@@ -1110,10 +1110,21 @@ export class AgentLoop {
     let historySummary = this.currentSummary;
 
     // 从 history 中排除最后一条 user 文本消息（compose 会重新添加）
-    // 工具执行续轮时同样需要过滤，避免同一条消息在上下文中出现两次
-    const historyWithoutLastUser = lastUserTextMsg
-      ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
-      : history;
+    // 工具执行续轮时保留在历史中供上下文参考，但不清除 userInput 以避免重复注入
+    const historyWithoutLastUser = hasPendingToolCalls
+      ? history
+      : lastUserTextMsg
+        ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
+        : history;
+
+    // 续轮时清空 userInput，防止同一条用户消息被重新注入为"新输入"
+    // 判断依据：历史最末尾不是用户新文本（而是 tool_result），说明是续轮
+    // 如果末尾是用户文本消息（如新的"好了停吧"），则保留 userInput
+    const lastMsg = history[history.length - 1];
+    const hasFreshUserInput = lastMsg?.role === 'user' && hasTextContent(lastMsg.content);
+    if (!hasFreshUserInput) {
+      userInputText = '';
+    }
 
     // 确定本轮实际使用的 Provider（路由决策前置，确保 compose 看到正确的 providerType）
     let activeProvider = this.provider;
