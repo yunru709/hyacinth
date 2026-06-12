@@ -226,6 +226,7 @@ export async function runTui(
   personaDir: string = DEFAULT_PERSONA_DIR,
   bootstrapStatus?: BootstrapStatus,
   localModelProvider?: Provider,
+  continuationMessage?: string,
 ): Promise<void> {
   // ── Force UTF-8 console encoding on Windows ──
   if (process.platform === 'win32') {
@@ -2618,6 +2619,14 @@ export async function runTui(
 
   // ── Start TUI ──
   tui.start();
+
+  // ── Auto-send continuation message after restart ──
+  if (continuationMessage) {
+    // Use setImmediate to let the TUI render its initial frame first
+    setImmediate(() => {
+      handleInput(continuationMessage);
+    });
+  }
 
   // ── Wait for exit (Ctrl+C double-tap or Ctrl+D) ──
   const exitPromise = new Promise<void>((resolve) => {

@@ -831,10 +831,11 @@ export async function runCli(): Promise<void> {
       }
     });
 
-  // --guardian: 守护模式，Agent 重启后自动重新拉起
-  const hasGuardian = process.argv.includes('--guardian');
-  if (hasGuardian) {
-    process.argv = process.argv.filter(a => a !== '--guardian');
+  // 守护进程（默认启用）：Agent 退出(code 42)时自动重新拉起
+  // 子进程通过 DEEPTHINK_GUARDIAN_CHILD 环境变量避免递归
+  const noGuardian = process.argv.includes('--no-guardian');
+  if (!noGuardian && !process.env.DEEPTHINK_GUARDIAN_CHILD) {
+    process.argv = process.argv.filter(a => a !== '--no-guardian');
     const { runGuardian } = await import('./guardian.js');
     runGuardian(process.argv.slice(2));
     return;
@@ -1000,6 +1001,13 @@ async function executeAction(
 
     // TUI mode — use blessed full-screen UI
     if (useTui) {
+      // 检测重启续工指令（TUI 模式下需在进入前读取）
+      let continuationMessage: string | undefined;
+      const continuationFile = path.join(process.cwd(), '.agent', '.restart-continuation');
+      if (fsSync.existsSync(continuationFile)) {
+        continuationMessage = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
+        fsSync.unlinkSync(continuationFile);
+      }
       await runTui(
         provider,
         sessionId,
@@ -1011,6 +1019,7 @@ async function executeAction(
         DEFAULT_PERSONA_DIR,
         bootstrapStatus,
         localModelProvider,
+        continuationMessage,
       );
       return;
     }
@@ -1036,6 +1045,15 @@ async function executeAction(
 
     if (loop.isBootstrapPending()) {
       await loop.startBootstrap();
+    }
+
+    // 检测重启续工指令
+    if (!prompt) {
+      const continuationFile = path.join(process.cwd(), '.agent', '.restart-continuation');
+      if (fsSync.existsSync(continuationFile)) {
+        prompt = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
+        fsSync.unlinkSync(continuationFile);
+      }
     }
 
   // 决定运行模式
