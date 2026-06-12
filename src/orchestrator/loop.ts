@@ -1071,7 +1071,6 @@ export class AgentLoop {
       ? extractTextContent(lastUserTextMsg.content)
       : '';
 
-
     // 判断是否是工具执行后的续轮（history 中有 tool_use）
     const hasPendingToolCalls = history.some(
       (m) => m.role === 'assistant' && hasToolUseContent(m.content),
@@ -1111,11 +1110,10 @@ export class AgentLoop {
     let historySummary = this.currentSummary;
 
     // 从 history 中排除最后一条 user 文本消息（compose 会重新添加）
-    const historyWithoutLastUser = hasPendingToolCalls
-      ? history
-      : lastUserTextMsg
-        ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
-        : history;
+    // 工具执行续轮时同样需要过滤，避免同一条消息在上下文中出现两次
+    const historyWithoutLastUser = lastUserTextMsg
+      ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
+      : history;
 
     // 确定本轮实际使用的 Provider（路由决策前置，确保 compose 看到正确的 providerType）
     let activeProvider = this.provider;
