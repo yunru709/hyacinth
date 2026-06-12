@@ -1,0 +1,1 @@
+export { AgentRegistry } from '../registry/agent.registry.js';

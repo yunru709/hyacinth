@@ -1,0 +1,542 @@
+import crypto from 'node:crypto';
+import type {
+  ScheduledTask,
+  ScheduleConfig,
+  ScheduleType,
+  IntervalConfig,
+  DailyConfig,
+  FixedTimeConfig,
+  TaskAction,
+  TaskExecutionRecord,
+  SchedulerConfig,
+  SchedulerStatus,
+} from './types.js';
+import type { ScheduleConfig as SystemScheduleConfig } from '../setup/config.js';
+import type { RuntimeConfigCenter } from '../runtime/config-center.js';
+import { CronExpression } from './cron.js';
+import { SchedulePersistence } from './persistence.js';
+
+const DEFAULT_CONFIG: SchedulerConfig = {
+  heartbeatMs: 5000,
+  maxConcurrent: 10,
+  taskTimeoutMs: 300_000,
+  maxRecords: 1000,
+};
+
+/** 任务执行处理器 */
+export type TaskHandler = (task: ScheduledTask) => Promise<void>;
+
+/**
+ * HeartbeatScheduler — 心跳驱动的定时任务调度器。
+ *
+ * 职责：
+ *   1. 以固定间隔（heartbeat）检查到期任务
+ *   2. 支持 interval / cron / daily / fixed-time 四种调度类型
+ *   3. 计算下次执行时间，持久化任务状态
+ *   4. 通过 TaskHandler 回调执行任务
+ *   5. 记录执行历史
+ */
+export class HeartbeatScheduler {
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private startedAt: Date | null = null;
+  private running = false;
+  private activeCount = 0;
+  private handler: TaskHandler | null = null;
+  private config: SchedulerConfig;
+  private persistence: SchedulePersistence;
+  private tasks: ScheduledTask[] = [];
+  private configUnsubscribers: Array<() => void> = [];
+
+  constructor(config?: Partial<SchedulerConfig>, scheduleConfig?: SystemScheduleConfig) {
+    this.config = { ...DEFAULT_CONFIG, ...(scheduleConfig ?? {}), ...config };
+    this.persistence = new SchedulePersistence();
+  }
+
+  /** 注册任务执行处理器 */
+  setHandler(handler: TaskHandler): void {
+    this.handler = handler;
+  }
+
+  /** 获取调度器状态 */
+  getStatus(): SchedulerStatus {
+    return {
+      running: this.running,
+      startedAt: this.startedAt?.toISOString() ?? null,
+      taskCount: this.tasks.length,
+      enabledTaskCount: this.tasks.filter(t => t.enabled).length,
+      recentExecutions: [], // records are loaded on demand
+      uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt.getTime()) / 1000) : null,
+    };
+  }
+
+  /**
+   * Subscribe to RuntimeConfigCenter for dynamic reconfiguration.
+   *
+   * Watched paths:
+   *   - schedule.heartbeatMs   — restarts the heartbeat timer on change
+   *   - schedule.maxConcurrent — live-updates the concurrency limit
+   *   - schedule.taskTimeoutMs — live-updates per-task timeout
+   *   - schedule.maxRecords    — live-updates execution record cap
+   */
+  subscribeConfig(configCenter: RuntimeConfigCenter): void {
+    this.configUnsubscribers.push(
+      configCenter.watch('schedule.heartbeatMs', (event) => {
+        if (typeof event.newValue === 'number' && event.newValue > 0) {
+          this.config.heartbeatMs = event.newValue;
+          this.restartHeartbeat();
+        }
+      }),
+    );
+
+    this.configUnsubscribers.push(
+      configCenter.watch('schedule.maxConcurrent', (event) => {
+        if (typeof event.newValue === 'number' && event.newValue > 0) {
+          this.config.maxConcurrent = event.newValue;
+        }
+      }),
+    );
+
+    this.configUnsubscribers.push(
+      configCenter.watch('schedule.taskTimeoutMs', (event) => {
+        if (typeof event.newValue === 'number' && event.newValue > 0) {
+          this.config.taskTimeoutMs = event.newValue;
+        }
+      }),
+    );
+
+    this.configUnsubscribers.push(
+      configCenter.watch('schedule.maxRecords', (event) => {
+        if (typeof event.newValue === 'number' && event.newValue > 0) {
+          this.config.maxRecords = event.newValue;
+        }
+      }),
+    );
+  }
+
+  /** 启动调度器 */
+  async start(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    this.startedAt = new Date();
+
+    this.tasks = await this.persistence.getAllTasks();
+
+    const now = new Date();
+    let cleaned = 0;
+
+    // 去重：同名任务只保留最新的一条，其余从内存和磁盘中删除
+    const seen = new Map<string, ScheduledTask>();
+    const duplicates: ScheduledTask[] = [];
+    for (const task of this.tasks) {
+      const existing = seen.get(task.name);
+      if (existing) {
+        const keep = existing.createdAt && task.createdAt
+          ? (existing.createdAt > task.createdAt ? existing : task)
+          : existing;
+        const remove = keep === existing ? task : existing;
+        duplicates.push(remove);
+        seen.set(task.name, keep);
+      } else {
+        seen.set(task.name, task);
+      }
+    }
+    if (duplicates.length > 0) {
+      for (const dup of duplicates) {
+        this.persistence.deleteTask(dup.id).catch(() => {});
+        cleaned++;
+      }
+    }
+
+    this.tasks = this.tasks.filter((task) => {
+      if (task.scheduleType === 'fixed-time' && task.nextRunAt !== null) {
+        const runAt = new Date(task.nextRunAt);
+        if (runAt < now) {
+          this.persistence.deleteTask(task.id).catch(() => {});
+          cleaned++;
+          return false;
+        }
+      }
+      // 同时也去掉重名重复项
+      if (duplicates.includes(task)) {
+        return false;
+      }
+      return true;
+    });
+
+    // 找出到期但从未执行过的任务（离线错过），重算前先记录
+    const MISSED_CATCH_UP_GAP_MS = 30 * 60_000; // 30 分钟：正常下次执行在半小时内就不补了
+    const missedTasks = this.tasks.filter(
+      t => t.enabled && t.scheduleType !== 'fixed-time' && t.scheduleType !== 'random'
+        && t.nextRunAt && new Date(t.nextRunAt) < now && t.lastRunAt === null,
+    );
+
+    for (const task of this.tasks) {
+      if (task.enabled) {
+        task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
+      }
+    }
+
+    // 筛选：正常重算后的下次执行时间如果很近，就不补（避免 2:50 补一次、3:00 又跑一次）
+    const catchUpTasks = missedTasks.filter(t => {
+      if (!t.nextRunAt) return false;
+      const nextMs = new Date(t.nextRunAt).getTime() - Date.now();
+      return nextMs > MISSED_CATCH_UP_GAP_MS;
+    });
+
+    // 启动心跳循环
+    this.timer = setInterval(() => this.tick(), this.config.heartbeatMs);
+    // 立即执行一次 tick
+    setImmediate(() => this.tick());
+
+    // 补执行离线期间错过的到期任务（每条只补一次）
+    if (catchUpTasks.length > 0) {
+      console.log(`[HeartbeatScheduler] Catch-up: ${catchUpTasks.length} missed task(s)`);
+      for (const task of catchUpTasks) {
+        this.executeTask(task);
+      }
+    }
+  }
+
+  /** 停止调度器 */
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    // 等待进行中的任务完成（最多等 5 秒）
+    const maxWait = 5000;
+    const start = Date.now();
+    while (this.activeCount > 0 && Date.now() - start < maxWait) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    this.startedAt = null;
+  }
+
+  // ===== 任务管理 =====
+
+  /** 添加新任务（同名任务会自动更新而非新增） */
+  async addTask(
+    name: string,
+    scheduleType: ScheduleType,
+    schedule: ScheduleConfig,
+    action: TaskAction,
+    tags: string[] = [],
+  ): Promise<ScheduledTask> {
+    const existing = this.tasks.find(t => t.name === name);
+    if (existing) {
+      existing.scheduleType = scheduleType;
+      existing.schedule = schedule;
+      existing.action = action;
+      existing.tags = tags;
+      existing.enabled = true;
+      existing.nextRunAt = this.calculateNextRun(existing)?.toISOString() ?? null;
+      await this.persistence.saveTask(existing);
+      return existing;
+    }
+
+    const task: ScheduledTask = {
+      id: crypto.randomUUID(),
+      name,
+      scheduleType,
+      schedule,
+      action,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastRunAt: null,
+      nextRunAt: null,
+      runCount: 0,
+      errorCount: 0,
+      tags,
+    };
+
+    task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
+    this.tasks.push(task);
+    await this.persistence.saveTask(task);
+    return task;
+  }
+
+  /** 更新任务 */
+  async updateTask(taskId: string, updates: Partial<ScheduledTask>): Promise<ScheduledTask | null> {
+    const task = this.tasks.find(t => t.id === taskId);
+    if (!task) return null;
+
+    Object.assign(task, updates);
+
+    // 如果调度配置变了，重新计算 nextRunAt
+    if (updates.schedule || updates.enabled !== undefined) {
+      task.nextRunAt = task.enabled ? this.calculateNextRun(task)?.toISOString() ?? null : null;
+    }
+
+    await this.persistence.saveTask(task);
+    return task;
+  }
+
+  /** 删除任务 */
+  async deleteTask(taskId: string): Promise<boolean> {
+    const idx = this.tasks.findIndex(t => t.id === taskId);
+    if (idx < 0) return false;
+    this.tasks.splice(idx, 1);
+    await this.persistence.deleteTask(taskId);
+    return true;
+  }
+
+  /** 获取所有任务 */
+  getTasks(): ScheduledTask[] {
+    return [...this.tasks];
+  }
+
+  /** 获取单个任务 */
+  getTask(taskId: string): ScheduledTask | undefined {
+    return this.tasks.find(t => t.id === taskId);
+  }
+
+  /** 启用任务 */
+  async enableTask(taskId: string): Promise<boolean> {
+    const task = this.tasks.find(t => t.id === taskId);
+    if (!task) return false;
+    task.enabled = true;
+    task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
+    await this.persistence.saveTask(task);
+    return true;
+  }
+
+  /** 禁用任务 */
+  async disableTask(taskId: string): Promise<boolean> {
+    const task = this.tasks.find(t => t.id === taskId);
+    if (!task) return false;
+    task.enabled = false;
+    task.nextRunAt = null;
+    await this.persistence.saveTask(task);
+    return true;
+  }
+
+  /** 获取执行记录 */
+  async getRecentRecords(limit?: number): Promise<TaskExecutionRecord[]> {
+    return this.persistence.getRecentRecords(limit);
+  }
+
+  // ===== 内部方法 =====
+
+  /** 心跳 tick */
+  private async tick(): Promise<void> {
+    if (!this.running) return;
+
+    const now = new Date();
+    const dueTasks = this.tasks.filter(t => {
+      if (!t.enabled || !t.nextRunAt) return false;
+      return new Date(t.nextRunAt) <= now;
+    });
+
+    for (const task of dueTasks) {
+      if (this.activeCount >= this.config.maxConcurrent) break;
+      this.executeTask(task);
+    }
+  }
+
+  /**
+   * Restart the heartbeat interval with the current config.heartbeatMs.
+   * No-op when the scheduler is not running.
+   */
+  private restartHeartbeat(): void {
+    if (!this.running) return;
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+    this.timer = setInterval(() => this.tick(), this.config.heartbeatMs);
+  }
+
+  /** 执行单个任务 */
+  private async executeTask(task: ScheduledTask): Promise<void> {
+    this.activeCount++;
+    const startTime = Date.now();
+
+    const record: TaskExecutionRecord = {
+      taskId: task.id,
+      taskName: task.name,
+      executedAt: new Date().toISOString(),
+      durationMs: 0,
+      success: false,
+    };
+
+    try {
+      // 超时控制
+      const result = await Promise.race([
+        this.runHandler(task),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Task timeout')), this.config.taskTimeoutMs)
+        ),
+      ]);
+
+      record.durationMs = Date.now() - startTime;
+      record.success = true;
+
+      task.runCount++;
+      task.lastRunAt = record.executedAt;
+    } catch (err) {
+      record.durationMs = Date.now() - startTime;
+      record.success = false;
+      record.error = err instanceof Error ? err.message : String(err);
+
+      task.errorCount++;
+      task.lastRunAt = record.executedAt;
+    } finally {
+      this.activeCount--;
+    }
+
+    // 计算下次执行时间
+    task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
+
+    // 持久化
+    await this.persistence.saveTask(task);
+    await this.persistence.addRecord(record, this.config.maxRecords);
+
+    // random 类型：消费已执行的 slot
+    if (task.scheduleType === 'random' && task.pendingSlots && task.pendingSlots.length > 0) {
+      task.pendingSlots.shift();
+      if (task.pendingSlots.length === 0) {
+        // 本周期所有 slot 已用完，下次 calculateNextRun 会滚动到新周期
+        task.pendingSlots = undefined;
+      }
+    }
+  }
+
+  /** 调用注册的处理器 */
+  private async runHandler(task: ScheduledTask): Promise<void> {
+    if (!this.handler) return;
+    await this.handler(task);
+  }
+
+  /** 计算下次执行时间 */
+  private calculateNextRun(task: ScheduledTask): Date | null {
+    const now = new Date();
+    // 如果之前执行过，从 lastRunAt 之后算；否则从当前时间算
+    const from = task.lastRunAt ? new Date(task.lastRunAt) : now;
+
+    switch (task.scheduleType) {
+      case 'interval': {
+        const cfg = task.schedule as IntervalConfig;
+        const next = new Date(from.getTime() + cfg.intervalMs);
+        return next <= now ? new Date(now.getTime() + cfg.intervalMs) : next;
+      }
+
+      case 'cron': {
+        const cfg = task.schedule as { expression: string };
+        try {
+          const cron = new CronExpression(cfg.expression);
+          return cron.next(now);
+        } catch {
+          return null;
+        }
+      }
+
+      case 'daily': {
+        const cfg = task.schedule as DailyConfig;
+        const [h, m] = cfg.time.split(':').map(Number);
+        if (isNaN(h) || isNaN(m)) return null;
+
+        const next = new Date(now);
+        next.setHours(h, m, 0, 0);
+
+        if (next <= now) {
+          next.setDate(next.getDate() + 1);
+        }
+        return next;
+      }
+
+      case 'fixed-time': {
+        const cfg = task.schedule as FixedTimeConfig;
+        const target = new Date(cfg.runAt);
+        return target > now ? target : null; // 一次性任务，过期后不再执行
+      }
+
+      case 'random': {
+        const cfg = task.schedule as import('./types.js').RandomConfig;
+        const minInterval = cfg.minIntervalMs ?? 0;
+
+        // 确定当前周期起始点
+        let periodStart: Date;
+        if (task.periodStartAt) {
+          periodStart = new Date(task.periodStartAt);
+        } else {
+          // 第一个周期从 now 开始
+          const nowMs = now.getTime();
+          periodStart = new Date(nowMs);
+          task.periodStartAt = periodStart.toISOString();
+        }
+
+        // 检查是否进入新周期：当前周期结束，重新生成 slot
+        const periodEnd = new Date(periodStart.getTime() + cfg.periodMs);
+        if (now >= periodEnd) {
+          // 滚动到新周期（基于原周期结束点对齐）
+          const elapsedPeriods = Math.floor(
+            (now.getTime() - periodStart.getTime()) / cfg.periodMs,
+          );
+          periodStart = new Date(periodStart.getTime() + elapsedPeriods * cfg.periodMs);
+          task.periodStartAt = periodStart.toISOString();
+          task.pendingSlots = undefined; // 清空旧 slots，触发重新生成
+        }
+
+        // 如果没有已生成的 slot，生成新的一组
+        if (!task.pendingSlots || task.pendingSlots.length === 0) {
+          task.pendingSlots = generateRandomSlots(cfg, periodStart, minInterval);
+        }
+
+        // 取第一个 slot 作为下次执行时间
+        const nextSlot = new Date(task.pendingSlots[0]);
+        if (nextSlot <= now && task.pendingSlots.length > 1) {
+          // 当前 slot 已到期且后续还有 → 立即执行当前 slot
+          // 不移除 slot（在 executeTask 完成后由调用方处理）
+        }
+        return nextSlot <= now ? new Date(now.getTime() + 100) : nextSlot;
+      }
+
+      default:
+        return null;
+    }
+  }
+}
+
+/**
+ * 在 periodMs 周期窗口内生成 count 个随机时间点，按升序排列。
+ *
+ * 约束：
+ *  - slots 在 [periodStart, periodStart + periodMs) 区间内
+ *  - 相邻 slot 间隔 >= minIntervalMs
+ *  - 总数不超过 count
+ */
+function generateRandomSlots(
+  cfg: import('./types.js').RandomConfig,
+  periodStart: Date,
+  minInterval: number,
+): string[] {
+  const startMs = periodStart.getTime();
+  const endMs = startMs + cfg.periodMs;
+  const windowMs = endMs - startMs;
+
+  // 若窗口太小放不下 count 个 slot（每个需 minInterval），降级为均匀分布
+  if (cfg.count * minInterval > windowMs) {
+    const step = windowMs / (cfg.count + 1);
+    const slots: string[] = [];
+    for (let i = 1; i <= cfg.count; i++) {
+      slots.push(new Date(startMs + Math.round(step * i)).toISOString());
+    }
+    return slots;
+  }
+
+  // Fisher-Yates 思想生成随机偏移
+  const offsets: number[] = [];
+  const attempts = cfg.count * 20; // 最多尝试 count*20 次
+  for (let i = 0; i < attempts && offsets.length < cfg.count; i++) {
+    const offset = startMs + Math.random() * windowMs;
+    // 检查与已有 slot 的距离
+    const tooClose = offsets.some(o => Math.abs(offset - o) < minInterval);
+    if (!tooClose) {
+      offsets.push(offset);
+    }
+  }
+
+  // 排序后转 ISO 字符串
+  offsets.sort((a, b) => a - b);
+  return offsets.map(o => new Date(o).toISOString());
+}

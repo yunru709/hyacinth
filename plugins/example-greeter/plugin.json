@@ -1,0 +1,8 @@
+{
+  "id": "example-greeter",
+  "name": "Example Greeter",
+  "description": "A simple example plugin that registers a hello tool",
+  "entry": "./index.js",
+  "enabledByDefault": true,
+  "version": "1.0.0"
+}

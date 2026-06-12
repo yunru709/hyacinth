@@ -1,0 +1,25 @@
+{
+  "commands": [
+    {
+      "name": "model",
+      "description": "模型管理（在线/本地/设置/信息）",
+      "icon": "◆",
+      "category": "model",
+      "executeLocal": true,
+      "children": [
+        {
+          "name": "local",
+          "description": "管理本地模型...",
+          "icon": "💻",
+          "category": "model",
+          "children": [
+            { "name": "start", "description": "启动本地模型服务", "icon": "▶", "category": "model", "args": "<name>", "handler": "localModel.start" },
+            { "name": "stop", "description": "停止本地模型服务", "icon": "■", "category": "model", "args": "<name>", "handler": "localModel.stop" },
+            { "name": "status", "description": "查看本地模型状态", "icon": "ℹ", "category": "model", "handler": "localModel.status" },
+            { "name": "unregister", "description": "注销模型", "icon": "➖", "category": "model", "args": "<name>", "handler": "localModel.unregister" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# Compiled output
+dist/
+
+# llama.cpp embedded directory (source + build artifacts, several GB)
+libs/
+
+# GGUF model files (several GB each)
+models/
+
+# Node modules
+node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# Per-user config (auto-generated on first run)
+.agent/
+
+# OS
+.DS_Store
+Thumbs.db

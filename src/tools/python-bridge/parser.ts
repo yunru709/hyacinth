@@ -1,0 +1,206 @@
+import { readFileSync } from 'node:fs';
+import { createLogger } from '../../logging/logger.js';
+
+const logger = createLogger('python-parser');
+
+export interface PythonToolMeta {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/**
+ * 从 Python 文件的 docstring 中解析工具元信息。
+ *
+ * 支持格式:
+ *   """
+ *   name: my_tool
+ *   description: 工具描述
+ *   parameters:
+ *     type: object
+ *     properties:
+ *       arg1: {type: string, description: 参数1}
+ *     required: [arg1]
+ *   """
+ */
+export function parsePythonToolMeta(filePath: string): PythonToolMeta | null {
+  let content: string;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch {
+    logger.warn(`Failed to read Python tool: ${filePath}`);
+    return null;
+  }
+
+  const docstring = extractDocstring(content);
+  if (!docstring) {
+    logger.debug(`No docstring found in ${filePath}`);
+    return null;
+  }
+
+  try {
+    const meta = parseYamlLike(docstring);
+    if (!meta.name || !meta.description) {
+      logger.warn(`Python tool ${filePath} missing required 'name' or 'description' in docstring`);
+      return null;
+    }
+    return meta;
+  } catch (err) {
+    logger.warn(`Failed to parse docstring in ${filePath}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/** 提取第一个 triple-quoted docstring */
+function extractDocstring(content: string): string | null {
+  // 匹配 """...""" 或 '''...'''
+  const m = content.match(/"""([^"]*)"""/s) ?? content.match(/'''([^']*)'''/s);
+  return m ? m[1].trim() : null;
+}
+
+/** 简单 YAML-like 解析：缩进层级 + 键值对 + 大括号块 */
+function parseYamlLike(text: string): PythonToolMeta {
+  const result: PythonToolMeta = { name: '', description: '', inputSchema: { type: 'object', properties: {} } };
+  const lines = text.split('\n');
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // 跳过空行和注释
+    if (!line.trim() || line.trim().startsWith('#')) { i++; continue; }
+
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) { i++; continue; }
+
+    const key = line.slice(0, colonIdx).trim();
+    const rest = line.slice(colonIdx + 1).trim();
+
+    if (key === 'name') {
+      result.name = rest;
+      i++;
+    } else if (key === 'description') {
+      let desc = rest;
+      // 多行描述：后续以同缩进或更深缩进开头的非键值行
+      const baseIndent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      i++;
+      while (i < lines.length) {
+        const nextLine = lines[i];
+        const nextIndent = nextLine.match(/^(\s*)/)?.[1].length ?? 0;
+        const nextColon = nextLine.indexOf(':');
+        // 如果下一行缩进更深且不是新的键值对，追加到描述
+        if (nextIndent > baseIndent && (nextColon === -1 || nextIndent >= nextLine.indexOf(':')!)) {
+          desc += '\n' + nextLine.trimStart();
+          i++;
+        } else {
+          break;
+        }
+      }
+      result.description = desc;
+    } else if (key === 'parameters') {
+      // 找 parameters 块：收集从下一行开始直到缩进回归的所有行
+      const blockLines: string[] = [];
+      const baseIndent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      i++;
+      while (i < lines.length) {
+        const nextLine = lines[i];
+        const nextIndent = nextLine.match(/^(\s*)/)?.[1].length ?? 0;
+        if (nextIndent <= baseIndent && nextLine.trim()) break;  // 缩进回归，参数块结束
+        blockLines.push(nextLine);
+        i++;
+      }
+      const schemaText = blockLines.join('\n').trim();
+      if (schemaText) {
+        try {
+          result.inputSchema = parseJsonLike(schemaText);
+        } catch {
+          // 解析失败，保留默认 schema
+          logger.warn('Failed to parse parameters block, using default schema');
+        }
+      }
+    } else {
+      i++;
+    }
+  }
+
+  return result;
+}
+
+/** 将缩进 YAML-like 的 parameters 块转为 JSON Schema 对象 */
+function parseJsonLike(text: string): Record<string, unknown> {
+  // Step 1: 将缩进格式转为 JSON 字符串
+  const lines = text.split('\n');
+  const jsonLines = convertToJsonLines(lines);
+  try {
+    return JSON.parse(jsonLines);
+  } catch {
+    // 嵌套花括号可能被分割, 尝试手动构建
+  }
+  return { type: 'object', properties: {} };
+}
+
+function convertToJsonLines(lines: string[]): string {
+  const result: string[] = [];
+  let i = 0;
+  const indentStack: number[] = [];
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) { i++; continue; }
+
+    const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+
+    // 关闭更深的块
+    while (indentStack.length > 0 && indent <= indentStack[indentStack.length - 1]) {
+      result.push('}');
+      indentStack.pop();
+    }
+
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) { i++; continue; }
+
+    const key = trimmed.slice(0, colonIdx).trim();
+    let val = trimmed.slice(colonIdx + 1).trim();
+
+    // 去掉尾部的逗号（支持 YAML-like trailing comma）
+    if (val.endsWith(',')) val = val.slice(0, -1);
+
+    if (val === '{') {
+      // 开始一个新的嵌套对象
+      const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+      result.push(`${keyQuoted}: {`);
+      indentStack.push(indent);
+    } else if (val.startsWith('{') && val.endsWith('}')) {
+      // 单行对象: key: { ... }
+      const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+      result.push(`${keyQuoted}: ${formatJsonValue(val)}`);
+    } else if (val.startsWith('[') && val.endsWith(']')) {
+      // 数组值
+      const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+      const arrItems = val.slice(1, -1).split(',').map(s => s.trim()).map(s => /^\w+$/.test(s) ? `"${s}"` : s).join(', ');
+      result.push(`${keyQuoted}: [${arrItems}]`);
+    } else {
+      // 普通键值对
+      const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+      result.push(`${keyQuoted}: ${formatJsonValue(val)}`);
+    }
+    i++;
+  }
+
+  // 关闭所有未闭合的块
+  while (indentStack.length > 0) {
+    result.push('}');
+    indentStack.pop();
+  }
+
+  return `{${result.join(', ')}}`;
+}
+
+function formatJsonValue(val: string): string {
+  if (val === 'true' || val === 'false') return val;
+  if (val === 'null') return 'null';
+  if (/^-?\d+(\.\d+)?$/.test(val)) return val;
+  // 字符串：引号包裹，转义内部引号
+  const escaped = val.replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}

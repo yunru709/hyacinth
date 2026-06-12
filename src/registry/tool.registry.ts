@@ -1,0 +1,209 @@
+import { GenericRegistry, type RegistryItem } from './base.js';
+import type { Tool } from '../tools/interface.js';
+import type { ToolDefinition } from '../types.js';
+import type { RuntimeConfigCenter } from '../runtime/config-center.js';
+import type { TrainingScheduler } from '../training/scheduler.js';
+import {
+  createGetConfigTool,
+  createUpdateConfigTool,
+  createConfigSchemaTool,
+  createResetConfigTool,
+} from '../tools/config.js';
+import {
+  createToggleTrainingTool,
+  createTrainingStatusTool,
+  createSetTrainingScheduleTool,
+} from '../tools/training.js';
+import {
+  createSwitchProviderTool,
+  createListProvidersTool,
+  createProviderInfoTool,
+  createSwitchToAutoRouteTool,
+  createToggleToolTool,
+  createListToolsTool,
+  createToggleSkillTool,
+  createListSkillsTool,
+  createToggleSubAgentTool,
+  createListSubAgentsTool,
+  createSpawnSubAgentTool,
+  createCreateSubAgentTool,
+  createUpdateSubAgentTool,
+  createInterruptTool,
+  createSessionStatsTool,
+  createTriggerTrainingTool,
+  createCancelTrainingTool,
+  createAllowToolTool,
+  createDisallowToolTool,
+  createListAllowlistTool,
+  createAddTaskTool,
+  createRemoveTaskTool,
+  createListTasksTool,
+  createToggleTaskTool,
+  createMcpStatusTool,
+} from '../tools/runtime-control.js';
+
+/** Tool 扩展 RegistryItem，增加可选的 source 字段 */
+interface RegisteredTool extends Tool, RegistryItem {}
+
+/**
+ * 工具注册表
+ * 负责注册、查询工具，以及生成 LLM 格式的工具定义
+ * 继承自 GenericRegistry，复用通用增删改查逻辑
+ */
+export class ToolRegistry extends GenericRegistry<RegisteredTool> {
+  /** 会话中热插拔添加的工具名集合。下次启动时清空，工具自然归位到 tool_rules。 */
+  private hotAddedNames = new Set<string>();
+
+  constructor() {
+    super();
+  }
+
+  // ── 热插拔工具追踪 ──────────────────────────────────────────
+
+  /** 标记工具为热插拔添加（会话临时）。调用方：hot-reload/tool-watcher.ts */
+  markHotAdded(name: string): void {
+    this.hotAddedNames.add(name);
+  }
+
+  /** 获取所有热插拔工具名（用于 Zone 5 session_tools 展示） */
+  getHotAddedNames(): string[] {
+    return [...this.hotAddedNames].sort();
+  }
+
+  /** 清空热插拔标记（下次启动时，所有工具自然都在 ToolRegistry 中） */
+  clearHotAdded(): void {
+    this.hotAddedNames.clear();
+  }
+
+  // ── LLM 工具定义 ──────────────────────────────────────────────
+
+  /**
+   * 生成 LLM 格式的工具定义数组
+   * 用于发送给 LLM API，告知可用工具及其参数格式
+   * 禁用的工具不会被包含
+   */
+  getToolDefinitions(): ToolDefinition[] {
+    return this.getAll()
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // ── 批量注册辅助方法 ──────────────────────────────────────────
+
+  /**
+   * 注册配置管理工具（get_config, update_config, config_schema, reset_config）
+   */
+  registerConfigTools(configCenter: RuntimeConfigCenter): void {
+    this.register(createGetConfigTool(configCenter));
+    this.register(createUpdateConfigTool(configCenter));
+    this.register(createConfigSchemaTool(configCenter));
+    this.register(createResetConfigTool(configCenter));
+  }
+
+  /**
+   * 注册训练控制工具（toggle_training, training_status, set_training_schedule）
+   */
+  registerTrainingTools(trainingScheduler: TrainingScheduler, configCenter: RuntimeConfigCenter): void {
+    this.register(createToggleTrainingTool(trainingScheduler, configCenter));
+    this.register(createTrainingStatusTool(trainingScheduler));
+    this.register(createSetTrainingScheduleTool(trainingScheduler, configCenter));
+  }
+
+  /**
+   * 注册所有运行时控制工具（30+ tools）
+   *
+   * ⚠️ 新增运行时工具的正确方式：
+   *   1. 在 src/tools/runtime-control.ts 中创建 createXxxTool() 工厂函数
+   *   2. 在下方各分类段落中按类别注册
+   *   3. 禁止在 factory.ts / loop.ts 中直接 new Tool() 硬编码
+   *
+   * Provider tools (4):
+   *   switch_provider, list_providers, provider_info, switch_to_auto_route
+   *
+   * Registry control tools (9):
+   *   toggle_tool, list_tools, toggle_skill, list_skills,
+   *   toggle_sub_agent, list_sub_agents, spawn_sub_agent, create_sub_agent,
+   *   update_sub_agent
+   *
+   * Session/Training control tools (4):
+   *   interrupt, session_stats, trigger_training, cancel_training
+   *
+   * Permission whitelist tools (3):
+   *   allow_tool, disallow_tool, list_allowlist
+   *
+   * Schedule task management tools (4):
+   *   add_task, remove_task, list_tasks, toggle_task
+   */
+  registerRuntimeControlTools(
+    agentLoop: any,
+    providerRouter: any,
+    skillRegistry: any,
+    agentRegistry: any,
+    trainingScheduler: any,
+    configCenter: any,
+    cwd: string,
+    heartbeatScheduler?: any,
+    mcpSystem?: any,
+  ): void {
+    // ── Provider tools (4) ──────────────────────────────────────────
+    this.register(createSwitchProviderTool(agentLoop));
+    this.register(createListProvidersTool(providerRouter));
+    this.register(createProviderInfoTool(agentLoop));
+    this.register(createSwitchToAutoRouteTool(agentLoop));
+
+    // ── Registry control tools (8) ──────────────────────────────────
+    this.register(createToggleToolTool(this, configCenter));
+    this.register(createListToolsTool(this));
+    this.register(createToggleSkillTool(skillRegistry, configCenter));
+    this.register(createListSkillsTool(skillRegistry));
+    this.register(createToggleSubAgentTool(agentRegistry, configCenter));
+    this.register(createListSubAgentsTool(agentRegistry));
+    this.register(createSpawnSubAgentTool(agentRegistry));
+    this.register(createCreateSubAgentTool(agentRegistry, cwd));
+    this.register(createUpdateSubAgentTool(agentRegistry));
+    // destroy_sub_agent needs factory.ts sessionDir; register in factory.ts after loop is created
+    // (handled by importing and registering createDestroySubAgentTool directly in factory.ts)
+
+    // ── Session / Training control tools (5) ────────────────────────
+    this.register(createInterruptTool(agentLoop));
+    this.register(createSessionStatsTool(agentLoop));
+    this.register(createTriggerTrainingTool(trainingScheduler));
+    this.register(createCancelTrainingTool(trainingScheduler));
+
+    // ── MCP status tool ────────────────────────────────────────────
+    if (mcpSystem) {
+      this.register(createMcpStatusTool(mcpSystem));
+    }
+
+    // ── Permission whitelist tools (3) ───────────────────────────────
+    if (configCenter) {
+      this.register(createAllowToolTool(configCenter));
+      this.register(createDisallowToolTool(configCenter));
+      this.register(createListAllowlistTool(configCenter));
+    }
+
+    // ── Schedule task management tools (4) ───────────────────────────
+    if (heartbeatScheduler) {
+      this.register(createAddTaskTool(heartbeatScheduler));
+      this.register(createRemoveTaskTool(heartbeatScheduler));
+      this.register(createListTasksTool(heartbeatScheduler));
+      this.register(createToggleTaskTool(heartbeatScheduler));
+    }
+  }
+
+  // ── 向后兼容别名 ──────────────────────────────────────────────
+
+  /** @deprecated 使用 enable() 替代 */
+  enableTool(name: string): void {
+    this.enable(name);
+  }
+
+  /** @deprecated 使用 disable() 替代 */
+  disableTool(name: string): void {
+    this.disable(name);
+  }
+}

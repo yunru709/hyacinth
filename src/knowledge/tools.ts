@@ -1,0 +1,213 @@
+/**
+ * 知识库工具 — 暴露给 LLM 的操作接口
+ *
+ * kb_add    — 导入文件/文件夹
+ * kb_list   — 列出所有已索引文档
+ * kb_delete — 删除指定文档（同时清理 files/ 中的文件）
+ * kb_update — 重新索引（可选路径，不传则全量同步 files/ 目录）
+ *
+ * 所有工具在知识库关闭时统一返回提示，模型无法绕过。
+ */
+
+import fs from 'node:fs';
+import type { Tool } from '../tools/interface.js';
+import type { KnowledgeBase } from './store.js';
+import { indexFile, indexDirectory, syncDirectory } from './indexer.js';
+
+// ── 守卫：检查知识库是否可用 ──────────────────────────────────────
+
+function kbGuard(kb: KnowledgeBase): string | null {
+  if (kb.enabled) return null;
+  if (!kb.zone4Enabled) {
+    return '知识库不可用：Zone 4 已关闭。请先执行 /zone4 on 开启 Zone 4，再执行 /kb on 开启知识库。';
+  }
+  return '知识库未开启。请执行 /kb on 开启知识库后再使用此工具。';
+}
+
+// ── kb_add ─────────────────────────────────────────────────────────
+
+export function createKbAddTool(
+  kb: KnowledgeBase,
+  kbFilesDir?: string,
+): Tool {
+  return {
+    name: 'kb_add',
+    description:
+      '导入文件或文件夹到知识库。传入路径后，自动读取其中的文本文件（.txt .md .json .py .js .ts .html .css .yaml 等）并建立索引。文件会被复制到知识库目录中，即使 Agent 重启也持久保留。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件路径或文件夹路径' },
+      },
+      required: ['path'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const blocked = kbGuard(kb);
+      if (blocked) return blocked;
+
+      const targetPath = args.path as string;
+      if (!targetPath) return 'Error: path is required.';
+
+      try {
+        const stat = fs.statSync(targetPath);
+        let count = 0;
+        const opts = kbFilesDir ? { kbFilesDir } : {};
+        if (stat.isDirectory()) {
+          count = await indexDirectory(kb, targetPath, opts);
+        } else if (stat.isFile()) {
+          count = await indexFile(kb, targetPath, opts);
+        } else {
+          return 'Error: path is not a file or directory.';
+        }
+        const fileInfo = kbFilesDir ? `（已复制到 ${kbFilesDir}）` : '';
+        return `已导入 ${count} 个文件到知识库${fileInfo}。当前共 ${kb.count()} 条记录。`;
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+// ── kb_list ─────────────────────────────────────────────────────────
+
+export function createKbListTool(kb: KnowledgeBase): Tool {
+  return {
+    name: 'kb_list',
+    description:
+      '列出知识库中所有已索引的文档。返回 ID、标题、来源路径和创建时间。',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    async execute(_args: Record<string, unknown>): Promise<string> {
+      const blocked = kbGuard(kb);
+      if (blocked) return blocked;
+
+      try {
+        const docs = kb.list();
+        if (docs.length === 0) return '知识库为空。使用 kb_add 导入文件。';
+        const lines = docs.map((d) => {
+          const title = d.title || '(无标题)';
+          const src = d.source ? ` — ${d.source}` : '';
+          const date = d.created_at ? ` [${d.created_at}]` : '';
+          return `- \`${d.id}\` **${title}**${src}${date}`;
+        });
+        return `共 ${docs.length} 条记录：\n${lines.join('\n')}`;
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+// ── kb_delete ───────────────────────────────────────────────────────
+
+export function createKbDeleteTool(
+  kb: KnowledgeBase,
+  kbFilesDir?: string,
+): Tool {
+  return {
+    name: 'kb_delete',
+    description:
+      '删除知识库中的指定文档。传入文档 ID（可通过 kb_list 获取）。如果文件在知识库目录中，会同时删除磁盘上的文件。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '文档 ID（从 kb_list 获取）' },
+      },
+      required: ['id'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const blocked = kbGuard(kb);
+      if (blocked) return blocked;
+
+      const docId = args.id as string;
+      if (!docId) return 'Error: id is required. Use kb_list to find document IDs.';
+
+      try {
+        const docs = kb.list();
+        const doc = docs.find((d) => d.id === docId);
+        if (!doc) return `未找到文档 "${docId}"。使用 kb_list 查看可用 ID。`;
+
+        const ok = kb.remove(docId);
+        if (!ok) return `删除失败: "${docId}"`;
+
+        let fileRemoved = false;
+        if (kbFilesDir && doc.source && doc.source.startsWith(kbFilesDir)) {
+          try {
+            if (fs.existsSync(doc.source)) {
+              fs.unlinkSync(doc.source);
+              fileRemoved = true;
+            }
+          } catch {
+            // 删文件失败不影响索引删除
+          }
+        }
+
+        const extra = fileRemoved ? '（已同时删除磁盘文件）' : '';
+        return `已删除: "${doc.title || docId}"${extra}。当前共 ${kb.count()} 条记录。`;
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+// ── kb_update ───────────────────────────────────────────────────────
+
+export function createKbUpdateTool(
+  kb: KnowledgeBase,
+  kbFilesDir?: string,
+): Tool {
+  return {
+    name: 'kb_update',
+    description:
+      '刷新知识库索引。不传 path 时全量同步知识库文件目录（检测增/删/改）；传 path 时重新索引指定文件或目录。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description:
+            '可选。要重新索引的文件或目录路径。不传则全量同步知识库目录。',
+        },
+      },
+      required: [],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const blocked = kbGuard(kb);
+      if (blocked) return blocked;
+
+      try {
+        const targetPath = (args.path as string) || '';
+
+        if (!targetPath && kbFilesDir) {
+          const { added, removed } = await syncDirectory(kb.retriever, kbFilesDir);
+          if (added === 0 && removed === 0) {
+            return `知识库已是最新。当前共 ${kb.count()} 条记录。`;
+          }
+          return `同步完成：新增 ${added} 条，移除 ${removed} 条。当前共 ${kb.count()} 条记录。`;
+        }
+
+        if (targetPath) {
+          if (!fs.existsSync(targetPath)) {
+            return `Error: 路径不存在: ${targetPath}`;
+          }
+          const stat = fs.statSync(targetPath);
+          const opts = kbFilesDir ? { kbFilesDir } : {};
+          let count = 0;
+          if (stat.isDirectory()) {
+            count = await indexDirectory(kb, targetPath, opts);
+          } else {
+            count = await indexFile(kb, targetPath, opts);
+          }
+          return `已重新索引 ${count} 个文件。当前共 ${kb.count()} 条记录。`;
+        }
+
+        return '请指定 path 参数，或在知识库目录已配置时留空以全量同步。';
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
