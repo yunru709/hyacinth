@@ -122,8 +122,11 @@ export class OpenAICompatibleProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
+    // 始终发送 thinking 参数：DeepSeek V4 默认 thinking=enabled，不发送会被当作 enabled
+    (params as unknown as Record<string, unknown>).thinking = this.thinkingEnabled
+      ? { type: 'enabled' }
+      : { type: 'disabled' };
     if (this.thinkingEnabled) {
-      (params as unknown as Record<string, unknown>).thinking = { type: 'enabled' };
       (params as unknown as Record<string, unknown>).reasoning_effort = this.reasoningEffort;
     }
 

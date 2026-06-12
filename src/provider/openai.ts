@@ -98,9 +98,10 @@ export class OpenAIProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    if (this.thinkingEnabled) {
-      (params as unknown as Record<string, unknown>).thinking = { type: 'enabled' };
-    }
+    // 始终发送 thinking 参数：避免 provider 默认开启推理
+    (params as unknown as Record<string, unknown>).thinking = this.thinkingEnabled
+      ? { type: 'enabled' }
+      : { type: 'disabled' };
 
     // ---- 流式消费 ----
     // 追踪正在构建的 tool calls（OpenAI 的 tool call 是按 index 分片传输的）
