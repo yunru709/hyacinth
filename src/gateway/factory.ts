@@ -375,6 +375,30 @@ export async function createAgent(
     getContent: () => memoryStore.formatForContext(),
   });
 
+  // ── 历史对话边界标记 — 对抗长上下文注意力漂移 ──────────────────────
+  contextComposer.registerSource({
+    name: 'history_boundary_before',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '历史对话开始标记',
+    getContent: () => {
+      return contextComposer.activeConditions.has('precise_mode')
+        ? '── 以下为检索有关信息 ──'
+        : '── 以下为历史对话 ──';
+    },
+  });
+  contextComposer.registerSource({
+    name: 'history_boundary_after',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '历史对话结束标记',
+    getContent: () => {
+      return contextComposer.activeConditions.has('precise_mode')
+        ? '── 以上为检索有关信息 ──'
+        : '── 以上为历史对话 ──';
+    },
+  });
+
   // ── 会话临时工具 ContextSource ──────────────────────────────────────
   // hot-reload 热添加的工具不进 Zone 2 tool_rules，在此 Zone 5 session_tools 展示。
   // 下次启动时工具已在 ToolRegistry 中持久化，自然归位到 tool_rules。

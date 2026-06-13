@@ -274,7 +274,7 @@ export class FeishuChannel implements ChannelHandler {
         const handler = createCollectHandler();
         const { loop } = await agentFactory.createAgent({
           outputHandler: handler,
-          sessionId: isShared ? event.sessionId : undefined,
+          sessionId: event.sessionId,
         });
         return { loop, collectHandler: handler };
       },
@@ -430,11 +430,11 @@ export class FeishuChannel implements ChannelHandler {
       }
     }
 
-    // ── 构造 sessionId ──
+    // ── 构造 sessionId（使用 _ 而非 :，: 在 Windows 上不可用于文件夹名） ──
 
     const sessionId = ctx.isGroup
-      ? `feishu:group:${ctx.chatId}${ctx.threadId ? `:thread:${ctx.threadId}` : ''}`
-      : `feishu:dm:${ctx.senderOpenId}`;
+      ? `feishu_group_${ctx.chatId}${ctx.threadId ? `_thread_${ctx.threadId}` : ''}`
+      : `feishu_dm_${ctx.senderOpenId}`;
 
     // 记录会话信息
     this.sessionMap.set(sessionId, {

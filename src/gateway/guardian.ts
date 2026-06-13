@@ -14,7 +14,10 @@ export function runGuardian(args: string[]): void {
   const entry = process.argv[1]; // dist/index.js
 
   function start(): ChildProcess {
-    const child = spawn(node, [entry, ...args], { stdio: 'inherit' });
+    const child = spawn(node, [entry, ...args], {
+      stdio: 'inherit',
+      env: { ...process.env, DEEPTHINK_GUARDIAN_CHILD: '1' },
+    });
     child.on('exit', (code, signal) => {
       if (code === RESTART_EXIT_CODE) {
         process.stderr.write('[guardian] Restarting Agent...\n');

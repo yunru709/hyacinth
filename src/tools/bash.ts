@@ -179,7 +179,7 @@ export class BashTool implements Tool {
     }
 
     // 输出截断配置
-    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 1024 * 1024; // 1MB
+    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 15 * 1024; // 15KB
     let outputSize = 0;
     let truncated = false;
 

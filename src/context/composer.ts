@@ -29,6 +29,25 @@ function formatTimestamp(date: Date = new Date()): string {
   return `${y}-${m}-${d} ${h}:${min}`;
 }
 
+/** 给历史消息的首个 text 块加 [历史] 前缀，区分当前对话 */
+function tagHistoryMessage(msg: import('../types.js').Message): import('../types.js').Message {
+  const prefix = '[历史] ';
+  const content = msg.content;
+  if (Array.isArray(content)) {
+    const tagged = content.map((block, i) => {
+      if (i === 0 && block.type === 'text') {
+        return { ...block, text: prefix + block.text };
+      }
+      return block;
+    });
+    return { ...msg, content: tagged };
+  }
+  if (content.type === 'text') {
+    return { ...msg, content: { ...content, text: prefix + content.text } };
+  }
+  return msg;
+}
+
 export interface LayeredComposeOptions {
   sessionDir: string;
   /** 当前 active Provider 的类型 — 决定缓存策略（断点 vs 自动前缀） */
@@ -261,7 +280,9 @@ export class LayeredContextComposer implements ContextComposer {
       if (sec.source === 'runtime:history' && options.history && options.history.length > 0) {
         flushSystemParts();
         flushTextParts();
-        messages.push(...options.history);
+        // 为历史消息加 [历史] 前缀，区分当前对话，对抗长上下文注意力漂移
+        const taggedHistory = options.history.map(msg => tagHistoryMessage(msg));
+        messages.push(...taggedHistory);
         continue;
       }
 

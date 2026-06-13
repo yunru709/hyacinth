@@ -152,7 +152,7 @@ export class TextGuard {
 
   /** 获取反思提示词 */
   static reflectionPrompt(): string {
-    return `[LoopGuard] Your last ${TEXT_THRESHOLD} responses were very similar (≥${Math.round(TEXT_SIMILARITY * 100)}% word overlap). You appear to be stuck in a text output loop. Consider a different approach or ask the user for guidance.`;
+    return `[LoopGuard] 检测到最近的回复高度相似。你可能陷入了重复输出循环。请尝试不同的思路或询问用户。`;
   }
 }
 
@@ -206,7 +206,8 @@ export class ToolGuard {
   }
 
   static reflectionPrompt(call: ToolCall): string {
-    return `[System] \`${call.name}\` called repeatedly with same arguments. Consider alternative approach or ask user.`;
+    // 使用 [LoopGuard] 而非 [System]，避免被 injection-filter 误杀
+    return `[LoopGuard] 工具 \`${call.name}\` 被重复调用且参数相同。请考虑其他方式或询问用户。`;
   }
 
 }

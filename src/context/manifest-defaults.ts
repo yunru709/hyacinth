@@ -38,7 +38,9 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       sections: [
         { name: 'project_context', source: 'runtime:projectContext', priority: 0, type: 'retrieval', description: '项目上下文文件 (.agent.md / AGENTS.md / CLAUDE.md)' },
         { name: 'history_summary',  source: 'runtime:summary',        priority: 1, type: 'runtime',  description: '上下文压缩摘要' },
-        { name: 'history',          source: 'runtime:history',        priority: 2, type: 'runtime',  description: '对话历史消息' },
+        { name: 'history_boundary_before', source: 'runtime:history_boundary_before', priority: 2, type: 'runtime', role: 'system', description: '历史对话开始标记' },
+        { name: 'history',          source: 'runtime:history',        priority: 3, type: 'runtime',  description: '对话历史消息' },
+        { name: 'history_boundary_after',  source: 'runtime:history_boundary_after',  priority: 4, type: 'runtime', role: 'system', description: '历史对话结束标记' },
       ],
     },
     zone4: {

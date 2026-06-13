@@ -162,9 +162,18 @@ export class ResilientProvider implements Provider {
         await sleep(delay);
       }
 
+      // ── Track whether we've yielded any event ────────────────
+      // 一旦 yield 过任何事件，重试必然导致 text/thinking 重复（已送出的无法撤回），
+      // 此时再遇到错误直接抛出，不再重试。
+      let hasYielded = false;
+
       try {
-        // ── Execute ────────────────────────────────────────────
-        yield* this.inner.createStream(messages, tools, signal);
+        // ── Execute (manual for-await to detect first yield) ──
+        const innerStream = this.inner.createStream(messages, tools, signal);
+        for await (const event of innerStream) {
+          hasYielded = true;
+          yield event;
+        }
         // Success → reset
         this.onSuccess(attempt);
         return;
@@ -173,6 +182,12 @@ export class ResilientProvider implements Provider {
 
         // ── Abort → rethrow immediately (never retry) ─────
         if (isAbortError(err)) {
+          throw err;
+        }
+
+        // ── Already yielded → cannot retry without duplication ──
+        if (hasYielded) {
+          this.onFailure(err);
           throw err;
         }
 

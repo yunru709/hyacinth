@@ -1,0 +1,36 @@
+# Source (dist only for distribution)
+src/
+
+# Tests
+*.test.ts
+*.test.js
+*.test.d.ts
+
+# Build config
+tsconfig.json
+vitest.config.ts
+
+# Development
+.vscode/
+.idea/
+.gitignore
+.npmignore
+
+# Dependencies
+node_modules/
+
+# Local model stuff
+libs/
+models/
+adapters/
+
+# Environment
+.env
+.env.*
+
+# Per-user config (auto-generated)
+.agent/
+
+# OS
+.DS_Store
+Thumbs.db

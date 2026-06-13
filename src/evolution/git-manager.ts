@@ -31,7 +31,69 @@ export class GitManager {
     try {
       return await execFileAsync('git', args, { cwd: this.repoPath, maxBuffer: 10 * 1024 * 1024 });
     } catch (err: any) {
-      throw new Error(`git ${args.join(' ')} failed: ${err.stderr || err.message}`);
+      const raw = (err.stderr || err.message || '').trim();
+      if (!raw) {
+        throw new Error(`git ${args.join(' ')} failed (no output)`);
+      }
+
+      const lines = raw.split('\n');
+
+      // 分离 error / warning / 其他行
+      const errors: string[] = [];
+      const warningPatterns = new Map<string, number>();
+      const others: string[] = [];
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (/^(error:|fatal:)/i.test(trimmed)) {
+          errors.push(trimmed);
+        } else if (/^warning:/i.test(trimmed)) {
+          // 归一化警告模式：去掉单引号内的具体路径（可能是文件路径、目录路径等）
+          const normalized = trimmed.replace(/'[^']*'/g, "'<...>'");
+          warningPatterns.set(normalized, (warningPatterns.get(normalized) || 0) + 1);
+        } else {
+          others.push(trimmed);
+        }
+      }
+
+      // 构建精简报告
+      const parts: string[] = [];
+
+      // 错误行优先保留（不合并）
+      if (errors.length > 0) {
+        parts.push(`=== ${errors.length} error(s) ===`);
+        parts.push(...errors);
+      }
+
+      // 警告去重聚合
+      if (warningPatterns.size > 0) {
+        const totalWarnings = [...warningPatterns.values()].reduce((a, b) => a + b, 0);
+        const summaryParts: string[] = [];
+        for (const [pattern, count] of warningPatterns) {
+          if (count === 1) {
+            summaryParts.push(pattern);
+          } else {
+            summaryParts.push(`${pattern} (×${count})`);
+          }
+        }
+        parts.push(`=== ${totalWarnings} warning(s), ${warningPatterns.size} unique pattern(s) ===`);
+        parts.push(...summaryParts);
+      }
+
+      // 其他行（无 error 时补上，有 error 时只保留前几条）
+      if (others.length > 0) {
+        const maxOthers = errors.length > 0 ? 5 : 20;
+        const sliced = others.slice(0, maxOthers);
+        parts.push(...sliced);
+        if (others.length > maxOthers) {
+          parts.push(`... (${others.length - maxOthers} more lines omitted)`);
+        }
+      }
+
+      const summary = parts.join('\n');
+      // 最终保底截断（防止极端情况）
+      const finalMsg = summary.length > 20_000 ? summary.slice(0, 20_000) + '\n... (truncated)' : summary;
+      throw new Error(`git ${args.join(' ')} failed:\n${finalMsg}`);
     }
   }
 

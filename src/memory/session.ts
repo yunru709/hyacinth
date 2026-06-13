@@ -114,14 +114,59 @@ export class SessionManager {
   }
 
   /**
-   * 恢复指定 session，不指定则恢复最近的
+   * 恢复指定 session，不指定则恢复最近的。
+   *
+   * 如果指定了 sessionId 但目录不存在，自动创建（以便渠道传 feishu_group_xxx 等
+   * 可识别 ID 时，首次调用能自动建立 session 存储）。
    */
   async resume(sessionId?: string): Promise<Session> {
     if (sessionId) {
       const sessionDir = getSessionDir(this.projectKey, sessionId);
-      await fs.access(sessionDir); // 确保目录存在
 
-      // 读取 meta.json 获取 type 和 createdAt
+      // 目录不存在 → 自动创建（首次调用或重启后重建）
+      try {
+        await fs.access(sessionDir);
+      } catch {
+        await ensureDir(sessionDir);
+        await ensureFile(path.join(sessionDir, 'conversation.jsonl'));
+        await ensureFile(path.join(sessionDir, 'events.jsonl'));
+        await ensureFile(path.join(sessionDir, 'stats.json'));
+
+        const now = new Date().toISOString();
+        // 检测 sessionId 前缀判断渠道来源
+        const channel = sessionId.startsWith('feishu_') ? 'feishu' : undefined;
+        await fs.writeFile(
+          path.join(sessionDir, 'meta.json'),
+          JSON.stringify({ type: 'normal', createdAt: now, channel }),
+          'utf-8',
+        );
+
+        // 写入 session_start 事件
+        const { EventStore } = await import('./events.js');
+        const eventStore = new EventStore();
+        await eventStore.append(sessionDir, {
+          type: 'session_start',
+          session_id: sessionId,
+          timestamp: now,
+        });
+
+        // 初始化 stats
+        const { StatsManager } = await import('./stats.js');
+        const statsManager = new StatsManager();
+        await statsManager.init(sessionDir);
+
+        const session: Session = {
+          id: sessionId,
+          projectKey: this.projectKey,
+          createdAt: now,
+          updatedAt: now,
+          type: 'normal',
+        };
+        logger.info('Auto-created session', { sessionId, channel });
+        return session;
+      }
+
+      // 目录已存在 → 读取 meta.json
       let type: 'normal' | 'precise' | undefined;
       let createdAt = '';
       try {

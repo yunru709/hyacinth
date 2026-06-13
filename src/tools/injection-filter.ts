@@ -4,12 +4,29 @@ const logger = createLogger('injection-filter');
 
 /** 提示词注入检测模式 */
 const PATTERNS = [
+  // 英文
   'ignore previous instructions',
   'ignore all previous',
   'disregard all',
   'forget your instructions',
   'you are now',
   'new instructions:',
+  'your new task is',
+  'do not follow',
+  'do not obey',
+  'override your',
+  'bypass your',
+  // 中文
+  '忽略之前的指令',
+  '忽略之前的所有',
+  '忘记你的指令',
+  '你现在是',
+  '新的指令',
+  '不要按照',
+  '不要遵守',
+  '覆盖你的',
+  '绕过你的',
+  '你现在的任务是',
 ];
 
 const SYSTEM_TAG_RE = /<system>[\s\S]*?<\/system>/gi;
