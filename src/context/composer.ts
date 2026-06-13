@@ -31,6 +31,8 @@ function formatTimestamp(date: Date = new Date()): string {
 
 /** 给历史消息的首个 text 块加 [历史] 前缀，区分当前对话 */
 function tagHistoryMessage(msg: import('../types.js').Message): import('../types.js').Message {
+  // 仅标记 user 消息——assistant 消息是模型自己的输出，模型看到会模仿
+  if (msg.role !== 'user') return msg;
   const prefix = '[历史] ';
   const content = msg.content;
   if (Array.isArray(content)) {
