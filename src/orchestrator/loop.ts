@@ -14,7 +14,7 @@ import type { EventStore } from '../memory/events.js';
 import { appendEvent } from '../event-store.js';
 import type { StatsManager } from '../memory/stats.js';
 import type { SummaryStore } from '../memory/summary.js';
-import type { Message, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent } from '../types.js';
+import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent } from '../types.js';
 import { OutputRouter } from '../parser/router.js';
 import { LLMOrchestrator } from './planner.js';
 import type { Plan } from './plan-store.js';
@@ -27,7 +27,7 @@ import type { LifecycleSupervisor } from '../lifecycle/supervisor.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { ImageStore, buildUserContentWithImages, createViewImageTool } from '../multimodal/index.js';
+import { ImageStore, buildUserContentWithImages, buildUserContentWithInlineImages, createViewImageTool } from '../multimodal/index.js';
 import { createLogger } from '../logging/logger.js';
 import { getBootstrapStatus, markBootstrapComplete } from '../setup/persona-bootstrap.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
@@ -227,6 +227,8 @@ export class AgentLoop {
   readonly imageStore = new ImageStore();
   /** 待注入图片队列（view_image 工具填充，下次 compose 前消费） */
   readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string }> = [];
+  /** 渠道预取图片（渠道层在 run() 前写入，_runInternal 一次性消费） */
+  channelImages: Array<{ data: string; media_type: string }> | null = null;
   /** Fallback 通知（onFallback 回调写入，runTurn 一次性消费后清空） */
   pendingFallbackInfo: string | null = null;
   /** 上下文组装策略（精确模式切换用） */
@@ -965,12 +967,19 @@ export class AgentLoop {
         }
       }
 
-      // 1. 将用户输入追加到 conversation（视觉模型自动检测图片路径并注入）
+      // 1. 将用户输入追加到 conversation（视觉模型自动检测图片路径或渠道预取图片）
       const activeP = this.getActiveProvider();
       const hasVision = activeP.getCapabilities?.()?.vision ?? false;
-      const userContent = hasVision
-        ? await buildUserContentWithImages(userInput, this.imageStore)
-        : { type: 'text' as const, text: userInput };
+      let userContent: MessageContent | MessageContent[];
+      if (hasVision && this.channelImages && this.channelImages.length > 0) {
+        // 渠道预取图片（飞书/HTTP 等已下载为 base64）
+        userContent = buildUserContentWithInlineImages(userInput, this.channelImages, this.imageStore);
+        this.channelImages = null; // 一次性消费
+      } else if (hasVision) {
+        userContent = await buildUserContentWithImages(userInput, this.imageStore);
+      } else {
+        userContent = { type: 'text' as const, text: userInput };
+      }
       const userMessage: Message = {
         role: 'user',
         content: userContent,

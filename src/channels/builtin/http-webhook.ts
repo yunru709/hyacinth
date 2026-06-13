@@ -143,7 +143,11 @@ export class HttpWebhookChannel implements ChannelHandler {
 
     // ── Chat ────────────────────────────────────────────────────
     this.app.post('/api/chat', async (req: FastifyRequest, reply: FastifyReply) => {
-      const body = req.body as { message?: string; sessionId?: string };
+      const body = req.body as {
+        message?: string;
+        sessionId?: string;
+        images?: Array<{ data: string; media_type: string }>;
+      };
       if (!body.message) {
         return reply.status(400).send({ error: 'message is required' });
       }
@@ -162,6 +166,7 @@ export class HttpWebhookChannel implements ChannelHandler {
           shouldContinue: !body.sessionId,
         });
 
+        if (body.images?.length) loop.channelImages = body.images;
         await loop.run(body.message);
 
         const sessionId = sessionDir.split(/[\\/]/).pop() ?? '';

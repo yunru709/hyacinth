@@ -49,13 +49,13 @@ export interface FeishuMessageContext {
   senderUserId?: string;
   content: string;
   contentType: string;
+  /** 图片 image_key（message_type: 'image' 时填入） */
+  imageKey?: string;
   rootId?: string;
   parentId?: string;
   threadId?: string;
   mentionedBot: boolean;
-  /** 发送者显示名称（后续解析） */
   senderName?: string;
-  /** 消息创建时间（毫秒） */
   createTimeMs?: number;
 }
 
@@ -133,25 +133,38 @@ function parseInteractiveContent(rawContent: string): string {
 /**
  * 解析飞书消息内容
  */
-export function parseMessageContent(rawContent: string, msgType: string): string {
-  if (!rawContent) return '';
+export interface ParsedMessage {
+  text: string;
+  /** 图片 image_key（message_type: 'image' 时填入） */
+  imageKey?: string;
+  contentType: string;
+}
+
+export function parseMessageContent(rawContent: string, msgType: string): ParsedMessage {
+  if (!rawContent) return { text: '', contentType: msgType };
 
   switch (msgType) {
     case 'text':
-      return parseTextContent(rawContent);
+      return { text: parseTextContent(rawContent), contentType: 'text' };
     case 'post':
-      return parsePostContent(rawContent);
+      return { text: parsePostContent(rawContent), contentType: 'post' };
     case 'interactive':
-      return parseInteractiveContent(rawContent);
-    default:
-      // 尝试作为 JSON 解析
+      return { text: parseInteractiveContent(rawContent), contentType: 'interactive' };
+    case 'image':
       try {
         const parsed = JSON.parse(rawContent);
-        if (typeof parsed === 'string') return parsed;
-        if (parsed?.text && typeof parsed.text === 'string') return parsed.text;
-        return `[${msgType} message]`;
+        return { text: '[图片]', imageKey: parsed.image_key as string, contentType: 'image' };
       } catch {
-        return rawContent;
+        return { text: '[图片消息]', contentType: 'image' };
+      }
+    default:
+      try {
+        const parsed = JSON.parse(rawContent);
+        if (typeof parsed === 'string') return { text: parsed, contentType: msgType };
+        if (parsed?.text && typeof parsed.text === 'string') return { text: parsed.text, contentType: msgType };
+        return { text: `[${msgType} message]`, contentType: msgType };
+      } catch {
+        return { text: rawContent, contentType: msgType };
       }
   }
 }
@@ -244,7 +257,7 @@ export function parseFeishuMessageEvent(
   const isGroup = chatType === 'group' || chatType === 'topic_group';
   const rawContent = event.message.content;
   const msgType = event.message.message_type;
-  const content = parseMessageContent(rawContent, msgType);
+  const parsed = parseMessageContent(rawContent, msgType);
 
   const senderOpenId = event.sender.sender_id.open_id?.trim() ?? '';
   const senderUserId = event.sender.sender_id.user_id?.trim();
@@ -256,8 +269,9 @@ export function parseFeishuMessageEvent(
     isGroup,
     senderOpenId: senderOpenId || senderUserId || '',
     senderUserId: senderUserId || undefined,
-    content,
-    contentType: msgType,
+    content: parsed.text,
+    contentType: parsed.contentType,
+    imageKey: parsed.imageKey,
     rootId: event.message.root_id || undefined,
     parentId: event.message.parent_id || undefined,
     threadId: event.message.thread_id || undefined,

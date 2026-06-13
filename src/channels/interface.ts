@@ -33,15 +33,12 @@ export type ChannelEvent =
 /** 用户消息事件 */
 export interface ChannelMessageEvent {
   type: 'message';
-  /** 会话 ID（相同 sessionId 的消息会路由到同一个 AgentLoop） */
   sessionId: string;
-  /** 用户标识（渠道定义，如 WeChat openid / Feishu user_id） */
   userId: string;
-  /** 消息文本内容 */
   content: string;
-  /** 来源渠道 ID */
   channel: string;
-  /** 原始消息元数据（渠道自定义，透传） */
+  /** 图片数据（base64 + MIME）。各渠道自行下载后填入，可选 */
+  images?: Array<{ data: string; media_type: string }>;
   metadata?: Record<string, unknown>;
 }
 
@@ -68,9 +65,8 @@ export interface ChannelErrorEvent {
 
 /** Agent 回复给渠道的消息 */
 export interface ChannelReply {
-  /** 回复文本内容 */
   content: string;
-  /** 附加元数据（渠道可自定义格式，如 Markdown、模板卡片等） */
+  images?: Array<{ data: string; media_type: string }>;
   metadata?: Record<string, unknown>;
 }
 

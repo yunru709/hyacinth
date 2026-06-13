@@ -133,7 +133,29 @@ export function detectImagePaths(text: string): string[] {
   return paths;
 }
 
-// ── 构建带图片的用户消息 ────────────────────────────────────────────
+// ── 构建带图片的用户消息（渠道预取 inline base64）───────────────────
+
+/** 渠道图片：接受已下载的 base64 数据，直接构造 ImageContent */
+export function buildUserContentWithInlineImages(
+  userInput: string,
+  images: Array<{ data: string; media_type: string }>,
+  imageStore: ImageStore,
+): MessageContent | MessageContent[] {
+  if (images.length === 0) return { type: 'text', text: userInput };
+
+  const blocks: MessageContent[] = [];
+  for (const img of images) {
+    const imgId = imageStore.store(img.data, img.media_type);
+    blocks.push({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } });
+    const ext = img.media_type.split('/')[1]?.toUpperCase() || 'IMG';
+    const sizeStr = img.data.length < 700 ? `${img.data.length}B` : `${(img.data.length / 700).toFixed(1)}KB`;
+    blocks.push({ type: 'text', text: `[Image indexed as #${imgId}: ${ext}, ${sizeStr}]` });
+  }
+  blocks.push({ type: 'text', text: userInput });
+  return blocks;
+}
+
+// ── 构建带图片的用户消息（本地磁盘路径）─────────────────────────────
 
 export async function buildUserContentWithImages(
   userInput: string, imageStore: ImageStore,

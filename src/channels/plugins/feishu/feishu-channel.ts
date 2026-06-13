@@ -281,6 +281,7 @@ export class FeishuChannel implements ChannelHandler {
     );
 
     entry.collectHandler.reset();
+    if (event.images?.length) (entry.loop as any).channelImages = event.images;
     await entry.loop.run(event.content);
     const response = entry.collectHandler.getResponse();
 
@@ -333,6 +334,7 @@ export class FeishuChannel implements ChannelHandler {
     loop.setOutputHandler(outputHandler);
 
     try {
+      if (event.images?.length) (loop as any).channelImages = event.images;
       await loop.run(event.content);
       await streaming.finish();
     } catch (err) {
@@ -445,14 +447,43 @@ export class FeishuChannel implements ChannelHandler {
       isGroup: ctx.isGroup,
     });
 
-    // ── 构造 ChannelMessageEvent ──
+    // ── 下载图片（message_type: 'image'） ──
+    let images: ChannelMessageEvent['images'];
+    if (ctx.imageKey && ctx.messageId && this.config?.appId && this.config?.appSecret) {
+      try {
+        // 获取 tenant access token
+        const tokenResp = await fetch(
+          'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app_id: this.config.appId, app_secret: this.config.appSecret }),
+          },
+        );
+        const tokenJson = await tokenResp.json() as { tenant_access_token?: string };
+        const token = tokenJson.tenant_access_token;
+        if (token) {
+          const resp = await fetch(
+            `https://open.feishu.cn/open-apis/im/v1/messages/${ctx.messageId}/resources/${ctx.imageKey}?type=image`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const contentType = resp.headers.get('content-type') || 'image/png';
+            images = [{ data: buf.toString('base64'), media_type: contentType }];
+          }
+        }
+      } catch { /* 下载失败不影响文本消息 */ }
+    }
 
+    // ── 构造 ChannelMessageEvent ──
     const channelEvent: ChannelEvent = {
       type: 'message',
       sessionId,
       userId: ctx.senderOpenId,
       content: ctx.content,
       channel: this.id,
+      images,
       metadata: {
         messageId: ctx.messageId,
         chatId: ctx.chatId,
