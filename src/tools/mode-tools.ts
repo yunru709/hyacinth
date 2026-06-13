@@ -215,7 +215,23 @@ export function createModeMarkTool(modeManager: ModeManager): Tool {
         // 找下一个未完成步骤
         const nextIdx = updatedSteps.findIndex((s, i) => i >= id && !s.done);
         if (nextIdx === -1) {
-          // 全部完成
+          // Spec Phase 2 (tasks) 全部完成 → 推进到 Phase 3 (checklist)
+          const state = modeManager.getState();
+          const data = state?.data as Record<string, unknown> | undefined;
+          if (mode === 'spec' && data?.phase === 'tasks') {
+            data.phase = 'checklist';
+            const specDir = data.specDir as string;
+            const clPath = path.join(specDir, 'checklist.md');
+            let clContent = '';
+            try { clContent = fs.readFileSync(clPath, 'utf-8'); } catch { return '错误：checklist.md 未找到。'; }
+            const clSteps = parseSteps(clContent);
+            if (clSteps.length === 0) return '错误：checklist.md 中没有检测到验收项。';
+            return `✅ Phase 2 全部完成，进入 Phase 3 验收阶段。\n` +
+              `解析到 ${clSteps.length} 个验收项:\n` +
+              clSteps.map((s, i) => `  ${i + 1}. ${s.done ? '✅' : '⬜'} ${s.text}`).join('\n') +
+              `\n逐项验证，每项完成后调用 mode_mark({action:"done", id:N})。`;
+          }
+          // 全部完成 → 自动结束
           modeManager.deactivate();
           return `✅ 全部 ${updatedSteps.length} 个步骤已完成。模式已自动结束。`;
         }
