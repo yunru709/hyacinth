@@ -437,21 +437,21 @@ export class StructuredSummarizer {
   async summarize(messages: Message[], existingSummary?: string, recentContext?: Message[]): Promise<string> {
     let prompt: string;
 
-    // 构建任务焦点：近期对话作为 LLM 判断相关性的"锚"
+    // 近期对话作为 LLM 判断相关性的"锚"
     const taskFocus = recentContext && recentContext.length > 0
-      ? `## 近期对话（仅供参考上下文，不需压缩）\n${this.serializeMessages(recentContext)}\n\n` +
+      ? `## 近期对话（仅供参考，不需压缩）\n${this.serializeMessages(recentContext)}\n\n` +
         `---\n\n` +
         `## 需压缩的历史对话\n` +
-        `请优先提取与近期对话相关的信息（相同的文件、延续的任务、未解决的错误等），\n` +
-        `与近期对话无关的内容（已完成的独立任务、过时的探索、重复操作）可以激进压缩。\n\n`
+        `优先保留与近期对话延续的信息。已完成的任务记入"✅ 已完成"，实现细节可压缩，但完成状态不能丢。\n` +
+        `与近期无关的内容可激进压缩。\n\n`
       : '';
 
     if (existingSummary) {
-      // Phase 3: 增量更新
+      // Phase 3: 增量更新 — 已完成的移到 ✅，新内容补充到对应章节
       prompt =
         `前一次摘要:\n${existingSummary}\n\n` +
         taskFocus +
-        `请基于新的对话内容增量更新摘要\n\n` +
+        `增量更新前一次摘要：已完成的任务移到"✅ 已完成"，新内容补到对应章节，不要重复已完成的项。\n\n` +
         `对话历史:\n${this.serializeMessages(messages)}\n\n` +
         STRUCTURED_SUMMARY_TEMPLATE;
     } else {
