@@ -106,6 +106,12 @@ export interface ChannelsConfig {
   feishu?: FeishuChannelConfigEntry;
 }
 
+/** 跨会话记忆文件配置 */
+export interface MemoryFileConfig {
+  /** 记忆文件路径，默认 ~/.agent/memory/memory.md */
+  file?: string;
+}
+
 /** Agent 配置（非敏感） */
 export interface AgentConfig {
   provider: string;
@@ -143,6 +149,8 @@ export interface AgentConfig {
   local?: LocalModelConfig;
   /** 渠道配置 */
   channels?: ChannelsConfig;
+  /** 跨会话记忆文件配置 */
+  memory?: MemoryFileConfig;
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -189,6 +197,9 @@ const DEFAULT_CONFIG: AgentConfig = {
       tuiSync: false,
       sessionMode: 'per_user',
     },
+  },
+  memory: {
+    file: path.join(os.homedir(), '.agent', 'memory', 'memory.md'),
   },
 };
 

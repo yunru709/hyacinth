@@ -60,8 +60,7 @@ export function createTaskMarkTool(modeManager: ModeManager): Tool {
         for (const d of descs) {
           modeManager.dispatchToolCall('add', { action: 'add', description: d } as Record<string, unknown>);
         }
-        const result = modeManager.dispatchToolCall('add', { action: 'add', description: descs[descs.length - 1] } as Record<string, unknown>);
-        return result ? `已添加 ${descs.length} 个步骤。` : '当前模式不支持此操作。';
+        return `已添加 ${descs.length} 个步骤。`;
       }
 
       const result = modeManager.dispatchToolCall(action, {

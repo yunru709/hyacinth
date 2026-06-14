@@ -236,7 +236,12 @@ export async function createAgent(
   });
 
   // ── 跨会话 Memory 系统 ─────────────────────────────────────────────
-  const memoryStore = new MemoryStore(sessionManager.getProjectDir());
+  const memoryFilePath = config.memory?.file ?? path.join(sessionManager.getProjectDir(), 'memory.md');
+  const memoryDir = path.dirname(memoryFilePath);
+  if (!fs.existsSync(memoryDir)) {
+    fs.mkdirSync(memoryDir, { recursive: true });
+  }
+  const memoryStore = new MemoryStore(memoryFilePath);
   memoryStore.initializeIfNeeded();
   contextComposer.registerSource({
     name: 'memory',

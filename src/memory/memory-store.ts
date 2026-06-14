@@ -1,16 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const MEMORY_FILENAME = 'memory.md';
 const HEADER = '<!-- Memory managed by Agent. Edit directly or use /memory command. -->';
 
 export class MemoryStore {
-  private projectDir: string;
   private filePath: string;
 
-  constructor(projectDir: string) {
-    this.projectDir = projectDir;
-    this.filePath = path.join(projectDir, MEMORY_FILENAME);
+  constructor(filePath: string) {
+    this.filePath = filePath;
   }
 
   load(): string {
