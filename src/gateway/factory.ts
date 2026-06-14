@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { SessionManager } from '../memory/session.js';
-import { createDefaultRegistry, createBuiltInTools } from '../tools/index.js';
+import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { registerBundleTools } from '../tools/bundle-tools.js';
@@ -66,6 +66,8 @@ import { modelCatalog } from '../provider/catalog.js';
 import { ModeManager, createPlanMode, createSpecMode, createTodoMode, createBootstrapMode } from '../modes/index.js';
 import { createBootstrapMarkTool } from '../tools/bootstrap.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
+import { BackgroundProcessRegistry } from '../tools/background-registry.js';
+import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
 
 import { collectSystemInfo, buildEnvironmentSection } from '../env/index.js';
 import type { ChannelsInfo } from '../env/index.js';
@@ -285,6 +287,24 @@ export async function createAgent(
   const compressor = new CompressorOrchestrator(tokenCounter, summarizer, effectiveMaxContext, { compressThreshold: config.context?.compressThreshold });
   const toolRegistry = createBuiltInTools(gitManager, currentSessionId, cwd);
   const toolExecutor = new ToolExecutor(toolRegistry);
+
+  // ── 后台进程注册表（异步工具支持）────────────────────────────────────
+  const backgroundRegistry = new BackgroundProcessRegistry();
+
+  // 注入 BashTool（使其支持 async: true 模式）
+  const bashTool = toolRegistry.get('bash');
+  bashTool?.setBackgroundRegistry?.(backgroundRegistry);
+
+  // tools.allowAsync 配置（默认 true，可设为 false 禁止异步模式）
+  const allowAsync = configCenter.get<boolean | undefined>('tools.allowAsync');
+  if (allowAsync === false && bashTool instanceof BashTool) {
+    bashTool.setAllowAsync(false);
+  }
+
+  // 注册后台进程管理工具
+  toolRegistry.register(createProcessListTool(backgroundRegistry));
+  toolRegistry.register(createProcessKillTool(backgroundRegistry));
+  toolRegistry.register(createProcessOutputTool(backgroundRegistry));
   const conversationStore = new ConversationStore(maxMessages);
   const eventStore = new EventStore();
   const statsManager = new StatsManager();
@@ -503,6 +523,11 @@ export async function createAgent(
   // 注入知识库状态引用
   loop.kbState = kbState;
   loopRef = loop; // wire fallback notification
+
+  // 注册后台进程注册表到 LifecycleSupervisor（优雅关闭时自动清理）
+  if (supervisor) {
+    supervisor.registerBackgroundRegistry(backgroundRegistry);
+  }
 
   // 注入精确模式策略（默认普通模式）
   const composeStrategy = sessionType === 'precise'

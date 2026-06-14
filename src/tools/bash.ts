@@ -2,6 +2,7 @@ import { spawn, execSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import type { Tool } from './interface.js';
+import type { BackgroundProcessRegistry } from './background-registry.js';
 
 /** 沙箱配置接口 — 限制 BashTool 可执行的命令 */
 export interface SandboxConfig {
@@ -53,7 +54,9 @@ function getShell(): string {
 export class BashTool implements Tool {
   readonly name = 'bash';
   readonly description =
-    'Executes a command in a subprocess and returns stdout and stderr. On Windows uses PowerShell, on Linux/macOS uses /bin/sh. Supports timeout control (default 600 seconds). The working directory is the current Agent working directory.';
+    'Executes a command in a subprocess and returns stdout and stderr. On Windows uses PowerShell, on Linux/macOS uses /bin/sh. Supports timeout control (default 600 seconds). The working directory is the current Agent working directory. ' +
+    'Set "async": true to run the command as a background process — returns a handle immediately (e.g. "[background:bg_001]") and the process keeps running across turns. ' +
+    'Use process_list / process_output / process_kill to manage background processes.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
@@ -63,19 +66,26 @@ export class BashTool implements Tool {
       },
       timeout: {
         type: 'number',
-        description: 'Timeout in seconds. Default is 600.',
+        description: 'Timeout in seconds. Default is 600. Ignored when async=true.',
       },
       env: {
         type: 'object',
         description: 'Environment variables to set for this command. These persist across subsequent bash calls in this session. Example: {"PYTHONIOENCODING": "utf-8"}',
       },
+      async: {
+        type: 'boolean',
+        description: 'If true, run the command as a background process. Returns a handle immediately (e.g. [background:bg_001]). The process continues running and can be managed with process_list/process_output/process_kill.',
+      },
     },
     required: ['command'],
   };
+  readonly executionMode = 'asyncable';
 
   private cwd: string;
   private sandboxConfig: SandboxConfig;
   private persistentEnv: Record<string, string>;
+  private backgroundRegistry?: BackgroundProcessRegistry;
+  private allowAsync = true;
 
   constructor(cwd?: string, sandboxConfig?: SandboxConfig) {
     this.cwd = cwd ?? process.cwd();
@@ -94,6 +104,16 @@ export class BashTool implements Tool {
   /** 运行时更新沙箱配置 */
   setSandboxConfig(config: SandboxConfig): void {
     this.sandboxConfig = config;
+  }
+
+  /** 注入后台进程注册表（用于 async 模式） */
+  setBackgroundRegistry(registry: BackgroundProcessRegistry): void {
+    this.backgroundRegistry = registry;
+  }
+
+  /** 是否允许 async 模式（默认 true，可通过 tools.allowAsync 配置关闭） */
+  setAllowAsync(allow: boolean): void {
+    this.allowAsync = allow;
   }
 
   /** 获取当前沙箱配置（只读） */
@@ -130,6 +150,7 @@ export class BashTool implements Tool {
     if (!command) return '错误：缺少 command 参数。请提供要执行的命令。';
     const timeout = (args.timeout as number | undefined) ?? 600;
     const callEnv = (args.env as Record<string, string>) ?? {};
+    const runAsync = args.async === true;
 
     // 持久化本次调用指定的环境变量
     for (const [key, value] of Object.entries(callEnv)) {
@@ -177,6 +198,43 @@ export class BashTool implements Tool {
         );
       }
     }
+
+    // ── 异步执行路径 ──
+    if (runAsync) {
+      if (!this.allowAsync) {
+        return 'Error: Async execution is disabled (tools.allowAsync = false). Run the command synchronously by omitting the "async" parameter.';
+      }
+      if (!this.backgroundRegistry) {
+        return 'Error: BackgroundProcessRegistry not available. Cannot run async commands.';
+      }
+
+      const shell = getShell();
+      const isWin = process.platform === 'win32';
+
+      const mergedEnv: Record<string, string | undefined> = { ...process.env };
+      if (isWin) {
+        mergedEnv.PYTHONIOENCODING = mergedEnv.PYTHONIOENCODING ?? 'utf-8';
+        mergedEnv.PYTHONUTF8 = mergedEnv.PYTHONUTF8 ?? '1';
+      }
+      for (const [key, value] of Object.entries(this.persistentEnv)) {
+        mergedEnv[key] = value;
+      }
+
+      const childProcess = spawn(command, [], {
+        cwd: this.cwd,
+        shell,
+        env: mergedEnv,
+        detached: !isWin,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      // 不等待，立即注册
+      const handle = this.backgroundRegistry.register('bash', command, childProcess);
+      const pid = childProcess.pid ?? '?';
+      return `[background:${handle}] PID ${pid}\nCommand: ${command}\n\nUse process_output("${handle}") to read output, process_kill("${handle}") to stop.`;
+    }
+
+    // ── 同步执行路径（原有逻辑）──
 
     // 输出截断配置
     const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 15 * 1024; // 15KB

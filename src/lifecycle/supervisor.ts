@@ -1,6 +1,7 @@
 import { type ProcessStatus, type ProcessEventCallbacks } from './interface.js';
 import { ProcessManager } from './manager.js';
 import { LocalModelManager, type LoadedModelInfo } from './local-model.js';
+import type { BackgroundProcessRegistry } from '../tools/background-registry.js';
 
 export type ManagedEntityType = 'local-model' | 'mcp-server' | 'custom';
 
@@ -23,6 +24,7 @@ export class LifecycleSupervisor {
   private entities: ManagedEntity[] = [];
   private localModelManager = new LocalModelManager();
   private _shuttingDown = false;
+  private backgroundRegistry?: BackgroundProcessRegistry;
 
   /** 是否正在关闭中 */
   get shuttingDown(): boolean {
@@ -204,6 +206,11 @@ export class LifecycleSupervisor {
     this.entities.push({ name, type, manager });
   }
 
+  /** 注册后台进程注册表（用于异步工具如 bash async:true），关闭时自动清理 */
+  registerBackgroundRegistry(registry: BackgroundProcessRegistry): void {
+    this.backgroundRegistry = registry;
+  }
+
   // ===== 全局优雅关闭 =====
 
   /**
@@ -214,6 +221,11 @@ export class LifecycleSupervisor {
   async shutdownAll(): Promise<void> {
     if (this._shuttingDown) return;
     this._shuttingDown = true;
+
+    // 先停止后台进程（bash async:true 启动的进程）
+    if (this.backgroundRegistry) {
+      await this.backgroundRegistry.shutdownAll().catch(() => {});
+    }
 
     const results = this.entities.map((e) =>
       e.manager.stop().catch(() => {
@@ -281,6 +293,9 @@ export class LifecycleSupervisor {
    * 用于 exit handler 中，不依赖异步操作。
    */
   private forceKillAll(): void {
+    // 后台进程（bash async:true）
+    this.backgroundRegistry?.forceKillAll();
+    // 受管实体（local-model, mcp-server）
     for (const entity of this.entities) {
       entity.manager.forceKillAll();
     }
