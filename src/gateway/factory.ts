@@ -5,6 +5,7 @@ import { SessionManager } from '../memory/session.js';
 import { createDefaultRegistry, createBuiltInTools } from '../tools/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolBundleRegistry } from '../tools/bundle-registry.js';
+import { registerBundleTools } from '../tools/bundle-tools.js';
 import { GitManager } from '../evolution/git-manager.js';
 import { SkillRegistry, createBuiltinSkills, SkillTool } from '../skills/index.js';
 import { AgentRegistry, createBuiltinAgents, DelegateToAgentTool, loadAgentConfigs } from '../agents/index.js';
@@ -23,6 +24,7 @@ import {
   createDeleteStructuredTool,
   createListStructuredTool,
   createKbUpdateTool,
+  createKbToggleTool,
 } from '../knowledge/index.js';
 import { DefaultStrategy, PreciseStrategy, type ComposeStrategy } from '../context/precision/index.js';
 import { CompressorOrchestrator, StructuredSummarizer } from '../context/compressor.js';
@@ -63,6 +65,7 @@ import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { ModeManager, createPlanMode, createSpecMode, createTodoMode, createBootstrapMode } from '../modes/index.js';
 import { createBootstrapMarkTool } from '../tools/bootstrap.js';
+import { createTriggerCompressionTool } from '../tools/compression.js';
 
 import { collectSystemInfo, buildEnvironmentSection } from '../env/index.js';
 import type { ChannelsInfo } from '../env/index.js';
@@ -120,141 +123,6 @@ export interface AgentComponents {
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
-
-/** 注册 6 个工具包管理工具：list / activate / deactivate / add / remove / create */
-function registerBundleTools(
-  toolRegistry: ReturnType<typeof createDefaultRegistry>,
-  bundleRegistry: ToolBundleRegistry,
-): void {
-  toolRegistry.register({
-    name: 'list_bundles',
-    description: '列出所有可用的工具包，包括每个包包含哪些工具及当前激活状态',
-    inputSchema: { type: 'object', properties: {} },
-    execute: async () => {
-      const bundles = bundleRegistry.list();
-      const activeNames = new Set(bundleRegistry.getActive().map(b => b.name));
-      const lines = bundles.map(b => {
-        const marker = activeNames.has(b.name) ? ' [已激活]' : '';
-        const toolList = b.tools.length > 0 ? b.tools.join(', ') : '(全量)';
-        return `- ${b.name}: ${b.description}${marker}\n  工具: ${toolList}`;
-      });
-      return lines.length > 0 ? lines.join('\n\n') : '(无工具包)';
-    },
-  });
-
-  toolRegistry.register({
-    name: 'activate_bundle',
-    description: '激活一个或多个工具包（逗号分隔）。用 deactivate_bundle 回到全量。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        names: { type: 'string', description: '工具包名称，多个用逗号分隔。如 "web,office"。传 "all" 或留空 = 全量模式。' },
-      },
-      required: [],
-    },
-    execute: async (args) => {
-      const raw = typeof args.names === 'string' ? args.names.trim() : '';
-      if (!raw || raw === 'all') {
-        bundleRegistry.deactivate();
-        return '已切换至全量模式，所有工具可用';
-      }
-      const names = raw.split(',').map(s => s.trim()).filter(Boolean);
-      bundleRegistry.activate(names);
-      const count = bundleRegistry.getActiveToolNames().length;
-      return `已激活 ${names.length} 个工具包（${count} 个工具去重并集），下一轮生效`;
-    },
-  });
-
-  toolRegistry.register({
-    name: 'deactivate_bundle',
-    description: '取消所有工具包限制，回到全量模式',
-    inputSchema: { type: 'object', properties: {} },
-    execute: async () => {
-      bundleRegistry.deactivate();
-      return '已取消所有工具包限制，回到全量模式';
-    },
-  });
-
-  toolRegistry.register({
-    name: 'create_bundle',
-    description: '创建新的工具包',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: '工具包名称' },
-        description: { type: 'string', description: '工具包描述' },
-        tools: { type: 'array', items: { type: 'string' }, description: '工具名称列表' },
-      },
-      required: ['name', 'description'],
-    },
-    execute: async (args) => {
-      const name = String(args.name);
-      const desc = String(args.description);
-      const tools = (Array.isArray(args.tools) ? args.tools : []) as string[];
-      bundleRegistry.create(name, desc, tools);
-      return `工具包 "${name}" 已创建（${tools.length} 个工具），使用 activate_bundle 激活`;
-    },
-  });
-
-  toolRegistry.register({
-    name: 'add_to_bundle',
-    description: '向现有工具包追加工具',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        bundle: { type: 'string', description: '目标工具包名称' },
-        tools: { type: 'array', items: { type: 'string' }, description: '要追加的工具名称列表' },
-      },
-      required: ['bundle', 'tools'],
-    },
-    execute: async (args) => {
-      const bundleName = String(args.bundle);
-      const toolNames = (Array.isArray(args.tools) ? args.tools : []) as string[];
-      bundleRegistry.addTools(bundleName, toolNames);
-      const b = bundleRegistry.get(bundleName)!;
-      return `已向 "${bundleName}" 追加 ${toolNames.length} 个工具，当前共 ${b.tools.length} 个`;
-    },
-  });
-
-  toolRegistry.register({
-    name: 'remove_from_bundle',
-    description: '从工具包移除工具',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        bundle: { type: 'string', description: '目标工具包名称' },
-        tools: { type: 'array', items: { type: 'string' }, description: '要移除的工具名称列表' },
-      },
-      required: ['bundle', 'tools'],
-    },
-    execute: async (args) => {
-      const bundleName = String(args.bundle);
-      const toolNames = (Array.isArray(args.tools) ? args.tools : []) as string[];
-      bundleRegistry.removeTools(bundleName, toolNames);
-      const b = bundleRegistry.get(bundleName);
-      return b
-        ? `已从 "${bundleName}" 移除 ${toolNames.length} 个工具，当前共 ${b.tools.length} 个`
-        : `"${bundleName}" 不存在`;
-    },
-  });
-
-  toolRegistry.register({
-    name: 'delete_bundle',
-    description: '删除整个工具包（builtin 和 common 不可删）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        bundle: { type: 'string', description: '要删除的工具包名称' },
-      },
-      required: ['bundle'],
-    },
-    execute: async (args) => {
-      const bundleName = String(args.bundle);
-      bundleRegistry.delete(bundleName);
-      return `工具包 "${bundleName}" 已删除`;
-    },
-  });
-}
 
 export async function createAgent(
   options: CreateAgentOptions,
@@ -575,6 +443,7 @@ export async function createAgent(
   toolRegistry.register(createKbListTool(knowledgeBase));
   toolRegistry.register(createKbDeleteTool(knowledgeBase, kbFilesDir));
   toolRegistry.register(createKbUpdateTool(knowledgeBase, kbFilesDir));
+  toolRegistry.register(createKbToggleTool(knowledgeBase, contextComposer));
   // 新结构化工具
   toolRegistry.register(createAddStructuredTool(structuredStore, () => knowledgeBase.enabled));
   toolRegistry.register(createUpdateStructuredTool(structuredStore, () => knowledgeBase.enabled));
@@ -669,6 +538,7 @@ export async function createAgent(
   toolRegistry.registerTrainingTools(trainingScheduler, configCenter);
   // registerRuntimeControlTools 内有 switch_provider / set_mode 等 30+ 工具依赖 loop 实例
   toolRegistry.registerRuntimeControlTools(loop, providerRouter, skillRegistry, agentRegistry, trainingScheduler, configCenter, cwd, heartbeatScheduler, mcpSystem);
+  toolRegistry.register(createTriggerCompressionTool(loop));
 
   // destroy_sub_agent 需要 sessionDir，在此单独注册
   const { createDestroySubAgentTool } = await import('../tools/runtime-control.js');

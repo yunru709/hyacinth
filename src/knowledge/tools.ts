@@ -211,3 +211,52 @@ export function createKbUpdateTool(
     },
   };
 }
+
+
+// ── kb_toggle ─────────────────────────────────────────────────────
+
+export function createKbToggleTool(
+  kb: KnowledgeBase,
+  contextComposer?: { activeConditions: Set<string> },
+): Tool {
+  return {
+    name: 'kb_toggle',
+    description:
+      '开启或关闭知识库。开启时自动同步开启 Zone 4，关闭时仅关闭知识库（Zone 4 保持开启）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['on', 'off'],
+          description: '"on" 开启知识库，"off" 关闭',
+        },
+      },
+      required: ['action'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      try {
+        const action = args.action as string;
+        if (action === 'on') {
+          if (kb.enabled) return '知识库已开启。';
+          if (!kb.zone4Enabled) {
+            kb.setZone4Enabled(true);
+            if (contextComposer) {
+              contextComposer.activeConditions.add('zone4_enabled');
+            }
+          }
+          kb.enable();
+          return '知识库已开启（Zone 4 已同步开启）。';
+        }
+        if (action === 'off') {
+          if (!kb.enabled) return '知识库已关闭。';
+          kb.disable();
+          return '知识库已关闭（Zone 4 保持开启）。';
+        }
+        return 'Error: action 必须是 "on" 或 "off"。';
+      } catch (err) {
+        return 'Error: ' + (err instanceof Error ? err.message : String(err));
+      }
+    },
+  };
+}

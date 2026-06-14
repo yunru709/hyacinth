@@ -16,7 +16,7 @@ export { KnowledgeWatcher } from './watcher.js';
 export type { WatcherOptions } from './watcher.js';
 
 // 工具
-export { createKbAddTool, createKbListTool, createKbDeleteTool, createKbUpdateTool } from './tools.js';
+export { createKbAddTool, createKbListTool, createKbDeleteTool, createKbUpdateTool, createKbToggleTool } from './tools.js';
 
 // 结构化知识库
 export { StructuredStore, type StructuredEntry, type TagMatchResult, type EntryCategory } from './structured-store.js';
