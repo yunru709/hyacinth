@@ -434,7 +434,14 @@ export async function createAgent(
       if (!knowledgeBase.enabled) return '';
       const q = kbState.lastQuery;
       if (!q || !q.trim()) return '';
-      return structuredStore.formatResults(structuredStore.search(q));
+      const maxTotal = configCenter.get<number>('kb.maxTotal') ?? 5;
+      const maxMain = configCenter.get<number>('kb.maxMain') ?? 3;
+      const maxRefs = configCenter.get<number>('kb.maxRefs') ?? 2;
+      return structuredStore.formatResults(
+        structuredStore.search(q, maxTotal),
+        maxMain,
+        maxRefs,
+      );
     },
   });
   // 旧工具（保留兼容）

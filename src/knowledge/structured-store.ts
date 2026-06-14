@@ -257,12 +257,12 @@ export class StructuredStore {
   }
 
   /** 组合检索：tag 匹配 → FTS5 兜底 → refs 扩展 */
-  search(query: string): TagMatchResult[] {
+  search(query: string, maxTotal = 5): TagMatchResult[] {
     const tagResults = this.matchByTags(query);
     const main = tagResults.filter(r => r.score >= 10);
 
     if (main.length < 2) {
-      const ftsEntries = this.searchFts(query, 5);
+      const ftsEntries = this.searchFts(query, maxTotal);
       const existingIds = new Set(main.map(r => r.entry.id));
       for (const e of ftsEntries) {
         if (!existingIds.has(e.id)) {
@@ -272,18 +272,18 @@ export class StructuredStore {
       }
     }
 
-    return main.slice(0, 5);
+    return main.slice(0, maxTotal);
   }
 
   // ── 格式化 ──────────────────────────────────────────────────────
 
   /** 将检索结果格式化为 Zone 4 注入文本 */
-  formatResults(results: TagMatchResult[]): string {
+  formatResults(results: TagMatchResult[], maxMain = 3, maxRefs = 2): string {
     if (results.length === 0) return '';
     const lines = ['── 以下内容来自知识库 ──', ''];
 
-    const main = results.slice(0, 3);
-    const refs = results.slice(3, 5);
+    const main = results.slice(0, maxMain);
+    const refs = results.slice(maxMain, maxMain + maxRefs);
 
     for (const r of main) {
       const tags = r.matchedTags.length > 0 ? `匹配标签: ${r.matchedTags.join(', ')}` : 'FTS5 匹配';
