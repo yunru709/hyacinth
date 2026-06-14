@@ -45,6 +45,24 @@
 - `list_sub_agents` / `toggle_sub_agent <name> <enabled>` — 管理子 Agent
 - `spawn_sub_agent <name>` — 派生子 Agent 执行独立任务
 
+### Skill 文件规范
+
+外部 Skill 放在 `.agent/skills/*.md`，**必须有 YAML frontmatter**：
+
+```markdown
+---
+name: skill-name
+description: 一句话描述
+tools: tool1,tool2
+---
+
+正文内容...
+```
+
+- `name` 必填，否则不加载
+- `tools` 可选，逗号分隔
+- 修改/删除 skill 文件即时生效（热加载），无需重启
+
 ## MCP（扩展外部工具）
 - MCP Server 配置在 `.agent/mcp.json`，支持 stdio（本地进程）和 SSE（远程服务）两种方式
 - MCP 工具直接调用即可，命名格式为 `mcp__{server}__{tool}`
