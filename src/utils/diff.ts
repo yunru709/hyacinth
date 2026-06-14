@@ -23,31 +23,27 @@ export function computeDiff(
 ): DiffLine[] {
   const result: DiffLine[] = [];
 
-  // header
-  result.push({ kind: 'header', text: `--- a/${filePath}` });
-  result.push({ kind: 'header', text: `+++ b/${filePath}` });
+  // normalize line endings
+  const oldNorm = oldText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const newNorm = newText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  const changes = diffLines(oldText, newText, { ignoreNewlineAtEof: true });
+  const changes = diffLines(oldNorm, newNorm, { ignoreNewlineAtEof: true });
 
   let oldLine = 1;
   let newLine = 1;
   let totalNonHeader = 0;
 
   for (const change of changes) {
-    const lines = change.value.replace(/\n$/, '').split('\n');
-    if (change.added) {
-      for (const line of lines) {
-        totalNonHeader++;
+    // remove trailing newline then split
+    const raw = change.value.endsWith('\n') ? change.value.slice(0, -1) : change.value;
+    const lines = raw.split('\n').map(l => l.trimEnd()); // strip \r and trailing spaces
+    for (const line of lines) {
+      totalNonHeader++;
+      if (change.added) {
         result.push({ kind: 'add', text: line, newLine: newLine++ });
-      }
-    } else if (change.removed) {
-      for (const line of lines) {
-        totalNonHeader++;
+      } else if (change.removed) {
         result.push({ kind: 'del', text: line, oldLine: oldLine++ });
-      }
-    } else {
-      for (const line of lines) {
-        totalNonHeader++;
+      } else {
         result.push({ kind: 'context', text: line, oldLine: oldLine++, newLine: newLine++ });
       }
     }
@@ -55,8 +51,7 @@ export function computeDiff(
 
   // 折叠
   if (totalNonHeader > MAX_LINES) {
-    const headerLines = 2; // --- and +++
-    const preview = result.slice(0, headerLines + PREVIEW_LINES);
+    const preview = result.slice(0, PREVIEW_LINES);
     preview.push({
       kind: 'context',
       text: `… 还有 ${totalNonHeader - PREVIEW_LINES} 行（折叠）`,
