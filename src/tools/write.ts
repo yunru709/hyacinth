@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
+import { computeDiff } from '../utils/diff.js';
+import { pushDiff } from './diff-channel.js';
 
 /**
  * WriteTool — 创建或覆盖文件
@@ -40,8 +42,15 @@ export class WriteTool implements Tool {
     const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
 
+    // 读旧内容（如果文件存在）
+    let oldContent = '';
+    try { oldContent = await fs.readFile(filePath, 'utf-8'); } catch {}
+
     // 写入文件
     await fs.writeFile(filePath, content, 'utf-8');
+
+    // 计算 diff
+    try { pushDiff(filePath, computeDiff(oldContent, content, filePath)); } catch {}
 
     // 计算行数
     const lineCount = content.split('\n').length;

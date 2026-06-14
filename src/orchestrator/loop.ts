@@ -108,6 +108,7 @@ export interface OutputHandler {
   onThinking?(content: string): void;
   onToolUse?(name: string, inputSummary: string, toolId?: string): void;
   onToolResult?(content: string, isError: boolean, toolId?: string): void;
+  onDiff?(toolId: string, filePath: string, diffLines: Array<{ kind: string; text: string }>): void;
   onStatus?(message: string, level: 'info' | 'warn' | 'error'): void;
   onTurnStart?(): void;
   onFlush?(): void;
@@ -1803,6 +1804,10 @@ export class AgentLoop {
 
       // 显示工具结果摘要
       this.outputHandler?.onToolResult?.(content, result.is_error ?? false, result.tool_use_id);
+      // 消费 diff 通道
+      const { popDiff: popD2 } = await import('../tools/diff-channel.js');
+      const diffData = popD2(result.tool_use_id);
+      if (diffData) this.outputHandler?.onDiff?.(result.tool_use_id, diffData.filePath, diffData.lines);
     }
   }
 
@@ -1892,6 +1897,15 @@ export class AgentLoop {
       const rawResult = await tool.execute(input, this.abortController?.signal ?? undefined);
       const result = this.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
       this.outputHandler?.onToolResult?.(result, false, id);
+      // 消费 diff 通道（edit/write 按 filePath 写入）
+      if (name === 'edit' || name === 'write' || name === 'multi_edit') {
+        const { popDiff: popD } = await import('../tools/diff-channel.js');
+        const fp = (input as Record<string, unknown>)?.file_path as string;
+        if (fp) {
+          const diffData = popD(fp);
+          if (diffData) this.outputHandler?.onDiff?.(id, diffData.filePath, diffData.lines);
+        }
+      }
       this.inlineToolResults.set(id, { content: result, isError: false });
       appendEvent(this.sessionDir, {
         type: 'tool_result',

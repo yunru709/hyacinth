@@ -523,6 +523,12 @@ export async function runTui(
       }
       tui.requestRender();
     },
+    onDiff(toolId: string, filePath: string, diffLines: Array<{ kind: string; text: string }>) {
+      if (toolId) {
+        chatLog.showDiff(toolId, filePath, diffLines);
+      }
+      tui.requestRender();
+    },
     onStatus(message: string, level: string) {
       // 压缩指示器
       if (message === 'compress-start') {

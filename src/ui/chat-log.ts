@@ -4,6 +4,7 @@ import { theme } from './theme.js';
 import { AssistantMessageComponent } from './assistant-message.js';
 import { ToolExecutionComponent } from './tool-execution.js';
 import { UserMessageComponent } from './user-message.js';
+import { DiffComponent, type DiffLineItem } from './diff-component.js';
 
 const MAX_COMPONENTS = 200;
 
@@ -170,6 +171,11 @@ export class ChatLog extends Container {
       return;
     }
     existing.setResult(text, { isError: opts?.isError });
+  }
+
+  showDiff(_toolId: string, filePath: string, diffLines: DiffLineItem[]) {
+    const diff = new DiffComponent(filePath, diffLines);
+    this.addChild(diff);
   }
 
   setToolsExpanded(expanded: boolean) {
