@@ -122,6 +122,7 @@ export interface AgentComponents {
   kbWatcher: KnowledgeWatcher;
   structuredStore: StructuredStore;
   composeStrategy: ComposeStrategy;
+  backgroundRegistry: BackgroundProcessRegistry;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -735,6 +736,7 @@ export async function createAgent(
     kbWatcher,
     structuredStore,
     composeStrategy,
+    backgroundRegistry,
   };
 }
 

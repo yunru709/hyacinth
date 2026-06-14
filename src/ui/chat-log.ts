@@ -23,6 +23,8 @@ export class ChatLog extends Container {
   private repeatableSystemMessage: RepeatableSystemMessage | null = null;
   private _scrollOffset = 0;
   private _viewportHeight = 40;
+  private _pinnedToBottom = true;
+  private _unreadCount = 0;
 
   constructor(maxComponents = MAX_COMPONENTS) {
     super();
@@ -53,6 +55,9 @@ export class ChatLog extends Container {
   private append(component: Component) {
     this.addChild(component);
     this.pruneOverflow();
+    if (!this._pinnedToBottom) {
+      this._unreadCount += 1;
+    }
   }
 
   private appendNonSystem(component: Component) {
@@ -185,12 +190,23 @@ export class ChatLog extends Container {
     }
   }
 
+  toggleToolsExpanded(): boolean {
+    this.setToolsExpanded(!this.toolsExpanded);
+    return this.toolsExpanded;
+  }
+
+  getToolsExpanded(): boolean {
+    return this.toolsExpanded;
+  }
+
   clearAll() {
     this.clear();
     this.toolById.clear();
     this.streamingRuns.clear();
     this.repeatableSystemMessage = null;
     this._scrollOffset = 0;
+    this._pinnedToBottom = true;
+    this._unreadCount = 0;
   }
 
   getContentLines(): string[] {
@@ -229,11 +245,36 @@ export class ChatLog extends Container {
     const maxOffset = Math.max(0, totalLines - this._viewportHeight);
     if (line < 0) {
       this._scrollOffset = Math.max(0, this._scrollOffset + line);
+      // User scrolled up → detach from bottom
+      if (this._scrollOffset < maxOffset) {
+        this._pinnedToBottom = false;
+      }
     } else if (line >= totalLines) {
       this._scrollOffset = maxOffset;
+      this._pinnedToBottom = true;
+      this._unreadCount = 0;
     } else {
       this._scrollOffset = Math.min(Math.max(0, line), maxOffset);
+      if (line < maxOffset) {
+        this._pinnedToBottom = false;
+      }
     }
+  }
+
+  /** Pin to bottom (called on End key or user requesting bottom) */
+  pinToBottom(): void {
+    const maxOffset = Math.max(0, this.getLineCount() - this._viewportHeight);
+    this._scrollOffset = maxOffset;
+    this._pinnedToBottom = true;
+    this._unreadCount = 0;
+  }
+
+  get isPinnedToBottom(): boolean {
+    return this._pinnedToBottom;
+  }
+
+  get unreadCount(): number {
+    return this._unreadCount;
   }
 
   get scrollOffset(): number {

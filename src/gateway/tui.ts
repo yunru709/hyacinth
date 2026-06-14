@@ -54,6 +54,7 @@ import { theme, editorTheme } from '../ui/theme.js';
 import { Evolver } from '../evolution/index.js';
 import { readRecentEvents, type ConversationEvent } from '../event-store.js';
 import { LocalModelModule } from '../local-model/index.js';
+import type { BackgroundProcessInfo } from '../tools/background-registry.js';
 import { DownloadManager } from '../local-model/download-manager.js';
 
 const logger = createLogger('tui');
@@ -64,18 +65,51 @@ const BOX_H = '\u2500'; // ─
 
 // ─── Status Bar Formatters ────────────────────────────────────────────────
 
+function visualWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) ?? 0;
+    // CJK, fullwidth forms, emoji: count as 2
+    w += (cp >= 0x1100 && cp <= 0x115f) ||   // Hangul Jamo
+      (cp >= 0x2e80 && cp <= 0xa4cf) ||       // CJK Radicals, Kangxi, Ideographs
+      (cp >= 0xac00 && cp <= 0xd7a3) ||       // Hangul Syllables
+      (cp >= 0xf900 && cp <= 0xfaff) ||       // CJK Compatibility Ideographs
+      (cp >= 0xfe10 && cp <= 0xfe19) ||       // Vertical forms
+      (cp >= 0xfe30 && cp <= 0xfe6f) ||       // CJK Compatibility Forms
+      (cp >= 0xff00 && cp <= 0xff60) ||       // Fullwidth Forms
+      (cp >= 0xffe0 && cp <= 0xffe6) ||       // Fullwidth Signs
+      (cp >= 0x1f300 && cp <= 0x1f9ff) ||     // Emoji & Symbols
+      (cp >= 0x20000 && cp <= 0x2fa1f)        // CJK Extension
+      ? 2 : 1;
+  }
+  return w;
+}
+
+function truncateByVisualWidth(s: string, maxVisualWidth: number): string {
+  if (visualWidth(s) <= maxVisualWidth) return s;
+  let w = 0;
+  let result = '';
+  for (const ch of s) {
+    const cw = visualWidth(ch);
+    if (w + cw + 3 > maxVisualWidth) { result += '...'; break; }
+    w += cw;
+    result += ch;
+  }
+  return result;
+}
+
 function formatStatusBar(
   info: TurnInfo,
   modelName: string,
   providerInfo?: { providerLabel: string; isLocal: boolean; mode: string } | null,
+  modeLabel?: string | null,
 ): string {
   const planInfo =
     info.planStepsTotal !== undefined
       ? `Plan: ${info.planStepsDone ?? 0}/${info.planStepsTotal}`
       : '';
 
-  const modelDisplay =
-    modelName.length > 24 ? modelName.slice(0, 24) + '...' : modelName;
+  const modelDisplay = truncateByVisualWidth(modelName, 28);
 
   const providerPart = providerInfo
     ? theme.dim(' | ') +
@@ -94,6 +128,10 @@ function formatStatusBar(
 
   if (planInfo) {
     parts.push(theme.dim(' | '), planInfo);
+  }
+
+  if (modeLabel) {
+    parts.push(theme.dim(' | '), theme.accent(modeLabel));
   }
 
   return parts.join('');
@@ -316,6 +354,10 @@ export async function runTui(
   let thinkingLoader: Loader | null = null;
   root.addChild(thinkingBar);
 
+  // Unread messages hint (shown when scrolled up) — P2-4
+  const unreadHintText = new Text('', 0, 0);
+  root.addChild(unreadHintText);
+
   root.addChild(footerText);
   root.addChild(permissionBar);
   root.addChild(editor);
@@ -351,6 +393,19 @@ export async function runTui(
       thinkingBar.removeChild(thinkingLoader);
       thinkingLoader = null;
     }
+  }
+
+  function updateUnreadHint(): void {
+    const count = chatLog.unreadCount;
+    if (count > 0 && !chatLog.isPinnedToBottom) {
+      unreadHintText.setText(
+        theme.warning(`↓ ${count} new message${count > 1 ? 's' : ''} below  `) +
+        theme.dim('(End to scroll down)'),
+      );
+    } else {
+      unreadHintText.setText('');
+    }
+    tui.requestRender();
   }
 
   // ── State for refreshStatus ──
@@ -409,7 +464,17 @@ export async function runTui(
     const currentModel = ap.getModel();
     const currentProviderType = ap.getProviderType();
     const currentProviderInfo = providerInfo ?? { providerLabel: currentProviderType, isLocal: false, mode: 'auto' };
-    let statusContent = formatStatusBar(activeInfo, currentModel, currentProviderInfo);
+    // Build mode label for header display
+    let modeHeaderLabel: string | null = null;
+    if (modeManager?.isActive()) {
+      const mn = modeManager.getActive();
+      if (mn) {
+        const label = mn.charAt(0).toUpperCase() + mn.slice(1);
+        const completed = modeManager.checkComplete();
+        modeHeaderLabel = completed ? `${label} ✓` : label;
+      }
+    }
+    let statusContent = formatStatusBar(activeInfo, currentModel, currentProviderInfo, modeHeaderLabel);
 
     // Compaction message
     if (compactionMessage) {
@@ -433,6 +498,14 @@ export async function runTui(
       if (total > 0) {
         const hitRate = (info.cacheHitTokens / total * 100).toFixed(1);
         ctxBar += theme.dim(` | Cache: ${hitRate}%`);
+      }
+    }
+    // Background process count
+    if (backgroundRegistry) {
+      const bgProcs = backgroundRegistry.list();
+      if (bgProcs.length > 0) {
+        const running = bgProcs.filter((p: BackgroundProcessInfo) => p.status === 'running').length;
+        ctxBar += theme.dim(' | ') + theme.accent(`⚙ ${running} bg`);
       }
     }
     contextBarText.setText(ctxBar);
@@ -481,10 +554,18 @@ export async function runTui(
 
   function updatePermissionBar() {
     const labels = ['Yes', 'Always', 'No'];
+    const shortcuts = ['Y', 'A', 'N'];
+    const parts = labels.map((l, i) => {
+      const prefix = i === permissionSelection ? '\u25b6 ' : '  ';
+      if (i === permissionSelection) {
+        return theme.fg(`[ ${prefix}${l} (${shortcuts[i]}) ]`);
+      }
+      return theme.dim(`  ${prefix}${l} (${shortcuts[i]})  `);
+    });
     permissionBar.setText(
-      labels.map((l, i) => i === permissionSelection
-        ? theme.accent(`\u25b6 ${l}`)
-        : theme.dim(`  ${l}`)).join('  ')
+      theme.warning('\u250c Permission Required \u2500 ') +
+      parts.join(theme.dim(' \u2502 ')) +
+      theme.warning(' \u2500\u2500 Use \u2190\u2192 to select, Enter to confirm')
     );
   }
 
@@ -515,18 +596,21 @@ export async function runTui(
         inputSummary.length > 100 ? inputSummary.slice(0, 97) + '...' : inputSummary;
       const id = toolId ?? `tool_${Date.now()}_${++toolCounterFallback}`;
       chatLog.startTool(id, name, summary);
+      updateUnreadHint();
       tui.requestRender();
     },
     onToolResult(content: string, isError: boolean, toolId?: string) {
       if (toolId) {
         chatLog.updateToolResult(toolId, content, { isError });
       }
+      updateUnreadHint();
       tui.requestRender();
     },
     onDiff(toolId: string, filePath: string, diffLines: Array<{ kind: string; text: string }>) {
       if (toolId) {
         chatLog.showDiff(toolId, filePath, diffLines);
       }
+      updateUnreadHint();
       tui.requestRender();
     },
     onStatus(message: string, level: string) {
@@ -600,6 +684,7 @@ export async function runTui(
           refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
         }
       }
+      updateUnreadHint();
       tui.requestRender();
     },
     onFlush() {
@@ -621,6 +706,7 @@ export async function runTui(
         chatLog.finalizeAssistant(currentTextLine.trim());
         currentTextLine = '';
       }
+      updateUnreadHint();
       tui.requestRender();
     },
     onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'> {
@@ -680,6 +766,7 @@ export async function runTui(
   const loop = agent.loop;
   let sessionDir = agent.sessionDir;
   const modeManager = agent.modeManager;
+  const backgroundRegistry = agent.backgroundRegistry;
   const modelRouter = agent.modelRouter;
   const knowledgeBase = agent.knowledgeBase;
   const composeStrategy = agent.composeStrategy;
@@ -882,16 +969,52 @@ export async function runTui(
   let inputHistory: string[] = [];
   let historyIndex = -1;
 
+  // ── History persistence ──
+  const historyFilePath = path.join(os.homedir(), '.agent', 'history.json');
+  const HISTORY_MAX = 500;
+  try {
+    if (fs.existsSync(historyFilePath)) {
+      const raw = fs.readFileSync(historyFilePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        inputHistory = parsed.slice(-HISTORY_MAX);
+      }
+    }
+  } catch { /* ignore corrupt history */ }
+
+  function saveHistory(): void {
+    try {
+      const dir = path.dirname(historyFilePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(historyFilePath, JSON.stringify(inputHistory.slice(-HISTORY_MAX), null, 2), 'utf-8');
+    } catch { /* ignore write errors */ }
+  }
+
   function updateTokenEstimate(): void {
     const text = editor.getText();
     const estimated = Math.ceil(text.length / 4);
     const ap = loop.getActiveProvider();
     const providerLabel = `${ap.getProviderType()} \u00b7 `;
-    footerText.setText(
-      theme.dim(
-        `Ctrl+C exit | Ctrl+L clear | Ctrl+P provider | /plan /spec /done | ${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`,
-      ),
+    let footer = theme.dim(
+      `Ctrl+C exit | Ctrl+L clear | Ctrl+P provider | Ctrl+F search | Ctrl+T tools`,
     );
+
+    // Context-aware hints
+    if (isThinking) {
+      footer += theme.accent(' | Esc to stop');
+    }
+    if (permissionQueue.length > 0) {
+      footer += theme.warning(' | \u2190\u2192 select  Enter confirm');
+    }
+    if (backgroundRegistry) {
+      const bgCount = backgroundRegistry.list().filter((p: BackgroundProcessInfo) => p.status === 'running').length;
+      if (bgCount > 0) {
+        footer += theme.accent(` | \u2699 ${bgCount} bg process(es)`);
+      }
+    }
+
+    footer += theme.dim(`\n${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`);
+    footerText.setText(footer);
   }
 
   async function handleInput(text: string): Promise<void> {
@@ -903,9 +1026,10 @@ export async function runTui(
     // Push to history
     if (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== input) {
       inputHistory.push(input);
-      if (inputHistory.length > 500) {
+      if (inputHistory.length > HISTORY_MAX) {
         inputHistory.shift();
       }
+      saveHistory();
     }
     historyIndex = -1;
 
@@ -1753,6 +1877,15 @@ export async function runTui(
       return;
     }
 
+    if (input === '/collapse') {
+      const expanded = chatLog.toggleToolsExpanded();
+      chatLog.addSystem(
+        theme.dim('Tool outputs ') + theme.fg(expanded ? 'expanded' : 'collapsed'),
+      );
+      tui.requestRender();
+      return;
+    }
+
     if (input === '/zone4 on') {
       knowledgeBase.setZone4Enabled(true);
       contextComposer.activeConditions.add('zone4_enabled');
@@ -2295,6 +2428,7 @@ export async function runTui(
 
     chatLog.addUser('\u276f ' + input);
     chatLog.addSystem(theme.dim('\u2500'.repeat(30)));
+    updateUnreadHint();
 
     try {
       const sid = sessionDir.split(/[\\/]/).pop() ?? 'tui-default';
@@ -2424,6 +2558,17 @@ export async function runTui(
       return undefined; // let editor handle Ctrl+C
     }
 
+    // Ctrl+T: toggle tools expanded/collapsed
+    if (matchesKey(data, Key.ctrl('t'))) {
+      const expanded = chatLog.toggleToolsExpanded();
+      chatLog.addSystem(
+        theme.dim('Tools ') + theme.fg(expanded ? 'expanded' : 'collapsed'),
+      );
+      updateUnreadHint();
+      tui.requestRender();
+      return { consume: true };
+    }
+
     // Ctrl+F: toggle search overlay
     if (matchesKey(data, Key.ctrl('f'))) {
       if (searchMode) {
@@ -2457,7 +2602,8 @@ export async function runTui(
 
     // End: jump to bottom
     if (matchesKey(data, Key.end)) {
-      chatLog.scrollToLine(999999);
+      chatLog.pinToBottom();
+      updateUnreadHint();
       tui.requestRender();
       return { consume: true };
     }
@@ -2501,6 +2647,29 @@ export async function runTui(
   let searchOverlayContainer: Container | null = null;
   let searchOverlayText: Text | null = null;
 
+  /** Highlight occurrences of `query` in `text` (case-insensitive) using accent color */
+  function highlightMatch(text: string, query: string, maxLen = 80): string {
+    if (!query) return theme.dim(text.slice(0, maxLen));
+    const truncated = text.slice(0, maxLen);
+    const lower = truncated.toLowerCase();
+    const q = query.toLowerCase();
+    let result = '';
+    let idx = 0;
+    while (idx < truncated.length) {
+      const found = lower.indexOf(q, idx);
+      if (found === -1) {
+        result += theme.dim(truncated.slice(idx));
+        break;
+      }
+      if (found > idx) {
+        result += theme.dim(truncated.slice(idx, found));
+      }
+      result += theme.accent(truncated.slice(found, found + q.length));
+      idx = found + q.length;
+    }
+    return result;
+  }
+
   function performSearch(query: string): void {
     searchQuery = query;
     const contentLines = chatLog.getContentLines();
@@ -2520,12 +2689,13 @@ export async function runTui(
 
     if (searchOverlayText) {
       if (searchMatches.length > 0) {
+        const preview = highlightMatch(cleanLines[searchMatches[0]]!, query);
         searchOverlayText.setText(
           theme.accent('Search: ') +
             theme.fg(query) +
             theme.dim(` [${searchMatchIndex + 1}/${searchMatches.length}]`) +
             '\n' +
-            theme.dim(searchMatches.length > 0 ? cleanLines[searchMatches[0]].slice(0, 80) : 'No matches'),
+            preview,
         );
       } else {
         searchOverlayText.setText(
@@ -2546,12 +2716,13 @@ export async function runTui(
         // eslint-disable-next-line no-control-regex
         l.replace(/\x1b\[[0-9;]*m/g, ''),
       );
+      const preview = highlightMatch(cleanLines[searchMatches[searchMatchIndex]] ?? '', searchQuery);
       searchOverlayText.setText(
         theme.accent('Search: ') +
           theme.fg(searchQuery) +
           theme.dim(` [${searchMatchIndex + 1}/${searchMatches.length}]`) +
           '\n' +
-          theme.dim(cleanLines[searchMatches[searchMatchIndex]]?.slice(0, 80) ?? ''),
+          preview,
       );
     }
     tui.requestRender();

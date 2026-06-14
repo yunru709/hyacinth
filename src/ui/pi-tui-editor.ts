@@ -88,7 +88,7 @@ export class CustomEditor extends Editor {
     }
 
     // Delegate all other input to the base Editor (multi-line editing, undo,
-    // autocomplete navigation, etc.)
+    // autocomplete navigation, Ctrl+Left/Right word jumps, etc.)
     super.handleInput(data);
   }
 }

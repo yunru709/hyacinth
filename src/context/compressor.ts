@@ -429,19 +429,35 @@ export class StructuredSummarizer {
    *
    * - 无 existingSummary → Phase 2（首次摘要），使用完整模板
    * - 有 existingSummary → Phase 3（增量更新），基于前次摘要增量更新
+   *
+   * @param messages - 待压缩的历史消息
+   * @param existingSummary - 已有的摘要（增量压缩时传入）
+   * @param recentContext - 近期对话（不压缩，仅供 LLM 判断相关性，优先保留相关信息）
    */
-  async summarize(messages: Message[], existingSummary?: string): Promise<string> {
+  async summarize(messages: Message[], existingSummary?: string, recentContext?: Message[]): Promise<string> {
     let prompt: string;
+
+    // 构建任务焦点：近期对话作为 LLM 判断相关性的"锚"
+    const taskFocus = recentContext && recentContext.length > 0
+      ? `## 近期对话（仅供参考上下文，不需压缩）\n${this.serializeMessages(recentContext)}\n\n` +
+        `---\n\n` +
+        `## 需压缩的历史对话\n` +
+        `请优先提取与近期对话相关的信息（相同的文件、延续的任务、未解决的错误等），\n` +
+        `与近期对话无关的内容（已完成的独立任务、过时的探索、重复操作）可以激进压缩。\n\n`
+      : '';
 
     if (existingSummary) {
       // Phase 3: 增量更新
       prompt =
-        `前一次摘要:\n${existingSummary}\n\n请基于新的对话内容增量更新摘要\n\n` +
+        `前一次摘要:\n${existingSummary}\n\n` +
+        taskFocus +
+        `请基于新的对话内容增量更新摘要\n\n` +
         `对话历史:\n${this.serializeMessages(messages)}\n\n` +
         STRUCTURED_SUMMARY_TEMPLATE;
     } else {
       // Phase 2: 首次摘要
       prompt =
+        taskFocus +
         `对话历史:\n${this.serializeMessages(messages)}\n\n` +
         STRUCTURED_SUMMARY_TEMPLATE;
     }
@@ -610,10 +626,13 @@ export class CompressorOrchestrator {
       }
 
       // ── Phase 2/3: LLM 结构化摘要（作用于 Layer 3）──
+      // 将 layer2(规则裁剪层) + layer1(最新保留层) 作为近期上下文传给 LLM，
+      // 让 LLM 以近期对话为"焦距"判断 layer3 中哪些信息值得优先保留
       if (layer3.length > 0) {
         try {
           const hadSummary = !!summary;
-          summary = await this.summarizer.summarize(layer3, summary);
+          const recentContext = [...layer2, ...layer1];
+          summary = await this.summarizer.summarize(layer3, summary, recentContext);
           this._currentSummary = summary;
           if (!phasesUsed.includes(2) && !phasesUsed.includes(3)) {
             phasesUsed.push(hadSummary ? 3 : 2);
