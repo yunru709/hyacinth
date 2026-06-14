@@ -199,7 +199,7 @@ const DEFAULT_CONFIG: AgentConfig = {
     },
   },
   memory: {
-    file: path.join(os.homedir(), '.agent', 'memory', 'memory.md'),
+    file: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),
   },
 };
 
