@@ -476,6 +476,9 @@ export class AgentLoop {
 
   /** 就地切换到指定 session，无需重启进程 */
   async switchSession(newSessionDir: string): Promise<void> {
+    // 1. 保存当前 session 的模式状态，加载新 session 的模式
+    this.modeManager?.switchSession(newSessionDir);
+
     this.sessionDir = newSessionDir;
     this.currentSummary = undefined;
     this.compressCount = 0;

@@ -415,6 +415,9 @@ export async function createAgent(
   modeManager.register(createSpecMode());
   modeManager.register(createTodoMode());
 
+  // 绑定 session 目录（模式状态随 session 持久化，切换时自动保存/恢复）
+  modeManager.setSessionDir(sessionDir);
+
   // Zone 5 模式注入：plan/spec/todo 激活时每轮注入模式提示词
   contextComposer.registerSource({
     name: 'mode-injection',
