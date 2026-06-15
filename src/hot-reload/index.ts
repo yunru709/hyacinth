@@ -11,3 +11,4 @@ export { watchConfigJson } from './config-watcher.js';
 export { watchTools } from './tool-watcher.js';
 export { watchSkills } from './skill-watcher.js';
 export { watchCommandsJson } from './command-watcher.js';
+export { watchModelChannels } from './channel-watcher.js';

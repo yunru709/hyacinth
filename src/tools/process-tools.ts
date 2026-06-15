@@ -100,7 +100,7 @@ export function createProcessOutputTool(registry: BackgroundProcessRegistry): To
       }
 
       // 截断过长的输出
-      const maxChars = 8000;
+      const maxChars = 200_000; // ToolResultBuffer handles context protection
       if (output.length > maxChars) {
         return `${header}\n${output.slice(0, maxChars)}\n\n[Output truncated: ${output.length - maxChars} more characters]`;
       }

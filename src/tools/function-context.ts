@@ -12,9 +12,7 @@ interface FunctionRange {
 export class FunctionContextTool implements Tool {
   readonly name = 'function_context';
   readonly description =
-    'Given a file path and a symbol name, returns the complete code of all functions/methods ' +
-    'that reference that symbol in the file. Automatically detects language rules based on file extension. ' +
-    'No need to read the entire file.';
+    'Return the full source code of functions/methods referencing a symbol. Use instead of reading the entire file.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

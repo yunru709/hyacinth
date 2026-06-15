@@ -17,7 +17,10 @@
 
 | 配置路径 | 含义 | 默认值 | 修改命令 |
 |---------|------|--------|---------|
-| `context.compressThreshold` | 触发压缩的比例（Zone总量 > maxContext × 此值） | 0.75 | `/threshold <0.0-1.0>` |
+| `context.compressThreshold` | 触发异步压缩的比例（Zone总量 > maxContext × 此值） | 0.75 | `/threshold <0.0-1.0>` |
+| `context.emergencyThreshold` | 触发紧急同步压缩的比例（防止 API 溢出） | 0.92 | `update_config path=context.emergencyThreshold value=<0.0-1.0>` |
+| `context.compressDepth` | 压缩激进程度（0=极激进, 1=保守） | 0.5 | `update_config path=context.compressDepth value=<0.0-1.0>` |
+| `context.compressionStrategy` | 压缩策略：`A`=独立提示词, `C`=克隆对话(缓存友好，默认) | `C` | `update_config path=context.compressionStrategy value=<A\|C>` |
 
 ### Provider 相关
 
@@ -51,6 +54,7 @@
 | `context-manifest.json` | Zone 架构声明（section 增删改序） | 直接编辑 |
 | `models-catalog.json` | 模型目录（上下文窗口、价格） | 直接编辑 |
 | `providers.json` | Provider 配置（API Key、默认模型） | 直接编辑 |
+| `model-channels.json` | 多通道模型路由配置（通道定义 + 角色映射） | 直接编辑 或 `/channel` 命令 |
 | `models.json` | 本地模型配置 | `/model local register` 或直接编辑 |
 | `agents.json` | 子 Agent 定义 | 直接编辑 |
 | `skills/*.md` | Skill 提示词模板 | 直接编辑 |

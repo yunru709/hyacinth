@@ -16,7 +16,7 @@ import { pushDiff } from './diff-channel.js';
 export class WriteTool implements Tool {
   readonly name = 'write';
   readonly description =
-    'Creates or overwrites a file with the given content. Automatically creates parent directories if they do not exist. Returns confirmation with file path and line count.';
+    'Create or overwrite a file. Creates parent directories automatically.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

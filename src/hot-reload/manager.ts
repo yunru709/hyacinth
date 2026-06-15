@@ -8,6 +8,7 @@ import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { LayeredContextComposer } from '../context/composer.js';
 import type { MCPSystem } from '../mcp/system.js';
 import type { ProviderConfigLoader } from '../provider/config.js';
+import type { ModelChannelRegistry } from '../provider/model-channel-registry.js';
 import type { ModelCatalog } from '../provider/catalog.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { createLogger } from '../logging/logger.js';
@@ -23,6 +24,7 @@ export interface HotReloadDeps {
   contextComposer: LayeredContextComposer;
   mcpSystem: MCPSystem;
   bundleRegistry: ToolBundleRegistry;
+  channelRegistry?: ModelChannelRegistry;
   cwd: string;
   providerConfigLoader: ProviderConfigLoader;
   modelCatalog: ModelCatalog;
@@ -227,6 +229,19 @@ export class HotReloadManager {
         });
       }).catch((err) => {
         this.logger.warn('Failed to load bundle watcher', { error: (err as Error).message });
+      });
+    }
+
+    // ── Model channel watcher ──
+    if (this.deps.configCenter.get<boolean>('hotReload.watchProviders') && this.deps.channelRegistry) {
+      import('./channel-watcher.js').then(({ watchModelChannels }) => {
+        this.registerWatcher(watchModelChannels, {
+          channelRegistry: this.deps.channelRegistry!,
+          cwd: this.deps.cwd,
+          debounceMs,
+        });
+      }).catch((err) => {
+        this.logger.warn('Failed to load channel watcher', { error: (err as Error).message });
       });
     }
 

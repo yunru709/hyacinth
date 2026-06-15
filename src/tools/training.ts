@@ -12,7 +12,7 @@ export function createToggleTrainingTool(
 ): Tool {
   return {
     name: 'toggle_training',
-    description: '开关训练调度器',
+    description: 'Enable or disable the training scheduler.',
     inputSchema: {
       type: 'object',
       properties: { enabled: { type: 'boolean' } },
@@ -36,7 +36,7 @@ export function createToggleTrainingTool(
 export function createTrainingStatusTool(trainingScheduler: TrainingScheduler): Tool {
   return {
     name: 'training_status',
-    description: '查看训练调度器状态',
+    description: 'Get training scheduler status (enabled, running, next scheduled run).',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -54,7 +54,7 @@ export function createSetTrainingScheduleTool(
 ): Tool {
   return {
     name: 'set_training_schedule',
-    description: '修改训练调度时间',
+    description: 'Set the daily training schedule time (HH:MM format).',
     inputSchema: {
       type: 'object',
       properties: { time: { type: 'string', description: 'HH:MM format' } },

@@ -220,10 +220,7 @@ async function readPdf(filePath: string, stat: Stats): Promise<string> {
 export class ReadTool implements Tool {
   readonly name = 'read';
   readonly description =
-    'Reads a file from the local filesystem. Supports offset/limit for chunked reading (streaming). ' +
-    'Detects images (returns dimensions) and PDFs (returns page count). ' +
-    'For PDF text extraction, use a dedicated PDF MCP server. ' +
-    'Maximum 2000 lines per read. Use offset+limit to read large files in chunks.';
+    'Read a file from disk. Supports offset/limit for chunked reading. Images return dimensions, PDFs return page count. Max 2000 lines per read — use offset+limit for large files.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

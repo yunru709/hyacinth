@@ -140,11 +140,6 @@ async function resolveRuntime(
     return resolveContextSourceContent('tool-bundles', ctx);
   }
 
-  // 工具包展开（Zone 5）：当前激活 bundle 的工具体
-  if (src === 'runtime:tool_bundle_expand') {
-    return resolveContextSourceContent('tool-bundle-expand', ctx);
-  }
-
   // 模式注入（Zone 5）：plan/spec 激活时注入提示词
   if (src === 'runtime:mode_injection') {
     return resolveContextSourceContent('mode-injection', ctx);

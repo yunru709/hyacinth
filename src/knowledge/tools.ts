@@ -33,7 +33,7 @@ export function createKbAddTool(
   return {
     name: 'kb_add',
     description:
-      '导入文件或文件夹到知识库。传入路径后，自动读取其中的文本文件（.txt .md .json .py .js .ts .html .css .yaml 等）并建立索引。文件会被复制到知识库目录中，即使 Agent 重启也持久保留。',
+      'Import files or directories into the knowledge base for indexing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,7 +74,7 @@ export function createKbListTool(kb: KnowledgeBase): Tool {
   return {
     name: 'kb_list',
     description:
-      '列出知识库中所有已索引的文档。返回 ID、标题、来源路径和创建时间。',
+      'List all indexed documents in the knowledge base.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -109,7 +109,7 @@ export function createKbDeleteTool(
   return {
     name: 'kb_delete',
     description:
-      '删除知识库中的指定文档。传入文档 ID（可通过 kb_list 获取）。如果文件在知识库目录中，会同时删除磁盘上的文件。',
+      'Delete a document from the knowledge base by ID.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -162,7 +162,7 @@ export function createKbUpdateTool(
   return {
     name: 'kb_update',
     description:
-      '刷新知识库索引。不传 path 时全量同步知识库文件目录（检测增/删/改）；传 path 时重新索引指定文件或目录。',
+      'Re-index the knowledge base. Pass a path to re-index specific files, omit for full sync.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -222,7 +222,7 @@ export function createKbToggleTool(
   return {
     name: 'kb_toggle',
     description:
-      '开启或关闭知识库。开启时自动同步开启 Zone 4，关闭时仅关闭知识库（Zone 4 保持开启）。',
+      'Toggle the knowledge base on/off. Turning it on also enables Zone 4.',
     inputSchema: {
       type: 'object',
       properties: {

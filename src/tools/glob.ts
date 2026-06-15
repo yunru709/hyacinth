@@ -14,7 +14,7 @@ import type { Tool } from './interface.js';
 export class GlobTool implements Tool {
   readonly name = 'glob';
   readonly description =
-    'Fast file pattern matching tool. Supports glob patterns (*, **, ?). Returns matching file paths sorted by modification time. Maximum 1000 results by default.';
+    'Find files matching a glob pattern. Returns paths sorted by modification time.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

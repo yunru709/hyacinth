@@ -23,10 +23,7 @@ export function createAddStructuredTool(store: StructuredStore, enabled: () => b
   return {
     name: 'kb_add_structured',
     description:
-      '结构化写入知识库条目。由 Agent 分析原始内容后提炼为结构化条目。' +
-      '每次可写入 1-10 条。id 应使用英文下划线命名（如 api_create_thread）。' +
-      'tags 是精确关键词（2-5 个），用户输入中包含这些词时自动匹配。' +
-      'content 不超过 200 字，核心信息即可。',
+      'Add structured knowledge entries (1-10 at a time). Use english_underscore ids, 2-5 tags, content ≤200 chars.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -95,7 +92,7 @@ export function createUpdateStructuredTool(store: StructuredStore, enabled: () =
   return {
     name: 'kb_update_structured',
     description:
-      '更新已有结构化条目。按 id 更新，只传需要修改的字段，不传的保持不变。',
+      'Update a structured entry by id. Only pass the fields you want to change.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -141,7 +138,7 @@ export function createUpdateStructuredTool(store: StructuredStore, enabled: () =
 export function createDeleteStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
   return {
     name: 'kb_delete_structured',
-    description: '删除指定条目（按 ID）。',
+    description: 'Delete a structured entry by id.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -172,7 +169,7 @@ export function createDeleteStructuredTool(store: StructuredStore, enabled: () =
 export function createListStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
   return {
     name: 'kb_list_structured',
-    description: '列出知识库中的所有结构化条目。可选按 category 筛选。',
+    description: 'List all structured knowledge entries, optionally filtered by category.',
     inputSchema: {
       type: 'object',
       properties: {

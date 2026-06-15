@@ -56,7 +56,6 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       order: 5,
       enabled: true,
       sections: [
-        { name: 'tool_bundle_expand', source: 'runtime:tool_bundle_expand', priority: 0, type: 'runtime', description: '当前激活工具包的工具清单' },
         { name: 'mode_injection',     source: 'runtime:mode_injection',     priority: 1, type: 'runtime', description: 'plan/spec 模式激活时注入的提示词' },
         { name: 'session_mcp',        source: 'runtime:mcp_live',           priority: 2, type: 'runtime', description: '会话中热插拔的 MCP 工具索引' },
         { name: 'session_tools',      source: 'runtime:tools_live',         priority: 4, type: 'runtime', description: '会话中热插拔的工具' },

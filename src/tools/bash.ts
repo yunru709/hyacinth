@@ -54,9 +54,7 @@ function getShell(): string {
 export class BashTool implements Tool {
   readonly name = 'bash';
   readonly description =
-    'Executes a command in a subprocess and returns stdout and stderr. On Windows uses PowerShell, on Linux/macOS uses /bin/sh. Supports timeout control (default 600 seconds). The working directory is the current Agent working directory. ' +
-    'Set "async": true to run the command as a background process — returns a handle immediately (e.g. "[background:bg_001]") and the process keeps running across turns. ' +
-    'Use process_list / process_output / process_kill to manage background processes.';
+    'Execute a shell command and return stdout/stderr. Set async=true for background execution (manage with process_list/process_kill/process_output).';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
@@ -237,7 +235,8 @@ export class BashTool implements Tool {
     // ── 同步执行路径（原有逻辑）──
 
     // 输出截断配置
-    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 15 * 1024; // 15KB
+    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 500 * 1024; // safety cap; ToolResultBuffer is the primary gate
+    const LIMIT_KB = Math.round(MAX_OUTPUT_BYTES / 1024);
     let outputSize = 0;
     let truncated = false;
 
@@ -267,7 +266,7 @@ export class BashTool implements Tool {
       let stdout = '';
       let stderr = '';
 
-      // 收集 stdout，检查输出大小
+      // 收集 stdout/stderr，超过上限后丢弃数据
       childProcess.stdout!.on('data', (data: Buffer | string) => {
         const chunk = Buffer.from(data);
         outputSize += chunk.length;
@@ -275,11 +274,10 @@ export class BashTool implements Tool {
           stdout += chunk.toString();
         } else if (!truncated) {
           truncated = true;
-          stdout += '\n\n[Output truncated: exceeded 1MB limit]';
+          stdout += `\n\n[Output truncated: exceeded ${LIMIT_KB}KB limit]`;
         }
       });
 
-      // 收集 stderr，检查输出大小
       childProcess.stderr!.on('data', (data: Buffer | string) => {
         const chunk = Buffer.from(data);
         outputSize += chunk.length;
@@ -287,7 +285,7 @@ export class BashTool implements Tool {
           stderr += chunk.toString();
         } else if (!truncated) {
           truncated = true;
-          stderr += '\n\n[Output truncated: exceeded 1MB limit]';
+          stderr += `\n\n[Output truncated: exceeded ${LIMIT_KB}KB limit]`;
         }
       });
 
@@ -315,7 +313,7 @@ export class BashTool implements Tool {
         if (stderr) parts.push(stderr);
 
         if (truncated) {
-          parts.push('[Output truncated: exceeded 1MB limit]');
+          parts.push(`[Output truncated: exceeded ${LIMIT_KB}KB limit]`);
         }
 
         const output = parts.join('\n');

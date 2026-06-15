@@ -40,6 +40,13 @@ import {
   createListTasksTool,
   createToggleTaskTool,
   createMcpStatusTool,
+  createListModelChannelsTool,
+  createAddModelChannelTool,
+  createRemoveModelChannelTool,
+  createSetChannelRoleTool,
+  createSetChannelModelTool,
+  createResetChannelModelTool,
+  createChannelInfoTool,
 } from '../tools/runtime-control.js';
 
 /** Tool 扩展 RegistryItem，增加可选的 source 字段 */
@@ -148,12 +155,24 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     cwd: string,
     heartbeatScheduler?: any,
     mcpSystem?: any,
+    modelRouter?: any,
   ): void {
     // ── Provider tools (4) ──────────────────────────────────────────
     this.register(createSwitchProviderTool(agentLoop));
     this.register(createListProvidersTool(providerRouter));
     this.register(createProviderInfoTool(agentLoop));
     this.register(createSwitchToAutoRouteTool(agentLoop));
+
+    // ── Model channel tools (4) ─────────────────────────────────────
+    if (modelRouter) {
+      this.register(createListModelChannelsTool(modelRouter));
+      this.register(createAddModelChannelTool(modelRouter));
+      this.register(createRemoveModelChannelTool(modelRouter));
+      this.register(createSetChannelRoleTool(modelRouter));
+      this.register(createSetChannelModelTool(modelRouter));
+      this.register(createResetChannelModelTool(modelRouter));
+      this.register(createChannelInfoTool(modelRouter));
+    }
 
     // ── Registry control tools (8) ──────────────────────────────────
     this.register(createToggleToolTool(this, configCenter));

@@ -11,7 +11,7 @@ import type { ModeManager } from '../modes/manager.js';
 export function createTaskStartTool(modeManager: ModeManager): Tool {
   return {
     name: 'task_start',
-    description: '启动 TODO 任务跟踪模式（仅当没有 Plan/Spec 激活时可用）。',
+    description: 'Start TODO task tracking mode (only available when no Plan/Spec is active).',
     inputSchema: { type: 'object' as const, properties: {} },
     async execute(): Promise<string> {
       if (modeManager.isActive()) {
@@ -30,7 +30,7 @@ export function createTaskStartTool(modeManager: ModeManager): Tool {
 export function createTaskMarkTool(modeManager: ModeManager): Tool {
   return {
     name: 'task_mark',
-    description: 'TODO 模式步骤管理（Plan/Spec 请使用 mode_mark）。',
+    description: 'Manage TODO task steps (add/done/blocked/list). Use mode_mark for Plan/Spec modes.',
     inputSchema: {
       type: 'object' as const,
       properties: {

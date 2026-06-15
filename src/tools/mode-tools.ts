@@ -126,11 +126,7 @@ export function createModeMarkTool(modeManager: ModeManager): Tool {
   return {
     name: 'mode_mark',
     description:
-      '统一模式管理工具。\n' +
-      '- init: 创建 Plan/Spec 文件。Plan 用 content 字段写完整 plan.md；Spec 用 spec/tasks/checklist 三个字段分别写三个文件。\n' +
-      '- done: 标记当前步骤完成。id 为步骤编号（1-based）。Plan/Spec Phase 2/3 使用。\n' +
-      '  Spec Phase 1 中调用 done({id:0}) 表示 spec.md 编写完毕，推进到执行阶段。\n' +
-      '- blocked: 标记步骤受阻，可选 message 字段记录原因。',
+      'Manage Plan/Spec/TODO modes. Actions: init (create plan/spec files), done (mark step complete), blocked (mark step blocked).',
     inputSchema: {
       type: 'object' as const,
       properties: {

@@ -256,6 +256,8 @@ export class AgentLoop {
   private lastContextTokens = 0;
   private needsCompression = false;
   private pendingCompression: Promise<CompressionResult | null> | null = null;
+  /** 工具触发的临时策略覆盖，仅在下一轮压缩时生效，用后即清 */
+  pendingCompressionStrategy: 'A' | 'C' | null = null;
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
 
@@ -708,6 +710,9 @@ export class AgentLoop {
     this.orchestrator?.setProvider(newProvider);
     this.providerRouter.setDefault(providerName);
 
+    // 同步主通道到 ModelRouter，确保 registry 中 main 通道持有最新 Provider
+    this.modelRouter?.setMainProvider(newProvider, providerName);
+
     // 自动裁剪上下文到新模型上限
     const modelLimit = getModelContextWindow(
       newProvider.getProviderType(),
@@ -1095,6 +1100,10 @@ export class AgentLoop {
       if (newThreshold != null) {
         this.compressor.setCompressThreshold(newThreshold);
       }
+      const newDepth = this.configCenter.get<number>('context.compressDepth');
+      if (newDepth != null) {
+        this.compressor.setCompressDepth(newDepth);
+      }
       this.contextDirty = false;
     }
 
@@ -1217,10 +1226,13 @@ export class AgentLoop {
     // 更新 current_context_tokens 到 Stats
     this.lastContextTokens = layeredResult.zoneBreakdown.total;
 
-    // ── 异步压缩触发：compose 后检测 Zone 总 token 是否超过 maxContextTokens × compressThreshold ──
+    // ── 压缩触发：compose 后检测 Zone 总 token 是否超过阈值 ──
     const compressThreshold = this.configCenter
       ? (this.configCenter.get('context.compressThreshold') as number) ?? 0.75
       : 0.75;
+    const emergencyThreshold = this.configCenter
+      ? (this.configCenter.get('context.emergencyThreshold') as number) ?? 0.92
+      : 0.92;
 
     // Step 1: 消费上一轮的后台压缩结果
     if (this.pendingCompression) {
@@ -1333,31 +1345,129 @@ export class AgentLoop {
       }
     }
 
-    // Step 2: 当前轮次超标 → 启动后台异步压缩（不阻塞 LLM 调用）
-    if (layeredResult.zoneBreakdown.total > this.maxContextTokens * compressThreshold) {
+    // Step 2: 当前轮次超标 → 异步或同步压缩
+    const currentTokens = layeredResult.zoneBreakdown.total;
+    if (currentTokens > this.maxContextTokens * compressThreshold) {
+      // LLM 摘要模式：工具临时覆盖优先 → 否则从 config 读取
+      const toolOverride = this.pendingCompressionStrategy;
+      this.pendingCompressionStrategy = null; // 用后即清
+      const strategySource = toolOverride
+        ?? (this.configCenter
+          ? (this.configCenter.get('context.compressionStrategy') as string) ?? 'C'
+          : 'C');
+      const llmMode: 'prompt' | 'clone' = strategySource === 'C' ? 'clone' : 'prompt';
+      const compressOptions = {
+        llmMode,
+        composedMessages: llmMode === 'clone' ? layeredResult.messages : undefined,
+      };
+
       const zone5TailBudget = Math.floor(this.maxContextTokens * 0.15);
       const protectCount = this.needsAggressiveCompress
         ? 0
         : computeProtectCount(uncompressedMsgs, zone5TailBudget);
 
-      this.outputHandler?.onStatus?.(
-        `Context ${layeredResult.zoneBreakdown.total.toLocaleString()} > ${Math.floor(this.maxContextTokens * compressThreshold).toLocaleString()} → compressing in background${this.needsAggressiveCompress ? ' (recent messages unprotected)' : ''} (protect: ${protectCount} msgs)`,
-        'warn',
-      );
+      // 紧急阈值：上下文接近爆满 → 同步压缩，停主对话等结果
+      if (currentTokens > this.maxContextTokens * emergencyThreshold) {
+        this.outputHandler?.onStatus?.(
+          `⚠ Emergency: ${currentTokens.toLocaleString()} tokens (${Math.round(currentTokens / this.maxContextTokens * 100)}%) — compressing synchronously to prevent overflow`,
+          'warn',
+        );
 
-      if (uncompressedMsgs && uncompressedMsgs.length > 0) {
-        this.outputHandler?.onStatus?.('compress-start', 'info');
-        this.pendingCompression = this.compressor.compress(
-          uncompressedMsgs,
-          this.currentSummary,
-          protectCount,
-          this.maxContextTokens,
-        ).catch((err) => {
-          this.logger.warn('Background compression failed', err);
-          return null;
-        }).finally(() => {
-          this.outputHandler?.onStatus?.('compress-end', 'info');
-        });
+        if (uncompressedMsgs && uncompressedMsgs.length > 0) {
+          this.outputHandler?.onStatus?.('compress-start', 'info');
+          try {
+            const emergencyResult = await this.compressor.compress(
+              uncompressedMsgs,
+              this.currentSummary,
+              0, // 不保护最近消息
+              this.maxContextTokens,
+              compressOptions,
+            );
+
+            if (emergencyResult) {
+              const compressedHistory = emergencyResult.messages;
+              historySummary = emergencyResult.summary || this.currentSummary;
+              await this.conversationStore.replace(this.sessionDir, compressedHistory);
+              uncompressedMsgs = compressedHistory;
+
+              if (emergencyResult.summary) {
+                this.currentSummary = emergencyResult.summary;
+                if (emergencyResult.summary !== this.lastSavedSummary) {
+                  await this.summaryStore.save(this.sessionDir, emergencyResult.summary);
+                  this.lastSavedSummary = emergencyResult.summary;
+                }
+              }
+
+              if (emergencyResult.phasesUsed.length > 0) {
+                this.compressCount++;
+                await this.statsManager.increment(this.sessionDir, 'compact_count', 1);
+              }
+
+              // 重新 compose
+              const emergencyHistory = hasPendingToolCalls
+                ? compressedHistory
+                : lastUserTextMsg
+                  ? compressedHistory.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
+                  : compressedHistory;
+
+              const reLayeredResult = await this.contextComposer.compose({
+                sessionDir: this.sessionDir,
+                providerType: activeProvider.getProviderType(),
+                maxContextTokens: this.maxContextTokens,
+                cwd: process.cwd(),
+                timestamp: formatTimestamp(),
+                tools: toolDefinitions,
+                history: emergencyHistory,
+                userInput: userInputText,
+                historySummary,
+                currentPlan: this.activePlan ? formatPlanAsText(this.activePlan) : undefined,
+                zone3Hashes: undefined,
+                impactInfo: this.pendingImpactInfo ?? undefined,
+                fullHistory: history,
+                personaDir: this.personaDir,
+                bootstrapStatus: this.bootstrapStatus,
+                gitManager: this.gitManager,
+              });
+
+              layeredResult.messages.length = 0;
+              layeredResult.messages.push(...reLayeredResult.messages);
+              layeredResult.zoneBreakdown = reLayeredResult.zoneBreakdown;
+
+              const preTokens = this.lastContextTokens;
+              this.lastContextTokens = reLayeredResult.zoneBreakdown.total;
+              this.outputHandler?.onStatus?.(
+                `compress-result:${preTokens}:${this.lastContextTokens}`,
+                'info',
+              );
+            }
+          } catch (err) {
+            this.logger.warn('Emergency compression failed', { error: (err as Error)?.message ?? String(err) });
+          } finally {
+            this.outputHandler?.onStatus?.('compress-end', 'info');
+          }
+        }
+      } else {
+        // 正常阈值：异步后台压缩（不阻塞 LLM 调用）
+        this.outputHandler?.onStatus?.(
+          `Context ${currentTokens.toLocaleString()} > ${Math.floor(this.maxContextTokens * compressThreshold).toLocaleString()} → compressing in background${this.needsAggressiveCompress ? ' (recent messages unprotected)' : ''} (protect: ${protectCount} msgs)`,
+          'warn',
+        );
+
+        if (uncompressedMsgs && uncompressedMsgs.length > 0) {
+          this.outputHandler?.onStatus?.('compress-start', 'info');
+          this.pendingCompression = this.compressor.compress(
+            uncompressedMsgs,
+            this.currentSummary,
+            protectCount,
+            this.maxContextTokens,
+            compressOptions,
+          ).catch((err) => {
+            this.logger.warn('Background compression failed', err);
+            return null;
+          }).finally(() => {
+            this.outputHandler?.onStatus?.('compress-end', 'info');
+          });
+        }
       }
     }
 
@@ -1791,9 +1901,14 @@ export class AgentLoop {
     }
 
     // 将工具结果追加到 conversation（过大的结果先缓冲到磁盘）
+    // 但读缓冲文件本身的结果不再二次缓冲（避免递归缓冲）
+    const bufferDir = this.resultBuffer.getBufferDir();
     for (const result of results) {
       const sanitized = sanitizeToolResult(result.content);
-      const content = this.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
+      const call = executableCalls.find(c => c.id === result.tool_use_id);
+      const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
+        call.input.file_path.startsWith(bufferDir);
+      const content = skipBuffer ? sanitized : this.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
       const toolResultMessage: Message = {
         role: 'user',
         content: {
@@ -1898,7 +2013,12 @@ export class AgentLoop {
     // Execute tool directly
     try {
       const rawResult = await tool.execute(input, this.abortController?.signal ?? undefined);
-      const result = this.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
+      // 读缓冲文件本身的结果不再二次缓冲（避免递归缓冲）
+      const isBufferedRead = name === 'read' && typeof (input as Record<string, unknown>).file_path === 'string' &&
+        ((input as Record<string, unknown>).file_path as string).startsWith(this.resultBuffer.getBufferDir());
+      const result = isBufferedRead
+        ? sanitizeToolResult(rawResult)
+        : this.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
       this.outputHandler?.onToolResult?.(result, false, id);
       // 消费 diff 通道（edit/write 按 filePath 写入）
       if (name === 'edit' || name === 'write' || name === 'multi_edit') {

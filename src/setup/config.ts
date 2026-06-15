@@ -33,6 +33,12 @@ export interface SafetyConfig {
 export interface ContextConfig {
   /** 压缩触发阈值 (0~1) */
   compressThreshold: number;
+  /** 紧急同步压缩阈值 (0~1) */
+  emergencyThreshold: number;
+  /** 压缩激进程度 (0~1) */
+  compressDepth: number;
+  /** 压缩策略: 'A'=独立提示词, 'C'=克隆对话(缓存友好) */
+  compressionStrategy: 'A' | 'C';
 }
 
 /** 调度器配置 */
@@ -166,6 +172,9 @@ const DEFAULT_CONFIG: AgentConfig = {
   },
   context: {
     compressThreshold: 0.75,
+    emergencyThreshold: 0.92,
+    compressDepth: 0.5,
+    compressionStrategy: 'C',
   },
   schedule: {
     heartbeatMs: 5000,

@@ -419,9 +419,27 @@ export const STRUCTURED_SUMMARY_TEMPLATE = loadPrompt('summary');
  */
 export class StructuredSummarizer {
   private modelRouter: ModelRouter;
+  private compressDepth: number;
 
-  constructor(modelRouter: ModelRouter) {
+  constructor(modelRouter: ModelRouter, options?: { compressDepth?: number }) {
     this.modelRouter = modelRouter;
+    this.compressDepth = options?.compressDepth ?? 0.5;
+  }
+
+  /** 运行时更新压缩深度 */
+  setCompressDepth(depth: number): void {
+    this.compressDepth = Math.max(0, Math.min(1, depth));
+  }
+
+  /** 根据 compressDepth 生成压缩策略提示词 */
+  private getDepthInstruction(): string {
+    if (this.compressDepth <= 0.3) {
+      return '激进压缩。仅保留任务完成状态和关键决策，丢弃所有实现细节、工具输出和过程描述。';
+    }
+    if (this.compressDepth <= 0.7) {
+      return '平衡压缩。优先保留相关信息和关键步骤，无关内容可适度压缩。';
+    }
+    return '保守压缩。尽可能保留完整上下文，保留决策过程和重要细节，只去除明显冗余和重复。';
   }
 
   /**
@@ -437,13 +455,15 @@ export class StructuredSummarizer {
   async summarize(messages: Message[], existingSummary?: string, recentContext?: Message[]): Promise<string> {
     let prompt: string;
 
+    const depthInstruction = this.getDepthInstruction();
+
     // 近期对话作为 LLM 判断相关性的"锚"
     const taskFocus = recentContext && recentContext.length > 0
       ? `## 近期对话（仅供参考，不需压缩）\n${this.serializeMessages(recentContext)}\n\n` +
         `---\n\n` +
         `## 需压缩的历史对话\n` +
-        `优先保留与近期对话延续的信息。已完成的任务记入"✅ 已完成"，实现细节可压缩，但完成状态不能丢。\n` +
-        `与近期无关的内容可激进压缩。\n\n`
+        `${depthInstruction}\n` +
+        `已完成的任务记入"✅ 已完成"，实现细节可压缩，但完成状态不能丢。\n\n`
       : '';
 
     if (existingSummary) {
@@ -472,6 +492,85 @@ export class StructuredSummarizer {
     let summaryText = '';
     const provider = this.modelRouter.getProvider('compression');
     const stream = provider.createStream(summaryMessages);
+    for await (const event of stream) {
+      if (event.type === 'TEXT') {
+        summaryText += event.content;
+      }
+    }
+
+    return summaryText;
+  }
+
+  /**
+   * 策略 C：克隆对话式压缩。
+   * 克隆完整的 composed messages，将最后一条 user 消息替换为压缩指令，
+   * 通过压缩 Provider 发送，返回模型生成的摘要文本。
+   *
+   * 缓存优势：system prompt 和历史消息完全复用 → 仅压缩指令未命中缓存。
+   * 与策略 A 不同，模型看到完整上下文（persona、工具定义、历史标记），
+   * 能更智能地判断哪些信息需要保留。
+   *
+   * @param fullMessages - 完整的 composed messages（system + history + tools + user input）
+   */
+  async summarizeViaClone(fullMessages: Message[]): Promise<string> {
+    // 1. 深拷贝消息数组（保留 content block 结构）
+    const cloned = fullMessages.map(m => ({
+      ...m,
+      content: Array.isArray(m.content)
+        ? m.content.map(c => ({ ...c } as MessageContent))
+        : { ...(m.content as object) } as MessageContent,
+    }));
+
+    // 2. 清除 cache_control 标记（避免跨 Provider 兼容问题）
+    for (const msg of cloned) {
+      if (msg.role === 'assistant') continue;
+      const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
+      for (const block of blocks) {
+        const b = block as unknown as Record<string, unknown>;
+        if ('cache_control' in b) {
+          delete b.cache_control;
+        }
+      }
+    }
+
+    // 3. 找到最后一条 user 消息（逆向搜索，跳过纯 tool_result 的 user 消息）
+    let lastUserIdx = -1;
+    for (let i = cloned.length - 1; i >= 0; i--) {
+      if (cloned[i].role !== 'user') continue;
+      const rawContent = cloned[i].content as unknown;
+      const blocks: MessageContent[] = Array.isArray(rawContent) ? rawContent as MessageContent[] : [rawContent as MessageContent];
+      // 跳过纯 tool_result 消息
+      if (blocks.every(b => b.type === 'tool_result')) continue;
+      lastUserIdx = i;
+      break;
+    }
+
+    if (lastUserIdx === -1) {
+      throw new Error('summarizeViaClone: no user message found in composed messages');
+    }
+
+    // 4. 替换为压缩指令
+    const depthInstruction = this.getDepthInstruction();
+    cloned[lastUserIdx] = {
+      role: 'user',
+      content: [{
+        type: 'text',
+        text:
+          `[系统指令] 请忽略上述用户请求，你的新任务是压缩对话历史。\n\n` +
+          `请压缩上述对话中所有标记为 [历史] 的对话内容，生成结构化摘要。\n\n` +
+          `压缩要求：\n` +
+          `- ${depthInstruction}\n` +
+          `- 已完成的任务记入"✅ 已完成"，实现细节可压缩但完成状态不能丢\n` +
+          `- 保留关键决策、修改的文件路径、重要错误及修复方案\n` +
+          `- 近期对话（未标记 [历史] 的部分）不要压缩，保持原样\n\n` +
+          STRUCTURED_SUMMARY_TEMPLATE,
+      } as TextContent],
+    };
+
+    // 5. 通过压缩 Provider 发送
+    let summaryText = '';
+    const provider = this.modelRouter.getProvider('compression');
+    const stream = provider.createStream(cloned);
     for await (const event of stream) {
       if (event.type === 'TEXT') {
         summaryText += event.content;
@@ -537,6 +636,8 @@ export class CompressorOrchestrator {
   private compressThreshold: number;
   /** 最大迭代轮数 */
   private maxRounds: number;
+  /** 压缩激进程度 0.0~1.0 */
+  private compressDepth: number;
   /** 压缩预算基准：当调用方传入 historyBudget 时使用该值，否则回退到 maxContextTokens */
   #historyBudget: number | null = null;
   /** 当前压缩摘要内容 */
@@ -552,6 +653,7 @@ export class CompressorOrchestrator {
       targetRatio?: number;
       compressThreshold?: number;
       maxRounds?: number;
+      compressDepth?: number;
     },
   ) {
     this.tokenizer = tokenizer;
@@ -562,6 +664,7 @@ export class CompressorOrchestrator {
     this.targetRatio = options?.targetRatio ?? 0.15;
     this.compressThreshold = options?.compressThreshold ?? 0.75;
     this.maxRounds = options?.maxRounds ?? 3;
+    this.compressDepth = options?.compressDepth ?? 0.5;
   }
 
   /**
@@ -580,7 +683,14 @@ export class CompressorOrchestrator {
     currentSummary: string | undefined,
     protectLast: number = 0,
     historyBudget: number,
-    gitManager?: GitManager,
+    options?: {
+      /** LLM 摘要模式: 'prompt'=独立提示词(策略A), 'clone'=克隆对话(策略C) */
+      llmMode?: 'prompt' | 'clone';
+      /** 策略 C(clone) 需要的完整 composed 上下文 */
+      composedMessages?: Message[];
+      /** Git 管理器（热文件检测用） */
+      gitManager?: GitManager;
+    },
   ): Promise<CompressionResult> {
     this.#historyBudget = historyBudget;
 
@@ -626,13 +736,18 @@ export class CompressorOrchestrator {
       }
 
       // ── Phase 2/3: LLM 结构化摘要（作用于 Layer 3）──
-      // 将 layer2(规则裁剪层) + layer1(最新保留层) 作为近期上下文传给 LLM，
-      // 让 LLM 以近期对话为"焦距"判断 layer3 中哪些信息值得优先保留
+      // prompt 模式：将 layer2(规则裁剪层) + layer1(最新保留层) 作为近期上下文传给 LLM
+      // clone  模式：克隆完整 composed 上下文，修改最后 user 消息为压缩指令
       if (layer3.length > 0) {
         try {
           const hadSummary = !!summary;
-          const recentContext = [...layer2, ...layer1];
-          summary = await this.summarizer.summarize(layer3, summary, recentContext);
+          const llmMode = options?.llmMode ?? 'prompt';
+          if (llmMode === 'clone' && options?.composedMessages) {
+            summary = await this.summarizer.summarizeViaClone(options.composedMessages);
+          } else {
+            const recentContext = [...layer2, ...layer1];
+            summary = await this.summarizer.summarize(layer3, summary, recentContext);
+          }
           this._currentSummary = summary;
           if (!phasesUsed.includes(2) && !phasesUsed.includes(3)) {
             phasesUsed.push(hadSummary ? 3 : 2);
@@ -705,6 +820,22 @@ export class CompressorOrchestrator {
    */
   setCompressThreshold(threshold: number): void {
     this.compressThreshold = threshold;
+  }
+
+  /**
+   * Update the compression depth at runtime.
+   * Delegates to StructuredSummarizer for prompt modulation.
+   */
+  setCompressDepth(depth: number): void {
+    this.compressDepth = depth;
+    this.summarizer.setCompressDepth(depth);
+  }
+
+  /**
+   * Get current compressDepth.
+   */
+  getCompressDepth(): number {
+    return this.compressDepth;
   }
 
   /** 获取当前压缩摘要 */

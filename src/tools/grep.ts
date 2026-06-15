@@ -3,17 +3,14 @@ import path from 'node:path';
 import type { Tool } from './interface.js';
 
 const MAX_FILE_SIZE = 1024 * 1024;
-const DEFAULT_HEAD_LIMIT = 100;
+const DEFAULT_HEAD_LIMIT = 2000; // ToolResultBuffer handles context protection
 
 export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 
 export class GrepTool implements Tool {
   readonly name = 'grep';
   readonly description =
-    'A powerful search tool built on ripgrep. Search specific text (in the pattern parameter) under a specific directory. ' +
-    'Supports full regex syntax, file type filtering, context lines, and multiple output modes. ' +
-    'Usage: Use Grep for exact symbol/string searches. Whenever possible, use this instead of terminal grep/rg. ' +
-    'This tool is faster and respects .gitignore.';
+    'Search file contents with regex patterns (ripgrep). Supports file type filtering, context lines, and multiline mode.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

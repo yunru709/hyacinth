@@ -4,7 +4,7 @@ import type { ModeManager } from '../modes/manager.js';
 export function createBootstrapMarkTool(modeManager: ModeManager): Tool {
   return {
     name: 'bootstrap_mark',
-    description: '标记首次身份引导进度。仅 bootstrap 模式有效。action: progress(记录进度)/complete(请求完成并停止引导)。',
+    description: 'Mark bootstrap progress. Use "progress" to record info, "complete" to finish and exit bootstrap mode.',
     inputSchema: {
       type: 'object',
       properties: {

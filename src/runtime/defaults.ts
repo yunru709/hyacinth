@@ -48,6 +48,9 @@ export function getDefaultConfig(): FullConfig {
     },
     context: {
       compressThreshold: 0.75,
+      emergencyThreshold: 0.92,
+      compressDepth: 0.5,
+      compressionStrategy: 'C' as const,
     },
     training: {
       enabled: false,

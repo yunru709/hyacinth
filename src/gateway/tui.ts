@@ -1403,41 +1403,56 @@ export async function runTui(
         case 'model/settings/source':
         case 'model/source': {
           if (!restArgs) {
-            chatLog.addSystem(theme.warning('Usage: /model source <role> <main|local>'));
+            chatLog.addSystem(theme.warning('Usage: /model source <role> <main|local|channel-name>'));
             tui.requestRender();
             return;
           }
           const parts2 = restArgs.split(/\s+/).filter(Boolean);
           if (parts2.length < 2) {
-            chatLog.addSystem(theme.warning('Usage: /model source <assessment|planning|compression|all> <main|local>'));
+            chatLog.addSystem(theme.warning('Usage: /model source <assessment|planning|compression|sub-agent|all> <main|local|channel-name>'));
             tui.requestRender();
             return;
           }
           const roleArg = parts2[0].toLowerCase();
-          const sourceArg = parts2[1].toLowerCase();
-          const validRoles = ['assessment', 'planning', 'compression', 'all'];
-          const validSources = ['main', 'local'];
+          const sourceArg = parts2[1];
+          const validRoles = ['assessment', 'planning', 'compression', 'sub-agent', 'all'];
           if (!validRoles.includes(roleArg)) {
-            chatLog.addSystem(theme.warning('Role must be: assessment, planning, compression, or all'));
+            chatLog.addSystem(theme.warning('Role must be: assessment, planning, compression, sub-agent, or all'));
             tui.requestRender();
             return;
           }
-          if (!validSources.includes(sourceArg)) {
-            chatLog.addSystem(theme.warning('Source must be "main" or "local"'));
-            tui.requestRender();
-            return;
-          }
+          // 尝试用 ModelChannelRegistry 的 setRoleMapping（多通道模式）
+          const modelRouter = (loop as any).modelRouter;
+          const registry = modelRouter?.getRegistry();
+          const channelNames = registry ? registry.listChannelNames() : [];
+          const isChannelName = channelNames.includes(sourceArg);
+
           try {
-            if (roleArg === 'all') {
-              for (const r of ['assessment', 'planning', 'compression'] as const) {
-                loop.setModelSource(r, sourceArg as 'main' | 'local');
+            if (isChannelName && registry) {
+              // 映射到已注册的通道
+              const roles = roleArg === 'all'
+                ? ['assessment', 'planning', 'compression', 'sub-agent']
+                : [roleArg];
+              for (const r of roles) {
+                registry.setRoleMapping(r, sourceArg);
               }
-              chatLog.addSystem(theme.success('All roles source set to ') + theme.fg(String(sourceArg)));
+              chatLog.addSystem(theme.success(`Mapped ${roles.join(', ')} → channel "${sourceArg}"`));
+            } else if (sourceArg === 'main' || sourceArg === 'local') {
+              // 旧的双通道模式
+              if (roleArg === 'all') {
+                for (const r of ['assessment', 'planning', 'compression'] as const) {
+                  loop.setModelSource(r, sourceArg as 'main' | 'local');
+                }
+                if (registry) {
+                  registry.setRoleMapping('sub-agent', 'main');
+                }
+                chatLog.addSystem(theme.success('All roles source set to ') + theme.fg(sourceArg));
+              } else {
+                loop.setModelSource(roleArg as 'assessment' | 'planning' | 'compression', sourceArg as 'main' | 'local');
+                chatLog.addSystem(theme.success(`Role ${roleArg} source set to `) + theme.fg(sourceArg));
+              }
             } else {
-              loop.setModelSource(roleArg as 'assessment' | 'planning' | 'compression', sourceArg as 'main' | 'local');
-              chatLog.addSystem(
-                theme.success(`Role ${roleArg} source set to `) + theme.fg(String(sourceArg)),
-              );
+              chatLog.addSystem(theme.warning(`Channel "${sourceArg}" not found. Available channels: ${channelNames.join(', ') || '(none)'}. Use /channel add to create one, or use "main" or "local".`));
             }
           } catch (e) {
             chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
@@ -1533,6 +1548,24 @@ export async function runTui(
           if (routing) {
             lines.push('  Route:    ' + theme.fg(routing.mode) + (routing.isLocal ? theme.success(' (local)') : theme.accent(' (online)')));
           }
+          // 通道信息
+          const modelRouter = (loop as any).modelRouter;
+          if (modelRouter) {
+            const registry = modelRouter.getRegistry();
+            const channels = registry.listChannels();
+            const roles = registry.listRoles();
+            if (channels.length > 1 || Object.keys(roles).some(r => roles[r] !== 'main')) {
+              lines.push(theme.dim('  ── Channels ──'));
+              for (const ch of channels) {
+                const chRoles = Object.entries(roles)
+                  .filter(([, cn]) => cn === ch.name)
+                  .map(([r]) => r);
+                const roleStr = chRoles.length > 0 ? ' ← ' + chRoles.join(', ') : '';
+                lines.push(theme.dim(`    ${ch.name}: ${ch.provider}${ch.model ? '/' + ch.model : ''}`) + theme.fg(roleStr));
+              }
+            }
+          }
+          // 旧 source 信息
           const sources = loop.getModelSources();
           if (sources) {
             const labels: Record<string, string> = { assessment: '评估', planning: '规划', compression: '压缩' };
@@ -1822,6 +1855,223 @@ export async function runTui(
             tui.requestRender();
             return;
           }
+          
+          // ── 压缩器控制: compress/* ──
+          if (cmdPath === 'compress/strategy' || cmdPath.startsWith('compress/strategy ')) {
+            const val = (restArgs || '').trim().toUpperCase();
+            if (val !== 'A' && val !== 'C') {
+              chatLog.addSystem(theme.warning('Usage: /compress strategy <A|C>'));
+              tui.requestRender();
+              return;
+            }
+            cfg.set('context.compressionStrategy', val);
+            cfg.save().catch(() => {});
+            const desc = val === 'C' ? '克隆对话（缓存友好，默认）' : '独立提示词';
+            chatLog.addSystem(theme.success('Compression strategy: ') + theme.fg(desc));
+            tui.requestRender();
+            return;
+          }
+
+          if (cmdPath === 'compress/threshold' || cmdPath.startsWith('compress/threshold ')) {
+            const val = parseFloat((restArgs || '').trim());
+            if (isNaN(val) || val < 0 || val > 1) {
+              chatLog.addSystem(theme.warning('Usage: /compress threshold <0.0-1.0>'));
+              tui.requestRender();
+              return;
+            }
+            cfg.set('context.compressThreshold', val);
+            cfg.save().catch(() => {});
+            chatLog.addSystem(theme.success('Compress threshold: ') + theme.fg(String(val)));
+            tui.requestRender();
+            updateTokenEstimate();
+            return;
+          }
+
+          if (cmdPath === 'compress/emergency' || cmdPath.startsWith('compress/emergency ')) {
+            const val = parseFloat((restArgs || '').trim());
+            if (isNaN(val) || val < 0 || val > 1) {
+              chatLog.addSystem(theme.warning('Usage: /compress emergency <0.0-1.0>'));
+              tui.requestRender();
+              return;
+            }
+            cfg.set('context.emergencyThreshold', val);
+            cfg.save().catch(() => {});
+            chatLog.addSystem(theme.success('Emergency threshold: ') + theme.fg(String(val)));
+            tui.requestRender();
+            updateTokenEstimate();
+            return;
+          }
+
+          if (cmdPath === 'compress/depth' || cmdPath.startsWith('compress/depth ')) {
+            const val = parseFloat((restArgs || '').trim());
+            if (isNaN(val) || val < 0 || val > 1) {
+              chatLog.addSystem(theme.warning('Usage: /compress depth <0.0-1.0>'));
+              tui.requestRender();
+              return;
+            }
+            cfg.set('context.compressDepth', val);
+            cfg.save().catch(() => {});
+            chatLog.addSystem(theme.success('Compress depth: ') + theme.fg(String(val)));
+            tui.requestRender();
+            updateTokenEstimate();
+            return;
+          }
+
+// ── 通道管理: channel/* ──
+          if (cmdPath.startsWith('channel/')) {
+            const modelRouter = (loop as any).modelRouter;
+            if (!modelRouter) {
+              chatLog.addSystem(theme.warning('ModelRouter not available'));
+              tui.requestRender();
+              return;
+            }
+            const registry = modelRouter.getRegistry();
+
+            if (cmdPath === 'channel/list') {
+              const channels = registry.listChannels();
+              const roles = registry.listRoles();
+              if (channels.length === 0) {
+                chatLog.addSystem(theme.dim('No model channels configured. All roles use main provider.'));
+              } else {
+                const lines: string[] = [theme.accent('=== Model Channels ===')];
+                for (const ch of channels) {
+                  const chRoles = Object.entries(roles)
+                    .filter(([, cn]) => cn === ch.name)
+                    .map(([r]) => r);
+                  const roleStr = chRoles.length > 0 ? theme.dim(' → ') + theme.fg(chRoles.join(', ')) : '';
+                  lines.push(theme.fg(`  ${ch.name}`) + theme.dim(`: ${ch.provider}/${ch.model || 'default'}`) + roleStr);
+                }
+                lines.push('');
+                lines.push(theme.accent('=== Role Mappings ==='));
+                for (const [role, channel] of Object.entries(roles)) {
+                  lines.push(theme.dim(`  ${role}`) + ' → ' + theme.fg(String(channel)));
+                }
+                chatLog.addSystem(lines.join('\n'));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (cmdPath === 'channel/add') {
+              if (!restArgs) {
+                chatLog.addSystem(theme.warning('Usage: /channel add <name> <provider> [model]'));
+                tui.requestRender();
+                return;
+              }
+              const parts = restArgs.split(/\s+/).filter(Boolean);
+              if (parts.length < 2) {
+                chatLog.addSystem(theme.warning('Usage: /channel add <name> <provider> [model]'));
+                tui.requestRender();
+                return;
+              }
+              const [name, provider, model] = parts;
+              try {
+                registry.upsertChannel(name, { provider, model });
+                chatLog.addSystem(theme.success(`Channel "${name}" added (${provider}${model ? '/' + model : ''})`));
+              } catch (e) {
+                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (cmdPath === 'channel/remove') {
+              if (!restArgs) {
+                chatLog.addSystem(theme.warning('Usage: /channel remove <name>'));
+                tui.requestRender();
+                return;
+              }
+              const name = restArgs.trim();
+              try {
+                registry.removeChannel(name);
+                chatLog.addSystem(theme.success(`Channel "${name}" removed`));
+              } catch (e) {
+                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (cmdPath === 'channel/role') {
+              if (!restArgs) {
+                chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
+                tui.requestRender();
+                return;
+              }
+              const parts = restArgs.split(/\s+/).filter(Boolean);
+              if (parts.length < 2) {
+                chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
+                tui.requestRender();
+                return;
+              }
+              const [role, channel] = parts;
+              try {
+                registry.setRoleMapping(role, channel);
+                chatLog.addSystem(theme.success(`Role "${role}" → channel "${channel}"`));
+              } catch (e) {
+                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            // ── 通道子命令: channel/<name>/info | /model | /reset ──
+            const chMatch = cmdPath.match(/^channel\/([^/]+)\/(info|model|reset)$/);
+            if (chMatch) {
+              const chName = chMatch[1];
+              const action = chMatch[2];
+
+              if (action === 'info') {
+                const info = registry.getChannelInfo(chName);
+                if (!info) {
+                  chatLog.addSystem(theme.warning(`Channel "${chName}" not found`));
+                } else {
+                  const lines: string[] = [theme.accent(`=== Channel: ${info.name}${info.isMain ? ' (main)' : ''} ===`)];
+                  lines.push(theme.fg('  Provider: ') + info.provider);
+                  lines.push(theme.fg('  Model:    ') + info.model);
+                  lines.push(theme.fg('  Type:     ') + info.providerType);
+                  if (info.description) lines.push(theme.dim('  Desc:     ') + info.description);
+                  if (info.roles.length > 0) lines.push(theme.fg('  Roles:    ') + info.roles.join(', '));
+                  chatLog.addSystem(lines.join('\n'));
+                }
+                tui.requestRender();
+                return;
+              }
+
+              if (action === 'model') {
+                const parts = (restArgs || '').split(/\s+/).filter(Boolean);
+                if (parts.length < 1) {
+                  chatLog.addSystem(theme.warning(`Usage: /channel/${chName}/model <provider> [model-name]`));
+                  tui.requestRender();
+                  return;
+                }
+                const provider = parts[0];
+                const model = parts[1] || undefined;
+                try {
+                  registry.setChannelModel(chName, provider, model);
+                  const updated = registry.getChannelInfo(chName);
+                  chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${updated?.provider}/${updated?.model} (runtime only, not persisted)`));
+                } catch (e) {
+                  chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+                }
+                tui.requestRender();
+                return;
+              }
+
+              if (action === 'reset') {
+                try {
+                  registry.resetChannelModel(chName);
+                  const info = registry.getChannelInfo(chName);
+                  chatLog.addSystem(theme.success(`Channel "${chName}" reset → ${info?.provider}/${info?.model}`));
+                } catch (e) {
+                  chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+                }
+                tui.requestRender();
+                return;
+              }
+            }
+          }
+
           // 通用 handler 路由：查找命令定义的 handler 字段
           const cmdDef = CommandRegistry.getInstance().find(cmdPath);
           if (cmdDef?.handler) {
@@ -2094,7 +2344,11 @@ export async function runTui(
     }
 
     // ── /threshold <0.0-1.0> ──
-    if (input.startsWith('/threshold ')) {
+    
+    // ── /compress sub-commands (handled via handleSlashSubCommand) ──
+
+    // ── /threshold <0.0-1.0> (deprecated: use /compress threshold) ──
+if (input.startsWith('/threshold ')) {
       const val = parseFloat(input.slice(11).trim());
       if (isNaN(val) || val < 0 || val > 1) {
         chatLog.addSystem(theme.warning('Usage: /threshold <0.0-1.0>'));

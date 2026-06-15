@@ -16,7 +16,6 @@ import { StatsManager } from '../memory/stats.js';
 import { SummaryStore } from '../memory/summary.js';
 import { LLMOrchestrator } from '../orchestrator/planner.js';
 import { PlanStore } from '../orchestrator/plan-store.js';
-import type { Provider } from '../provider/interface.js';
 import { ModelRouter } from '../provider/model-router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { DependencyAnalyzer } from '../dependency/analyzer.js';
@@ -30,7 +29,7 @@ export interface ProgressEvent {
 
 /** 上下文传递给子 Agent 的参数 */
 export interface SubAgentContext {
-  provider: Provider;
+  modelRouter: ModelRouter;
   toolRegistry: ToolRegistry;
   sessionDir: string;
   maxContextTokens: number;
@@ -173,15 +172,18 @@ export async function createSubAgentLoop(
   // 5. 创建 ToolExecutor
   const toolExecutor = new ToolExecutor(filteredRegistry);
 
-  // 6. 创建 Compressor（复用主 Agent 的 Provider）
+  // 6. 获取子 Agent 的 Provider（通过 ModelRouter，可配置独立通道）
+  const subProvider = parentContext.modelRouter.getProvider('sub-agent');
+
+  // 7. 创建 Compressor（复用主 Agent 的 ModelRouter 做压缩路由）
   const tokenCounter = new TokenCounter();
-  const subModelRouter = new ModelRouter(parentContext.provider);
+  const subModelRouter = new ModelRouter(subProvider);
   const summarizer = new StructuredSummarizer(subModelRouter);
   const compressor = new CompressorOrchestrator(tokenCounter, summarizer, parentContext.maxContextTokens);
 
-  // 7. 创建 LLMOrchestrator
+  // 8. 创建 LLMOrchestrator
   const planStore = new PlanStore();
-  const orchestrator = new LLMOrchestrator(parentContext.provider, planStore, subSessionDir, subModelRouter);
+  const orchestrator = new LLMOrchestrator(subProvider, planStore, subSessionDir, subModelRouter);
 
   // 8. 创建 OutputHandler（有 onProgress 则报告进度，否则静默）
   const emit = parentContext.onProgress;
@@ -203,7 +205,7 @@ export async function createSubAgentLoop(
 
   // 9. 创建 AgentLoop
   const loop = new AgentLoop(
-    parentContext.provider,
+    subProvider,
     subComposer,
     compressor,
     orchestrator,

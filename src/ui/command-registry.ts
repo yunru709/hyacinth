@@ -378,12 +378,54 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
+    name: 'compress',
+    description: '压缩器控制（策略/阈值/深度）',
+    icon: '🗜',
+    category: 'config',
+    children: [
+      {
+        name: 'compress strategy',
+        description: '切换压缩策略：A=独立提示词，C=克隆对话(默认)',
+        icon: '🔀',
+        category: 'config',
+        args: '<A|C>',
+        argOptions: ['A', 'C'],
+        executeLocal: true,
+      },
+      {
+        name: 'compress threshold',
+        description: '异步压缩触发阈值（0.0-1.0，默认 0.75）',
+        icon: '📊',
+        category: 'config',
+        args: '<0.0-1.0>',
+        executeLocal: true,
+      },
+      {
+        name: 'compress emergency',
+        description: '紧急同步压缩阈值（0.0-1.0，默认 0.92）',
+        icon: '🚨',
+        category: 'config',
+        args: '<0.0-1.0>',
+        executeLocal: true,
+      },
+      {
+        name: 'compress depth',
+        description: '压缩激进程度（0=极激进, 0.5=平衡, 1=保守）',
+        icon: '🎚',
+        category: 'config',
+        args: '<0.0-1.0>',
+        executeLocal: true,
+      },
+    ],
+  },
+  {
     name: 'threshold',
-    description: '设置压缩触发阈值（0.0-1.0）',
-    icon: '\u2300',
+    description: '设置压缩触发阈值（0.0-1.0）[deprecated: 用 /compress threshold]',
+    icon: '⌀',
     category: 'config',
     args: '<0.0-1.0>',
     executeLocal: true,
+    deprecated: true,
   },
   {
     name: 'confirm',
@@ -500,6 +542,101 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     icon: '\u{1F3AF}',
     category: 'mode',
     executeLocal: true,
+  },
+  {
+    name: 'channel',
+    description: '模型通道管理（多通道模型路由）',
+    icon: '🔀',
+    category: 'model',
+    executeLocal: true,
+    // 全部子命令由 childrenProvider 动态生成（参考 /session 模式）
+    childrenProvider: async () => {
+      try {
+        const { ModelChannelRegistry } = await import('../provider/model-channel-registry.js');
+        const registry = new ModelChannelRegistry(process.cwd());
+        registry.load();
+        const channels = registry.listChannels();
+
+        const children: SlashCommandDef[] = [
+          {
+            name: 'add',
+            description: '新增模型通道',
+            icon: '➕',
+            category: 'model',
+            args: '<name> <provider> [model]',
+            executeLocal: true,
+          },
+          {
+            name: 'remove',
+            description: '删除模型通道',
+            icon: '➖',
+            category: 'model',
+            args: '<name>',
+            executeLocal: true,
+          },
+          {
+            name: 'role',
+            description: '设置角色→通道映射',
+            icon: '🔗',
+            category: 'model',
+            args: '<role> <channel>',
+            executeLocal: true,
+          },
+        ];
+
+        if (channels.length > 0) {
+          children.push({
+            name: '── 通道 ──',
+            description: '展开查看操作',
+            icon: ' ',
+            category: 'model',
+            children: [],
+          } as SlashCommandDef);
+
+          for (const ch of channels) {
+            children.push({
+              name: ch.name,
+              description: `${ch.provider}${ch.model ? '/' + ch.model : ''}${ch.description ? ' — ' + ch.description : ''}`,
+              icon: ch.name === 'main' ? '⭐' : '📡',
+              category: 'model',
+              children: [
+                {
+                  name: 'info',
+                  description: '通道详情（provider/model/roles）',
+                  icon: 'ℹ️',
+                  category: 'model',
+                  executeLocal: true,
+                },
+                {
+                  name: 'model',
+                  description: '切换通道模型（运行时，不持久化）',
+                  icon: '🤖',
+                  category: 'model',
+                  args: '<provider> [model]',
+                  executeLocal: true,
+                },
+                {
+                  name: 'reset',
+                  description: '重置为持久化配置',
+                  icon: '🔄',
+                  category: 'model',
+                  executeLocal: true,
+                },
+              ],
+            });
+          }
+        }
+
+        children.push(
+          { name: '── 全部 ──', description: '查看所有通道', icon: ' ', category: 'model', children: [] } as SlashCommandDef,
+          { name: 'list', description: '列出所有通道及角色映射', icon: '📋', category: 'model', executeLocal: true },
+        );
+
+        return children;
+      } catch {
+        return [];
+      }
+    },
   },
 ];
 

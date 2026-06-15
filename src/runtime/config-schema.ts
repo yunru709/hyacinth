@@ -36,7 +36,10 @@ export interface FullConfig {
   };
 
   context: {
-    compressThreshold: number; // 0.75
+    compressThreshold: number;    // 0.75 — 触发异步压缩的阈值
+    emergencyThreshold: number;   // 0.92 — 触发同步紧急压缩的阈值
+    compressDepth: number;        // 0.5  — 压缩激进程度 0.0~1.0
+    compressionStrategy: 'A' | 'C'; // 'A' — 独立压缩提示词（默认），'C' — 克隆对话缓存友好
   };
 
   training: {

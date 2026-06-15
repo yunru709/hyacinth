@@ -79,3 +79,7 @@ export type { ModelCatalogEntry, ModelsCatalogConfig } from './model-catalog-loa
 // Model Router
 export { ModelRouter } from './model-router.js';
 export type { ModelRole, ModelSourceConfig, ModelsConfig, LocalModelConfig } from './model-router.js';
+
+// Model Channel Registry
+export { ModelChannelRegistry } from './model-channel-registry.js';
+export type { ChannelConfig, ModelChannelsConfig } from './model-channel-registry.js';

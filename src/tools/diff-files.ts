@@ -77,7 +77,7 @@ export class DiffFilesTool implements Tool {
       }
     }
 
-    const MAX_LINES = 500;
+    const MAX_LINES = 5000; // ToolResultBuffer handles context protection
     if (lines.length > MAX_LINES + 2) {
       const truncated = lines.slice(0, MAX_LINES);
       truncated.push(`... (truncated, ${lines.length - MAX_LINES - 2} more lines)`);

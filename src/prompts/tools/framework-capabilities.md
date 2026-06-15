@@ -18,6 +18,45 @@
 - 简单任务想省配额 → 主动建议切到本地
 - 降级链已切到本地 → `provider_info` 会显示 `on_fallback: true`，告知用户即可
 
+## 多通道模型路由
+
+系统支持 N 通道模型路由：不同角色（主对话、压缩器、子 Agent 等）可以各自使用不同的 Provider 和模型。配置在 `.agent/model-channels.json`：
+
+```json
+{
+  "channels": {
+    "main": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+    "compression": { "provider": "deepseek", "model": "deepseek-v4-pro" },
+    "sub-agent": { "provider": "local", "model": "qwen3.5:9b" }
+  },
+  "roles": {
+    "assessment": "main",
+    "planning": "main",
+    "compression": "compression",
+    "sub-agent": "sub-agent"
+  }
+}
+```
+
+**通道管理工具（7 个）：**
+
+- `list_model_channels` — 列出所有通道及角色映射
+- `add_model_channel` — 新增通道（name 必填，provider 必填，model 可选）。一个通道 = 一个 Provider + 模型组合
+- `remove_model_channel` — 删除通道（main 不可删除）
+- `set_channel_role` — 将角色（assessment/planning/compression/sub-agent）映射到指定通道
+- `set_channel_model` — **运行时**切换某通道当前使用的 Provider/模型（不持久化，重启恢复）
+- `reset_channel_model` — 取消运行时覆盖，恢复为 `model-channels.json` 配置
+- `channel_info` — 查看指定通道详情（provider、模型、角色映射）
+
+**TUI 管理：** 用户可通过 `/channel` 面板操作（add/remove/role/list，选中通道后 info/model/reset）。
+
+**接口复用：** 多个角色可共享一个通道，只需在 `roles` 中指向同一个 channel 名。
+
+**压缩策略选择：**
+- 配置 `context.compressionStrategy`：`'A'`=独立提示词（传统），`'C'`=克隆对话（缓存友好，默认）。同模型下策略 C 大幅降低 API 成本。
+- `trigger_compression` 工具支持 `strategy` 参数（`'A'` 或 `'C'`），可临时覆盖默认策略，仅本次生效。
+- 压缩通过 compression 通道执行，与主对话通道缓存隔离。
+
 ## 知识库
 
 当 Zone 4 已开启时，知识库自动检索并注入上下文，你无需手动搜索。你有以下结构化工具可管理知识库内容：
@@ -87,6 +126,9 @@ tools: tool1,tool2
 | 工具/Skill 禁用 | `tools.disabled` / `skills.disabled` |
 | 工具结果缓冲 | `tools.resultBuffer.*` |
 | 上下文压缩阈值 | `context.compressThreshold` |
+| 压缩策略 | `context.compressionStrategy` (`A`=独立提示词, `C`=克隆对话(默认)) |
+| 紧急压缩阈值 | `context.emergencyThreshold` |
+| 压缩激进程度 | `context.compressDepth` |
 | 子 Agent 模型路由 | `models.assessment` / `models.planning` / `models.compression` |
 | 日志/热重载 | `logging.level` / `hotReload.*` |
 
@@ -158,6 +200,7 @@ tools: tool1,tool2
 | `.agent/mcp.json` | MCP 服务器 |
 | `.agent/agents.json` | 子 Agent 定义 |
 | `.agent/providers.json` | Provider API 配置 |
+| `.agent/model-channels.json` | 多通道模型路由（角色→通道→Provider） |
 | `.agent/tool-bundles.json` | 工具包配置 |
 | `.agent/local-provider.json` | 本地 Provider 默认配置 |
 | `.agent/models.json` | 本地模型配置 |

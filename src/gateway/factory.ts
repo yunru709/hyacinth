@@ -52,6 +52,7 @@ import { createLogger } from '../logging/logger.js';
 import { ProviderRouter } from '../provider/router.js';
 import { ModelRouter } from '../provider/model-router.js';
 import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js';
+import { ModelChannelRegistry } from '../provider/model-channel-registry.js';
 import { TrainingScheduler } from '../training/scheduler.js';
 import { DataRefiner } from '../training/refiner.js';
 import { RefinedDataStore } from '../training/refined-store.js';
@@ -288,9 +289,21 @@ export async function createAgent(
       return names.length > 0 ? `[Session-only tools]\n${names.join(', ')}` : '';
     },
   });
-  const modelRouter = new ModelRouter(provider, config.models, config.local);
+  const channelRegistry = new ModelChannelRegistry(cwd);
+  const providerActive = typeof config.provider === 'object'
+    ? (config.provider as Record<string, unknown>).active as string | undefined
+    : undefined;
+  channelRegistry.buildFromLegacy(config.models, config.local, providerActive);
+  channelRegistry.initializeChannels();
+  // 将 ProviderManager 构建的带弹性层（重试+熔断+降级链）的主 Provider 注入 registry，
+  // 替换 initializeChannels 中创建的裸 Provider
+  channelRegistry.setMainProvider(provider, providerActive);
+  const modelRouter = new ModelRouter(provider, config.models, config.local, channelRegistry);
   const summarizer = new StructuredSummarizer(modelRouter);
-  const compressor = new CompressorOrchestrator(tokenCounter, summarizer, effectiveMaxContext, { compressThreshold: config.context?.compressThreshold });
+  const compressor = new CompressorOrchestrator(tokenCounter, summarizer, effectiveMaxContext, {
+    compressThreshold: config.context?.compressThreshold,
+    compressDepth: config.context?.compressDepth,
+  });
   const toolRegistry = createBuiltInTools(gitManager, currentSessionId, cwd);
   const toolExecutor = new ToolExecutor(toolRegistry);
 
@@ -392,7 +405,7 @@ export async function createAgent(
     agentRegistry.register(agent);
   }
   const delegateTool = new DelegateToAgentTool(agentRegistry, {
-    provider,
+    modelRouter,
     toolRegistry,
     sessionDir,
     maxContextTokens: maxContext,
@@ -578,7 +591,7 @@ export async function createAgent(
   toolRegistry.registerConfigTools(configCenter);
   toolRegistry.registerTrainingTools(trainingScheduler, configCenter);
   // registerRuntimeControlTools 内有 switch_provider / set_mode 等 30+ 工具依赖 loop 实例
-  toolRegistry.registerRuntimeControlTools(loop, providerRouter, skillRegistry, agentRegistry, trainingScheduler, configCenter, cwd, heartbeatScheduler, mcpSystem);
+  toolRegistry.registerRuntimeControlTools(loop, providerRouter, skillRegistry, agentRegistry, trainingScheduler, configCenter, cwd, heartbeatScheduler, mcpSystem, modelRouter);
   toolRegistry.register(createTriggerCompressionTool(loop));
 
   // destroy_sub_agent 需要 sessionDir，在此单独注册
@@ -680,32 +693,6 @@ export async function createAgent(
   });
   loop.setBundleRegistry(bundleRegistry);
 
-  // Zone 5 工具包展开：当前激活 bundle 的工具清单
-  contextComposer.registerSource({
-    name: 'tool-bundle-expand',
-    strategy: 'always_inline',
-    cacheability: 'live',
-    description: '当前工具包展开',
-    getContent: () => {
-      const active = bundleRegistry.getActive();
-      if (active.length === 0) return '';  // 全量模式，不注入
-      const allTools = toolRegistry.getAll();
-      const names = active.map(b => b.name).join(' + ');
-      const allowed = new Set(bundleRegistry.getActiveToolNames());
-      const lines: string[] = [`[Active Bundles: ${names}]`];
-      for (const toolName of allowed) {
-        const tool = allTools.find(t => t.name === toolName);
-        if (tool) {
-          const desc = tool.description.length > 80
-            ? tool.description.slice(0, 80) + '...'
-            : tool.description;
-          lines.push(`- ${toolName}: ${desc}`);
-        }
-      }
-      return lines.join('\n');
-    },
-  });
-
   // ── Hot Reload Manager ────────────────────────────────────────────
   const hotReloadManager = new HotReloadManager({
     toolRegistry,
@@ -716,6 +703,7 @@ export async function createAgent(
     contextComposer,
     mcpSystem,
     bundleRegistry,
+    channelRegistry,
     cwd,
     providerConfigLoader,
     modelCatalog,
