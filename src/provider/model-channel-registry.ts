@@ -16,8 +16,8 @@ const logger = createLogger('model-channel-registry');
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface ChannelConfig {
-  /** Provider 类型 */
-  provider: string;
+  /** Provider 类型（可选，不填则继承 main 通道的 provider） */
+  provider?: string;
   /** 模型名称，不填则使用 Provider 默认模型 */
   model?: string;
   /** API Key（可选，不填则从环境变量获取） */
@@ -280,8 +280,13 @@ export class ModelChannelRegistry {
 
   // ── Mutate ───────────────────────────────────────────────────────
 
-  /** 添加或更新通道 */
+  /** 添加或更新通道。provider 可选，不填则继承 main 通道的 provider。 */
   upsertChannel(name: string, config: ChannelConfig): void {
+    // provider 未指定时继承 main 通道的 provider
+    if (!config.provider && name !== 'main') {
+      const mainCfg = this.config.channels['main'];
+      config = { ...config, provider: mainCfg?.provider ?? 'deepseek' };
+    }
     this.config.channels[name] = config;
     // 立即创建 Provider 实例
     const provider = this.createChannelProvider(name);
@@ -396,6 +401,10 @@ export class ModelChannelRegistry {
 
   /** 从自定义配置创建 Provider 实例（共用创建逻辑） */
   private createChannelProviderFromConfig(name: string, cfg: ChannelConfig): Provider | null {
+    if (!cfg.provider) {
+      logger.warn(`Cannot create provider for channel "${name}": no provider specified`);
+      return null;
+    }
     try {
       const providerLoader = getProviderConfigLoader();
       const meta = providerLoader.getProvider(cfg.provider);

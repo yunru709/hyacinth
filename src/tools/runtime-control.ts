@@ -1161,19 +1161,19 @@ export function createListModelChannelsTool(modelRouter: ModelRouter): Tool {
 export function createAddModelChannelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'add_model_channel',
-    description: 'Add or update a model channel. Required: name, provider. Optional: model, apiKey, apiKeyEnv, baseUrl, description.',
+    description: 'Add a new model channel. Only name is required; provider defaults to main channel provider. Use set_channel_model to change provider/model later.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '通道名称（如 "compression"、"sub-agent"）。main 为默认主通道。' },
-        provider: { type: 'string', description: 'Provider 类型（anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo/local）' },
-        model: { type: 'string', description: '模型名（可选，不填则用 provider 默认值）' },
-        apiKey: { type: 'string', description: 'API Key（可选，不填则从环境变量获取）' },
-        apiKeyEnv: { type: 'string', description: '环境变量名（可选，如 DEEPSEEK_API_KEY）' },
-        baseUrl: { type: 'string', description: '自定义 API 地址（可选）' },
-        description: { type: 'string', description: '通道描述（可选）' },
+        name: { type: 'string', description: 'Channel name (e.g. "compression", "sub-agent")' },
+        provider: { type: 'string', description: 'Provider type: anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo/local. Defaults to main channel provider.' },
+        model: { type: 'string', description: 'Model name (optional, defaults to provider default)' },
+        apiKey: { type: 'string', description: 'API key (optional)' },
+        apiKeyEnv: { type: 'string', description: 'Env variable name for API key (optional)' },
+        baseUrl: { type: 'string', description: 'Custom API base URL (optional)' },
+        description: { type: 'string', description: 'Channel description (optional)' },
       },
-      required: ['name', 'provider'],
+      required: ['name'],
     },
     async execute(args: Record<string, unknown>): Promise<string> {
       const name = args.name as string;
@@ -1187,7 +1187,8 @@ export function createAddModelChannelTool(modelRouter: ModelRouter): Tool {
           baseUrl: args.baseUrl as string | undefined,
           description: args.description as string | undefined,
         });
-        return `Channel "${name}" (provider: ${provider}) has been added/updated. Use set_channel_role to map roles to this channel.`;
+        const info = modelRouter.getRegistry().getChannelInfo(name);
+        return `Channel "${name}" added (${info?.provider}/${info?.model}). Use set_channel_role to map roles to this channel.`;
       } catch (err) {
         return `Error adding channel: ${err instanceof Error ? err.message : String(err)}`;
       }

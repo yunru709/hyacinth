@@ -563,7 +563,7 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
             description: '新增模型通道',
             icon: '➕',
             category: 'model',
-            args: '<name> <provider> [model]',
+            args: '<name> [provider] [model]',
             executeLocal: true,
           },
           {

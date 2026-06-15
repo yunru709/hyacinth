@@ -1940,20 +1940,16 @@ export async function runTui(
 
             if (cmdPath === 'channel/add') {
               if (!restArgs) {
-                chatLog.addSystem(theme.warning('Usage: /channel add <name> <provider> [model]'));
+                chatLog.addSystem(theme.warning('Usage: /channel add <name> [provider] [model]'));
                 tui.requestRender();
                 return;
               }
               const parts = restArgs.split(/\s+/).filter(Boolean);
-              if (parts.length < 2) {
-                chatLog.addSystem(theme.warning('Usage: /channel add <name> <provider> [model]'));
-                tui.requestRender();
-                return;
-              }
               const [name, provider, model] = parts;
               try {
                 registry.upsertChannel(name, { provider, model });
-                chatLog.addSystem(theme.success(`Channel "${name}" added (${provider}${model ? '/' + model : ''})`));
+                const info = registry.getChannelInfo(name);
+                chatLog.addSystem(theme.success(`Channel "${name}" added (${info?.provider}${model ? '/' + model : ''})`));
               } catch (e) {
                 chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
               }
