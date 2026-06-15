@@ -106,12 +106,6 @@ export interface ChannelsConfig {
   feishu?: FeishuChannelConfigEntry;
 }
 
-/** 跨会话记忆文件配置 */
-export interface MemoryFileConfig {
-  /** 记忆文件路径，默认 ~/.agent/prompts/persona/memory.md */
-  file?: string;
-}
-
 /** Agent 配置（非敏感） */
 export interface AgentConfig {
   provider: string;
@@ -149,8 +143,8 @@ export interface AgentConfig {
   local?: LocalModelConfig;
   /** 渠道配置 */
   channels?: ChannelsConfig;
-  /** 跨会话记忆文件配置 */
-  memory?: MemoryFileConfig;
+  /** 跨会话记忆文件路径（默认 ~/.agent/prompts/persona/memory.md） */
+  memoryFile?: string;
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -198,9 +192,7 @@ const DEFAULT_CONFIG: AgentConfig = {
       sessionMode: 'per_user',
     },
   },
-  memory: {
-    file: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),
-  },
+  memoryFile: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),
 };
 
 /** 默认最大上下文 Token 数 */
