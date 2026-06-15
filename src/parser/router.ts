@@ -20,7 +20,7 @@ export class OutputRouter {
   onText: ((content: string) => void) | null = null;
   onThinking: ((content: string) => void) | null = null;
   onToolUse: ((id: string, name: string, input: Record<string, unknown>) => void) | null = null;
-  onUsage: ((inputTokens: number, outputTokens: number, cacheHitTokens?: number, cacheMissTokens?: number) => void) | null = null;
+  onUsage: ((inputTokens: number, outputTokens: number, cacheHitTokens?: number, cacheMissTokens?: number, cacheReadInputTokens?: number, cacheCreationInputTokens?: number) => void) | null = null;
   onStop: ((reason: string) => void) | null = null;
 
   /**
@@ -42,7 +42,7 @@ export class OutputRouter {
         break;
       }
       case 'USAGE': {
-        this.onUsage?.(event.input_tokens, event.output_tokens, event.cache_hit_tokens, event.cache_miss_tokens);
+        this.onUsage?.(event.input_tokens, event.output_tokens, event.cache_hit_tokens, event.cache_miss_tokens, event.cache_read_input_tokens, event.cache_creation_input_tokens);
         break;
       }
       case 'STOP': {

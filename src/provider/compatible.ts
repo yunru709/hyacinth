@@ -29,6 +29,8 @@ export interface OpenAICompatibleOptions {
   maxTokens?: number;
   /** 额外的 HTTP 头（如 OpenRouter 要求的 HTTP-Referer / X-Title） */
   headers?: Record<string, string>;
+  /** DeepSeek 缓存隔离 ID，区分不同产品的缓存池。默认 "deepthink"。 */
+  userId?: string;
 }
 
 /**
@@ -53,6 +55,7 @@ export class OpenAICompatibleProvider implements Provider {
   private providerType: ProviderType;
   private thinkingEnabled = false;
   private reasoningEffort: DeepSeekReasoningEffort = 'high';
+  private userId: string;
 
   constructor(opts: OpenAICompatibleOptions) {
     const apiKey = opts.apiKey ?? (opts.envKey ? process.env[opts.envKey] : undefined);
@@ -74,6 +77,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.model = opts.model;
     this.maxTokens = opts.maxTokens ?? getModelInfo(opts.providerType, opts.model)?.maxTokens ?? 4096;
     this.providerType = opts.providerType;
+    this.userId = opts.userId ?? 'deepthink';
   }
 
   getProviderType(): ProviderType {
@@ -117,6 +121,8 @@ export class OpenAICompatibleProvider implements Provider {
       stream: true,
       stream_options: { include_usage: true },
     };
+    // DeepSeek 缓存隔离：同一 key 下不同 user_id 各自维护缓存池
+    (params as unknown as Record<string, unknown>).user_id = this.userId;
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);

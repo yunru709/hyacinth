@@ -21,6 +21,8 @@ export interface OpenAIProviderOptions {
   model?: string;
   /** 最大输出 token 数，默认 4096 */
   maxTokens?: number;
+  /** 缓存隔离 ID，区分不同产品的缓存池。默认 "deepthink"。 */
+  userId?: string;
 }
 
 /**
@@ -36,6 +38,7 @@ export class OpenAIProvider implements Provider {
   private model: string;
   private maxTokens: number;
   private thinkingEnabled = false;
+  private userId: string;
 
   constructor(opts: OpenAIProviderOptions = {}) {
     const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY;
@@ -52,6 +55,7 @@ export class OpenAIProvider implements Provider {
 
     this.model = opts.model ?? 'gpt-4o';
     this.maxTokens = opts.maxTokens ?? getModelInfo('openai', this.model)?.maxTokens ?? 4096;
+    this.userId = opts.userId ?? 'deepthink';
   }
 
   getProviderType(): ProviderType {
@@ -102,6 +106,8 @@ export class OpenAIProvider implements Provider {
     (params as unknown as Record<string, unknown>).thinking = this.thinkingEnabled
       ? { type: 'enabled' }
       : { type: 'disabled' };
+    // 缓存隔离：同一 key 下不同 user_id 各自维护缓存池
+    (params as unknown as Record<string, unknown>).user_id = this.userId;
 
     // ---- 流式消费 ----
     // 追踪正在构建的 tool calls（OpenAI 的 tool call 是按 index 分片传输的）

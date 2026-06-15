@@ -18,6 +18,7 @@ export function getDefaultConfig(): FullConfig {
       active: 'anthropic',
       routeMode: 'auto',
       enableThinking: false,
+      userId: 'deepthink',
       anthropic: { model: providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
       deepseek: { model: providerDefault('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },
@@ -94,7 +95,7 @@ export function getDefaultConfig(): FullConfig {
       baseUrl: localCfg.baseUrl,
       defaultModel: localCfg.defaultModel,
     },
-    logging: { level: 'info' },
+    logging: { level: 'info', logCacheHits: false },
     repair: {
       scavenge: {
         enabled: true,

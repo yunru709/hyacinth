@@ -79,7 +79,9 @@ export class CustomEditor extends Editor {
         super.handleInput(data);
         return;
       }
-      const text = this.getText().trim();
+      // Use getExpandedText() to expand paste markers like "[paste #2 +32 lines]"
+      // into the actual pasted content. getText() returns raw text with markers.
+      const text = this.getExpandedText().trim();
       if (text.length > 0) {
         this.onSubmit(text);
         this.setText('');

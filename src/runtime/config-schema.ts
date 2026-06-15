@@ -3,6 +3,8 @@ export interface FullConfig {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
     routeMode: 'auto' | 'manual';
     enableThinking: boolean; // 启用 thinking/reasoning 模式
+    /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "deepthink"。 */
+    userId?: string;
     anthropic: { model: string; apiKeyEnv: string };
     openai: { model: string; apiKeyEnv: string };
     deepseek: { model: string; apiKeyEnv: string };
@@ -114,6 +116,8 @@ export interface FullConfig {
 
   logging: {
     level: 'debug' | 'info' | 'warn' | 'error' | 'off';
+    /** 是否在 stats.json 中记录每轮上下文缓存的命中详情。默认 false（调试用途）。 */
+    logCacheHits: boolean;
   };
 
   repair: {

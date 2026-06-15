@@ -118,6 +118,17 @@ export interface OutputHandler {
   onPermissionRequest?(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'>;
 }
 
+/** Per-turn cache hit statistics */
+export interface CacheTurnRecord {
+  turn: number;
+  timestamp: string;
+  inputTokens: number;
+  outputTokens: number;
+  hitTokens: number;
+  missTokens: number;
+  hitRate: number;
+}
+
 /** Info available to output handlers after each turn */
 export interface TurnInfo {
   turnCount: number;
@@ -132,6 +143,10 @@ export interface TurnInfo {
   cacheHitTokens?: number;
   /** 缓存未命中 tokens */
   cacheMissTokens?: number;
+  /** 当前轮次缓存命中率 (0-100)，不支持的 provider 为 undefined */
+  cacheHitRate?: number;
+  /** 所有轮次的缓存记录（用于分析缓存稳定性） */
+  cacheHistory?: CacheTurnRecord[];
 }
 
 // ── 半块 Unicode 字符画 ─────────────────────────────────────────────
@@ -210,6 +225,8 @@ export class AgentLoop {
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
   private cacheMissTokens = 0;
+  private cacheTurns: CacheTurnRecord[] = [];
+  private logCacheHits: boolean;
   private currentTurn = 0;
   private lastSavedSummary: string | undefined;
   private pendingImpactInfo: string | null = null;
@@ -342,6 +359,10 @@ export class AgentLoop {
       previewChars: typeof bufferPreviewChars === 'number' && bufferPreviewChars > 0 ? bufferPreviewChars : 500,
     });
 
+    this.logCacheHits = this.configCenter
+      ? (this.configCenter.get('logging.logCacheHits') as boolean) === true
+      : false;
+
     if (trainingScheduler) {
       this.trainingScheduler = trainingScheduler;
       trainingScheduler.start();
@@ -453,6 +474,8 @@ export class AgentLoop {
       ).length;
     }
     const hasCache = this.cacheHitTokens > 0 || this.cacheMissTokens > 0;
+    // Latest turn cache hit rate
+    const latestTurn = this.cacheTurns.at(-1);
     return {
       turnCount,
       maxTurns: this.maxTurns,
@@ -464,6 +487,8 @@ export class AgentLoop {
       compressCount: this.compressCount,
       cacheHitTokens: hasCache ? this.cacheHitTokens : undefined,
       cacheMissTokens: hasCache ? this.cacheMissTokens : undefined,
+      cacheHitRate: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
+      cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
     };
   }
 
@@ -1347,14 +1372,18 @@ export class AgentLoop {
 
     // Step 2: 当前轮次超标 → 异步或同步压缩
     const currentTokens = layeredResult.zoneBreakdown.total;
-    if (currentTokens > this.maxContextTokens * compressThreshold) {
-      // LLM 摘要模式：工具临时覆盖优先 → 否则从 config 读取
-      const toolOverride = this.pendingCompressionStrategy;
-      this.pendingCompressionStrategy = null; // 用后即清
-      const strategySource = toolOverride
-        ?? (this.configCenter
-          ? (this.configCenter.get('context.compressionStrategy') as string) ?? 'C'
-          : 'C');
+
+    // LLM 摘要模式：工具临时覆盖优先 → 否则从 config 读取
+    // 提前消费：手动触发（trigger_compression）不受阈值门限制
+    const toolOverride = this.pendingCompressionStrategy;
+    this.pendingCompressionStrategy = null; // 用后即清
+    const strategySource = toolOverride
+      ?? (this.configCenter
+        ? (this.configCenter.get('context.compressionStrategy') as string) ?? 'C'
+        : 'C');
+
+    // 压缩条件：token 超阈值，或模型通过 trigger_compression 主动要求
+    if (currentTokens > this.maxContextTokens * compressThreshold || toolOverride !== null) {
       const llmMode: 'prompt' | 'clone' = strategySource === 'C' ? 'clone' : 'prompt';
       const compressOptions = {
         llmMode,
@@ -1526,11 +1555,46 @@ export class AgentLoop {
       }).catch(() => {});
     };
 
-    router.onUsage = (inputTokens: number, outputTokens: number, hit?: number, miss?: number) => {
+    router.onUsage = (inputTokens: number, outputTokens: number, hit?: number, miss?: number, anthroRead?: number, anthroCreation?: number) => {
       usageInput = inputTokens;
       usageOutput = outputTokens;
-      if (hit !== undefined) this.cacheHitTokens = hit;
-      if (miss !== undefined) this.cacheMissTokens = miss;
+
+      // 归一化：DeepSeek/OpenAI 用 cache_hit_tokens/cache_miss_tokens，
+      // Anthropic 用 cache_read_input_tokens（命中）/ cache_creation_input_tokens（新建）。
+      // 优先使用 DeepSeek 格式，否则从 Anthropic 字段推导。
+      let effectiveHit: number | undefined;
+      let effectiveMiss: number | undefined;
+
+      if (hit !== undefined && miss !== undefined) {
+        // DeepSeek / OpenAI 格式：直接使用
+        effectiveHit = hit;
+        effectiveMiss = miss;
+      } else if (anthroRead !== undefined && inputTokens > 0) {
+        // Anthropic 格式：cache_read 是命中量，未命中 = 总量 - 命中
+        effectiveHit = anthroRead;
+        effectiveMiss = Math.max(0, inputTokens - anthroRead);
+      }
+
+      if (effectiveHit !== undefined && effectiveMiss !== undefined) {
+        this.cacheHitTokens = effectiveHit;
+        this.cacheMissTokens = effectiveMiss;
+
+        if (this.logCacheHits) {
+          const total = effectiveHit + effectiveMiss;
+          const hitRate = total > 0 ? (effectiveHit / total) * 100 : 0;
+
+          const record: CacheTurnRecord = {
+            turn: this.currentTurn,
+            timestamp: new Date().toISOString(),
+            inputTokens,
+            outputTokens,
+            hitTokens: effectiveHit,
+            missTokens: effectiveMiss,
+            hitRate: Math.round(hitRate * 100) / 100,
+          };
+          this.cacheTurns.push(record);
+        }
+      }
     };
 
     router.onStop = (reason: string) => {
@@ -1628,10 +1692,14 @@ export class AgentLoop {
 
     // 更新 stats
     const currentStats = await this.statsManager.get(this.sessionDir);
-    await this.statsManager.update(this.sessionDir, {
+    const statsUpdate: Parameters<typeof this.statsManager.update>[1] = {
       input_tokens: currentStats.input_tokens + usageInput,
       output_tokens: currentStats.output_tokens + usageOutput,
-    });
+    };
+    if (this.logCacheHits) {
+      statsUpdate.cache_turns = this.cacheTurns.length > 0 ? this.cacheTurns : currentStats.cache_turns;
+    }
+    await this.statsManager.update(this.sessionDir, statsUpdate);
 
     // 记录 usage 事件
     if (usageInput > 0 || usageOutput > 0) {

@@ -88,6 +88,16 @@ export interface SessionStats {
   turn_count: number;
   compact_count: number;
   current_context_tokens: number;
+  /** 每轮缓存命中记录（用于分析前缀缓存稳定性） */
+  cache_turns?: Array<{
+    turn: number;
+    timestamp: string;
+    inputTokens: number;
+    outputTokens: number;
+    hitTokens: number;
+    missTokens: number;
+    hitRate: number;
+  }>;
 }
 
 // === Provider 相关 ===

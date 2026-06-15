@@ -491,11 +491,16 @@ export async function runTui(
       updateHeaderText(statusContent);
     }
     let ctxBar = formatContextBar(info.tokensUsed, liveMaxContext);
-    if (info.cacheHitTokens != null && info.cacheMissTokens != null) {
-      const total = info.cacheHitTokens + info.cacheMissTokens;
-      if (total > 0) {
-        const hitRate = (info.cacheHitTokens / total * 100).toFixed(1);
-        ctxBar += theme.dim(` | Cache: ${hitRate}%`);
+    // 优先使用最新轮次的缓存命中率，否则从累计值计算
+    const hitRate = info.cacheHitRate != null
+      ? info.cacheHitRate.toFixed(1)
+      : (info.cacheHitTokens != null && info.cacheMissTokens != null)
+        ? (() => { const t = info.cacheHitTokens + info.cacheMissTokens; return t > 0 ? (info.cacheHitTokens / t * 100).toFixed(1) : null; })()
+        : null;
+    if (hitRate != null) {
+      ctxBar += theme.dim(` | Cache: ${hitRate}%`);
+      if (info.cacheHistory && info.cacheHistory.length > 1) {
+        ctxBar += theme.dim(` (${info.cacheHistory.length}t)`);
       }
     }
     // Background process count
