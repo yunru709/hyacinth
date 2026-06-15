@@ -24,17 +24,17 @@ function generateSessionId(): string {
 }
 
 /**
- * 获取项目存储根目录：~/.agent/sessions/<projectKey>/
+ * 获取 sessions 根目录：~/.agent/sessions/
  */
-function getProjectDir(projectKey: string): string {
-  return path.join(os.homedir(), '.agent', 'sessions', projectKey);
+function getSessionsRoot(): string {
+  return path.join(os.homedir(), '.agent', 'sessions');
 }
 
 /**
- * 获取 session 目录
+ * 获取 session 目录：~/.agent/sessions/<sessionId>/
  */
-function getSessionDir(projectKey: string, sessionId: string): string {
-  return path.join(getProjectDir(projectKey), sessionId);
+function getSessionDir(sessionId: string): string {
+  return path.join(getSessionsRoot(), sessionId);
 }
 
 /**
@@ -57,11 +57,11 @@ async function ensureFile(filePath: string): Promise<void> {
 
 export class SessionManager {
   private projectKey: string;
-  private projectDir: string;
+  private sessionsRoot: string;
 
   constructor(cwd: string) {
     this.projectKey = toProjectKey(cwd);
-    this.projectDir = getProjectDir(this.projectKey);
+    this.sessionsRoot = getSessionsRoot();
   }
 
   /**
@@ -81,7 +81,7 @@ export class SessionManager {
       type,
     };
 
-    const sessionDir = getSessionDir(this.projectKey, id);
+    const sessionDir = getSessionDir(id);
     await ensureDir(sessionDir);
 
     // 创建 session 必需的文件
@@ -89,10 +89,10 @@ export class SessionManager {
     await ensureFile(path.join(sessionDir, 'events.jsonl'));
     await ensureFile(path.join(sessionDir, 'stats.json'));
 
-    // 持久化 session 元信息（type 等）
+    // 持久化 session 元信息（type、projectKey 等）
     await fs.writeFile(
       path.join(sessionDir, 'meta.json'),
-      JSON.stringify({ type, createdAt: now }),
+      JSON.stringify({ type, createdAt: now, projectKey: this.projectKey }),
       'utf-8',
     );
 
@@ -121,7 +121,7 @@ export class SessionManager {
    */
   async resume(sessionId?: string): Promise<Session> {
     if (sessionId) {
-      const sessionDir = getSessionDir(this.projectKey, sessionId);
+      const sessionDir = getSessionDir(sessionId);
 
       // 目录不存在 → 自动创建（首次调用或重启后重建）
       try {
@@ -137,7 +137,7 @@ export class SessionManager {
         const channel = sessionId.startsWith('feishu_') ? 'feishu' : undefined;
         await fs.writeFile(
           path.join(sessionDir, 'meta.json'),
-          JSON.stringify({ type: 'normal', createdAt: now, channel }),
+          JSON.stringify({ type: 'normal', createdAt: now, channel, projectKey: this.projectKey }),
           'utf-8',
         );
 
@@ -169,18 +169,20 @@ export class SessionManager {
       // 目录已存在 → 读取 meta.json
       let type: 'normal' | 'precise' | undefined;
       let createdAt = '';
+      let projectKey = this.projectKey;
       try {
         const metaPath = path.join(sessionDir, 'meta.json');
         if (existsSync(metaPath)) {
           const meta = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
           createdAt = meta.createdAt ?? '';
           if (meta.type === 'precise' || meta.type === 'normal') type = meta.type;
+          if (meta.projectKey) projectKey = meta.projectKey;
         }
       } catch { /* meta.json 缺失或损坏，使用默认值 */ }
 
       const session: Session = {
         id: sessionId,
-        projectKey: this.projectKey,
+        projectKey,
         createdAt,
         updatedAt: new Date().toISOString(),
         type,
@@ -191,36 +193,38 @@ export class SessionManager {
     // 恢复最近的 session
     const latest = await this.getLatest();
     if (!latest) {
-      throw new Error(`No sessions found for project: ${this.projectKey}`);
+      throw new Error(`No sessions found`);
     }
     return latest;
   }
 
   /**
-   * 列出当前项目的所有 session
+   * 列出所有 session
    */
   async list(): Promise<Session[]> {
-    await ensureDir(this.projectDir);
+    await ensureDir(this.sessionsRoot);
 
-    const entries = await fs.readdir(this.projectDir, { withFileTypes: true });
+    const entries = await fs.readdir(this.sessionsRoot, { withFileTypes: true });
     const sessions: Session[] = [];
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
 
-      const sessionDir = path.join(this.projectDir, entry.name);
+      const sessionDir = path.join(this.sessionsRoot, entry.name);
       try {
         const stat = await fs.stat(sessionDir);
-        // 读取 session 元信息（type 等）
+        // 读取 session 元信息
         let sessionType: 'normal' | 'precise' | undefined;
+        let projectKey = '';
         try {
           const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
           const meta = JSON.parse(metaRaw);
           if (meta.type === 'precise' || meta.type === 'normal') sessionType = meta.type;
+          projectKey = meta.projectKey ?? '';
         } catch { /* 旧 session 没有 meta.json，默认为 normal */ }
         sessions.push({
           id: entry.name,
-          projectKey: this.projectKey,
+          projectKey,
           createdAt: stat.birthtime.toISOString(),
           updatedAt: stat.mtime.toISOString(),
           type: sessionType ?? 'normal',
@@ -247,7 +251,7 @@ export class SessionManager {
    * 获取 session 目录路径
    */
   getSessionDir(sessionId: string): string {
-    return getSessionDir(this.projectKey, sessionId);
+    return getSessionDir(sessionId);
   }
 
   /**
@@ -258,10 +262,10 @@ export class SessionManager {
   }
 
   /**
-   * 获取项目存储根目录
+   * 获取 sessions 根目录
    */
-  getProjectDir(): string {
-    return this.projectDir;
+  getSessionsRoot(): string {
+    return this.sessionsRoot;
   }
 
   /**
@@ -279,7 +283,7 @@ export class SessionManager {
     for (const session of sessions) {
       const updatedAtTime = new Date(session.updatedAt).getTime();
       if (now - updatedAtTime > maxAgeMs) {
-        const sessionDir = getSessionDir(this.projectKey, session.id);
+        const sessionDir = getSessionDir(session.id);
         await fs.rm(sessionDir, { recursive: true, force: true });
         logger.info('Cleaned up expired session', { sessionId: session.id });
         deletedCount++;

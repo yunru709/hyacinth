@@ -11,8 +11,8 @@ import { toProjectKey } from '../utils/misc.js';
 const CACHE_VERSION = 1;
 
 /** 获取依赖图缓存文件路径 */
-function getCachePath(projectKey: string): string {
-  return path.join(os.homedir(), '.agent', 'cache', 'dependency-graph', `${projectKey}.json`);
+function getCachePath(): string {
+  return path.join(os.homedir(), '.agent', 'cache', 'dependency-graph.json');
 }
 
 /** 计算文件内容的哈希（用于增量更新检测） */
@@ -32,7 +32,7 @@ export class DependencyAnalyzer {
   async analyze(rootDir: string): Promise<DependencyGraph> {
     this.rootDir = rootDir;
     this.projectKey = toProjectKey(rootDir);
-    this.cachePath = getCachePath(this.projectKey);
+    this.cachePath = getCachePath();
 
     // 尝试加载缓存
     const cached = await this.loadCache();

@@ -222,8 +222,7 @@ export class HttpWebhookChannel implements ChannelHandler {
         const fs = await import('node:fs/promises');
         const path = await import('node:path');
         const os = await import('node:os');
-        const projectKey = this.cwd.replace(/[/\\]+/g, '-').replace(/^[-]+|[-]+$/g, '').replace(/:/g, '');
-        const sessionDir = path.join(os.homedir(), '.agent', 'sessions', projectKey, id);
+        const sessionDir = path.join(os.homedir(), '.agent', 'sessions', id);
         await fs.rm(sessionDir, { recursive: true, force: true });
         return reply.send({ ok: true });
       } catch {

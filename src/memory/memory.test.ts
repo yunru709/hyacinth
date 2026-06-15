@@ -258,10 +258,13 @@ describe('SessionManager', () => {
   });
 
   afterEach(async () => {
-    // Clean up the project directory under ~/.agent/sessions/
-    const projectKey = manager.getProjectKey();
-    const projectDir = path.join(os.homedir(), '.agent', 'sessions', projectKey);
-    await removeDir(projectDir);
+    // Clean up sessions created during this test (sessions are flat, so delete individually)
+    const sessions = await manager.list();
+    for (const s of sessions) {
+      if (s.projectKey === manager.getProjectKey()) {
+        await removeDir(manager.getSessionDir(s.id));
+      }
+    }
     await removeDir(tempProjectDir);
   });
 
