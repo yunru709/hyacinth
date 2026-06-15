@@ -1437,22 +1437,8 @@ export async function runTui(
                 registry.setRoleMapping(r, sourceArg);
               }
               chatLog.addSystem(theme.success(`Mapped ${roles.join(', ')} → channel "${sourceArg}"`));
-            } else if (sourceArg === 'main' || sourceArg === 'local') {
-              // 旧的双通道模式
-              if (roleArg === 'all') {
-                for (const r of ['assessment', 'planning', 'compression'] as const) {
-                  loop.setModelSource(r, sourceArg as 'main' | 'local');
-                }
-                if (registry) {
-                  registry.setRoleMapping('sub-agent', 'main');
-                }
-                chatLog.addSystem(theme.success('All roles source set to ') + theme.fg(sourceArg));
-              } else {
-                loop.setModelSource(roleArg as 'assessment' | 'planning' | 'compression', sourceArg as 'main' | 'local');
-                chatLog.addSystem(theme.success(`Role ${roleArg} source set to `) + theme.fg(sourceArg));
-              }
             } else {
-              chatLog.addSystem(theme.warning(`Channel "${sourceArg}" not found. Available channels: ${channelNames.join(', ') || '(none)'}. Use /channel add to create one, or use "main" or "local".`));
+              chatLog.addSystem(theme.warning(`Channel "${sourceArg}" not found. Available: ${channelNames.join(', ') || '(none)'}. Use /channel add ${sourceArg} <provider> [model] to create it.`));
             }
           } catch (e) {
             chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));

@@ -154,28 +154,32 @@ export class ModelChannelRegistry {
       description: '主对话通道（自动构建）',
     };
 
-    // local 通道：本地模型
-    let localCfg: LocalModelConfig;
-    try {
-      localCfg = this.legacyLocalConfig ?? getLocalProviderConfigLoader();
-    } catch {
-      localCfg = { baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: '' };
-    }
-    if (localCfg.defaultModel) {
-      this.config.channels['local'] = {
-        provider: 'local',
-        model: localCfg.defaultModel,
-        baseUrl: localCfg.baseUrl,
-        description: '本地模型通道（自动构建）',
-      };
-    }
-
-    // roles：从 legacy modelsConfig 推断 + 硬编码默认兜底
+    // roles：从 legacy modelsConfig 推断
+    // source='local' 的角色 → 创建以角色命名的通道（如 compression → compression 通道用 local provider）
+    // source='main' 的角色 → 直接映射到 main
     this.config.roles = { ...DEFAULT_ROLES };
     if (this.legacyModelsConfig) {
+      let localCfg: LocalModelConfig | null = null;
+      const hasLocalRole = Object.values(this.legacyModelsConfig).some(
+        (cfg) => cfg.source === 'local',
+      );
+      if (hasLocalRole) {
+        try {
+          localCfg = this.legacyLocalConfig ?? getLocalProviderConfigLoader();
+        } catch {
+          localCfg = { baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: '' };
+        }
+      }
       for (const [role, cfg] of Object.entries(this.legacyModelsConfig)) {
-        if (cfg.source === 'local' && this.config.channels['local']) {
-          this.config.roles[role] = 'local';
+        if (cfg.source === 'local' && localCfg?.defaultModel) {
+          // 以角色名创建通道，provider 为 local（而非创建名为 "local" 的通道）
+          this.config.channels[role] = {
+            provider: 'local',
+            model: localCfg.defaultModel,
+            baseUrl: localCfg.baseUrl,
+            description: `${role} 专用通道（local 模型）`,
+          };
+          this.config.roles[role] = role;
         } else {
           this.config.roles[role] = 'main';
         }
