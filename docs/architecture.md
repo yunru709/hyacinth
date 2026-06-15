@@ -103,7 +103,7 @@ Registry-based tool execution with sandbox support.
 | EventStore | `memory/events.ts` | JSONL |
 | StatsManager | `memory/stats.ts` | JSON |
 | SummaryStore | `memory/summary.ts` | Markdown |
-| SessionManager | `memory/session.ts` | Directory-based under `~/.agent/projects/` |
+| SessionManager | `memory/session.ts` | Directory-based under `~/.agent/sessions/` |
 
 ### 7. Sub-Agent System
 

@@ -236,7 +236,7 @@ export async function createAgent(
   });
 
   // ── 跨会话 Memory 系统 ─────────────────────────────────────────────
-  const memoryFilePath = config.memory?.file ?? path.join(sessionManager.getProjectDir(), 'memory.md');
+  const memoryFilePath = config.memory?.file ?? path.join(os.homedir(), '.agent', 'memory', `${sessionManager.getProjectKey()}.md`);
   const memoryDir = path.dirname(memoryFilePath);
   if (!fs.existsSync(memoryDir)) {
     fs.mkdirSync(memoryDir, { recursive: true });

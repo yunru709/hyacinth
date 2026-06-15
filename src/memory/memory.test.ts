@@ -258,9 +258,9 @@ describe('SessionManager', () => {
   });
 
   afterEach(async () => {
-    // Clean up the project directory under ~/.agent/projects/
+    // Clean up the project directory under ~/.agent/sessions/
     const projectKey = manager.getProjectKey();
-    const projectDir = path.join(os.homedir(), '.agent', 'projects', projectKey);
+    const projectDir = path.join(os.homedir(), '.agent', 'sessions', projectKey);
     await removeDir(projectDir);
     await removeDir(tempProjectDir);
   });

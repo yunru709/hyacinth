@@ -108,7 +108,7 @@ export interface ChannelsConfig {
 
 /** 跨会话记忆文件配置 */
 export interface MemoryFileConfig {
-  /** 记忆文件路径，默认 ~/.agent/memory/memory.md */
+  /** 记忆文件路径，默认 ~/.agent/prompts/persona/memory.md */
   file?: string;
 }
 

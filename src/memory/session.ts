@@ -24,10 +24,10 @@ function generateSessionId(): string {
 }
 
 /**
- * 获取项目存储根目录：~/.agent/projects/<projectKey>/
+ * 获取项目存储根目录：~/.agent/sessions/<projectKey>/
  */
 function getProjectDir(projectKey: string): string {
-  return path.join(os.homedir(), '.agent', 'projects', projectKey);
+  return path.join(os.homedir(), '.agent', 'sessions', projectKey);
 }
 
 /**

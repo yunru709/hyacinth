@@ -12,7 +12,7 @@ const CACHE_VERSION = 1;
 
 /** 获取依赖图缓存文件路径 */
 function getCachePath(projectKey: string): string {
-  return path.join(os.homedir(), '.agent', 'projects', projectKey, 'dependency-graph.json');
+  return path.join(os.homedir(), '.agent', 'cache', 'dependency-graph', `${projectKey}.json`);
 }
 
 /** 计算文件内容的哈希（用于增量更新检测） */
