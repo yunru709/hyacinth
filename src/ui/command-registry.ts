@@ -447,20 +447,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
-    name: 'evolve',
-    description: '触发自我进化',
-    icon: '\u27F3',
-    category: 'tools',
-    args: '<目标>',
-    argOptions: ['compressor', 'composer', 'all'],
-  },
-  {
-    name: 'evolve-status',
-    description: '显示进化状态',
-    icon: '\u27F3',
-    category: 'tools',
-  },
-  {
     name: 'schedule',
     description: '显示定时任务',
     icon: '\u23F0',

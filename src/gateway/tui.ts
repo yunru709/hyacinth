@@ -51,7 +51,6 @@ import { CommandRegistry, type SlashCommandDef } from '../ui/command-registry.js
 import { ChatLog } from '../ui/chat-log.js';
 import { CustomEditor } from '../ui/pi-tui-editor.js';
 import { theme, editorTheme } from '../ui/theme.js';
-import { Evolver } from '../evolution/index.js';
 import { readRecentEvents, type ConversationEvent } from '../event-store.js';
 import { LocalModelModule } from '../local-model/index.js';
 import type { BackgroundProcessInfo } from '../tools/background-registry.js';
@@ -417,7 +416,6 @@ export async function runTui(
   let prevProviderIsLocal = false;
   let fallbackMessage: string | null = null;
   let isThinking = false;
-  let evolver: Evolver | null = null;
 
   function refreshStatus(info: TurnInfo): void {
     // ── Track last known values for /provider handler ──
@@ -901,7 +899,6 @@ export async function runTui(
       return null;
     }
   }
-
 
   // ── Welcome ──
   const asciiArt = await loadAsciiArt(54);
@@ -2234,77 +2231,6 @@ export async function runTui(
       cfg.set('repair.storm.threshold', n);
       cfg.save().catch(() => {});
       chatLog.addSystem(theme.success('Storm threshold set to ') + theme.fg(String(n)));
-      tui.requestRender();
-      updateTokenEstimate();
-      return;
-    }
-
-    // ── /evolve <target> ──
-    if (input.startsWith('/evolve ')) {
-      const target = input.slice(8).trim();
-      const targetMap: Record<string, string[]> = {
-        compressor: ['src/context/compressor.ts'],
-        composer: ['src/context/composer.ts'],
-        all: ['src/context/compressor.ts', 'src/context/composer.ts'],
-      };
-      const targetFiles = targetMap[target];
-      if (!targetFiles) {
-        chatLog.addSystem(
-          theme.warning('Usage: /evolve <compressor|composer|all>'),
-        );
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-
-      if (!evolver) {
-        evolver = new Evolver(process.cwd());
-      }
-
-      chatLog.addSystem(
-        theme.accent('Starting evolution on: ') +
-          theme.fg(targetFiles.join(', ')),
-      );
-
-      try {
-        const result = await evolver.runEvolution(
-          targetFiles,
-          (_prompt: string) => {
-            chatLog.addSystem(
-              theme.dim('[Evolution] Prompt injected into system context'),
-            );
-          },
-          (message: string) => {
-            chatLog.addSystem(theme.fg(message));
-          },
-          loop,
-        );
-        chatLog.addSystem(
-          theme.success('Evolution complete: ') +
-            theme.fg(result.summary ?? 'done'),
-        );
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        chatLog.addSystem(
-          theme.error('Evolution failed: ') + theme.error(msg),
-        );
-      }
-
-      tui.requestRender();
-      updateTokenEstimate();
-      return;
-    }
-
-    // ── /evolve-status ──
-    if (input === '/evolve-status') {
-      if (evolver) {
-        chatLog.addSystem(
-          theme.accent('Evolution status: ') +
-            theme.fg(evolver.getStatus().phase),
-        );
-      } else {
-        chatLog.addSystem(theme.dim('No evolution active'));
-      }
       tui.requestRender();
       updateTokenEstimate();
       return;
