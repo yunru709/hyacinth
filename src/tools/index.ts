@@ -38,6 +38,11 @@ export { MultiEditTool } from './multi-edit.js';
 export { CodeGraphTool } from './code-graph.js';
 export { InsertTool } from './insert.js';
 export { RestartTool } from './restart.js';
+export { DiffFilesTool } from './diff-files.js';
+export { JsonEditTool } from './json-edit.js';
+export { HttpRequestTool } from './http-request.js';
+export { ArchiveTool } from './archive.js';
+export { DbQueryTool } from './db-query.js';
 export { PythonToolBridge } from './python-bridge/index.js';
 export type { PythonToolMeta } from './python-bridge/index.js';
 export { ToolExecutor } from './executor.js';
@@ -57,6 +62,11 @@ import { FunctionContextTool } from './function-context.js';
 import { MultiEditTool } from './multi-edit.js';
 import { InsertTool } from './insert.js';
 import { RestartTool } from './restart.js';
+import { DiffFilesTool } from './diff-files.js';
+import { JsonEditTool } from './json-edit.js';
+import { HttpRequestTool } from './http-request.js';
+import { ArchiveTool } from './archive.js';
+import { DbQueryTool } from './db-query.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
@@ -77,6 +87,11 @@ export function createDefaultRegistry(cwd?: string, sandboxConfig?: SandboxConfi
   registry.register(new MultiEditTool());
   registry.register(new InsertTool());
   registry.register(new RestartTool(cwd ?? process.cwd()));
+  registry.register(new DiffFilesTool());
+  registry.register(new JsonEditTool());
+  registry.register(new HttpRequestTool());
+  registry.register(new ArchiveTool());
+  registry.register(new DbQueryTool());
   return registry;
 }
 

@@ -1,0 +1,117 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Tool } from './interface.js';
+
+/**
+ * DbQueryTool — SQLite 内置支持，参数化查询。
+ * 使用 better-sqlite3 进行本地 SQLite 查询。
+ */
+export class DbQueryTool implements Tool {
+  readonly name = 'db_query';
+  readonly description =
+    'Execute a parameterized SQL query against a SQLite database. ' +
+    'For SELECT, returns results as a formatted table (JSON array of objects). ' +
+    'For INSERT/UPDATE/DELETE, returns the number of affected rows. ' +
+    'Parameters are passed as a JSON array for safe, injection-free queries. ' +
+    'Supports read-only and read-write modes.';
+  readonly inputSchema: Record<string, unknown> = {
+    type: 'object',
+    properties: {
+      database: {
+        type: 'string',
+        description: 'Path to the SQLite database file (absolute or relative to cwd)',
+      },
+      query: {
+        type: 'string',
+        description: 'SQL query to execute. Use ? placeholders for parameters.',
+      },
+      params: {
+        type: 'string',
+        description: 'JSON array of parameter values to bind to ? placeholders. Example: [1, "hello"]',
+      },
+      readonly: {
+        type: 'boolean',
+        description: 'If true, opens database in read-only mode. Default: false for SELECT, true otherwise.',
+      },
+    },
+    required: ['database', 'query'],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const dbPath = args.database as string;
+    const query = args.query as string;
+    const paramsRaw = args.params as string | undefined;
+    const readonlyFlag = args.readonly as boolean | undefined;
+
+    if (!dbPath || !query) return 'Error: database and query are required.';
+
+    const cwd = process.cwd();
+    const absDb = path.isAbsolute(dbPath) ? dbPath : path.resolve(cwd, dbPath);
+
+    if (!fs.existsSync(absDb)) {
+      return `Error: Database file not found: ${absDb}`;
+    }
+
+    // Parse params
+    let params: unknown[] = [];
+    if (paramsRaw) {
+      try {
+        params = JSON.parse(paramsRaw);
+        if (!Array.isArray(params)) {
+          return 'Error: params must be a JSON array.';
+        }
+      } catch {
+        return 'Error: params must be a valid JSON array string.';
+      }
+    }
+
+    // Determine read-only mode
+    const isSelect = /^\s*SELECT|PRAGMA|EXPLAIN/i.test(query.trim());
+    const readOnly = readonlyFlag ?? isSelect;
+
+    // Dynamic import of better-sqlite3 (optional dependency)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let BetterSqlite3: any;
+    try {
+      BetterSqlite3 = (await import('better-sqlite3')).default;
+    } catch {
+      return 'Error: better-sqlite3 module not available.';
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db: any = new BetterSqlite3(absDb, { readonly: readOnly });
+    try {
+      const isQuery = /^\s*SELECT|PRAGMA|EXPLAIN|WITH\s/i.test(query.trim());
+
+      if (isQuery) {
+        const stmt = db.prepare(query);
+        const rows = params.length > 0 ? stmt.all(...params) : stmt.all();
+
+        if (rows.length === 0) return '(empty result set)';
+
+        // Format as a Markdown table for readability
+        const columns = Object.keys(rows[0] as object);
+        const header = '| ' + columns.join(' | ') + ' |';
+        const separator = '|' + columns.map(() => '---').join('|') + '|';
+        const bodyRows = (rows as Record<string, unknown>[]).map(row =>
+          '| ' + columns.map(c => String(row[c] ?? 'NULL')).join(' | ') + ' |',
+        );
+
+        const result = [header, separator, ...bodyRows.slice(0, 200)].join('\n');
+        const suffix = rows.length > 200
+          ? `\n\n... (${rows.length - 200} more rows, ${rows.length} total)`
+          : `\n\n${rows.length} row(s)`;
+
+        return result + suffix;
+      } else {
+        const stmt = db.prepare(query);
+        const result = params.length > 0 ? stmt.run(...params) : stmt.run();
+        return `Query OK. ${result.changes} row(s) affected.`;
+      }
+    } catch (err) {
+      return `Error: ${(err as Error).message}`;
+    } finally {
+      db.close();
+    }
+  }
+}

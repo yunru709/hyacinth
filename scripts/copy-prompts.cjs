@@ -12,4 +12,6 @@ function cp(src, dst) {
 }
 
 cp('src/prompts', 'dist/prompts');
+cp('src/tools/builtin', '.agent/tools');
+console.log('Builtin Python tools copied to .agent/tools');
 console.log('Prompts copied to dist/prompts');

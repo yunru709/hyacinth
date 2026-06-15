@@ -39,6 +39,7 @@ const BUILTIN_COMMON: ToolBundle = {
     'task_start', 'task_mark', 'bootstrap_mark', 'interrupt', 'restart',
     'add_task', 'list_tasks', 'remove_task', 'toggle_task',
     'mcp_status', 'session_stats',
+    'diff_files', 'json_edit', 'http_request', 'archive',
   ],
 };
 
@@ -70,9 +71,23 @@ const BUILTIN_ADMIN: ToolBundle = {
   ],
 };
 
+const BUILTIN_OFFICE: ToolBundle = {
+  name: 'office',
+  description: '办公文档 — 读取 Word/Excel 文件（按需激活）',
+  builtin: true,
+  tools: ['docx_read', 'xlsx_read'],
+};
+
+const BUILTIN_DATABASE: ToolBundle = {
+  name: 'database',
+  description: '数据库 — SQLite 参数化查询（按需激活）',
+  builtin: true,
+  tools: ['db_query'],
+};
+
 const DEFAULT_CONFIG: ToolBundlesConfig = {
   activeBundles: [],
-  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN },
+  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN, office: BUILTIN_OFFICE, database: BUILTIN_DATABASE },
 };
 
 // ── Registry ───────────────────────────────────────────────────────
@@ -210,9 +225,18 @@ export class ToolBundleRegistry {
     try {
       const raw = fs.readFileSync(this.configPath, 'utf-8');
       const parsed = JSON.parse(raw);
-      // Ensure builtin bundles always exist
-      for (const b of [BUILTIN_ALL, BUILTIN_COMMON, BUILTIN_CODING, BUILTIN_AGENT, BUILTIN_ADMIN]) {
-        if (!parsed.bundles?.[b.name]) parsed.bundles = { ...parsed.bundles, [b.name]: b };
+      // Ensure builtin bundles always exist with latest tool lists
+      const builtins = [BUILTIN_ALL, BUILTIN_COMMON, BUILTIN_CODING, BUILTIN_AGENT, BUILTIN_ADMIN, BUILTIN_OFFICE, BUILTIN_DATABASE];
+      for (const b of builtins) {
+        if (!parsed.bundles) parsed.bundles = { [b.name]: b };
+        else if (!parsed.bundles[b.name]) {
+          parsed.bundles[b.name] = b;
+        } else {
+          // Existing builtin: merge tool list (ensure builtin tools are always present,
+          // preserving any user-added tools)
+          const existing = parsed.bundles[b.name];
+          existing.tools = [...new Set([...b.tools, ...existing.tools])];
+        }
       }
       return parsed as ToolBundlesConfig;
     } catch {
