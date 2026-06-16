@@ -199,8 +199,9 @@ export class OpenAICompatibleProvider implements Provider {
             let input: Record<string, unknown> = {};
             try {
               input = JSON.parse(acc.arguments || '{}');
-            } catch {
-              // JSON parse error
+            } catch (e) {
+              console.warn(`[compatible] JSON parse failed for tool "${acc.name}": ${(e as Error).message}`);
+              console.warn(`[compatible] raw (first 500 chars): ${(acc.arguments || '').slice(0, 500)}`);
             }
             yield { type: 'TOOL_USE', id: acc.id, name: acc.name, input };
           }

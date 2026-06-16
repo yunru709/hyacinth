@@ -354,10 +354,6 @@ export async function runTui(
   let thinkingLoader: Loader | null = null;
   root.addChild(thinkingBar);
 
-  // Unread messages hint (shown when scrolled up) — P2-4
-  const unreadHintText = new Text('', 0, 0);
-  root.addChild(unreadHintText);
-
   root.addChild(footerText);
   root.addChild(permissionBar);
   root.addChild(editor);
@@ -393,19 +389,6 @@ export async function runTui(
       thinkingBar.removeChild(thinkingLoader);
       thinkingLoader = null;
     }
-  }
-
-  function updateUnreadHint(): void {
-    const count = chatLog.unreadCount;
-    if (count > 0 && !chatLog.isPinnedToBottom) {
-      unreadHintText.setText(
-        theme.warning(`↓ ${count} new message${count > 1 ? 's' : ''} below  `) +
-        theme.dim('(End to scroll down)'),
-      );
-    } else {
-      unreadHintText.setText('');
-    }
-    tui.requestRender();
   }
 
   // ── State for refreshStatus ──
@@ -600,21 +583,21 @@ export async function runTui(
         inputSummary.length > 100 ? inputSummary.slice(0, 97) + '...' : inputSummary;
       const id = toolId ?? `tool_${Date.now()}_${++toolCounterFallback}`;
       chatLog.startTool(id, name, summary);
-      updateUnreadHint();
+
       tui.requestRender();
     },
     onToolResult(content: string, isError: boolean, toolId?: string) {
       if (toolId) {
         chatLog.updateToolResult(toolId, content, { isError });
       }
-      updateUnreadHint();
+
       tui.requestRender();
     },
     onDiff(toolId: string, filePath: string, diffLines: Array<{ kind: string; text: string }>) {
       if (toolId) {
         chatLog.showDiff(toolId, filePath, diffLines);
       }
-      updateUnreadHint();
+
       tui.requestRender();
     },
     onStatus(message: string, level: string) {
@@ -688,7 +671,7 @@ export async function runTui(
           refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
         }
       }
-      updateUnreadHint();
+
       tui.requestRender();
     },
     onFlush() {
@@ -710,7 +693,7 @@ export async function runTui(
         chatLog.finalizeAssistant(currentTextLine.trim());
         currentTextLine = '';
       }
-      updateUnreadHint();
+
       tui.requestRender();
     },
     onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'> {
@@ -2786,7 +2769,7 @@ if (input.startsWith('/threshold ')) {
       chatLog.addSystem(
         theme.dim('Tools ') + theme.fg(expanded ? 'expanded' : 'collapsed'),
       );
-      updateUnreadHint();
+
       tui.requestRender();
       return { consume: true };
     }
@@ -2825,7 +2808,7 @@ if (input.startsWith('/threshold ')) {
     // End: jump to bottom
     if (matchesKey(data, Key.end)) {
       chatLog.pinToBottom();
-      updateUnreadHint();
+
       tui.requestRender();
       return { consume: true };
     }

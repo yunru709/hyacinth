@@ -177,8 +177,9 @@ export class OpenAIProvider implements Provider {
             let input: Record<string, unknown> = {};
             try {
               input = JSON.parse(acc.arguments || '{}');
-            } catch {
-              // JSON 解析失败时保留空对象
+            } catch (e) {
+              console.warn(`[openai] JSON parse failed for tool "${acc.name}": ${(e as Error).message}`);
+              console.warn(`[openai] raw (first 500 chars): ${(acc.arguments || '').slice(0, 500)}`);
             }
             yield {
               type: 'TOOL_USE',

@@ -75,10 +75,17 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
 }): ReturnType<typeof spawn> {
   // 剥掉可能的 powershell -Command "..." 外壳，避免嵌套调用
   const script = unwrapPsCommand(command);
-  // 写临时 .ps1 文件，UTF-8 编码
+  // 写临时 .ps1 文件，UTF-8 with BOM（PowerShell -File 靠 BOM 识别编码）
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-ps-'));
   const psFile = path.join(tmpDir, 'script.ps1');
-  fs.writeFileSync(psFile, `[Console]::OutputEncoding = [Text.Encoding]::UTF8\n${script}\n`, 'utf-8');
+  // BOM + 编码设置：确保 PS 解析和外部命令都走 UTF-8
+  const preamble = [
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    '[Console]::InputEncoding  = [Text.Encoding]::UTF8',
+    '$OutputEncoding = [Text.Encoding]::UTF8',
+    'chcp 65001 > $null',       // 让 cmd.exe / 外部命令也走 UTF-8
+  ].join('\n');
+  fs.writeFileSync(psFile, '﻿' + preamble + '\n' + script + '\n', 'utf-8');
 
   const child = spawn('powershell.exe', [
     '-NoProfile',

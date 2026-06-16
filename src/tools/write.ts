@@ -35,7 +35,10 @@ export class WriteTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const filePath = (args.file_path || args.path) as string;
     const content = args.content as string;
-    if (!filePath) return '错误：缺少 file_path 参数。请提供文件的绝对路径，例如 file_path: "/path/to/file.md"。';
+    if (!filePath) {
+      const received = Object.keys(args).filter(k => args[k] !== undefined && args[k] !== null);
+      return `错误：缺少 file_path 参数。已收到参数: ${received.length > 0 ? received.join(', ') : '(无)'}。请使用 file_path 提供目标文件的绝对路径，例如 file_path: "/path/to/file.md"。`;
+    }
     if (content === undefined || content === null) return '错误：缺少 content 参数。请提供要写入的内容。';
 
     // 自动创建父目录

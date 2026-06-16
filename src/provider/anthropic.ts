@@ -191,8 +191,9 @@ export class AnthropicProvider implements Provider {
               let input: Record<string, unknown> = {};
               try {
                 input = JSON.parse(currentToolUse.inputJson || '{}');
-              } catch {
-                // JSON 解析失败时保留空对象
+              } catch (e) {
+                console.warn(`[anthropic] JSON parse failed for tool "${currentToolUse.name}": ${(e as Error).message}`);
+                console.warn(`[anthropic] raw (first 500 chars): ${(currentToolUse.inputJson || '').slice(0, 500)}`);
               }
               yield {
                 type: 'TOOL_USE',

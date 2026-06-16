@@ -157,7 +157,13 @@ export class DiskUsageTool implements Tool {
     return new Promise((resolve, reject) => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-du-'));
       const psFile = path.join(tmpDir, 'script.ps1');
-      fs.writeFileSync(psFile, `[Console]::OutputEncoding = [Text.Encoding]::UTF8\n${script}\n`, 'utf-8');
+      const preambleDU = [
+        '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+        '[Console]::InputEncoding  = [Text.Encoding]::UTF8',
+        '$OutputEncoding = [Text.Encoding]::UTF8',
+        'chcp 65001 > $null',
+      ].join('\n');
+      fs.writeFileSync(psFile, '﻿' + preambleDU + '\n' + script + '\n', 'utf-8');
 
       const child = spawn('powershell.exe', [
         '-NoProfile',
