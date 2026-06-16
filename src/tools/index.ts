@@ -43,6 +43,7 @@ export { JsonEditTool } from './json-edit.js';
 export { HttpRequestTool } from './http-request.js';
 export { ArchiveTool } from './archive.js';
 export { DbQueryTool } from './db-query.js';
+export { DiskUsageTool } from './disk-usage.js';
 export { PythonToolBridge } from './python-bridge/index.js';
 export type { PythonToolMeta } from './python-bridge/index.js';
 export { ToolExecutor } from './executor.js';
@@ -67,6 +68,7 @@ import { JsonEditTool } from './json-edit.js';
 import { HttpRequestTool } from './http-request.js';
 import { ArchiveTool } from './archive.js';
 import { DbQueryTool } from './db-query.js';
+import { DiskUsageTool } from './disk-usage.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
@@ -92,6 +94,7 @@ export function createDefaultRegistry(cwd?: string, sandboxConfig?: SandboxConfi
   registry.register(new HttpRequestTool());
   registry.register(new ArchiveTool());
   registry.register(new DbQueryTool());
+  registry.register(new DiskUsageTool(cwd));
   return registry;
 }
 

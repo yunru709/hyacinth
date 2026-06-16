@@ -8,6 +8,7 @@ export type CustomEditorCallbacks = {
   onCtrlL?: () => void;
   onCtrlP?: () => void;
   onAltEnter?: () => void;
+  onBackspaceOnEmpty?: () => void;
 };
 
 /**
@@ -30,6 +31,7 @@ export class CustomEditor extends Editor {
   declare onCtrlL?: () => void;
   declare onCtrlP?: () => void;
   declare onAltEnter?: () => void;
+  declare onBackspaceOnEmpty?: () => void;
 
   override handleInput(data: string): void {
     // Alt+Enter: trigger alternative submit (e.g. multi-line mode toggle)
@@ -86,6 +88,15 @@ export class CustomEditor extends Editor {
         this.onSubmit(text);
         this.setText('');
       }
+      return;
+    }
+
+    // Backspace on empty input: notify owner (e.g. for queue cancellation)
+    if (matchesKey(data, Key.backspace) &&
+        this.getText().length === 0 &&
+        this.onBackspaceOnEmpty &&
+        !this.isShowingAutocomplete()) {
+      this.onBackspaceOnEmpty();
       return;
     }
 

@@ -1,6 +1,6 @@
 # Agent 框架配置指南
 
-你收到的消息由多个 Zone 按编号顺序拼接而成。Zone 1-3 使用 `cache_control` 缓存，内容不变时不消耗 token 计费。压缩只影响对话历史 Zone，不影响身份/工具/Skill 等固定内容。
+你收到的消息由多个 Zone 按编号顺序拼接而成。Zone 1-3 使用 `cache_control` 缓存，内容不变时不消耗 token 计费。压缩只影响 Zone 3（对话记录），不影响身份/工具/Skill 等固定内容。
 
 ## 可修改的配置项
 

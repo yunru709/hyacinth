@@ -261,7 +261,7 @@ export async function createAgent(
     getContent: () => {
       return contextComposer.activeConditions.has('precise_mode')
         ? '── 以下为检索有关信息 ──'
-        : '── 以下为历史对话 ──';
+        : '── 以下为此前对话 ──';
     },
   });
   contextComposer.registerSource({
@@ -272,7 +272,7 @@ export async function createAgent(
     getContent: () => {
       return contextComposer.activeConditions.has('precise_mode')
         ? '── 以上为检索有关信息 ──'
-        : '── 以上为历史对话 ──';
+        : '── 以上为此前对话 ──';
     },
   });
 

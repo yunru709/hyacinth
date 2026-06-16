@@ -9,6 +9,7 @@ const logger = createLogger('env-collector');
 export interface SystemEnvInfo {
   os: string;
   arch: string;
+  cpuModel: string;
   cpuCores: number;
   totalMemoryGB: string;
   gpu: string;
@@ -30,23 +31,49 @@ function safeExec(cmd: string, fallback: string = '(未检测到)'): string {
 
 function detectGPU(): string {
   if (process.platform === 'win32') {
-    const output = safeExec(
-      'wmic path win32_VideoController get Name /value',
+    // ── 方案1: nvidia-smi — N 卡优先，VRAM 准确不溢出（Win32_VideoController.AdapterRAM 是 uint32，>4GB 截断）──
+    const nvidiaOutput = safeExec(
+      'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader',
       '',
     );
-    const match = output.match(/Name\s*=\s*(.+)/);
-    if (match) {
-      const gpuName = match[1].trim();
-      const vramOutput = safeExec(
-        'wmic path win32_VideoController get AdapterRAM /value',
-        '',
-      );
-      const vramMatch = vramOutput.match(/AdapterRAM\s*=\s*(\d+)/);
-      if (vramMatch) {
-        const vramGB = (parseInt(vramMatch[1], 10) / 1024 / 1024 / 1024).toFixed(1);
-        return `${gpuName} (VRAM ${vramGB} GB)`;
+    if (nvidiaOutput && nvidiaOutput !== '(未检测到)') {
+      const firstLine = nvidiaOutput.split('\n')[0].trim();
+      const parts = firstLine.split(',').map(s => s.trim());
+      if (parts.length >= 2) {
+        const vramMatch = parts[1].match(/(\d+)/);
+        const vramMB = vramMatch ? parseInt(vramMatch[1], 10) : 0;
+        if (vramMB > 0) {
+          const vramGB = (vramMB / 1024).toFixed(1);
+          return `${parts[0]} (VRAM ${vramGB} GB)`;
+        }
       }
-      return gpuName;
+      return firstLine;
+    }
+
+    // ── 方案2: Get-CimInstance（没 N 卡驱动时回退，如 AMD/Intel 独显）──
+    const psCmd = 'Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name)||$($_.AdapterRAM)" }';
+    const output = safeExec(`powershell -Command "${psCmd}"`, '');
+    if (output && output !== '(未检测到)') {
+      const lines = output.split('\n').map(l => l.trim()).filter(Boolean);
+      const realCards = lines.filter(l =>
+        !l.includes('Microsoft Basic') &&
+        !l.includes('Microsoft Remote') &&
+        !l.includes('Microsoft Hyper-V') &&
+        !l.includes('Remote Display'),
+      );
+      for (const line of [...realCards, ...lines]) {
+        const sepIdx = line.indexOf('||');
+        const name = sepIdx >= 0 ? line.substring(0, sepIdx).trim() : line.trim();
+        const vramStr = sepIdx >= 0 ? line.substring(sepIdx + 2).trim() : '';
+        const vramBytes = parseInt(vramStr, 10);
+        if (vramBytes && !isNaN(vramBytes) && vramBytes > 0 && vramBytes < 1_000_000_000_000) {
+          const vramGB = (vramBytes / 1024 / 1024 / 1024).toFixed(1);
+          return `${name} (VRAM ${vramGB} GB)`;
+        }
+        if (name && name !== '(未检测到)') {
+          return name;
+        }
+      }
     }
   }
 
@@ -90,6 +117,19 @@ function detectShell(): string {
   return process.env.SHELL || '/bin/sh';
 }
 
+function detectCPUModel(): string {
+  if (process.platform === 'win32') {
+    const name = safeExec(
+      'powershell -Command "(Get-CimInstance Win32_Processor).Name"',
+      '',
+    ).replace(/[\r\n]+/g, '').trim();
+    if (name && name !== '(未检测到)') return name;
+  }
+  // Linux/macOS fallback: Node.js 的 os.cpus()[0].model 已够用
+  const firstCpu = os.cpus()[0];
+  return firstCpu?.model?.trim() || os.arch();
+}
+
 export function collectSystemInfo(): SystemEnvInfo {
   if (cachedInfo) return cachedInfo;
 
@@ -97,12 +137,16 @@ export function collectSystemInfo(): SystemEnvInfo {
   const totalMemGB = (totalMemBytes / 1024 / 1024 / 1024).toFixed(1);
 
   const osName = process.platform === 'win32'
-    ? safeExec('ver', os.type()).replace(/[\r\n\[\]]/g, '').trim()
+    ? safeExec(
+        'powershell -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
+        os.type(),
+      ).replace(/[\r\n]+/g, '').trim()
     : `${os.type()} ${os.release()}`;
 
   cachedInfo = {
     os: osName,
     arch: os.arch(),
+    cpuModel: detectCPUModel(),
     cpuCores: os.cpus().length,
     totalMemoryGB: totalMemGB,
     gpu: detectGPU(),
@@ -184,7 +228,7 @@ function formatDynamicEnvInfo(info: SystemEnvInfo): string {
     `运行环境:`,
     `- 操作系统: ${info.os}`,
     `- 架构: ${info.arch}`,
-    `- CPU 核心: ${info.cpuCores}`,
+    `- CPU: ${info.cpuModel} (${info.cpuCores} 核)`,
     `- 内存: ${info.totalMemoryGB} GB`,
     `- 显卡: ${info.gpu}`,
     `- Python: ${info.python}`,

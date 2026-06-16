@@ -39,6 +39,7 @@ import { getBootstrapStatus, DEFAULT_PERSONA_DIR } from '../setup/persona-bootst
 import { createLogger } from '../logging/logger.js';
 import { TuiChannel } from '../channels/builtin/tui-channel.js';
 import { ChannelManager } from '../channels/manager.js';
+import { MessageQueue, QueueMessageMode } from '../channels/index.js';
 import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
 import type { AgentFactory, ChannelMessageEvent, ReplyFn } from '../channels/interface.js';
 import {
@@ -968,6 +969,7 @@ export async function runTui(
 
   // ── Input state ──
   let isProcessing = false;
+  const messageQueue = new MessageQueue();
   let inputHistory: string[] = [];
   let historyIndex = -1;
 
@@ -1016,7 +1018,47 @@ export async function runTui(
     }
 
     footer += theme.dim(`\n${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`);
+    if (messageQueue.size > 0) {
+      footer += theme.fg(` | Queue: ${messageQueue.size}`);
+    }
     footerText.setText(footer);
+  }
+
+  function truncateMsg(text: string, max = 40): string {
+    return text.length > max ? text.slice(0, max) + '...' : text;
+  }
+
+  /**
+   * Process one message through the agent loop, then drain any queued messages.
+   * Called by handleInput when the agent is idle.
+   */
+  async function processBatch(initialText: string): Promise<void> {
+    let text: string | undefined = initialText;
+
+    while (text !== undefined) {
+      isProcessing = true;
+      editor.setText('');
+
+      chatLog.addUser('❯ ' + text);
+      chatLog.addSystem(theme.dim('─'.repeat(30)));
+
+      try {
+        const sid = sessionDir.split(/[\\/]/).pop() ?? 'tui-default';
+        await tuiChannel.sendMessage(sid, text);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(message));
+      }
+
+      isProcessing = false;
+
+      // Check queue for pending messages
+      const next = messageQueue.dequeue();
+      text = next?.text;
+    }
+
+    updateTokenEstimate();
+    tui.requestRender();
   }
 
   async function handleInput(text: string): Promise<void> {
@@ -2588,26 +2630,24 @@ if (input.startsWith('/threshold ')) {
       return;
     }
 
-    if (isProcessing) return;
+    // \u2500\u2500 Message Queue Integration \u2500\u2500
+    const mode = MessageQueue.detectMode(input);
+    const cleanText = MessageQueue.stripMarkers(input);
 
-    isProcessing = true;
-    editor.setText('');
-
-    chatLog.addUser('\u276f ' + input);
-    chatLog.addSystem(theme.dim('\u2500'.repeat(30)));
-    updateUnreadHint();
-
-    try {
-      const sid = sessionDir.split(/[\\/]/).pop() ?? 'tui-default';
-      await tuiChannel.sendMessage(sid, input);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(message));
+    if (isProcessing) {
+      messageQueue.enqueue(cleanText, mode);
+      if (mode === QueueMessageMode.Insert) {
+        chatLog.addSystem(theme.warning(`\u23e9 Inserting: ${truncateMsg(cleanText)}`));
+        loop.interrupt();
+      } else {
+        chatLog.addSystem(theme.dim(`\u23f3 Queued (#${messageQueue.size}): ${truncateMsg(cleanText)}`));
+      }
+      updateTokenEstimate();
+      tui.requestRender();
+      return;
     }
 
-    isProcessing = false;
-    tui.requestRender();
-    updateTokenEstimate();
+    await processBatch(cleanText);
   }
 
   // ── Editor callbacks ──
@@ -2657,6 +2697,21 @@ if (input.startsWith('/threshold ')) {
       refreshStatus(loop.getTurnInfo(tc, st.current_context_tokens ?? 0));
     }).catch(() => {});
     tui.requestRender();
+  };
+
+  // ── Queue cancellation: Backspace on empty input pops last queued message ──
+  editor.onBackspaceOnEmpty = () => {
+    if (messageQueue.isEmpty()) return;
+    const removed = messageQueue.pop();
+    if (removed) {
+      chatLog.addSystem(
+        theme.dim(
+          `[queue] removed: "${truncateMsg(removed.text)}" (${messageQueue.size} remaining)`,
+        ),
+      );
+      updateTokenEstimate();
+      tui.requestRender();
+    }
   };
 
   // ── Slash command autocomplete ──

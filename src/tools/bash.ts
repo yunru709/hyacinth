@@ -1,4 +1,5 @@
 import { spawn, execSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Tool } from './interface.js';
@@ -23,17 +24,85 @@ const DEFAULT_BLOCKED_COMMANDS: string[] = [
   'del /f /s /q C:',
 ];
 
-/** 词边界正则黑名单 — 匹配独立危险命令，避免子串误杀（如 format 误杀 Format-Table） */
+/** 词边界正则黑名单 — 匹配独立危险命令。
+ *  (?!-) 确保 format 不误杀 PowerShell 的 Format-List/Format-Table/Format-Hex 等 cmdlet */
 const BLOCKED_COMMAND_REGEX: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\bformat\b/i, label: 'format' },
+  { pattern: /\bformat\b(?!-)/i, label: 'format' },
 ];
 
-/** Platform-aware default shell */
-function getShell(): string {
-  if (os.platform() === 'win32') {
-    return 'powershell.exe';
+/**
+ * 如果命令是 `powershell -Command "..."` 包装，取出内部脚本。
+ * spawnWindows 已通过 -File 在 PowerShell 中执行，嵌套的 powershell
+ * 会重新引入 cmd.exe 包装层，破坏 $_ / 管道 / 重定向。
+ *
+ * 不靠枚举标志名的正则——只找 -Command/-c 分隔点，拿到后面的内容即可。
+ */
+function unwrapPsCommand(command: string): string {
+  const lc = command.toLowerCase();
+  // 只处理以 powershell 开头的命令行
+  if (!lc.startsWith('powershell')) return command;
+
+  // 找 -Command 或 -c（必须是独立参数，不能是 -CustomFlag 的一部分）
+  const cmdIdx = lc.search(/\s-(?:command|c)\b/i);
+  if (cmdIdx === -1) {
+    // 没有 -Command 标志，可能是裸 powershell 调用，
+    // 整个 command 就是脚本内容 — 但 powershell 本身不是有效 PS 脚本，
+    // 把整个字符串当 PS 代码执行（PS 会报语法错），也算合理。
+    return command;
   }
-  return '/bin/sh';
+
+  let script = command.slice(cmdIdx).trim().replace(/^-(?:command|c)\s*/i, '').trim();
+
+  // 去掉外层引号
+  if ((script.startsWith('"') && script.endsWith('"')) ||
+      (script.startsWith("'") && script.endsWith("'"))) {
+    script = script.slice(1, -1);
+  }
+
+  return script || command;
+}
+
+/**
+ * Windows: 将命令写入临时 .ps1 文件，通过 `powershell -File` 直接执行。
+ *
+ * 绕过了 spawn({ shell: true }) 的 cmd.exe 包装层，命令原文直达 PowerShell。
+ */
+function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts: {
+  timeout: number;
+  signal?: AbortSignal;
+  detached: boolean;
+  stdin: 'ignore' | 'pipe';
+}): ReturnType<typeof spawn> {
+  // 剥掉可能的 powershell -Command "..." 外壳，避免嵌套调用
+  const script = unwrapPsCommand(command);
+  // 写临时 .ps1 文件，UTF-8 编码
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-ps-'));
+  const psFile = path.join(tmpDir, 'script.ps1');
+  fs.writeFileSync(psFile, `[Console]::OutputEncoding = [Text.Encoding]::UTF8\n${script}\n`, 'utf-8');
+
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', psFile,
+  ], {
+    cwd,
+    env,
+    detached: opts.detached,
+    stdio: [opts.stdin, 'pipe', 'pipe'],
+    // shell: false — 不经过 cmd.exe，直接创建 powershell 进程
+    windowsHide: true,
+  });
+
+  // 子进程退出后清理临时目录
+  child.on('close', () => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  });
+  child.on('error', () => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  });
+
+  return child;
 }
 
 /**
@@ -45,7 +114,7 @@ function getShell(): string {
  * - env (可选): 环境变量映射，会自动持久化到后续调用
  *
  * 平台适配：
- * - Windows: 使用 PowerShell 执行，默认注入 PYTHONIOENCODING=utf-8 + PYTHONUTF8=1
+ * - Windows: 命令写入临时 .ps1 文件，powershell -File 直接执行
  * - Linux/macOS: 使用 /bin/sh 执行
  *
  * 返回 stdout + stderr，超时后终止进程树
@@ -54,7 +123,7 @@ function getShell(): string {
 export class BashTool implements Tool {
   readonly name = 'bash';
   readonly description =
-    'Execute a shell command and return stdout/stderr. Set async=true for background execution (manage with process_list/process_kill/process_output).';
+    'Execute a shell command and return stdout/stderr. On Windows, commands natively run in PowerShell — do NOT prefix with "powershell -Command". On Linux/macOS, commands run in /bin/sh. Set async=true for background execution.';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
@@ -64,7 +133,7 @@ export class BashTool implements Tool {
       },
       timeout: {
         type: 'number',
-        description: 'Timeout in seconds. Default is 600. Ignored when async=true.',
+        description: 'Timeout in seconds. Default is 600. Applies to both sync and async execution.',
       },
       env: {
         type: 'object',
@@ -127,14 +196,11 @@ export class BashTool implements Tool {
   private killProcessTree(pid: number): void {
     try {
       if (process.platform === 'win32') {
-        // Windows: 使用 taskkill 杀进程树
         execSync(`taskkill /T /F /PID ${pid}`, { stdio: 'ignore' });
       } else {
-        // Unix: 杀进程组
         process.kill(-pid, 'SIGKILL');
       }
     } catch {
-      // 进程可能已退出，尝试直接杀
       try {
         process.kill(pid, 'SIGKILL');
       } catch {
@@ -163,7 +229,7 @@ export class BashTool implements Tool {
       }
     }
 
-    // 沙箱拦截：词边界正则匹配（避免子串误杀）
+    // 沙箱拦截：词边界正则匹配
     for (const { pattern, label } of BLOCKED_COMMAND_REGEX) {
       if (pattern.test(command)) {
         throw new Error(`Command blocked by sandbox: contains blocked command "${label}"`);
@@ -184,8 +250,7 @@ export class BashTool implements Tool {
       }
     }
 
-    // 沙箱拦截：检查路径是否在白名单内
-    // 解析命令中可能包含的路径参数，验证工作目录是否在 allowedPaths 内
+    // 沙箱拦截：检查工作目录在白名单内
     if (this.sandboxConfig.allowedPaths.length > 0) {
       const cwdAllowed = this.sandboxConfig.allowedPaths.some(
         (p) => this.cwd === p || this.cwd.startsWith(p + (os.platform() === 'win32' ? '\\' : '/')),
@@ -197,6 +262,18 @@ export class BashTool implements Tool {
       }
     }
 
+    const isWin = process.platform === 'win32';
+
+    // 构建环境变量
+    const mergedEnv: Record<string, string | undefined> = { ...process.env };
+    if (isWin) {
+      mergedEnv.PYTHONIOENCODING = mergedEnv.PYTHONIOENCODING ?? 'utf-8';
+      mergedEnv.PYTHONUTF8 = mergedEnv.PYTHONUTF8 ?? '1';
+    }
+    for (const [key, value] of Object.entries(this.persistentEnv)) {
+      mergedEnv[key] = value;
+    }
+
     // ── 异步执行路径 ──
     if (runAsync) {
       if (!this.allowAsync) {
@@ -206,62 +283,63 @@ export class BashTool implements Tool {
         return 'Error: BackgroundProcessRegistry not available. Cannot run async commands.';
       }
 
-      const shell = getShell();
-      const isWin = process.platform === 'win32';
+      const childProcess = isWin
+        ? spawnWindows(command, this.cwd, mergedEnv as NodeJS.ProcessEnv, {
+            timeout,
+            signal,
+            detached: false,
+            stdin: 'ignore',
+          })
+        : spawn(command, [], {
+            cwd: this.cwd,
+            shell: '/bin/sh',
+            env: mergedEnv as NodeJS.ProcessEnv,
+            detached: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
 
-      const mergedEnv: Record<string, string | undefined> = { ...process.env };
-      if (isWin) {
-        mergedEnv.PYTHONIOENCODING = mergedEnv.PYTHONIOENCODING ?? 'utf-8';
-        mergedEnv.PYTHONUTF8 = mergedEnv.PYTHONUTF8 ?? '1';
-      }
-      for (const [key, value] of Object.entries(this.persistentEnv)) {
-        mergedEnv[key] = value;
-      }
-
-      const childProcess = spawn(command, [], {
-        cwd: this.cwd,
-        shell,
-        env: mergedEnv,
-        detached: !isWin,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      // 不等待，立即注册
       const handle = this.backgroundRegistry.register('bash', command, childProcess);
       const pid = childProcess.pid ?? '?';
+
+      // 超时自动终止（和同步路径一致）
+      const timeoutMs = timeout * 1000;
+      const timer = setTimeout(() => {
+        if (childProcess.pid) {
+          this.killProcessTree(childProcess.pid);
+        }
+        this.backgroundRegistry?.kill(handle);
+      }, timeoutMs);
+      // 子进程正常退出时清除定时器，避免重复 kill
+      childProcess.on('exit', () => clearTimeout(timer));
+
       return `[background:${handle}] PID ${pid}\nCommand: ${command}\n\nUse process_output("${handle}") to read output, process_kill("${handle}") to stop.`;
     }
 
-    // ── 同步执行路径（原有逻辑）──
+    // ── 同步执行路径 ──
 
     // 输出截断配置
-    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 500 * 1024; // safety cap; ToolResultBuffer is the primary gate
+    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 500 * 1024;
     const LIMIT_KB = Math.round(MAX_OUTPUT_BYTES / 1024);
     let outputSize = 0;
     let truncated = false;
 
     return new Promise<string>((resolve, reject) => {
-      const shell = getShell();
-      const isWin = process.platform === 'win32';
       const startTime = Date.now();
 
-      // 构建环境变量：Node 进程 env + 默认 UTF-8 + 持久化 env
-      const mergedEnv: Record<string, string | undefined> = { ...process.env };
-      if (isWin) {
-        mergedEnv.PYTHONIOENCODING = mergedEnv.PYTHONIOENCODING ?? 'utf-8';
-        mergedEnv.PYTHONUTF8 = mergedEnv.PYTHONUTF8 ?? '1';
-      }
-      for (const [key, value] of Object.entries(this.persistentEnv)) {
-        mergedEnv[key] = value;
-      }
-
-      const childProcess = spawn(command, [], {
-        cwd: this.cwd,
-        shell: shell,
-        env: mergedEnv,
-        detached: !isWin, // Unix 使用进程组
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const childProcess = isWin
+        ? spawnWindows(command, this.cwd, mergedEnv as NodeJS.ProcessEnv, {
+            timeout,
+            signal,
+            detached: false,
+            stdin: 'pipe',
+          })
+        : spawn(command, [], {
+            cwd: this.cwd,
+            shell: '/bin/sh',
+            env: mergedEnv as NodeJS.ProcessEnv,
+            detached: false,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
 
       let stdout = '';
       let stderr = '';
@@ -289,14 +367,14 @@ export class BashTool implements Tool {
         }
       });
 
-      // 超时处理：使用进程树 kill
+      // 超时处理
       const timer = setTimeout(() => {
         if (childProcess.pid) {
           this.killProcessTree(childProcess.pid);
         }
       }, timeout * 1000);
 
-      // AbortSignal 监听：Ctrl+C 中断时 kill 子进程
+      // AbortSignal 监听
       const onAbort = () => {
         if (childProcess.pid) {
           this.killProcessTree(childProcess.pid);
@@ -326,7 +404,6 @@ export class BashTool implements Tool {
             resolve(`Command completed successfully [Exit code: 0, ${elapsed}ms]`);
           }
         } else {
-          // 检查是否因超时被杀
           const elapsed = Date.now() - startTime;
           const timedOut = code === null;
           if (timedOut) {
