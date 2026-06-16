@@ -10,6 +10,7 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { getProviderConfigLoader } from './config.js';
+import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** OpenAICompatibleProvider 构造选项 */
 export interface OpenAICompatibleOptions {
@@ -196,14 +197,13 @@ export class OpenAICompatibleProvider implements Provider {
         // finish_reason
         if (choice.finish_reason) {
           for (const [, acc] of toolCallAccumulators) {
-            let input: Record<string, unknown> = {};
-            try {
-              input = JSON.parse(acc.arguments || '{}');
-            } catch (e) {
-              console.warn(`[compatible] JSON parse failed for tool "${acc.name}": ${(e as Error).message}`);
-              console.warn(`[compatible] raw (first 500 chars): ${(acc.arguments || '').slice(0, 500)}`);
+            const raw = acc.arguments || '';
+            const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
+            if (!complete) {
+              logToolArgsWarning('compatible', acc.name, raw, error);
             }
-            yield { type: 'TOOL_USE', id: acc.id, name: acc.name, input };
+            // Even on incomplete recovery, still emit — allows partial execution
+            yield { type: 'TOOL_USE', id: acc.id, name: acc.name, input: recovered };
           }
           toolCallAccumulators.clear();
           yield { type: 'STOP', reason: choice.finish_reason };

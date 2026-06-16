@@ -10,6 +10,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {
@@ -174,18 +175,16 @@ export class OpenAIProvider implements Provider {
         if (choice.finish_reason) {
           // 先 emit 所有累积的 tool_use
           for (const [, acc] of toolCallAccumulators) {
-            let input: Record<string, unknown> = {};
-            try {
-              input = JSON.parse(acc.arguments || '{}');
-            } catch (e) {
-              console.warn(`[openai] JSON parse failed for tool "${acc.name}": ${(e as Error).message}`);
-              console.warn(`[openai] raw (first 500 chars): ${(acc.arguments || '').slice(0, 500)}`);
+            const raw = acc.arguments || '';
+            const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
+            if (!complete) {
+              logToolArgsWarning('openai', acc.name, raw, error);
             }
             yield {
               type: 'TOOL_USE',
               id: acc.id,
               name: acc.name,
-              input,
+              input: recovered,
             };
           }
           toolCallAccumulators.clear();

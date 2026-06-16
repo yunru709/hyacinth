@@ -9,6 +9,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {
@@ -188,18 +189,16 @@ export class AnthropicProvider implements Provider {
           // ---- content_block_stop：完成 tool_use 块 ----
           case 'content_block_stop': {
             if (currentToolUse) {
-              let input: Record<string, unknown> = {};
-              try {
-                input = JSON.parse(currentToolUse.inputJson || '{}');
-              } catch (e) {
-                console.warn(`[anthropic] JSON parse failed for tool "${currentToolUse.name}": ${(e as Error).message}`);
-                console.warn(`[anthropic] raw (first 500 chars): ${(currentToolUse.inputJson || '').slice(0, 500)}`);
+              const raw = currentToolUse.inputJson || '';
+              const { recovered, complete, error } = recoverToolArguments(raw, currentToolUse.name);
+              if (!complete) {
+                logToolArgsWarning('anthropic', currentToolUse.name, raw, error);
               }
               yield {
                 type: 'TOOL_USE',
                 id: currentToolUse.id,
                 name: currentToolUse.name,
-                input,
+                input: recovered,
               };
               currentToolUse = null;
             }

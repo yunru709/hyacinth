@@ -7,6 +7,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
+import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** LocalProvider 构造选项 */
 export interface LocalProviderOptions {
@@ -152,18 +153,16 @@ export class LocalProvider implements Provider {
         // finish_reason
         if (choice.finish_reason) {
           for (const [, acc] of toolCallAccumulators) {
-            let input: Record<string, unknown> = {};
-            try {
-              input = JSON.parse(acc.arguments || '{}');
-            } catch (e) {
-              console.warn(`[local] JSON parse failed for tool "${acc.name}": ${(e as Error).message}`);
-              console.warn(`[local] raw (first 500 chars): ${(acc.arguments || '').slice(0, 500)}`);
+            const raw = acc.arguments || '';
+            const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
+            if (!complete) {
+              logToolArgsWarning('local', acc.name, raw, error);
             }
             yield {
               type: 'TOOL_USE',
               id: acc.id,
               name: acc.name,
-              input,
+              input: recovered,
             };
           }
           toolCallAccumulators.clear();

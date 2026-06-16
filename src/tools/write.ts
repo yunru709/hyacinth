@@ -37,7 +37,9 @@ export class WriteTool implements Tool {
     const content = args.content as string;
     if (!filePath) {
       const received = Object.keys(args).filter(k => args[k] !== undefined && args[k] !== null);
-      return `错误：缺少 file_path 参数。已收到参数: ${received.length > 0 ? received.join(', ') : '(无)'}。请使用 file_path 提供目标文件的绝对路径，例如 file_path: "/path/to/file.md"。`;
+      const rawJson = JSON.stringify(args);
+      const truncated = rawJson.length > 500 ? rawJson.slice(0, 497) + '...' : rawJson;
+      return `错误：缺少 file_path 参数。已收到参数: ${received.length > 0 ? received.join(', ') : '(无)'}。原始输入: ${truncated}。请使用 file_path 提供目标文件的绝对路径，例如 file_path: "/path/to/file.md"。`;
     }
     if (content === undefined || content === null) return '错误：缺少 content 参数。请提供要写入的内容。';
 
