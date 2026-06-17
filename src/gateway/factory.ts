@@ -60,8 +60,6 @@ import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { WorkflowRegistry, WorkflowManager, createWorkflowTool, createConvertSkillToWorkflowTool } from '../workflow/index.js';
-import { parseAndCompile, getGlobalHookRegistry } from '../workflow/dsl/index.js';
-import { getBuiltinYamlPath } from '../workflow/dsl/builtins.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
 import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
@@ -432,52 +430,8 @@ export async function createAgent(
 
   // ── Workflow System ──────────────────────────────────────────────
   const workflowRegistry = new WorkflowRegistry();
-
-  // Register builtins from YAML (DSL-compiled)
-  const builtinNames = ['bootstrap', 'plan', 'spec', 'todo'] as const;
-  for (const name of builtinNames) {
-    const yamlPath = getBuiltinYamlPath(name);
-    if (!fs.existsSync(yamlPath)) {
-      throw new Error(`Builtin workflow YAML not found: ${yamlPath}`);
-    }
-    let yaml = fs.readFileSync(yamlPath, 'utf-8');
-    // Bootstrap: inject personaDir at registration time
-    if (name === 'bootstrap') {
-      yaml = yaml.replace('value: ""', `value: "${effectivePersonaDir.replace(/\\/g, '\\\\')}"`);
-    }
-    const def = parseAndCompile(yaml);
-    if (!def) {
-      throw new Error(`Failed to compile builtin workflow: ${name}`);
-    }
-    def.source = 'builtin';
-    workflowRegistry.registerBuiltin(def);
-  }
-
-  // Register Bootstrap validation hook (for YAML-compiled bootstrap)
-  import('../setup/persona-bootstrap.js').then(({ validatePersonaFilesSync, markBootstrapCompleteSync }) => {
-    getGlobalHookRegistry().register('validatePersonaFiles', (state) => {
-      const personaDir = (state.data as Record<string, unknown>).personaDir as string;
-      const validation = validatePersonaFilesSync(personaDir);
-      if (validation.complete) {
-        markBootstrapCompleteSync(personaDir);
-        (state.data as Record<string, unknown>).allDone = true;
-        return { success: true, message: 'Bootstrap complete.' };
-      }
-      const missing = validation.missing?.join(', ') || '';
-      const templates = validation.templateFiles?.join(', ') || '';
-      const details = [missing && `missing: ${missing}`, templates && `templates: ${templates}`]
-        .filter(Boolean).join('; ');
-      return { success: false, message: `Bootstrap incomplete: ${details || 'persona files are incomplete'}` };
-    });
-  }).catch(() => { /* hook registration optional */ });
-
   const workflowManager = new WorkflowManager(workflowRegistry);
   workflowManager.setSessionDir(sessionDir);
-
-  // 首次运行时自动激活 bootstrap workflow
-  if (effectiveBootstrapStatus === 'pending') {
-    workflowManager.activate('bootstrap');
-  }
 
   // Zone 5 workflow persistent context（阶段引导、分析结果——阶段切换时变化，比 step 稳定）
   contextComposer.registerSource({
@@ -766,7 +720,6 @@ export async function createAgent(
     cwd,
     providerConfigLoader,
     modelCatalog,
-    workflowRegistry,
   });
   // 清除上一 session 可能残留的热插拔标记，确保重启后工具归位 Zone 2
   toolRegistry.clearHotAdded();

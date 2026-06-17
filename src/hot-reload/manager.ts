@@ -18,8 +18,6 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { SkillDefinition } from '../types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { WorkflowRegistry } from '../workflow/registry.js';
-import type { WorkflowDefinition } from '../workflow/types.js';
 import type { PluginManager } from '../plugins/manager.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { LayeredContextComposer } from '../context/composer.js';
@@ -36,7 +34,6 @@ export interface HotReloadDeps {
   toolRegistry: ToolRegistry;
   skillRegistry: SkillRegistry;
   agentRegistry: AgentRegistry;
-  workflowRegistry: WorkflowRegistry;
   pluginManager: PluginManager;
   configCenter: RuntimeConfigCenter;
   contextComposer: LayeredContextComposer;
@@ -180,32 +177,6 @@ export class HotReloadManager {
         });
       }).catch((err) => {
         this.logger.warn('Failed to load skill watcher', { error: (err as Error).message });
-      });
-    }
-
-    // ── Workflow watcher ──
-    if (this.deps.configCenter.get<boolean>('hotReload.watchWorkflows') !== false) {
-      import('./workflow-watcher.js').then(({ watchWorkflows }) => {
-        this.registerWatcher(watchWorkflows, {
-          workflowRegistry: this.deps.workflowRegistry,
-          cwd: this.deps.cwd,
-          debounceMs,
-          onWorkflowLoaded: (wf: WorkflowDefinition) => {
-            // 文件 workflow 热加载后补注册 lazy_expand ContextSource
-            this.deps.contextComposer.registerSource({
-              name: `workflow-${wf.name}`,
-              strategy: 'lazy_expand',
-              cacheability: 'manifest',
-              description: wf.description,
-              getContent: () => {
-                const w = this.deps.workflowRegistry.get(wf.name);
-                return w ? this.deps.workflowRegistry.getFullDefinitions([wf.name]) : '';
-              },
-            });
-          },
-        });
-      }).catch((err) => {
-        this.logger.warn('Failed to load workflow watcher', { error: (err as Error).message });
       });
     }
 

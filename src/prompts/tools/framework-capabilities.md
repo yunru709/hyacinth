@@ -183,14 +183,6 @@ tools: tool1,tool2
 4. 用 `write` 写回完整 JSON
 5. 不要用 `update_config` 写 `channels`，除非 `config_schema` 明确包含该路径
 
-## 工作流
-
-多步任务主动激活工作流：
-
-- **plan** — 拆解为 checklist 逐步执行（文件持久化，适合复杂多步任务）
-- **spec** — 需求→规格→实现→验收（适合完整开发流程）
-- **todo** — 轻量内存跟踪（适合简单待办，不写文件）
-
 ## 会话
 - `interrupt` — 中断当前长任务
 - `session_stats` — 当前会话统计

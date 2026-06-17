@@ -149,27 +149,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     category: 'system',
     executeLocal: true,
   },
-  // ── Workflow commands ──────────────────────────────────────────
-  {
-    name: 'workflow',
-    description: '工作流管理 — 列表/激活/停止/状态/创建/删除',
-    icon: '\u{1F504}',
-    category: 'mode',
-    executeLocal: true,
-    children: [
-      { name: 'list', description: '列出所有可用工作流（内置 + 自定义）', icon: '\u{1F4CB}', category: 'mode', executeLocal: true },
-      { name: 'start', description: '激活指定工作流', icon: '▶', category: 'mode', args: '<name>', executeLocal: true },
-      { name: 'stop', description: '停用当前工作流', icon: '■', category: 'mode', executeLocal: true },
-      { name: 'status', description: '显示当前工作流状态和进度', icon: '●', category: 'mode', executeLocal: true },
-      { name: 'create', description: '创建新工作流 — ~/.agent/workflows/ 下新建 .yaml', icon: '➕', category: 'mode', executeLocal: true },
-      { name: 'delete', description: '删除自定义工作流（内置不可删）', icon: '✖', category: 'mode', args: '<name>', executeLocal: true },
-    ],
-  },
-  // ── Workflow shortcuts ─────────────────────────────────────────
-  { name: 'plan', description: '快捷激活 Plan 工作流', icon: '\u{1F4C4}', category: 'mode', args: '<task>', executeLocal: true },
-  { name: 'spec', description: '快捷激活 Spec 工作流', icon: '\u{1F4CB}', category: 'mode', args: '<task>', executeLocal: true },
-  { name: 'todo', description: '快捷激活 TODO 工作流', icon: '✏', category: 'mode', args: '<task>', executeLocal: true },
-  { name: 'done', description: '停用当前工作流', icon: '✔', category: 'mode', executeLocal: true },
   {
     name: 'model',
     description: '模型管理（在线/本地/设置/信息）',
