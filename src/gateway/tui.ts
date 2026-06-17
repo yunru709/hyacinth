@@ -2139,6 +2139,7 @@ export async function runTui(
                 const name = workflowManager.getActive();
                 workflowManager.deactivate();
                 chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
+                refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
               } else {
                 chatLog.addSystem(theme.dim('No active workflow.'));
               }
@@ -2228,6 +2229,7 @@ export async function runTui(
               try {
                 workflowManager.activate(wfName, { task: taskDesc || wfName });
                 chatLog.addSystem(theme.success(`Workflow "${wfName}" activated: `) + theme.fg(taskDesc || wfName));
+                refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
                 // Send task description to LLM (if provided)
                 if (taskDesc) input = taskDesc;
               } catch (e) {
@@ -2404,6 +2406,7 @@ export async function runTui(
       try {
         workflowManager.activate(wfName, { task });
         chatLog.addSystem(theme.success(`Workflow "${wfName}" activated: `) + theme.fg(task));
+        refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
         input = task;
       } catch (e) {
         chatLog.addSystem(theme.error(`Cannot activate "${wfName}": ${(e as Error).message}`));
@@ -2418,6 +2421,7 @@ export async function runTui(
         const name = workflowManager.getActive();
         workflowManager.deactivate();
         chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
+        refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
       } else {
         chatLog.addSystem(theme.dim('No active workflow. Use /workflow <name> to start one.'));
       }
