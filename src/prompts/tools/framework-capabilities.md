@@ -183,9 +183,41 @@ tools: tool1,tool2
 4. 用 `write` 写回完整 JSON
 5. 不要用 `update_config` 写 `channels`，除非 `config_schema` 明确包含该路径
 
+## 工作流
+
+当用户的任务需要**拆解为多个步骤**、**规格化需求**、或**逐项跟踪进度**时，你应该**主动激活**工作流，而不是直接开始执行。
+
+**可用工作流：**
+
+| 工作流 | 适用场景 | 触发信号 |
+|--------|----------|----------|
+| **plan** | 多步任务分解、逐项完成、有进度的任务 | "计划一下"、"分步骤做"、"拆解任务"、"列出要做的事" |
+| **spec** | 需求→实现→验证的完整开发流程 | "写一个规格"、"需求文档"、"按规范开发"、"先设计再实现" |
+| **todo** | 轻量级任务跟踪、不需要文件持久化 | "记几个待办"、"帮我跟踪一下"、"列个清单" |
+
+**使用方式：**
+- `workflow({action:"list"})` — 查看所有可用工作流（含自定义）
+- `workflow({action:"activate", name:"plan"})` — 激活工作流
+- `workflow({action:"step", id:N, stepAction:"done"})` — 标记步骤完成
+- `workflow({action:"step", id:N, stepAction:"blocked", message:"原因"})` — 标记受阻
+- `workflow({action:"step", stepAction:"add", description:"新步骤"})` — 追加步骤
+- `workflow({action:"step", stepAction:"complete"})` — 阶段切换（analyze→execute）
+
+**示例：**
+- 用户说"帮我在桌面新建一个文件夹，在里面写一个 web 版的我的世界" → 激活 plan，让 AI 引导拆解
+- 用户说"我想开发一个功能，先规格后实现" → 激活 spec
+- 用户说"记一下我要做的事" → 激活 todo
+
+**原则：**
+- 用户没有指定工作流时，根据任务复杂度**主动判断**是否激活
+- 多步骤任务（≥3步）→ 优先用 plan
+- 用户说"写个文档/设计/规格"且期望后续实现 → 用 spec
+- 简单一次性任务（查资料、解释概念、单步操作）→ 不用工作流
+- 激活后严格按工作流引导执行，不要跳过步骤
+- 用户可通过 `/plan`、`/spec`、`/todo` 或 `/workflow` 面板手动激活
+
 ## 会话
 - `interrupt` — 中断当前长任务
-- `workflow` — 工作流管理（plan/spec/todo/bootstrap + 自定义，支持 list/activate/step）
 - `session_stats` — 当前会话统计
 - `/session list` 查看历史会话，`/session <完整ID>/load` 加载指定会话
 - ⚠️ session ID 必须完整复制（格式: `YYYYMMDD-HHMMSS-xxxx`），不可自己拼接或转换为日期
