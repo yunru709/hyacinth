@@ -1776,9 +1776,33 @@ export class AgentLoop {
         return { stop: true, stopReason: 'workflow_completed' };
       }
 
+      // 工具执行完毕后检查工作流是否应自动完成
+      if (this.workflowManager?.isActive() && this.workflowManager.checkComplete()) {
+        const wfName = this.workflowManager.getActive() ?? 'unknown';
+        const completedMsg = {
+          role: 'user' as const,
+          content: { type: 'text' as const, text: `[System] Workflow "${wfName}" completed. All steps finished.` },
+        };
+        await this.conversationStore.append(this.sessionDir, completedMsg);
+        this.outputHandler?.onStatus?.(`Workflow "${wfName}" completed`, 'info');
+        return { stop: true, stopReason: 'workflow_completed' };
+      }
+
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
       return { stop: false };
+    }
+
+    // 检查工作流是否应自动完成（没有 tool_calls 的正常结束）
+    if (this.workflowManager?.isActive() && this.workflowManager.checkComplete()) {
+      const wfName = this.workflowManager.getActive() ?? 'unknown';
+      const completedMsg = {
+        role: 'user' as const,
+        content: { type: 'text' as const, text: `[System] Workflow "${wfName}" completed. All steps finished.` },
+      };
+      await this.conversationStore.append(this.sessionDir, completedMsg);
+      this.outputHandler?.onStatus?.(`Workflow "${wfName}" completed`, 'info');
+      return { stop: true, stopReason: 'workflow_completed' };
     }
 
     // 没有 tool_calls，说明 Agent 正常结束
