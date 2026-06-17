@@ -1004,7 +1004,7 @@ export async function runTui(
 
     footer += theme.dim(`\n${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`);
 
-    // \u5de5\u4f5c\u6d41\u72b6\u6001\uff08\u6fc0\u6d3b\u65f6\u663e\u793a\u5728 footer \u72b6\u6001\u884c\uff09
+    // \u5de5\u4f5c\u6d41\u72b6\u6001\uff08\u59cb\u7ec8\u663e\u793a\uff09
     if (workflowManager.isActive()) {
       const wfName = workflowManager.getActive();
       const wfState = workflowManager.getState();
@@ -1012,20 +1012,19 @@ export async function runTui(
         const done = wfState.steps.filter(s => s.status === 'completed').length;
         const blocked = wfState.steps.filter(s => s.status === 'blocked').length;
         const total = wfState.steps.length;
-        if (total > 0) {
-          const wfLabel = wfName.charAt(0).toUpperCase() + wfName.slice(1);
-          if (done === total && total > 0) {
-            footer += theme.success(` | ${wfLabel} \u2713`);
-          } else if (blocked > 0) {
-            footer += theme.warning(` | ${wfLabel}: ${done}/${total} (${blocked} blocked)`);
-          } else {
-            footer += theme.accent(` | ${wfLabel}: ${done}/${total}`);
-          }
+        const wfLabel = wfName.charAt(0).toUpperCase() + wfName.slice(1);
+        if (total > 0 && done === total) {
+          footer += theme.success(` | ${wfLabel} \u2713`);
+        } else if (total > 0 && blocked > 0) {
+          footer += theme.warning(` | ${wfLabel}: ${done}/${total} (${blocked} blocked)`);
+        } else if (total > 0) {
+          footer += theme.accent(` | ${wfLabel}: ${done}/${total}`);
         } else {
-          const wfLabel = wfName.charAt(0).toUpperCase() + wfName.slice(1);
           footer += theme.accent(` | ${wfLabel}: active`);
         }
       }
+    } else {
+      footer += theme.dim(' | Workflow: \u2014');
     }
 
     if (messageQueue.size > 0) {
