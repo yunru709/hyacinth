@@ -2111,6 +2111,124 @@ export async function runTui(
             }
           }
 
+          // ── 工作流管理: workflow/* ──
+          if (cmdPath.startsWith('workflow/')) {
+            const sub = cmdPath.slice('workflow/'.length);
+
+            if (sub === 'list') {
+              const index = agent.workflowRegistry.getIndex();
+              const activeWf = workflowManager.isActive() ? workflowManager.getActive() : null;
+              let msg = theme.accent('Available workflows:') + '\n' +
+                (index || theme.dim('(none registered)'));
+              if (activeWf) {
+                msg += '\n\n' + theme.success(`Active: ${activeWf}`);
+              }
+              chatLog.addSystem(msg);
+              tui.requestRender();
+              return;
+            }
+
+            if (sub === 'stop') {
+              if (workflowManager.isActive()) {
+                const name = workflowManager.getActive();
+                workflowManager.deactivate();
+                chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
+              } else {
+                chatLog.addSystem(theme.dim('No active workflow.'));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (sub === 'status') {
+              if (workflowManager.isActive()) {
+                const wfState = workflowManager.getState();
+                const name = workflowManager.getActive();
+                let msg = theme.accent(`── Workflow: ${name} ──`) + '\n';
+                if (wfState) {
+                  const phase = wfState.phase || (wfState.data.phase as string) || '-';
+                  const done = wfState.steps.filter(s => s.status === 'completed').length;
+                  const blocked = wfState.steps.filter(s => s.status === 'blocked').length;
+                  const total = wfState.steps.length;
+                  msg += theme.fg(`Phase: `) + theme.accent(phase) + '\n';
+                  if (total > 0) {
+                    msg += theme.fg(`Progress: `) + theme.accent(`${done}/${total}`) +
+                      (blocked > 0 ? theme.warning(` (${blocked} blocked)`) : '') + '\n';
+                    for (const s of wfState.steps) {
+                      const mark = s.status === 'completed' ? theme.success('[x]') :
+                        s.status === 'blocked' ? theme.warning('[🚫]') :
+                        s.status === 'in_progress' ? theme.accent('[▶]') : theme.dim('[ ]');
+                      msg += `  ${mark} ${s.description}` +
+                        (s.reason ? theme.dim(` — ${s.reason}`) : '') + '\n';
+                    }
+                  }
+                }
+                chatLog.addSystem(msg.trimEnd());
+              } else {
+                chatLog.addSystem(theme.dim('No active workflow. Use /workflow start <name> to begin.'));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (sub === 'create') {
+              chatLog.addSystem(
+                theme.accent('Create a new Workflow:') + '\n' +
+                theme.dim('1. 在 ~/.agent/workflows/ 或 <project>/.agent/workflows/ 下创建 .yaml 文件') + '\n' +
+                theme.dim('2. 格式: name, description, phases[], complete, onDeactivate') + '\n' +
+                theme.dim('3. 参考内置工作流: ~/.agent/workflows/ 或文档') + '\n' +
+                theme.dim('4. 保存后自动热加载注册')
+              );
+              tui.requestRender();
+              return;
+            }
+
+            if (sub === 'delete' || sub.startsWith('delete ')) {
+              const deleteName = sub.startsWith('delete ') ? sub.slice(7).trim() : (restArgs?.trim() || '');
+              if (!deleteName) {
+                chatLog.addSystem(theme.warning('Usage: /workflow delete <name>'));
+                tui.requestRender();
+                return;
+              }
+              if (agent.workflowRegistry.isBuiltin(deleteName)) {
+                chatLog.addSystem(theme.warning(`"${deleteName}" 是内置工作流，不可删除。`));
+              } else if (agent.workflowRegistry.has(deleteName)) {
+                agent.workflowRegistry.unregister(deleteName);
+                chatLog.addSystem(theme.success(`Workflow "${deleteName}" deleted.`));
+              } else {
+                chatLog.addSystem(theme.dim(`Workflow "${deleteName}" not found.`));
+              }
+              tui.requestRender();
+              return;
+            }
+
+            if (sub === 'start' || sub.startsWith('start ')) {
+              const wfName = sub.startsWith('start ') ? sub.slice(6).trim() : (restArgs?.trim() || '');
+              if (!wfName) {
+                // No name given — show available workflows
+                const index = agent.workflowRegistry.getIndex();
+                chatLog.addSystem(
+                  theme.warning('Usage: /workflow start <name>') + '\n\n' +
+                  theme.accent('Available workflows:') + '\n' +
+                  (index || theme.dim('(none registered)'))
+                );
+                tui.requestRender();
+                return;
+              }
+              try {
+                workflowManager.activate(wfName, { task: wfName });
+                chatLog.addSystem(theme.success(`Workflow "${wfName}" activated.`));
+                input = wfName;
+              } catch (e) {
+                chatLog.addSystem(theme.error(`Cannot activate "${wfName}": ${(e as Error).message}`));
+                tui.requestRender();
+                return;
+              }
+            }
+            tui.requestRender();
+            return;
+          }
+
           // 通用 handler 路由：查找命令定义的 handler 字段
           const cmdDef = CommandRegistry.getInstance().find(cmdPath);
           if (cmdDef?.handler) {
@@ -2256,90 +2374,7 @@ export async function runTui(
 
     const cfg = RuntimeConfigCenter.getInstance();
 
-    if (input === '/workflows' || input === '/workflow') {
-      const index = agent.workflowRegistry.getIndex();
-      const activeWf = workflowManager.isActive() ? workflowManager.getActive() : null;
-      let msg = theme.accent('Available workflows:') + '\n' +
-        (index || theme.dim('(none registered)'));
-      if (activeWf) {
-        msg += '\n\n' + theme.success(`Active: ${activeWf}`);
-      }
-      msg += '\n\n' + theme.dim('Use /plan <task>  /spec <task>  /todo <task>  to start.');
-      chatLog.addSystem(msg);
-      tui.requestRender();
-      updateTokenEstimate();
-      return;
-    }
-
-    if (input.startsWith('/workflow ')) {
-      const rest = input.slice('/workflow '.length).trim();
-      if (rest === 'stop' || rest === 'deactivate') {
-        if (workflowManager.isActive()) {
-          const name = workflowManager.getActive();
-          workflowManager.deactivate();
-          chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
-        } else {
-          chatLog.addSystem(theme.dim('No active workflow.'));
-        }
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-      if (rest === 'status') {
-        if (workflowManager.isActive()) {
-          chatLog.addSystem(theme.accent('Workflow Status:') + '\n' +
-            (workflowManager.renderForInjection() ?? theme.dim('(no state)')));
-        } else {
-          chatLog.addSystem(theme.dim('No active workflow.'));
-        }
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-      if (rest === 'create') {
-        chatLog.addSystem(
-          theme.accent('Create a new Workflow:') + '\n' +
-          theme.dim('在 ~/.agent/workflows/ 下创建 .yaml 文件定义新工作流。') + '\n' +
-          theme.dim('格式参考: name / description / triggerKeywords / relatedTools / steps')
-        );
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-      if (rest.startsWith('delete ')) {
-        const deleteName = rest.slice(7).trim();
-        if (!deleteName) {
-          chatLog.addSystem(theme.warning('Usage: /workflow delete <name>'));
-          tui.requestRender();
-          updateTokenEstimate();
-          return;
-        }
-        if (agent.workflowRegistry.isBuiltin(deleteName)) {
-          chatLog.addSystem(theme.warning(`"${deleteName}" 是内置工作流，不可删除。`));
-        } else if (agent.workflowRegistry.has(deleteName)) {
-          agent.workflowRegistry.unregister(deleteName);
-          chatLog.addSystem(theme.success(`Workflow "${deleteName}" deleted.`));
-        } else {
-          chatLog.addSystem(theme.dim(`Workflow "${deleteName}" not found.`));
-        }
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-      // activate workflow by name (treat rest as task name)
-      try {
-        workflowManager.activate(rest, { task: rest });
-        chatLog.addSystem(theme.success(`Workflow "${rest}" activated.`));
-        // redirect input so the task text is sent to LLM
-        input = rest;
-      } catch (e) {
-        chatLog.addSystem(theme.error(`Cannot activate "${rest}": ${(e as Error).message}`));
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-    }
-
+    // ── Workflow shortcuts (flat commands for quick access) ──
     if (input.startsWith('/plan ') || input.startsWith('/spec ') || input === '/plan' || input === '/spec' || input.startsWith('/todo ') || input === '/todo') {
       let cmdName: string;
       let wfName: string;
