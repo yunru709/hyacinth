@@ -2210,22 +2210,27 @@ export async function runTui(
             }
 
             if (sub === 'start' || sub.startsWith('start ')) {
-              const wfName = sub.startsWith('start ') ? sub.slice(6).trim() : (restArgs?.trim() || '');
-              if (!wfName) {
+              const allArgs = sub.startsWith('start ') ? sub.slice(6).trim() : (restArgs?.trim() || '');
+              if (!allArgs) {
                 // No name given — show available workflows
                 const index = agent.workflowRegistry.getIndex();
                 chatLog.addSystem(
-                  theme.warning('Usage: /workflow start <name>') + '\n\n' +
+                  theme.warning('Usage: /workflow start <name> [task]') + '\n\n' +
                   theme.accent('Available workflows:') + '\n' +
                   (index || theme.dim('(none registered)'))
                 );
                 tui.requestRender();
                 return;
               }
+              // Split: first word = workflow name, rest = task description
+              const spaceIdx = allArgs.indexOf(' ');
+              const wfName = spaceIdx > 0 ? allArgs.slice(0, spaceIdx) : allArgs;
+              const taskDesc = spaceIdx > 0 ? allArgs.slice(spaceIdx + 1).trim() : '';
               try {
-                workflowManager.activate(wfName, { task: wfName });
-                chatLog.addSystem(theme.success(`Workflow "${wfName}" activated.`));
-                input = wfName;
+                workflowManager.activate(wfName, { task: taskDesc || wfName });
+                chatLog.addSystem(theme.success(`Workflow "${wfName}" activated: `) + theme.fg(taskDesc || wfName));
+                // Send task description to LLM (if provided)
+                if (taskDesc) input = taskDesc;
               } catch (e) {
                 chatLog.addSystem(theme.error(`Cannot activate "${wfName}": ${(e as Error).message}`));
                 tui.requestRender();
