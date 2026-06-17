@@ -58,9 +58,9 @@ phases:
         staticVars:
           task: "{task}"
           planPath: "{workDir}/plan.md"
-        dynamicVars:
-          content: "file:{workDir}/plan.md"
-          progress: "file:{workDir}/plan.md"
+          currentStep: "not yet created — use write tool to create plan.md"
+          progress: ""
+        dynamicVars: {}
       step:
         type: none
 
