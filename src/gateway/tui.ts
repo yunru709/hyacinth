@@ -935,12 +935,14 @@ export async function runTui(
 
   chatLog.addSystem(
     theme.dim('Type ') +
+      theme.success('/help') +
+      theme.dim(' for commands. ') +
+      theme.success('/plan <task>') +
+      theme.dim(' or ') +
+      theme.success('/spec <task>') +
+      theme.dim(' to start. ') +
       theme.success('exit') +
-      theme.dim(' to quit. ') +
-      theme.success('Ctrl+C') +
-      theme.dim(' twice to force. ') +
-      theme.success('Ctrl+P') +
-      theme.dim(' to toggle provider.'),
+      theme.dim(' to quit.'),
   );
   chatLog.addSystem('');
   tui.requestRender();
@@ -1001,6 +1003,31 @@ export async function runTui(
     }
 
     footer += theme.dim(`\n${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`);
+
+    // \u5de5\u4f5c\u6d41\u72b6\u6001\uff08\u6fc0\u6d3b\u65f6\u663e\u793a\u5728 footer \u72b6\u6001\u884c\uff09
+    if (workflowManager.isActive()) {
+      const wfName = workflowManager.getActive();
+      const wfState = workflowManager.getState();
+      if (wfName && wfState) {
+        const done = wfState.steps.filter(s => s.status === 'completed').length;
+        const blocked = wfState.steps.filter(s => s.status === 'blocked').length;
+        const total = wfState.steps.length;
+        if (total > 0) {
+          const wfLabel = wfName.charAt(0).toUpperCase() + wfName.slice(1);
+          if (done === total && total > 0) {
+            footer += theme.success(` | ${wfLabel} \u2713`);
+          } else if (blocked > 0) {
+            footer += theme.warning(` | ${wfLabel}: ${done}/${total} (${blocked} blocked)`);
+          } else {
+            footer += theme.accent(` | ${wfLabel}: ${done}/${total}`);
+          }
+        } else {
+          const wfLabel = wfName.charAt(0).toUpperCase() + wfName.slice(1);
+          footer += theme.accent(` | ${wfLabel}: active`);
+        }
+      }
+    }
+
     if (messageQueue.size > 0) {
       footer += theme.fg(` | Queue: ${messageQueue.size}`);
     }
@@ -2229,10 +2256,16 @@ export async function runTui(
 
     const cfg = RuntimeConfigCenter.getInstance();
 
-    if (input === '/workflows') {
+    if (input === '/workflows' || input === '/workflow') {
       const index = agent.workflowRegistry.getIndex();
-      chatLog.addSystem(theme.accent('Available workflows:') + '\n' +
-        (index || theme.dim('(none registered)')));
+      const activeWf = workflowManager.isActive() ? workflowManager.getActive() : null;
+      let msg = theme.accent('Available workflows:') + '\n' +
+        (index || theme.dim('(none registered)'));
+      if (activeWf) {
+        msg += '\n\n' + theme.success(`Active: ${activeWf}`);
+      }
+      msg += '\n\n' + theme.dim('Use /plan <task>  /spec <task>  /todo <task>  to start.');
+      chatLog.addSystem(msg);
       tui.requestRender();
       updateTokenEstimate();
       return;
@@ -2307,9 +2340,13 @@ export async function runTui(
       }
     }
 
-    if (input.startsWith('/plan ') || input.startsWith('/spec ')) {
-      const cmdName = input.startsWith('/plan ') ? '/plan' : '/spec';
-      const task = input.slice(cmdName.length + 1).trim();
+    if (input.startsWith('/plan ') || input.startsWith('/spec ') || input === '/plan' || input === '/spec' || input.startsWith('/todo ') || input === '/todo') {
+      let cmdName: string;
+      let wfName: string;
+      if (input.startsWith('/plan')) { cmdName = '/plan'; wfName = 'plan'; }
+      else if (input.startsWith('/spec')) { cmdName = '/spec'; wfName = 'spec'; }
+      else { cmdName = '/todo'; wfName = 'todo'; }
+      const task = input.slice(cmdName.length).trim();
       if (!task) {
         chatLog.addSystem(theme.warning(`Usage: ${cmdName} "task description"`));
         tui.requestRender();
@@ -2317,7 +2354,7 @@ export async function runTui(
         return;
       }
       // Route to workflow
-      const wfName = cmdName === '/plan' ? 'plan' : 'spec';
+      // wfName already computed above
       try {
         workflowManager.activate(wfName, { task });
         chatLog.addSystem(theme.success(`Workflow "${wfName}" activated: `) + theme.fg(task));

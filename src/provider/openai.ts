@@ -10,6 +10,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import { getProviderConfigLoader } from './config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** OpenAIProvider 构造选项 */
@@ -55,7 +56,11 @@ export class OpenAIProvider implements Provider {
     });
 
     this.model = opts.model ?? 'gpt-4o';
-    this.maxTokens = opts.maxTokens ?? getModelInfo('openai', this.model)?.maxTokens ?? 4096;
+    const provConfig = getProviderConfigLoader().getProvider('openai');
+    this.maxTokens = opts.maxTokens
+      ?? getModelInfo('openai', this.model)?.maxTokens
+      ?? provConfig?.maxTokens
+      ?? 16384;
     this.userId = opts.userId ?? 'deepthink';
   }
 

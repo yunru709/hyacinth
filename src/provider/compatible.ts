@@ -76,7 +76,11 @@ export class OpenAICompatibleProvider implements Provider {
       ...(opts.headers ? { defaultHeaders: opts.headers } : {}),
     });
     this.model = opts.model;
-    this.maxTokens = opts.maxTokens ?? getModelInfo(opts.providerType, opts.model)?.maxTokens ?? 4096;
+    const provConfig = getProviderConfigLoader().getProvider(opts.providerType);
+    this.maxTokens = opts.maxTokens
+      ?? getModelInfo(opts.providerType, opts.model)?.maxTokens
+      ?? provConfig?.maxTokens
+      ?? 16384;
     this.providerType = opts.providerType;
     this.userId = opts.userId ?? 'deepthink';
   }
