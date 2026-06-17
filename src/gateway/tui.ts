@@ -446,14 +446,14 @@ export async function runTui(
     const currentModel = ap.getModel();
     const currentProviderType = ap.getProviderType();
     const currentProviderInfo = providerInfo ?? { providerLabel: currentProviderType, isLocal: false, mode: 'auto' };
-    // Build mode label for header display
+    // Build workflow label for header display
     let modeHeaderLabel: string | null = null;
-    if (modeManager?.isActive()) {
-      const mn = modeManager.getActive();
+    if (workflowManager.isActive()) {
+      const mn = workflowManager.getActive();
       if (mn) {
         const label = mn.charAt(0).toUpperCase() + mn.slice(1);
-        const completed = modeManager.checkComplete();
-        modeHeaderLabel = completed ? `${label} ✓` : label;
+        const completed = workflowManager.checkComplete();
+        modeHeaderLabel = completed ? `${label} ✓` : `WF:${label}`;
       }
     }
     let statusContent = formatStatusBar(activeInfo, currentModel, currentProviderInfo, modeHeaderLabel);
@@ -752,7 +752,7 @@ export async function runTui(
   });
   const loop = agent.loop;
   let sessionDir = agent.sessionDir;
-  const modeManager = agent.modeManager;
+  const workflowManager = agent.workflowManager;
   const backgroundRegistry = agent.backgroundRegistry;
   const modelRouter = agent.modelRouter;
   const knowledgeBase = agent.knowledgeBase;
@@ -2229,40 +2229,114 @@ export async function runTui(
 
     const cfg = RuntimeConfigCenter.getInstance();
 
-    if (input.startsWith('/plan ')) {
-      const task = input.slice(6).trim();
-      if (!task) {
-        chatLog.addSystem(theme.warning('Usage: /plan "task description"'));
-        tui.requestRender();
-        updateTokenEstimate();
-        return;
-      }
-      modeManager?.activate('plan', { task });
-      chatLog.addSystem(theme.success('Plan mode activated: ') + theme.fg(task));
-      // 替换 input 为任务文本，继续走下方的 LLM 调用流程
-      input = task;
+    if (input === '/workflows') {
+      const index = agent.workflowRegistry.getIndex();
+      chatLog.addSystem(theme.accent('Available workflows:') + '\n' +
+        (index || theme.dim('(none registered)')));
+      tui.requestRender();
+      updateTokenEstimate();
+      return;
     }
 
-    if (input.startsWith('/spec ')) {
-      const task = input.slice(6).trim();
-      if (!task) {
-        chatLog.addSystem(theme.warning('Usage: /spec "task description"'));
+    if (input.startsWith('/workflow ')) {
+      const rest = input.slice('/workflow '.length).trim();
+      if (rest === 'stop' || rest === 'deactivate') {
+        if (workflowManager.isActive()) {
+          const name = workflowManager.getActive();
+          workflowManager.deactivate();
+          chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
+        } else {
+          chatLog.addSystem(theme.dim('No active workflow.'));
+        }
         tui.requestRender();
         updateTokenEstimate();
         return;
       }
-      modeManager?.activate('spec', { task });
-      chatLog.addSystem(theme.success('Spec mode activated: ') + theme.fg(task));
-      input = task;
+      if (rest === 'status') {
+        if (workflowManager.isActive()) {
+          chatLog.addSystem(theme.accent('Workflow Status:') + '\n' +
+            (workflowManager.renderForInjection() ?? theme.dim('(no state)')));
+        } else {
+          chatLog.addSystem(theme.dim('No active workflow.'));
+        }
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      if (rest === 'create') {
+        chatLog.addSystem(
+          theme.accent('Create a new Workflow:') + '\n' +
+          theme.dim('在 ~/.agent/workflows/ 下创建 .yaml 文件定义新工作流。') + '\n' +
+          theme.dim('格式参考: name / description / triggerKeywords / relatedTools / steps')
+        );
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      if (rest.startsWith('delete ')) {
+        const deleteName = rest.slice(7).trim();
+        if (!deleteName) {
+          chatLog.addSystem(theme.warning('Usage: /workflow delete <name>'));
+          tui.requestRender();
+          updateTokenEstimate();
+          return;
+        }
+        if (agent.workflowRegistry.isBuiltin(deleteName)) {
+          chatLog.addSystem(theme.warning(`"${deleteName}" 是内置工作流，不可删除。`));
+        } else if (agent.workflowRegistry.has(deleteName)) {
+          agent.workflowRegistry.unregister(deleteName);
+          chatLog.addSystem(theme.success(`Workflow "${deleteName}" deleted.`));
+        } else {
+          chatLog.addSystem(theme.dim(`Workflow "${deleteName}" not found.`));
+        }
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      // activate workflow by name (treat rest as task name)
+      try {
+        workflowManager.activate(rest, { task: rest });
+        chatLog.addSystem(theme.success(`Workflow "${rest}" activated.`));
+        // redirect input so the task text is sent to LLM
+        input = rest;
+      } catch (e) {
+        chatLog.addSystem(theme.error(`Cannot activate "${rest}": ${(e as Error).message}`));
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+    }
+
+    if (input.startsWith('/plan ') || input.startsWith('/spec ')) {
+      const cmdName = input.startsWith('/plan ') ? '/plan' : '/spec';
+      const task = input.slice(cmdName.length + 1).trim();
+      if (!task) {
+        chatLog.addSystem(theme.warning(`Usage: ${cmdName} "task description"`));
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      // Route to workflow
+      const wfName = cmdName === '/plan' ? 'plan' : 'spec';
+      try {
+        workflowManager.activate(wfName, { task });
+        chatLog.addSystem(theme.success(`Workflow "${wfName}" activated: `) + theme.fg(task));
+        input = task;
+      } catch (e) {
+        chatLog.addSystem(theme.error(`Cannot activate "${wfName}": ${(e as Error).message}`));
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
     }
 
     if (input === '/done') {
-      if (modeManager?.isActive()) {
-        const modeName = modeManager?.getActive();
-        modeManager?.deactivate();
-        chatLog.addSystem(theme.success(`Mode "${modeName}" deactivated.`));
+      if (workflowManager.isActive()) {
+        const name = workflowManager.getActive();
+        workflowManager.deactivate();
+        chatLog.addSystem(theme.success(`Workflow "${name}" stopped.`));
       } else {
-        chatLog.addSystem(theme.dim('No active mode to deactivate.'));
+        chatLog.addSystem(theme.dim('No active workflow. Use /workflow <name> to start one.'));
       }
       tui.requestRender();
       updateTokenEstimate();
@@ -2274,7 +2348,7 @@ export async function runTui(
       const items: [string, unknown][] = [
         ['Provider', s.provider.active],
         ['Model', s.provider[s.provider.active as keyof typeof s.provider] as { model?: string } | string[] | undefined],
-        ['Active Mode', modeManager?.isActive() ? modeManager?.getActive() : 'none'],
+        ['Active Workflow', workflowManager.isActive() ? workflowManager.getActive() : 'none'],
         ['Max Context', `${s.session.maxContext.toLocaleString()} tokens`],
         ['Max Turns', s.session.maxTurns],
         ['Compress Threshold', s.context.compressThreshold.toFixed(2)],

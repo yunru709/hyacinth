@@ -51,6 +51,8 @@ export async function resolveSection(
 function resolveStatic(sec: SectionEntry, ctx?: ResolverContext): string | undefined {
   if (sec.name === 'persona_soul') {
     if (ctx?.activeConditions?.has('precise_mode')) return undefined;
+    // bootstrap 期间人设文件是空模板占位符，由 workflow-injection 提供引导
+    if (ctx?.bootstrapStatus === 'pending') return undefined;
     return buildSoulSection() || undefined;
   }
   try {

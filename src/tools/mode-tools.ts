@@ -10,6 +10,7 @@
 
 import type { Tool } from './interface.js';
 import type { ModeManager } from '../modes/manager.js';
+import type { WorkflowManager } from '../workflow/manager.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -122,7 +123,7 @@ function createTemplateFiles(
 
 // ── 工具定义 ──────────────────────────────────────────────────────
 
-export function createModeMarkTool(modeManager: ModeManager): Tool {
+export function createModeMarkTool(modeManager: ModeManager, workflowManager?: WorkflowManager): Tool {
   return {
     name: 'mode_mark',
     description:
@@ -146,6 +147,23 @@ export function createModeMarkTool(modeManager: ModeManager): Tool {
     async execute(args: Record<string, unknown>): Promise<string> {
       const action = args.action as string;
       const mode = modeManager.getActive();
+
+      // ── Workflow routing ──────────────────────────────────────────
+      if (workflowManager?.isActive() && (action === 'done' || action === 'blocked' || action === 'add')) {
+        const result = workflowManager.dispatchStep({
+          action: action as 'done' | 'blocked' | 'add',
+          id: args.id as number | undefined,
+          description: args.content as string | undefined,
+          message: args.message as string | undefined,
+        });
+        if (result) {
+          if (result.allDone) {
+            workflowManager.deactivate();
+            return `${result.progress}\n\nAll steps complete. Workflow finished.`;
+          }
+          return result.progress;
+        }
+      }
 
       // ── init ──────────────────────────────────────────────────────
       if (action === 'init') {

@@ -64,8 +64,7 @@ import { ProviderConfigLoader, getProviderConfigLoader } from '../provider/confi
 import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
-import { ModeManager, createPlanMode, createSpecMode, createTodoMode, createBootstrapMode } from '../modes/index.js';
-import { createBootstrapMarkTool } from '../tools/bootstrap.js';
+import { WorkflowRegistry, WorkflowManager, createWorkflowTool, createConvertSkillToWorkflowTool, createPlanWorkflow, createSpecWorkflow, createTodoWorkflow, createBootstrapWorkflow } from '../workflow/index.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
 import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
@@ -115,7 +114,8 @@ export interface AgentComponents {
   contextComposer: LayeredContextComposer;
   mcpSystem: MCPSystem;
   hotReloadManager: HotReloadManager;
-  modeManager: ModeManager;
+  workflowRegistry: WorkflowRegistry;
+  workflowManager: WorkflowManager;
   modelRouter: ModelRouter;
   providerConfigLoader: ProviderConfigLoader;
   knowledgeBase: KnowledgeBase;
@@ -424,34 +424,47 @@ export async function createAgent(
     });
   }
 
-  // ── Mode Manager ─────────────────────────────────────────────────
-  const modeManager = new ModeManager();
-  modeManager.register(createBootstrapMode(effectivePersonaDir));
+  // ── Workflow System ──────────────────────────────────────────────
+  const workflowRegistry = new WorkflowRegistry();
+  workflowRegistry.registerBuiltin(createBootstrapWorkflow(effectivePersonaDir));
+  workflowRegistry.registerBuiltin(createPlanWorkflow());
+  workflowRegistry.registerBuiltin(createSpecWorkflow());
+  workflowRegistry.registerBuiltin(createTodoWorkflow());
+
+  const workflowManager = new WorkflowManager(workflowRegistry);
+  workflowManager.setSessionDir(sessionDir);
+
+  // 首次运行时自动激活 bootstrap workflow
   if (effectiveBootstrapStatus === 'pending') {
-    modeManager.activate('bootstrap');
+    workflowManager.activate('bootstrap');
   }
-  modeManager.register(createPlanMode());
-  modeManager.register(createSpecMode());
-  modeManager.register(createTodoMode());
 
-  // 绑定 session 目录（模式状态随 session 持久化，切换时自动保存/恢复）
-  modeManager.setSessionDir(sessionDir);
-
-  // Zone 5 模式注入：plan/spec/todo 激活时每轮注入模式提示词
+  // Zone 5 workflow injection
   contextComposer.registerSource({
-    name: 'mode-injection',
+    name: 'workflow-injection',
     strategy: 'always_inline',
     cacheability: 'live',
-    description: '当前激活模式的注入内容',
-    getContent: () => modeManager.isActive() ? (modeManager.renderForInjection() ?? '') : '',
+    description: '当前激活工作流的注入内容',
+    getContent: () => workflowManager.isActive() ? (workflowManager.renderForInjection() ?? '') : '',
   });
 
-  // ── 模式系统工具 ──────────────────────────────────────────────────
-  const { createModeMarkTool, createTaskStartTool, createTaskMarkTool } = await import('../tools/mode-tools.js');
-  toolRegistry.register(createModeMarkTool(modeManager));
-  toolRegistry.register(createBootstrapMarkTool(modeManager));
-  toolRegistry.register(createTaskStartTool(modeManager));
-  toolRegistry.register(createTaskMarkTool(modeManager));
+  // Zone 2 manifest: 每个 Workflow 注册为 lazy_expand 源
+  for (const wf of workflowRegistry.getAll()) {
+    contextComposer.registerSource({
+      name: `workflow-${wf.name}`,
+      strategy: 'lazy_expand',
+      cacheability: 'manifest',
+      description: wf.description,
+      getContent: () => {
+        const w = workflowRegistry.get(wf.name);
+        return w ? workflowRegistry.getFullDefinitions([wf.name]) : '';
+      },
+    });
+  }
+
+  // 注册 workflow 工具（统一入口）+ 转换工具（模型专用）
+  toolRegistry.register(createWorkflowTool(workflowRegistry, workflowManager));
+  toolRegistry.register(createConvertSkillToWorkflowTool(skillRegistry, workflowRegistry, workflowManager));
 
   // ── 知识库（Zone 4，默认关闭）───────────────────────────────────────
   const kbDir = path.join(os.homedir(), '.agent', 'knowledge');
@@ -538,7 +551,7 @@ export async function createAgent(
     new Set(),
     config.training?.scheduleTime ?? '03:00',
     configCenter,
-    modeManager,
+    workflowManager,
     modelRouter,
   );
 
@@ -707,7 +720,11 @@ export async function createAgent(
     cwd,
     providerConfigLoader,
     modelCatalog,
+    workflowRegistry,
   });
+  // 清除上一 session 可能残留的热插拔标记，确保重启后工具归位 Zone 2
+  toolRegistry.clearHotAdded();
+
   hotReloadManager.start();
 
   return {
@@ -721,7 +738,8 @@ export async function createAgent(
     contextComposer,
     mcpSystem,
     hotReloadManager,
-    modeManager,
+    workflowRegistry,
+    workflowManager,
     modelRouter,
     providerConfigLoader,
     knowledgeBase,

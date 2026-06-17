@@ -35,6 +35,9 @@ export function createTriggerCompressionTool(agentLoop: AgentLoop): Tool {
           return `压缩已触发，策略: ${desc}。将在下一轮对话前执行。`;
         }
 
+        // 未指定策略时，仍需设置非空标记以触发压缩条件检查
+        // 策略从 config 读取（loop.ts:1383-1386）
+        loop.pendingCompressionStrategy = '_default';
         return '压缩已触发，使用当前配置的策略。将在下一轮对话前执行。';
       } catch (err) {
         return 'Error: ' + (err instanceof Error ? err.message : String(err));

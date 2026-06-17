@@ -43,7 +43,8 @@ import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
-import { ModeManager, extractTextContent } from '../modes/index.js';
+import { extractTextContent } from '../modes/index.js';
+import type { WorkflowManager } from '../workflow/index.js';
 import * as sessionAllowlist from '../memory/session-allowlist.js';
 
 /** Format a Date as YYYY-MM-DD HH:mm (cache-friendly, minute precision) */
@@ -274,7 +275,7 @@ export class AgentLoop {
   private needsCompression = false;
   private pendingCompression: Promise<CompressionResult | null> | null = null;
   /** 工具触发的临时策略覆盖，仅在下一轮压缩时生效，用后即清 */
-  pendingCompressionStrategy: 'A' | 'C' | null = null;
+  pendingCompressionStrategy: string | null = null;
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
 
@@ -305,7 +306,7 @@ export class AgentLoop {
     allowlistTools?: Set<string>,
     trainingScheduleTime?: string,
     configCenter?: RuntimeConfigCenter,
-    private modeManager?: ModeManager,
+    private workflowManager?: WorkflowManager,
     private modelRouter?: ModelRouter,
   ) {
     this.orchestrator = orchestrator;
@@ -503,8 +504,8 @@ export class AgentLoop {
 
   /** 就地切换到指定 session，无需重启进程 */
   async switchSession(newSessionDir: string): Promise<void> {
-    // 1. 保存当前 session 的模式状态，加载新 session 的模式
-    this.modeManager?.switchSession(newSessionDir);
+    // 1. 保存当前 session 的状态
+    this.workflowManager?.switchSession(newSessionDir);
 
     this.sessionDir = newSessionDir;
     this.currentSummary = undefined;
@@ -1375,15 +1376,17 @@ export class AgentLoop {
 
     // LLM 摘要模式：工具临时覆盖优先 → 否则从 config 读取
     // 提前消费：手动触发（trigger_compression）不受阈值门限制
-    const toolOverride = this.pendingCompressionStrategy;
+    // _default sentinel 表示使用 config 默认策略，但仍触发压缩
+    const toolOverrideRaw = this.pendingCompressionStrategy;
     this.pendingCompressionStrategy = null; // 用后即清
+    const toolOverride = (toolOverrideRaw && toolOverrideRaw !== '_default') ? toolOverrideRaw : null;
     const strategySource = toolOverride
       ?? (this.configCenter
         ? (this.configCenter.get('context.compressionStrategy') as string) ?? 'C'
         : 'C');
 
     // 压缩条件：token 超阈值，或模型通过 trigger_compression 主动要求
-    if (currentTokens > this.maxContextTokens * compressThreshold || toolOverride !== null) {
+    if (currentTokens > this.maxContextTokens * compressThreshold || toolOverrideRaw !== null) {
       const llmMode: 'prompt' | 'clone' = strategySource === 'C' ? 'clone' : 'prompt';
       const compressOptions = {
         llmMode,
@@ -1711,18 +1714,18 @@ export class AgentLoop {
       });
     }
 
-    // ModeManager: 工具驱动模式下由 task_mark 工具内部完成状态推进。
-    // 此处仅检查自动停用条件（如 task_mark 返回 allDone 时已在工具中 deactivate）。
-    let modeCompleted = false;
+    // Workflow completion check
+    let workflowCompleted = false;
     let allDoneDetected = false;
-    let completedModeName: string | null = null;
-    if (this.modeManager?.isActive()) {
-      completedModeName = this.modeManager.getActive(); // 先保存（checkComplete 内部会 deactivate）
-      modeCompleted = this.modeManager.checkComplete();
-      if (modeCompleted) {
+    let completedWorkflowName: string | null = null;
+
+    if (this.workflowManager?.isActive()) {
+      completedWorkflowName = this.workflowManager.getActive();
+      workflowCompleted = this.workflowManager.checkComplete();
+      if (workflowCompleted) {
         allDoneDetected = true;
       } else {
-        completedModeName = null;
+        completedWorkflowName = null;
       }
     }
 
@@ -1772,14 +1775,14 @@ export class AgentLoop {
       await this.conversationStore.append(this.sessionDir, assistantMessage);
     }
 
-    // ModeManager: 模式完成时追加系统通知
-    if (modeCompleted && allDoneDetected && completedModeName) {
-      const modeCompletedMsg: Message = {
+    // Workflow 完成时追加系统通知
+    if (workflowCompleted && allDoneDetected && completedWorkflowName) {
+      const completedMsg: Message = {
         role: 'user',
-        content: { type: 'text', text: `[System] Mode "${completedModeName}" completed. All steps finished.` },
+        content: { type: 'text', text: `[System] Workflow "${completedWorkflowName}" completed. All steps finished.` },
       };
-      await this.conversationStore.append(this.sessionDir, modeCompletedMsg);
-      this.outputHandler?.onStatus?.(`Mode "${completedModeName}" completed`, 'info');
+      await this.conversationStore.append(this.sessionDir, completedMsg);
+      this.outputHandler?.onStatus?.(`Workflow "${completedWorkflowName}" completed`, 'info');
     }
 
     // 如果有工具调用，执行工具并将结果追加到 conversation
@@ -2060,7 +2063,7 @@ export class AgentLoop {
       ? (this.configCenter.get('repair.storm.enabled') as boolean)
       : true;
 
-    const STORM_EXEMPT = ['read', 'glob', 'grep', 'task_start', 'task_mark'];
+    const STORM_EXEMPT = ['read', 'glob', 'grep', 'workflow'];
     if (stormEnabled !== false && !isMutating(name) && !STORM_EXEMPT.includes(name)) {
       const { suppressed } = this.loopGuard.checkToolCalls([{ id, name, input }]);
       if (suppressed.has(id)) {

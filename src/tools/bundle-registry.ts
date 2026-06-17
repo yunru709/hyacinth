@@ -36,7 +36,7 @@ const BUILTIN_COMMON: ToolBundle = {
     'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep',
     'list_bundles', 'activate_bundle', 'deactivate_bundle',
     'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
-    'task_start', 'task_mark', 'bootstrap_mark', 'interrupt', 'restart',
+    'workflow', 'convert_skill_to_workflow', 'interrupt', 'restart',
     'add_task', 'list_tasks', 'remove_task', 'toggle_task',
     'mcp_status', 'session_stats',
     'diff_files', 'json_edit', 'http_request', 'archive',
