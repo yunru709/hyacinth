@@ -1,0 +1,65 @@
+schema: "1.0"
+name: bootstrap
+description: "First-run identity initialization — configure agent persona and memory"
+triggerKeywords:
+  - bootstrap
+  - setup
+  - identity
+  - persona
+relatedTools:
+  - write
+  - read
+
+init:
+  staticVars:
+    personaDir:
+      compute: literal
+      value: ""
+  data:
+    allDone:
+      type: boolean
+      default: false
+    progress:
+      type: array
+      default: []
+  phaseField: data
+
+phases:
+  - name: collect
+    description: "Collect persona information from the user"
+    actions:
+      - note
+      - progress
+      - complete
+    stepSource:
+      type: none
+    onAction:
+      note:
+        appendToDataArray: progress
+      progress:
+        appendToDataArray: progress
+      complete:
+        transition: null
+        hook: validatePersonaFiles
+        validate: []
+    render:
+      persistent:
+        type: template
+        template: modes/bootstrap
+        staticVars:
+          personaDir: "{personaDir}"
+        dynamicVars:
+          progress: "data.progress"
+      step:
+        type: none
+
+complete:
+  condition: flag
+  flag: allDone
+
+hooks:
+  validatePersonaFiles:
+    module: "./persona-bootstrap.js"
+    export: validateAndMark
+
+onDeactivate: none

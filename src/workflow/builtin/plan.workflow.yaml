@@ -1,0 +1,111 @@
+schema: "1.0"
+name: plan
+description: "Plan execution mode — file-driven task decomposition and step-by-step completion"
+triggerKeywords:
+  - plan
+  - planning
+  - "break down"
+  - "task list"
+relatedTools:
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+
+init:
+  taskFrom: "params.task"
+  workDir:
+    base: "~/.agent/workflows"
+    segments:
+      - plan
+      - "{slug}"
+  staticVars:
+    slug:
+      compute: slug
+      from: "{task}"
+      maxLen: 60
+      fallback: "plan"
+  data:
+    phase:
+      type: string
+      default: ""
+  phaseField: data
+
+phases:
+  - name: analyze
+    description: "Load prompt template, wait for model to create plan.md"
+    skipIf:
+      file: "{workDir}/plan.md"
+      condition: has-checkboxes
+      thenPhase: execute
+    actions:
+      - complete
+    stepSource:
+      type: none
+    onAction:
+      complete:
+        transition: execute
+        validate:
+          - type: file
+            path: "{workDir}/plan.md"
+            condition: has-checkboxes
+            message: "plan.md has no steps yet. Create it first with - [ ] checklist items."
+    render:
+      persistent:
+        type: template
+        template: modes/plan
+        staticVars:
+          task: "{task}"
+          planPath: "{workDir}/plan.md"
+        dynamicVars:
+          content: "file:{workDir}/plan.md"
+          progress: "file:{workDir}/plan.md"
+      step:
+        type: none
+
+  - name: execute
+    description: "Execute steps one by one from plan.md"
+    actions:
+      - done
+      - blocked
+      - add
+      - note
+      - progress
+      - complete
+    stepSource:
+      type: file
+      path: "{workDir}/plan.md"
+      format: flat
+    onAction:
+      done:
+        source: file
+        markFile: x
+      blocked:
+        source: file
+        markFile: blocked
+        autoAdvance: true
+      add:
+        source: file
+        appendToFile: true
+      note:
+        appendToData: notes
+      progress:
+        appendToData: notes
+      complete:
+        transition: null
+    render:
+      persistent:
+        type: progress-summary
+        title: "Plan: {task}"
+        file: "{workDir}/plan.md"
+      step:
+        type: current-step
+        stepLabel: Step
+        showWorkflowCommand: true
+
+complete:
+  condition: all-steps-done
+  file: "{workDir}/plan.md"
+
+onDeactivate: none

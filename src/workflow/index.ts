@@ -23,7 +23,8 @@ export { WorkflowManager } from './manager.js';
 export { loadWorkflowFile, scanWorkflowsDir } from './loader.js';
 export { createWorkflowTool } from './workflow-tool.js';
 export { createConvertSkillToWorkflowTool } from './converter.js';
-export { createPlanWorkflow, createSpecWorkflow, createTodoWorkflow, createBootstrapWorkflow } from './builtin/index.js';
+export { getBuiltinYamlPath, BUILTIN_WORKFLOW_NAMES } from './builtin/index.js';
+export type { BuiltinWorkflowName } from './builtin/index.js';
 
 export type {
   WorkflowStep,
