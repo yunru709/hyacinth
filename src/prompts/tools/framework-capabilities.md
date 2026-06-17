@@ -190,7 +190,6 @@ tools: tool1,tool2
 - **plan** — 拆解为 checklist 逐步执行（文件持久化，适合复杂多步任务）
 - **spec** — 需求→规格→实现→验收（适合完整开发流程）
 - **todo** — 轻量内存跟踪（适合简单待办，不写文件）
-- `workflow({action:"list"})` 查看全部，`activate` 激活，`step` 推进
 
 ## 会话
 - `interrupt` — 中断当前长任务
