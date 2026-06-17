@@ -1142,6 +1142,13 @@ export async function runTui(
           panel.show(tui, (result) => {
             slashSubPanelActive = false;
             if (result) {
+              // 如果叶子命令有 args 占位符 → 自动填充到输入框，让用户继续输入
+              const leafDef = CommandRegistry.getInstance().find(result.path);
+              if (leafDef?.args && !leafDef.children && !leafDef.childrenProvider) {
+                editor.setText(`/${result.path} `);
+                updateTokenEstimate();
+                return;
+              }
               handleSlashSubCommand(result.path, '');
             }
           });
