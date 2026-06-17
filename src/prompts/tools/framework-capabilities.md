@@ -185,7 +185,7 @@ tools: tool1,tool2
 
 ## 会话
 - `interrupt` — 中断当前长任务
-- `task_start` / `task_mark` — TODO 跟踪
+- `workflow` — 工作流管理（plan/spec/todo/bootstrap + 自定义，支持 list/activate/step）
 - `session_stats` — 当前会话统计
 - `/session list` 查看历史会话，`/session <完整ID>/load` 加载指定会话
 - ⚠️ session ID 必须完整复制（格式: `YYYYMMDD-HHMMSS-xxxx`），不可自己拼接或转换为日期

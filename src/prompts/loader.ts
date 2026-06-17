@@ -1,3 +1,22 @@
+/**
+ * ## 提示词加载器 — 外部化原则
+ *
+ * 项目设计原则：所有面向模型的提示词内容必须通过此加载器获取，
+ * 不得在代码中硬编码大段提示词文本。
+ *
+ * 外部覆盖顺序（项目级 → 全局 → 内置）：
+ *   1. .agent/prompts/{name}.md          ← 项目自定义
+ *   2. ~/.agent/prompts/{name}.md        ← 全局用户覆盖
+ *   3. dist/prompts/{name}.md            ← 内置默认
+ *
+ * 这样用户可以在不修改源码的情况下定制任何提示词。
+ * 所有 Workflow 引导模板、Persona 文件、系统规则都在此体系内。
+ *
+ * 如果你要新增提示词：
+ *   1. 在 src/prompts/ 下建 .md 文件
+ *   2. 代码中调用 loadPrompt('modes/xxx') 而非硬编码字符串
+ *   3. 需要变量的用 renderPrompt(template, { key: value })
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +30,9 @@ export function getExternalPromptsDir(): string {
 }
 
 /**
- * 加载提示词文件，支持外部覆盖和子目录递归搜索
+ * 加载提示词文件。
  *
- * 查找顺序：
+ * 查找顺序（外部优先）：
  * 1. 外部目录 .agent/prompts/{name}.md（精确路径）
  * 2. 外部目录 .agent/prompts/{name}/{name}.md（子目录路径）
  * 3. 外部目录 .agent/prompts/ 递归搜索

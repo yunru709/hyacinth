@@ -1,20 +1,24 @@
-## TODO 模式 — 任务跟踪
+## TODO Mode — Analyze & Plan
 
-当前进度：
-{{progress}}
+**Task**: {{task}}
 
-### 工作流程
+### Instructions
 
-**阶段 1 — 规划**：如果上方进度为空，先规划好所有步骤，然后一次性批量添加：
-```
-task_mark({action:"add", descriptions: ["步骤1", "步骤2", "步骤3", ...]})
-```
-加完后进度列表出现。
+You are in the **analysis phase**. Your job:
 
-**阶段 2 — 执行**：所有步骤添加完毕后，逐个执行。每完成一步：
-```
-task_mark({action:"done", id:N})
-```
-受阻时调用 `task_mark({action:"blocked", id:N, message:"原因"})`。
+1. **Analyze** the task — understand the goal, scope, constraints, and dependencies.
+2. **Record your analysis** using:
+   ```
+   workflow({action:"step", stepAction:"note", message:"your analysis..."})
+   ```
+   This analysis becomes persistent context throughout execution.
+3. **Break it down** into specific, actionable steps. Each step should be independently verifiable with a clear output. Add each step:
+   ```
+   workflow({action:"step", stepAction:"add", description:"Step description"})
+   ```
+4. **When all steps are added**, complete the analysis:
+   ```
+   workflow({action:"step", stepAction:"complete"})
+   ```
 
-全部步骤完成后框架会自动结束本模式。
+The framework will then guide you through executing each step **one at a time** — you will only see the current step, not the full list repeatedly.

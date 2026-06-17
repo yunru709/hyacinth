@@ -12,11 +12,26 @@ interface ModelCatalogWatcherDeps {
   currentModel: () => { provider: string; model: string } | undefined;
 }
 
-export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): fs.FSWatcher[] {
+/**
+ * 监听 models-catalog.json 文件变化，自动重载模型目录并同步 maxContext。
+ *
+ * 使用 fs.watchFile（原因同 provider-watcher）。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): any[] {
   const logger = createLogger('hot-reload:model-catalog');
-  const { cwd, debounceMs } = deps;
+  const { cwd } = deps;
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const watchPath = path.join(cwd, '.agent', 'models-catalog.json');
+  const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
+
+  let lastMtime = 0;
+  try {
+    const stat = fs.statSync(watchPath);
+    lastMtime = stat.mtimeMs;
+  } catch {
+    // 文件不存在
+  }
 
   function handleChange(): void {
     try {
@@ -32,7 +47,6 @@ export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): fs.FSWat
       const current = deps.currentModel();
       if (!current) return;
       const newMaxContext = getModelContextWindow(current.provider, current.model);
-      // 仅当当前值超过新模型上限时才裁剪，不覆盖用户自定义的更小值
       const currentMaxContext = deps.configCenter.get<number>('session.maxContext');
       if (currentMaxContext && currentMaxContext <= newMaxContext) {
         logger.info('session.maxContext kept (user value within new model limit)', { current: currentMaxContext, newLimit: newMaxContext });
@@ -46,23 +60,11 @@ export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): fs.FSWat
     }
   }
 
-  const watchDir = path.join(cwd, '.agent');
-  const targetFile = 'models-catalog.json';
+  const watcher = fs.watchFile(watchPath, { interval: POLL_INTERVAL_MS }, (curr) => {
+    if (curr.mtimeMs === lastMtime) return;
+    lastMtime = curr.mtimeMs;
+    handleChange();
+  });
 
-  const watchers: fs.FSWatcher[] = [];
-
-  try {
-    const watcher = fs.watch(watchDir, (_event, filename) => {
-      if (!filename || (filename !== targetFile && !filename.endsWith(path.sep + targetFile))) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(handleChange, debounceMs);
-    });
-    watcher.on('error', (err) => {
-      logger.warn('watcher error', { dir: watchDir, error: err.message });
-    });
-    watchers.push(watcher);
-  } catch {
-  }
-
-  return watchers;
+  return [watcher];
 }

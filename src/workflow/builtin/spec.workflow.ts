@@ -1,15 +1,27 @@
 /**
- * Spec Workflow — 三阶段，文件驱动。
+ * Spec Workflow — 三阶段，三文档，文件驱动。
  *
- * 文件: ~/.agent/specs/<slug>/spec.md | tasks.md | checklist.md
- * 复用 spec.mode.ts 和 mode-tools.ts 的三阶段逻辑。
+ * 文件: ~/.agent/workflows/spec/<slug>/spec.md | tasks.md | checklist.md
  *
- * Phase 1 (spec): 收集需求，编写 spec.md → id:0 推进到 Phase 2
- * Phase 2 (tasks): 执行步骤，标记 checkbox → 全部完成推进到 Phase 3
- * Phase 3 (checklist): 逐项验收 → 全部完成结束
+ * 三份文档：
+ *   spec.md     — 需求分析、架构设计、技术方案（持久注入，贯穿全部阶段）
+ *   tasks.md    — 多级任务分解（## 第N部分 → - [ ] 步骤），框架按段推进
+ *   checklist.md — 验收清单，逐项对照 spec.md 验证
+ *
+ * 三阶段：
+ *   Phase 1 (spec)      — 引导模型同时编写三份文档，完成后调用 complete
+ *   Phase 2 (tasks)     — 解析 tasks.md 结构，逐条注入执行，spec.md 持续注入
+ *   Phase 3 (checklist) — 解析 checklist.md，逐项验收，spec.md 持续注入
  */
 
 import type { WorkflowDefinition, WorkflowState } from '../types.js';
+import { loadPrompt, renderPrompt } from '../../prompts/loader.js';
+import {
+  parseSimpleSteps, parseTaskSections, flattenSections,
+  markStepInFile, allStepsDone,
+  buildWfSteps, buildWfStepsFromFlat,
+  findNextStepIdx, findInProgressId, renderProgress,
+} from '../shared/file-steps.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,20 +30,17 @@ import os from 'node:os';
 
 interface SpecData {
   task: string;
-  phase: 'spec' | 'tasks' | 'checklist';
   specDir: string;
+  phase: 'spec' | 'tasks' | 'checklist';
 }
 
 function getData(state: WorkflowState): SpecData {
   return state.data as unknown as SpecData;
 }
 
-function setPhase(state: WorkflowState, phase: SpecData['phase']): WorkflowState {
-  const data = getData(state);
-  return { ...state, phase, data: { ...state.data, phase } as unknown as Record<string, unknown> };
+function getPhaseFile(phase: string): string {
+  switch (phase) { case 'tasks': return 'tasks.md'; case 'checklist': return 'checklist.md'; default: return 'spec.md'; }
 }
-
-// ─── 文件操作 ───────────────────────────────────────────────────────
 
 function readFile(specDir: string, name: string): string {
   try { return fs.readFileSync(path.join(specDir, name), 'utf-8'); } catch { return ''; }
@@ -41,66 +50,12 @@ function writeFile(specDir: string, name: string, content: string): void {
   fs.writeFileSync(path.join(specDir, name), content, 'utf-8');
 }
 
-/** 解析 "- [ ] 描述" 行 */
-function parseSteps(content: string): Array<{ lineIdx: number; text: string; done: boolean }> {
-  const steps: Array<{ lineIdx: number; text: string; done: boolean }> = [];
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^- \[(.)\] (.+)/);
-    if (m) steps.push({ lineIdx: i, text: m[2].trim(), done: m[1] !== ' ' });
-  }
-  return steps;
-}
-
-function markStepInFile(
-  content: string,
-  stepIdx: number,
-  mark: 'x' | '🚫',
-  message?: string,
-): string {
-  const lines = content.split('\n');
-  const step = parseSteps(content)[stepIdx];
-  if (!step) return content;
-
-  let suffix = '';
-  if (mark === '🚫' && message) suffix = ` (受阻: ${message})`;
-
-  lines[step.lineIdx] = lines[step.lineIdx].replace(/^- \[.\] (.+)/, `- [${mark}] $1${suffix}`);
-  return lines.join('\n');
-}
-
-/** 获取当前 phase 对应的文件名 */
-function getPhaseFile(phase: string): string {
-  switch (phase) {
-    case 'spec': return 'spec.md';
-    case 'tasks': return 'tasks.md';
-    case 'checklist': return 'checklist.md';
-    default: return 'spec.md';
-  }
-}
-
-/** 创建初始模板文件 */
-function createTemplateFiles(specDir: string, task: string): void {
-  if (!fs.existsSync(path.join(specDir, 'spec.md'))) {
-    fs.writeFileSync(path.join(specDir, 'spec.md'),
-      `# Spec: ${task}\n\n## 需求分析\n\n## 技术方案\n`, 'utf-8');
-  }
-  if (!fs.existsSync(path.join(specDir, 'tasks.md'))) {
-    fs.writeFileSync(path.join(specDir, 'tasks.md'),
-      `- [ ] 步骤1\n- [ ] 步骤2\n`, 'utf-8');
-  }
-  if (!fs.existsSync(path.join(specDir, 'checklist.md'))) {
-    fs.writeFileSync(path.join(specDir, 'checklist.md'),
-      `- [ ] 核心功能正常\n- [ ] 异常输入处理\n`, 'utf-8');
-  }
-}
-
 // ─── 工厂 ───────────────────────────────────────────────────────────
 
 export function createSpecWorkflow(): WorkflowDefinition {
   return {
     name: 'spec',
-    description: '规格化开发模式 — 三阶段：需求→执行→验收',
+    description: '规格化开发模式 — 三文档 × 三阶段：分析→执行→验收',
     source: 'builtin',
     relatedTools: ['read', 'write', 'edit', 'glob', 'grep'],
     triggerKeywords: ['spec', 'specification', 'requirement', 'design'],
@@ -108,334 +63,218 @@ export function createSpecWorkflow(): WorkflowDefinition {
     createState(params) {
       const task = String(params.task ?? '');
       const taskSlug = task.replace(/[^a-zA-Z0-9一-鿿_-]/g, '-').slice(0, 60) || 'spec';
-      const specDir = path.join(os.homedir(), '.agent', 'specs', taskSlug);
+      const specDir = path.join(os.homedir(), '.agent', 'workflows', 'spec', taskSlug);
       if (!fs.existsSync(specDir)) fs.mkdirSync(specDir, { recursive: true });
-
-      createTemplateFiles(specDir, task);
 
       return {
         name: 'spec',
         phase: 'spec',
-        data: { task, phase: 'spec', specDir } as unknown as Record<string, unknown>,
+        data: { task, specDir, phase: 'spec' } as unknown as Record<string, unknown>,
         steps: [],
         startedAt: new Date().toISOString(),
       };
     },
 
     handleStep(state, action) {
-      const { specDir } = getData(state);
-      const phase = state.phase ?? 'spec';
+      const data = getData(state);
+      const { specDir, phase } = data;
+      const reject = (msg: string) => ({
+        newState: state,
+        result: { workflow: 'spec' as const, phase, progress: msg, allDone: false },
+      });
+      const rejectPhase1 = () => reject(
+        'Phase 1 (spec) 不接受步骤操作。请用 write 创建三份文档后调用 complete。',
+      );
 
-      // ── Spec Phase 1 → Phase 2 (id:0 done) ────────────────────
-      if (phase === 'spec' && action.action === 'done' && action.id === 0) {
-        const tasksContent = readFile(specDir, 'tasks.md');
-        if (!tasksContent.trim()) {
+      switch (action.action) {
+        case 'complete': {
+          if (phase !== 'spec') return reject('✅ Spec phase marked complete.');
+
+          const tasksContent = readFile(specDir, 'tasks.md');
+          if (!tasksContent.trim()) return reject('错误：tasks.md 不存在或为空。');
+          const sections = parseTaskSections(tasksContent);
+          const flat = flattenSections(sections);
+          if (flat.length === 0) return reject('错误：tasks.md 中没有步骤（格式: - [ ] 描述）。');
+          if (!readFile(specDir, 'spec.md').trim()) return reject('错误：spec.md 不存在或为空。');
+          if (!readFile(specDir, 'checklist.md').trim()) return reject('错误：checklist.md 不存在或为空。');
+
+          const newPhase = 'tasks' as const;
+          const wfSteps = buildWfStepsFromFlat(flat);
+          const first = wfSteps.find(s => s.status === 'in_progress');
+          const sectionList = sections.map(s => `  **${s.title}** (${s.steps.length} 步)`).join('\n');
+
           return {
-            newState: state,
+            newState: { ...state, phase: newPhase, data: { ...state.data, phase: newPhase } as unknown as Record<string, unknown>, steps: wfSteps },
             result: {
-              workflow: 'spec',
-              phase: 'spec',
-              progress: '错误：tasks.md 未找到或为空。请先用 write 创建 tasks.md。',
-              allDone: false,
+              workflow: 'spec', phase: 'tasks',
+              progress: `✅ Phase 1 完成，进入 Phase 2。\n${sections.length} 部分、${flat.length} 步骤:\n${sectionList}`,
+              allDone: false, nextStep: first,
             },
           };
         }
 
-        const steps = parseSteps(tasksContent);
-        if (steps.length === 0) {
+        case 'progress':
+        case 'note':
+          return reject(action.message ?? (action.action === 'progress' ? 'Progress noted.' : ''));
+
+        case 'add': {
+          if (phase === 'spec') return rejectPhase1();
+          const fileName = getPhaseFile(phase);
+          let content = readFile(specDir, fileName);
+          content += `\n- [ ] ${action.description ?? 'New step'}`;
+          writeFile(specDir, fileName, content);
+          const updated = parseSimpleSteps(content);
           return {
-            newState: state,
-            result: {
-              workflow: 'spec',
-              phase: 'spec',
-              progress: '错误：tasks.md 中没有检测到步骤（格式: - [ ] 描述）。',
-              allDone: false,
-            },
+            newState: { ...state, steps: buildWfSteps(updated, findInProgressId(state.steps ?? [])) },
+            result: { workflow: 'spec', phase, progress: `✅ 已添加到 ${fileName}`, allDone: false },
           };
         }
 
-        const newState = setPhase(state, 'tasks');
-        const wfSteps = steps.map((s, i) => ({
-          id: i + 1,
-          name: s.text,
-          description: s.text,
-          status: s.done ? 'completed' as const
-            : (i === 0 ? 'in_progress' as const : 'pending' as const),
-        }));
+        case 'done':
+        case 'blocked': {
+          if (phase === 'spec') return rejectPhase1();
 
-        return {
-          newState: { ...newState, steps: wfSteps },
-          result: {
-            workflow: 'spec',
-            phase: 'tasks',
-            progress: `✅ Phase 1 完成，进入 Phase 2 执行阶段。\n解析到 ${steps.length} 个步骤:\n` +
-              steps.map((s, i) => `  ${i + 1}. ${s.done ? '✅' : '⬜'} ${s.text}`).join('\n') +
-              `\n开始执行第 1 步。每步完成后调用 workflow({action:"step", id:N, stepAction:"done"})。`,
-            allDone: false,
-            nextStep: wfSteps[0],
-          },
-        };
-      }
+          const id = action.id ?? 0;
+          if (id < 1) return null;
 
-      // ── Spec Phase 1 guard: reject operations other than id:0 ──
-      if (phase === 'spec' && action.action !== 'note' && action.action !== 'progress') {
-        return {
-          newState: state,
-          result: {
-            workflow: 'spec',
-            phase: 'spec',
-            progress: 'Phase 1 (spec) 不接受步骤操作。请先完成 spec.md 的需求分析和技术方案设计，确认无误后调用 workflow({action:"step", id:0, stepAction:"done"}) 进入 Phase 2。',
-            allDone: false,
-          },
-        };
-      }
+          const fileName = getPhaseFile(phase);
+          let content: string;
+          try { content = fs.readFileSync(path.join(specDir, fileName), 'utf-8'); } catch { return null; }
 
-      // ── Phase 2 or 3: add step ─────────────────────────────────
-      if (action.action === 'add') {
-        const fileName = getPhaseFile(phase);
-        let content = readFile(specDir, fileName);
-        const desc = action.description ?? 'New step';
-        content += `\n- [ ] ${desc}`;
-        writeFile(specDir, fileName, content);
+          const steps = parseSimpleSteps(content);
+          if (id > steps.length) return reject(`错误：步骤 ${id} 不存在。${fileName} 共 ${steps.length} 步。`);
 
-        const updatedSteps = parseSteps(content);
-        return {
-          newState: {
-            ...state,
-            steps: updatedSteps.map((s, i) => ({
-              id: i + 1,
-              name: s.text,
-              description: s.text,
-              status: s.done ? 'completed' as const : 'pending' as const,
-            })),
-          },
-          result: {
-            workflow: 'spec',
-            phase,
-            progress: `✅ 已添加步骤到 ${fileName}: ${desc}`,
-            allDone: false,
-          },
-        };
-      }
+          const isBlocked = action.action === 'blocked';
+          const newContent = markStepInFile(content, id - 1, isBlocked ? '🚫' : 'x', action.message);
+          writeFile(specDir, fileName, newContent);
+          const updated = parseSimpleSteps(newContent);
+          const completed = allStepsDone(updated);
 
-      // ── Phase 2 or 3: done / blocked ───────────────────────────
-      if (action.action === 'done' || action.action === 'blocked') {
-        const id = action.id ?? 0;
-        if (id < 1) return null;
-
-        const fileName = getPhaseFile(phase);
-        let content: string;
-        try { content = fs.readFileSync(path.join(specDir, fileName), 'utf-8'); } catch {
-          return null;
-        }
-
-        const steps = parseSteps(content);
-        if (id > steps.length) {
-          return {
-            newState: state,
-            result: {
-              workflow: 'spec',
-              phase,
-              progress: `错误：步骤 ${id} 不存在。${fileName} 中共 ${steps.length} 个步骤（编号 1-${steps.length}）。`,
-              allDone: false,
-            },
-          };
-        }
-
-        const mark = action.action === 'done' ? 'x' : '🚫';
-        const newContent = markStepInFile(content, id - 1, mark, action.message);
-        writeFile(specDir, fileName, newContent);
-
-        const updatedSteps = parseSteps(newContent);
-        const currentStep = updatedSteps[id - 1];
-
-        if (action.action === 'blocked') {
-          return {
-            newState: {
-              ...state,
-              steps: updatedSteps.map((s, i) => ({
-                id: i + 1,
-                name: s.text,
-                description: s.text,
-                status: s.done ? 'completed' as const : 'blocked' as const,
-              })),
-            },
-            result: {
-              workflow: 'spec',
-              phase,
-              progress: `🚫 ${fileName} 步骤 ${id} 已标记为受阻: ${currentStep.text}`,
-              allDone: false,
-            },
-          };
-        }
-
-        // done: check for phase transition
-        const allCompleted = updatedSteps.every(s => s.done);
-
-        // Phase 2 (tasks) all done → Phase 3 (checklist)
-        if (phase === 'tasks' && allCompleted) {
-          const clContent = readFile(specDir, 'checklist.md');
-          if (!clContent.trim()) {
+          if (isBlocked) {
+            const nextIdx = findNextStepIdx(updated, id);
             return {
-              newState: state,
+              newState: { ...state, steps: buildWfSteps(updated, nextIdx) },
               result: {
-                workflow: 'spec',
-                phase: 'tasks',
-                progress: '错误：checklist.md 未找到。',
+                workflow: 'spec', phase,
+                progress: `🚫 ${fileName} 步骤 ${id} 受阻: ${updated[id - 1].text}` +
+                  (nextIdx !== -1 ? `\n→ 步骤 ${nextIdx + 1}` : ''),
+                allDone: false,
+                nextStep: nextIdx !== -1 ? { id: nextIdx + 1, name: updated[nextIdx].text, description: updated[nextIdx].text, status: 'in_progress' } : undefined,
+              },
+            };
+          }
+
+          // Phase transition: tasks → checklist
+          if (phase === 'tasks' && completed) {
+            const clContent = readFile(specDir, 'checklist.md');
+            if (!clContent.trim()) return reject('错误：checklist.md 未找到。');
+            const clSteps = parseSimpleSteps(clContent);
+            const newPhase = 'checklist' as const;
+            const wfSteps = buildWfSteps(clSteps);
+            return {
+              newState: { ...state, phase: newPhase, data: { ...state.data, phase: newPhase } as unknown as Record<string, unknown>, steps: wfSteps },
+              result: {
+                workflow: 'spec', phase: 'checklist',
+                progress: `✅ Phase 2 完成，进入 Phase 3。${clSteps.length} 个验收项。`,
                 allDone: false,
               },
             };
           }
-          const clSteps = parseSteps(clContent);
-          const newState = setPhase(state, 'checklist');
-          const wfSteps = clSteps.map((s, i) => ({
-            id: i + 1,
-            name: s.text,
-            description: s.text,
-            status: s.done ? 'completed' as const
-              : (i === 0 ? 'in_progress' as const : 'pending' as const),
-          }));
 
+          // Phase 3 all done → complete
+          if (phase === 'checklist' && completed) {
+            return {
+              newState: { ...state, steps: buildWfSteps(updated) },
+              result: {
+                workflow: 'spec', phase: 'checklist',
+                progress: `✅ 全部 ${updated.length} 个验收项已完成。`,
+                allDone: true,
+              },
+            };
+          }
+
+          const nextIdx = findNextStepIdx(updated, id);
           return {
-            newState: { ...newState, steps: wfSteps },
+            newState: { ...state, steps: buildWfSteps(updated, nextIdx) },
             result: {
-              workflow: 'spec',
-              phase: 'checklist',
-              progress: `✅ Phase 2 全部完成，进入 Phase 3 验收阶段。\n解析到 ${clSteps.length} 个验收项:\n` +
-                clSteps.map((s, i) => `  ${i + 1}. ${s.done ? '✅' : '⬜'} ${s.text}`).join('\n') +
-                `\n逐项验证，每项完成后调用 workflow({action:"step", id:N, stepAction:"done"})。`,
+              workflow: 'spec', phase,
+              progress: `✅ 步骤 ${id} 完成。${nextIdx !== -1 ? `\n下一步: 步骤 ${nextIdx + 1} — ${updated[nextIdx].text}` : ''}`,
               allDone: false,
+              nextStep: nextIdx !== -1 ? { id: nextIdx + 1, name: updated[nextIdx].text, description: updated[nextIdx].text, status: 'in_progress' } : undefined,
             },
           };
         }
 
-        // Phase 3 (checklist) all done → complete
-        if (phase === 'checklist' && allCompleted) {
-          return {
-            newState: {
-              ...state,
-              steps: updatedSteps.map((s, i) => ({
-                id: i + 1,
-                name: s.text,
-                description: s.text,
-                status: 'completed' as const,
-              })),
-            },
-            result: {
-              workflow: 'spec',
-              phase: 'checklist',
-              progress: `✅ 全部 ${updatedSteps.length} 个验收项已完成。工作流已结束。`,
-              allDone: true,
-            },
-          };
-        }
-
-        // regular step done
-        const nextIdx = updatedSteps.findIndex((s, i) => i >= id && !s.done);
-
-        return {
-          newState: {
-            ...state,
-            steps: updatedSteps.map((s, i) => ({
-              id: i + 1,
-              name: s.text,
-              description: s.text,
-              status: s.done ? 'completed' as const
-                : (i === nextIdx ? 'in_progress' as const : 'pending' as const),
-            })),
-          },
-          result: {
-            workflow: 'spec',
-            phase,
-            progress: nextIdx === -1
-              ? `✅ 步骤 ${id} 完成。`
-              : `✅ 步骤 ${id} 完成。\n下一步: 步骤 ${nextIdx + 1} — ${updatedSteps[nextIdx].text}`,
-            allDone: false,
-            nextStep: nextIdx !== -1 ? {
-              id: nextIdx + 1,
-              name: updatedSteps[nextIdx].text,
-              description: updatedSteps[nextIdx].text,
-              status: 'in_progress',
-            } : undefined,
-          },
-        };
+        default: return null;
       }
-
-      return null;
     },
 
-    renderForInjection(state) {
-      const { task, specDir } = getData(state);
-      const phase = state.phase ?? 'spec';
+    renderForInjection(state) { return this.renderPersistent!(state); },
+
+    renderPersistent(state) {
+      const data = getData(state);
+      const { task, specDir, phase } = data;
       const specContent = readFile(specDir, 'spec.md');
 
-      const specAnchor = specContent
-        ? `\n---\n## 规格文档 (spec.md)\n${specContent}\n---\n`
-        : '\n(还未创建 spec.md — 请用 write 编辑)\n';
-
-      switch (phase) {
-        case 'spec': {
-          return `## Spec Workflow — Phase 1: 需求分析
-
-**任务**: ${task || '(未指定)'}
-**目录**: ${specDir}
-
-当前阶段：收集需求、分析技术方案。用 write 编辑 spec.md。
-完成后调用 \`workflow({action:"step", id:0, stepAction:"done"})\` 进入执行阶段。
-${specAnchor}`;
-        }
-
-        case 'tasks': {
-          const tasksContent = readFile(specDir, 'tasks.md');
-          const steps = parseSteps(tasksContent);
-          const next = steps.find(s => !s.done);
-          const progress = steps.map((s, i) => {
-            const mark = s.done ? '✅' : (s === next ? '🔄' : '⬜');
-            return `  ${mark} [${i + 1}] ${s.text}`;
-          }).join('\n');
-
-          return `${specAnchor}
-## Spec Workflow — Phase 2: 执行阶段
-
-**进度**:
-${progress || '(暂无步骤)'}
-
-${next ? `🔄 当前: 步骤 ${steps.findIndex(s => !s.done) + 1} — ${next.text}` : (tasksContent ? '✅ 全部完成 — 下一步自动进入 Phase 3' : '')}
-
-使用 \`workflow({action:"step", id:N, stepAction:"done"})\` 标记步骤完成。`;
-        }
-
-        case 'checklist': {
-          const clContent = readFile(specDir, 'checklist.md');
-          const steps = parseSteps(clContent);
-          const next = steps.find(s => !s.done);
-          const progress = steps.map((s, i) => {
-            const mark = s.done ? '✅' : (s === next ? '🔄' : '⬜');
-            return `  ${mark} [${i + 1}] ${s.text}`;
-          }).join('\n');
-
-          return `${specAnchor}
-## Spec Workflow — Phase 3: 验收阶段
-
-**验收项**:
-${progress || '(暂无验收项)'}
-
-${next ? `🔄 当前: 检查项 ${steps.findIndex(s => !s.done) + 1} — ${next.text}` : (clContent ? '✅ 全部验收完成' : '')}
-
-使用 \`workflow({action:"step", id:N, stepAction:"done"})\` 标记验收项通过。`;
-        }
-
-        default: return '';
+      if (phase === 'spec') {
+        return renderPrompt(loadPrompt('modes/spec-phase1'), { task: task || '(未指定)', specDir });
       }
+
+      const specHeader = specContent.trim()
+        ? `## 规格文档 (spec.md)\n\n${specContent}\n`
+        : '⚠️ spec.md 为空。\n';
+
+      if (phase === 'tasks') {
+        const tasksContent = readFile(specDir, 'tasks.md');
+        const sections = parseTaskSections(tasksContent);
+        const flat = flattenSections(sections);
+        const progressLine = renderProgress(
+          flat.filter(f => f.step.done).length, flat.length,
+          flat.filter(f => f.step.blocked).length,
+        );
+        return `## Spec: ${task || ''}\n\n${specHeader}\n${progressLine}`;
+      }
+
+      // checklist phase
+      const clSteps = parseSimpleSteps(readFile(specDir, 'checklist.md'));
+      const progressLine = renderProgress(
+        clSteps.filter(s => s.done).length, clSteps.length,
+        clSteps.filter(s => s.blocked).length,
+      );
+      return `## Spec: ${task || ''}\n\n${specHeader}\n${progressLine}`;
+    },
+
+    renderStep(state) {
+      const data = getData(state);
+      const { specDir, phase } = data;
+      if (phase === 'spec') return '';
+
+      const wfSteps = state.steps ?? [];
+      const cur = wfSteps.find(s => s.status === 'in_progress');
+      const total = wfSteps.length;
+      const allDone = wfSteps.length > 0 && wfSteps.every(s => s.status === 'completed');
+      const allBlocked = wfSteps.length > 0 && wfSteps.every(s => s.status === 'blocked' || s.status === 'completed') &&
+        wfSteps.some(s => s.status === 'blocked');
+
+      const label = phase === 'tasks' ? 'Task' : 'Checklist Item';
+
+      if (allDone) return `\n✅ All ${label.toLowerCase()}s complete.`;
+      if (!cur) {
+        const next = wfSteps.find(s => s.status === 'pending');
+        if (next) return `\n### Next ${label}\n🔄 **${next.id}. ${next.description}**\n\nVerify: \`workflow({action:"step", id:${next.id}, stepAction:"done"})\``;
+        if (allBlocked) return '\n⚠️ All remaining items are blocked.';
+        return '';
+      }
+
+      return `\n### Current ${label} (${cur.id}/${total})\n🔄 **${cur.description}**\n\nMark done:\n\`\`\`\nworkflow({action:"step", id:${cur.id}, stepAction:"done"})\n\`\`\``;
     },
 
     isComplete(state) {
-      const { specDir } = getData(state);
-      if (state.phase !== 'checklist') return false;
-      const content = readFile(specDir, 'checklist.md');
+      const data = getData(state);
+      if (data.phase !== 'checklist') return false;
+      const content = readFile(data.specDir, 'checklist.md');
       if (!content.trim()) return false;
-      const steps = parseSteps(content);
-      return steps.length > 0 && steps.every(s => s.done);
+      return allStepsDone(parseSimpleSteps(content));
     },
   };
 }

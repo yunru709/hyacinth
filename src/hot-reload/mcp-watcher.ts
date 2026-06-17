@@ -12,25 +12,37 @@ interface McpWatcherDeps {
 /**
  * 监听 MCP 配置文件变化，自动增/删/改 MCP Server 连接。
  *
- * 监听两个文件：
- *   - .agent/mcp.json
- *   - .mcp.json
+ * 监听两个文件：.agent/mcp.json 和 .mcp.json。
  *
- * 任一文件发生变化时，debounce 后通过 MCPSystem.reload() 重新加载配置。
+ * 使用 fs.watchFile（原因同 provider-watcher）：
+ *   .agent/ 目录下文件变更频繁，fs.watch 会产生大量无效回调。
+ *   fs.watchFile 以固定间隔 stat 轮询，对极少变更的配置文件开销更低。
  */
-export function watchMcpConfig(deps: McpWatcherDeps): fs.FSWatcher[] {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function watchMcpConfig(deps: McpWatcherDeps): any[] {
   const logger = createLogger('hot-reload:mcp');
-  const { mcpSystem, cwd, debounceMs } = deps;
+  const { mcpSystem, cwd } = deps;
 
-  // ── 配置变更处理（含 debounce） ──
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const watchPaths = [
+    path.join(cwd, '.agent', 'mcp.json'),
+    path.join(cwd, '.mcp.json'),
+  ];
+  const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
+
   let handleLock = false;
+  const lastMtimes = new Map<string, number>();
+
+  for (const watchPath of watchPaths) {
+    try {
+      const stat = fs.statSync(watchPath);
+      lastMtimes.set(watchPath, stat.mtimeMs);
+    } catch {
+      // 文件不存在
+    }
+  }
 
   async function handleChange(): Promise<void> {
-    if (handleLock) {
-      logger.info('handleChange already running, skipping');
-      return;
-    }
+    if (handleLock) return;
     handleLock = true;
 
     try {
@@ -44,37 +56,18 @@ export function watchMcpConfig(deps: McpWatcherDeps): fs.FSWatcher[] {
     }
   }
 
-  // ── 监听配置文件（目录级别，支持文件被创建后触发） ──
-  const configWatchTargets = [
-    { dir: path.join(cwd, '.agent'), file: 'mcp.json' },
-    { dir: cwd, file: '.mcp.json' },
-  ];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const watchers: any[] = [];
 
-  const watchers: fs.FSWatcher[] = [];
-  const watchedDirs = new Set<string>();
-
-  for (const { dir, file } of configWatchTargets) {
-    if (watchedDirs.has(dir)) continue;
-    watchedDirs.add(dir);
-
-    try {
-      const watcher = fs.watch(dir, (_event, filename) => {
-        if (!filename || !isTargetFile(filename, configWatchTargets)) return;
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(handleChange, debounceMs);
-      });
-      watcher.on('error', (err) => {
-        logger.warn('watcher error', { dir, error: err.message });
-      });
-      watchers.push(watcher);
-    } catch {
-    }
+  for (const watchPath of watchPaths) {
+    const watcher = fs.watchFile(watchPath, { interval: POLL_INTERVAL_MS }, (curr) => {
+      const prev = lastMtimes.get(watchPath) ?? 0;
+      if (curr.mtimeMs === prev) return;
+      lastMtimes.set(watchPath, curr.mtimeMs);
+      handleChange();
+    });
+    watchers.push(watcher);
   }
 
   return watchers;
-}
-
-// ── 检查目录变更事件是否命中目标文件 ──
-function isTargetFile(filename: string, targets: Array<{ dir: string; file: string }>): boolean {
-  return targets.some((t) => filename === t.file || filename.endsWith(path.sep + t.file));
 }

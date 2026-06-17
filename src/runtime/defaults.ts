@@ -53,17 +53,6 @@ export function getDefaultConfig(): FullConfig {
       compressDepth: 0.5,
       compressionStrategy: 'C' as const,
     },
-    training: {
-      enabled: false,
-      scheduleTime: '03:00',
-      checkIntervalMs: 600000,
-      minSamples: 10,
-      baseModel: 'models/llama-3-8b-q4_k_m.gguf',
-      adapter: {
-        maxAdapters: 5,
-        minSamplesPerAdapter: 10,
-      },
-    },
     schedule: {
       heartbeatMs: 5000,
       maxConcurrent: 10,

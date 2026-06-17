@@ -1,4 +1,19 @@
-import type { FSWatcher } from 'node:fs';
+/**
+ * ## 热加载管理器 — 热加载原则
+ *
+ * 项目设计原则：配置变更应即时生效，不重启。
+ * 所有外部化内容（MCP、Skill、Agent、Workflow、Provider、Config 等）
+ * 均通过各自的 watcher 监听文件变化，自动重载。
+ *
+ * 已使用 fs.watchFile（stat 轮询）替代 fs.watch：
+ *   - .agent/ 目录文件密集（session、SQLite、scheduler），fs.watch 在 Windows 上性能差
+ *   - 用 5s 间隔 stat 轮询，对极少变更的配置文件影响更小
+ *
+ * 新增热加载项：
+ *   1. 在对应目录写 watcher 模块（参考 mcp-watcher.ts / provider-watcher.ts）
+ *   2. 在此文件的 start() 中注册（带 config guard）
+ *   3. 确保 watcher 返回 handle 数组，stop() 会统一 close
+ */
 import type { ToolRegistry } from '../tools/registry.js';
 import type { SkillDefinition } from '../types.js';
 import type { SkillRegistry } from '../skills/registry.js';
@@ -36,7 +51,8 @@ export interface HotReloadDeps {
 // ─── HotReloadManager ─────────────────────────────────────────────
 
 export class HotReloadManager {
-  private watchers: FSWatcher[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private watchers: any[] = [];
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private logger = createLogger('hot-reload:manager');
   private started = false;
@@ -281,9 +297,9 @@ export class HotReloadManager {
   stop(): void {
     this.logger.info('Stopping hot reload watchers...');
 
-    // Close all FSWatcher instances
+    // Close all watcher instances (FSWatcher / StatWatcher / custom handles)
     for (const watcher of this.watchers) {
-      watcher.close();
+      if (typeof watcher?.close === 'function') watcher.close();
     }
     this.watchers = [];
 
@@ -304,7 +320,7 @@ export class HotReloadManager {
    * Handles both single FSWatcher and FSWatcher[] return values.
    */
   registerWatcher(
-    fn: (...args: any[]) => FSWatcher | FSWatcher[],
+    fn: (...args: any[]) => any,
     ...args: unknown[]
   ): void {
     try {

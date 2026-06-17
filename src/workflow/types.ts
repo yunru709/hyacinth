@@ -1,26 +1,56 @@
 /**
  * Workflow System — 统一工作流类型定义
  *
- * Workflow 是 Plan / Spec / TODO / (转换后的)Skill 的统一容器。
- * 由 WorkflowRegistry 注册、WorkflowManager 管理运行时状态。
+ * ## 架构概览
  *
- * 激活方式：/workflow <name> 或 workflow({action:"activate", name})
- * 步骤推进：workflow({action:"step", id:N, stepAction:"done"})
- * 注入：renderForInjection() → Zone 5 workflow-injection
+ * Workflow 是 Plan / Spec / TODO / (转换后的)Skill 的统一容器。
+ * 三个内置 Workflow 共享以下通用模式：
+ *
+ *   analyze phase  → 一次性引导注入，模型分析+拆分任务
+ *   execute phase → 分析结果持久注入 + 仅当前步骤，逐条驱动
+ *   all done      → 框架自动停用
+ *
+ * 运行时由 WorkflowRegistry 注册、WorkflowManager 管理。
+ * 注入架构（Zone 5）：
+ *   renderPersistent → workflow_persistent（阶段引导/分析，阶段切换时变化）
+ *   renderStep      → workflow_step（当前步骤指令，每步变化）
+ *
+ * ## 如何添加新的 Workflow
+ *
+ * 1. 实现 WorkflowDefinition 接口（参考 builtin/plan.workflow.ts）
+ * 2. 使用 shared/file-steps.ts 中的共享工具（文件驱动型）或自行实现
+ * 3. 在工厂中注册：workflowRegistry.registerBuiltin(createXxxWorkflow())
+ * 4. 如需 prompt 模板，放入 src/prompts/modes/ 并通过 loadPrompt 加载
+ *
+ * ## handleStep 约定
+ *
+ * 所有 handleStep 必须处理以下 actions（即使只返回 null）：
+ *   - done / blocked  → 步骤推进（执行阶段）
+ *   - add             → 追加步骤
+ *   - note / progress → 记录信息（不改变步骤状态）
+ *   - complete        → 阶段切换（analyze→execute）或全局完成标记
+ *
+ * 返回值：
+ *   - { newState, result } → 正常处理
+ *   - null                 → 不支持该操作（框架返回 "not supported"）
+ *
+ * 阶段守卫模式（推荐）：
+ *   分析阶段拒绝 done/blocked/add，引导模型用 complete 推进。
+ *   执行阶段拒绝 complete（除非设计为手动结束）。
  */
 
 // ─── 步骤 ─────────────────────────────────────────────────────────────
 
 export interface WorkflowStep {
-  /** 步骤编号（1-based，与现有 task_mark id 语义一致） */
+  /** 步骤编号（1-based） */
   id: number;
-  /** 步骤名称 */
+  /** 步骤名称（展示用，可含段落前缀如 "[第一部分] 描述"） */
   name: string;
   /** 步骤描述 */
   description: string;
   /** 当前状态 */
   status: 'pending' | 'in_progress' | 'completed' | 'blocked';
-  /** 依赖步骤 ID（保留字段，第一版只校验不执行拓扑排序） */
+  /** 依赖步骤 ID（保留字段） */
   dependsOn?: number[];
   /** 阻塞原因（status === 'blocked' 时） */
   reason?: string;
@@ -31,24 +61,35 @@ export interface WorkflowStep {
 export interface WorkflowState {
   /** 工作流名称 */
   name: string;
-  /** 当前阶段（Spec 为 "spec"|"tasks"|"checklist"，其他为 undefined） */
+  /**
+   * 当前阶段。
+   * Plan:  undefined（analyze/execute 在 data.phase 中）
+   * Spec:  "spec" | "tasks" | "checklist"
+   * TODO:  undefined（analyze/execute 在 data.phase 中）
+   */
   phase?: string;
-  /** 工作流特定数据（planDir / specDir 等） */
+  /**
+   * 工作流特定数据。
+   * 内置 Workflow 的 data 结构：
+   *   Plan: { task, planDir, phase }
+   *   Spec: { task, specDir, phase }
+   *   TODO: { task, analysis, steps: TodoStep[], phase }
+   */
   data: Record<string, unknown>;
-  /** 步骤列表 */
+  /** 步骤列表（与 handleStep 同步维护） */
   steps: WorkflowStep[];
-  /** 激活时间 */
+  /** 激活时间（ISO 字符串） */
   startedAt?: string;
 }
 
 // ─── 步骤操作参数 ─────────────────────────────────────────────────────
 
 export interface WorkflowStepAction {
-  /** 操作类型（与现有 task_mark action 一致） */
+  /** 操作类型 */
   action: 'done' | 'blocked' | 'add' | 'note' | 'progress' | 'complete';
-  /** 步骤编号（1-based） */
+  /** 步骤编号（1-based）。add/note/progress 时可选，done/blocked 时必填 */
   id?: number;
-  /** 步骤描述（add 操作时使用） */
+  /** 步骤描述（add 时使用） */
   description?: string;
   /** 附加消息（blocked 原因 / note 内容 / progress 更新） */
   message?: string;
@@ -61,48 +102,81 @@ export interface WorkflowStepResult {
   workflow: string;
   /** 当前阶段 */
   phase?: string;
-  /** 进度汇总（人类可读，含 emoji 标记） */
+  /** 进度描述（人类可读，含 emoji） */
   progress: string;
-  /** 是否全部完成 */
+  /** 是否全部完成。true 时框架自动调用 manager.deactivate() */
   allDone: boolean;
-  /** 下一步建议 */
+  /** 下一步建议（框架展示给模型） */
   nextStep?: WorkflowStep;
 }
 
 // ─── 工作流定义 ───────────────────────────────────────────────────────
 
 export interface WorkflowDefinition {
-  /** 唯一名称（注册表键） */
+  /** 唯一名称（注册表键）。内置名受保护，不可被文件 Workflow 覆盖 */
   name: string;
-  /** 简短描述（用于索引显示） */
+  /** 简短描述（用于 /workflows 列表和 Zone 2 manifest） */
   description: string;
-  /** 来源：内置 / 文件加载 / 插件 / Skill 转换 */
+  /** 来源 */
   source: 'builtin' | 'file' | 'plugin' | 'converted';
-  /** 关联工具白名单（soft 提示，默认不强制） */
+  /** 关联工具白名单（soft 提示） */
   relatedTools?: string[];
-  /** 触发关键词（LLM 匹配建议，可选） */
+  /** 触发关键词（LLM 匹配建议） */
   triggerKeywords?: string[];
 
-  /** 创建初始状态 */
+  /**
+   * 创建初始状态。
+   * 不应写模板文件——文件由模型按注入的引导模板自行创建。
+   * 若检测到已有步骤文件（如 plan.md），可直接进入 execute 阶段。
+   */
   createState: (params: Record<string, unknown>) => WorkflowState;
 
   /**
-   * 处理步骤操作，返回 { newState, result }。
-   * 若操作与当前工作流无关，返回 null。
-   * 若不实现（undefined），表示该工作流不接受步骤操作（纯展示型）。
+   * 处理步骤操作。
+   * 返回 null 表示不支持该操作（框架返回错误提示）。
+   * 返回 { newState, result } 更新状态并推进。
+   *
+   * 推荐实现模式（参考 builtin/plan.workflow.ts）：
+   *   switch (action.action) {
+   *     case 'complete': → 阶段切换或全局标记
+   *     case 'progress': case 'note': → 透传消息，不改变步骤状态
+   *     case 'add':      → 追加步骤
+   *     case 'done': case 'blocked': → 标记步骤 + 自动推进
+   *   }
    */
   handleStep?: (
     state: WorkflowState,
     action: WorkflowStepAction,
   ) => { newState: WorkflowState; result: WorkflowStepResult } | null;
 
-  /** 渲染注入到对话中的提示词内容 */
+  /**
+   * 兼容旧接口——若不实现 renderPersistent/renderStep 则回退到此。
+   * 新 Workflow 应优先实现下面两个方法。
+   */
   renderForInjection: (state: WorkflowState) => string;
 
-  /** 判断工作流是否已完成 */
+  /**
+   * 持久上下文注入 → Zone 5 workflow_persistent。
+   * 阶段引导提示词、分析结果、spec.md 内容等不随步骤变化的内容。
+   * 阶段切换时内容才变化（analyze→execute），同阶段内多轮不变。
+   */
+  renderPersistent?: (state: WorkflowState) => string;
+
+  /**
+   * 当前步骤注入 → Zone 5 workflow_step。
+   * 单条步骤指令，每步变化。非执行阶段返回空字符串。
+   * 只展示当前一步，不展示全量步骤列表。
+   */
+  renderStep?: (state: WorkflowState) => string;
+
+  /**
+   * 判断工作流是否已完成。
+   * 内置 Workflow 通常在 execute 阶段检查所有步骤 done。
+   * 若返回 true，checkComplete() 会调用 deactivate()。
+   */
   isComplete: (state: WorkflowState) => boolean;
 
-  /** 停用时的清理回调 */
+  /** 停用时的清理回调（如清理临时文件） */
   onDeactivate?: (state: WorkflowState) => void;
 }
 

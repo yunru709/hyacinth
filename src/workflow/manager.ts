@@ -4,11 +4,14 @@
  * 职责：
  *   1. 激活/停用 Workflow（互斥）
  *   2. 步骤分发（委托到当前 WorkflowDefinition.handleStep）
- *   3. 注入内容渲染
+ *   3. 注入内容渲染（persistent + step 双通道）
  *   4. 自动检测停用条件
  *   5. 状态与 session 绑定（切换 session 时自动保存/恢复）
  *
- * 与 ModeManager 同架构，但面向 WorkflowDefinition 接口。
+ * 注入架构：
+ *   renderPersistent() → Zone 5 workflow_persistent（阶段引导/分析结果，阶段切换时变化）
+ *   renderStep()      → Zone 5 workflow_step（当前步骤指令，每步变化）
+ *   未实现 renderPersistent/renderStep 的旧 Workflow 回退到 renderForInjection。
  */
 
 import type { WorkflowDefinition, WorkflowState, WorkflowStepAction, WorkflowStepResult } from './types.js';
@@ -41,7 +44,7 @@ export class WorkflowManager {
 
   // ── 激活 / 停用 ──────────────────────────────────────────────────
 
-  /** 激活指定 Workflow（自动停用当前 Workflow 和 ModeManager） */
+  /** 激活指定 Workflow（自动停用当前已激活的 Workflow） */
   activate(name: string, params: Record<string, unknown> = {}): WorkflowState {
     if (this.activeDef) this.deactivate();
 
@@ -82,9 +85,35 @@ export class WorkflowManager {
 
   // ── 注入 ─────────────────────────────────────────────────────────
 
+  /** 回退用的组合注入（兼容旧 workflow） */
   renderForInjection(): string | null {
     if (!this.activeDef || !this.activeState) return null;
     return this.activeDef.renderForInjection(this.activeState);
+  }
+
+  /**
+   * 持久上下文 — 分析结果等不随步骤变化的内容。
+   * 若 workflow 实现了 renderPersistent 则用新接口，否则回退到 renderForInjection。
+   */
+  renderPersistent(): string | null {
+    if (!this.activeDef || !this.activeState) return null;
+    if (this.activeDef.renderPersistent) {
+      return this.activeDef.renderPersistent(this.activeState);
+    }
+    // 兼容：旧 workflow 的 renderForInjection 作为 persistent 内容
+    return this.activeDef.renderForInjection(this.activeState);
+  }
+
+  /**
+   * 当前步骤 — 单条步骤指令，每轮变化。
+   * 若 workflow 实现了 renderStep 则用新接口，否则返回 null（不重复注入）。
+   */
+  renderStep(): string | null {
+    if (!this.activeDef || !this.activeState) return null;
+    if (this.activeDef.renderStep) {
+      return this.activeDef.renderStep(this.activeState);
+    }
+    return null;
   }
 
   // ── 步骤分发 ─────────────────────────────────────────────────────
@@ -107,7 +136,13 @@ export class WorkflowManager {
 
   // ── 完成检查 ─────────────────────────────────────────────────────
 
-  /** 检查当前 Workflow 是否已完成（用于自动停用检测） */
+  /** 只读检查：当前工作流是否已完成（不触发停用） */
+  isCompleteCheck(): boolean {
+    if (!this.activeDef || !this.activeState) return false;
+    return this.activeDef.isComplete(this.activeState);
+  }
+
+  /** 检查并自动停用已完成的工作流（有副作用，仅在后工具检测时调用） */
   checkComplete(): boolean {
     if (!this.activeDef || !this.activeState) return false;
 
@@ -187,6 +222,12 @@ export class WorkflowManager {
         ?? this.registry.getAll().find(d => d.name.toLowerCase() === data.name.toLowerCase());
       if (!def) {
         logger.warn(`Workflow "${data.name}" from session state not registered, skipping restore.`);
+        return;
+      }
+      // 若恢复的工作流已完成，跳过激活并清理残留状态文件
+      if (def.isComplete(data.state)) {
+        logger.info(`Restored workflow "${data.name}" is already complete, skipping.`);
+        try { fs.unlinkSync(filePath); } catch {}
         return;
       }
       this.activeDef = def;

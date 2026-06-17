@@ -53,11 +53,6 @@ import { ProviderRouter } from '../provider/router.js';
 import { ModelRouter } from '../provider/model-router.js';
 import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js';
 import { ModelChannelRegistry } from '../provider/model-channel-registry.js';
-import { TrainingScheduler } from '../training/scheduler.js';
-import { DataRefiner } from '../training/refiner.js';
-import { RefinedDataStore } from '../training/refined-store.js';
-import { AdapterBridge } from '../training/adapter-bridge.js';
-import { LocalModelModule } from '../local-model/index.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
 import { HotReloadManager } from '../hot-reload/index.js';
 import { ProviderConfigLoader, getProviderConfigLoader } from '../provider/config.js';
@@ -72,11 +67,6 @@ import { createProcessListTool, createProcessKillTool, createProcessOutputTool }
 import { collectSystemInfo, buildEnvironmentSection } from '../env/index.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { CommandRegistry } from '../ui/command-registry.js';
-import { TrainingAggregator } from '../training/aggregator.js';
-import { DatasetBuilder } from '../training/dataset.js';
-import { AdapterManager } from '../training/adapter.js';
-import { ModelStore } from '../training/model-store.js';
-
 const logger = createLogger('factory');
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -127,6 +117,21 @@ export interface AgentComponents {
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
+//
+// ## 组件装配原则
+//
+// 这是整个 Agent 的唯一装配入口。所有模块在此创建、配置、注入。
+// 如果你要新增系统级组件（如新的 ContextSource、Tool、Workflow）：
+//
+//   1. 在此文件中注册 ContextSource 到 composer（Zone 注入）
+//   2. 在此文件中注册 Tool 到 toolRegistry
+//   3. 在此文件中注册 Workflow 到 workflowRegistry
+//   4. 不要在其他地方分散注册——保持单一装配点
+//
+// 提示词、配置均通过外部化体系加载（loadPrompt / RuntimeConfigCenter），
+// 不要在工厂中硬编码任何面向模型或用户的文本内容。
+//
+// ─────────────────────────────────────────────────────────────────────
 
 export async function createAgent(
   options: CreateAgentOptions,
@@ -348,16 +353,29 @@ export async function createAgent(
     });
   }
 
-  // ── MCP 系统（统一管理，随主进程启动）───────────────────────────
+  // ── 定时任务调度器（提前构造，start 放入并行块）───────────────────
+  const persistedSchedule = configCenter.get('schedule') as Record<string, unknown> | undefined;
+  const scheduleConfig = persistedSchedule ?? config.schedule;
+  const heartbeatScheduler = new HeartbeatScheduler(undefined, scheduleConfig as any);
+  heartbeatScheduler.subscribeConfig(configCenter);
+
+  // ── MCP 系统 + 独立初始化（并行） ──────────────────────────────────
   const mcpSystem = new MCPSystem({ cwd });
-  await mcpSystem.start();
+
+  // MCP 启动（可能启动子进程，慢）与调度器启动、依赖分析并行
+  const [, , dependencyAnalyzer] = await Promise.all([
+    mcpSystem.start(),
+    heartbeatScheduler.start(),
+    initDependencyAnalyzer(cwd),
+  ] as const);
+
   mcpSystem.registerToToolRegistry(toolRegistry);
   mcpSystem.registerToContextComposer(contextComposer);
   if (supervisor) {
     mcpSystem.registerToLifecycleSupervisor(supervisor);
   }
 
-  // ── 插件系统 ──────────────────────────────────────────────────────
+  // ── 插件系统（依赖 MCP 就绪）───────────────────────────────────────
   const pluginManager = new PluginManager({
     toolRegistry,
     skillRegistry,
@@ -371,26 +389,12 @@ export async function createAgent(
   const planStore = new PlanStore();
   const orchestrator = new LLMOrchestrator(provider, planStore, sessionDir, modelRouter);
 
-  // ── Provider 路由 + 训练调度器 ─────────────────────────────────────
-  const { trainingScheduler, providerRouter } = await createTrainingPipeline({
-    cwd,
-    sessionDir,
-    statsManager,
-    provider,
-    localModelProvider,
-    config,
-  });
-
-  // ── 定时任务调度器 ─────────────────────────────────────────────────
-  // Read persisted schedule config from configCenter, fallback to config.schedule
-  const persistedSchedule = configCenter.get('schedule') as Record<string, unknown> | undefined;
-  const scheduleConfig = persistedSchedule ?? config.schedule;
-  const heartbeatScheduler = new HeartbeatScheduler(undefined, scheduleConfig as any);
-  heartbeatScheduler.subscribeConfig(configCenter);
-  await heartbeatScheduler.start();
-
-  // ── 依赖图谱分析器 ────────────────────────────────────────────────
-  const dependencyAnalyzer = await initDependencyAnalyzer(cwd);
+  // ── Provider 路由 ──────────────────────────────────────────────────
+  const providerRouter = new ProviderRouter();
+  providerRouter.register('main', provider);
+  if (localModelProvider) {
+    providerRouter.register('local', localModelProvider);
+  }
 
   // ── CodeGraphTool（依赖图谱查询，需 DependencyAnalyzer 实例） ──────
   if (dependencyAnalyzer) {
@@ -439,13 +443,22 @@ export async function createAgent(
     workflowManager.activate('bootstrap');
   }
 
-  // Zone 5 workflow injection
+  // Zone 5 workflow persistent context（阶段引导、分析结果——阶段切换时变化，比 step 稳定）
   contextComposer.registerSource({
-    name: 'workflow-injection',
+    name: 'workflow-persistent',
     strategy: 'always_inline',
     cacheability: 'live',
-    description: '当前激活工作流的注入内容',
-    getContent: () => workflowManager.isActive() ? (workflowManager.renderForInjection() ?? '') : '',
+    description: '当前工作流持久上下文',
+    getContent: () => workflowManager.isActive() ? (workflowManager.renderPersistent() ?? '') : '',
+  });
+
+  // Zone 5 workflow current step（每轮变化）
+  contextComposer.registerSource({
+    name: 'workflow-step',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '当前工作流步骤指令',
+    getContent: () => workflowManager.isActive() ? (workflowManager.renderStep() ?? '') : '',
   });
 
   // Zone 2 manifest: 每个 Workflow 注册为 lazy_expand 源
@@ -546,10 +559,8 @@ export async function createAgent(
     effectivePersonaDir,
     effectiveBootstrapStatus,
     providerRouter,
-    trainingScheduler,
     new Set(config.safety?.dangerousTools ?? ['write', 'bash']),
     new Set(),
-    config.training?.scheduleTime ?? '03:00',
     configCenter,
     workflowManager,
     modelRouter,
@@ -602,9 +613,8 @@ export async function createAgent(
   // 不依赖 loop 的工具在 AgentLoop 之前注册；依赖 loop 的紧跟在构造之后。
   // 确保工具列表在首轮 compose 前已完整。
   toolRegistry.registerConfigTools(configCenter);
-  toolRegistry.registerTrainingTools(trainingScheduler, configCenter);
   // registerRuntimeControlTools 内有 switch_provider / set_mode 等 30+ 工具依赖 loop 实例
-  toolRegistry.registerRuntimeControlTools(loop, providerRouter, skillRegistry, agentRegistry, trainingScheduler, configCenter, cwd, heartbeatScheduler, mcpSystem, modelRouter);
+  toolRegistry.registerRuntimeControlTools(loop, providerRouter, skillRegistry, agentRegistry, configCenter, cwd, heartbeatScheduler, mcpSystem, modelRouter);
   toolRegistry.register(createTriggerCompressionTool(loop));
 
   // destroy_sub_agent 需要 sessionDir，在此单独注册
@@ -749,66 +759,4 @@ export async function createAgent(
     composeStrategy,
     backgroundRegistry,
   };
-}
-
-/**
- * 创建训练调度器及其依赖组件（用于 CLI 命令和 Agent 主流程）
- */
-export async function createTrainingPipeline(options: {
-  cwd: string;
-  sessionDir: string;
-  statsManager: StatsManager;
-  provider: Provider;
-  localModelProvider?: Provider;
-  config: Awaited<ReturnType<ConfigManager['load']>>;
-}): Promise<{ trainingScheduler: TrainingScheduler; providerRouter: ProviderRouter }> {
-  const { cwd, sessionDir, statsManager, provider, localModelProvider, config } = options;
-
-  const sessionsParentDir = path.dirname(sessionDir);
-  const trainingDataDir = path.join(cwd, 'training_data');
-  const adaptersDir = path.join(cwd, 'adapters');
-
-  const providerRouter = new ProviderRouter();
-  providerRouter.register('main', provider);
-  if (localModelProvider) {
-    providerRouter.register('local', localModelProvider);
-  }
-
-  const modelStore = new ModelStore(path.join(cwd, 'models'));
-  await modelStore.scan();
-
-  const trainAggregator = new TrainingAggregator(sessionsParentDir);
-  const trainDatasetBuilder = new DatasetBuilder(trainingDataDir);
-  const trainAdapterManager = new AdapterManager(
-    path.join(adaptersDir, 'registry.json'),
-    trainingDataDir,
-  );
-  await trainAdapterManager.init();
-
-  const refinedStore = new RefinedDataStore(cwd);
-  const refiner = new DataRefiner();
-  const localModelModule = LocalModelModule.getInstance();
-  if (!localModelModule.isInitialized()) {
-    localModelModule.initialize(cwd);
-  }
-  const modelBridge = localModelModule.getBridge();
-  const adapterBridge = new AdapterBridge(modelBridge, adaptersDir);
-
-  const trainingScheduler = new TrainingScheduler({
-    aggregator: trainAggregator,
-    datasetBuilder: trainDatasetBuilder,
-    adapterManager: trainAdapterManager,
-    statsManager,
-    globalDir: sessionsParentDir,
-    modelStore,
-    providerRouter,
-    config: config.training,
-    scheduleTime: config.training?.scheduleTime ?? '03:00',
-    refiner,
-    refinedStore,
-    adapterBridge,
-    cwd,
-  });
-
-  return { trainingScheduler, providerRouter };
 }

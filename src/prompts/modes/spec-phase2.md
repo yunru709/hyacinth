@@ -7,7 +7,7 @@
 {{currentStep}}
 {{progress}}
 
-每完成一项: `mode_mark({action:"done", id:N})`
-受阻: `mode_mark({action:"blocked", id:N, message:"原因"})`
+每完成一项: `workflow({action:"step", id:N, stepAction:"done"})`
+受阻: `workflow({action:"step", id:N, stepAction:"blocked", message:"原因"})`
 
 全部完成后自动进入验收阶段。

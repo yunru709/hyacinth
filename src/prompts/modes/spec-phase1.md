@@ -33,13 +33,13 @@
 
 ### 第三步：产出文档
 
-前两步分析完成后，用 `mode_mark` 一步创建三个文件：
+前两步分析完成后，用 `write` 分别创建三个文件（目录已由 Workflow 自动创建）：
 
 ```
-mode_mark({action:"init", spec: "...", tasks: "...", checklist: "..."})
+write({file_path: "<specDir>/spec.md", content: "..."})
+write({file_path: "<specDir>/tasks.md", content: "..."})
+write({file_path: "<specDir>/checklist.md", content: "..."})
 ```
-
-**⚠️ 必须用 `mode_mark`，不要用 `write` 创建这三个文件。**
 
 各文件内容要求：
 
@@ -51,10 +51,27 @@ mode_mark({action:"init", spec: "...", tasks: "...", checklist: "..."})
 - 关键交互流程说明
 - 边界条件和约束
 
-**tasks.md** — 执行任务：
-- 按依赖关系排序的可执行步骤
-- 每行格式 `- [ ] 描述`，粒度适中（不是一行"完成整个功能"，也不是一个函数写一条）
-- 遵循"先搭骨架 → 填充细节 → 联调测试"的顺序
+**tasks.md** — 执行任务（多级结构）：
+- 先按任务大类分为若干"部分"，用 `## 第N部分: 标题` 标记
+- 每部分下面列出具体可执行步骤，每行格式 `- [ ] 描述`
+- 步骤粒度适中（不是一行"完成整个功能"，也不是一个函数写一条）
+- 整体遵循"先搭骨架 → 填充细节 → 联调测试"的顺序
+- 每个步骤应该是可独立验证的、有明确产出的小任务
+
+示例结构：
+```
+## 第一部分: 数据层搭建
+- [ ] 定义数据模型和接口
+- [ ] 实现数据存储层
+
+## 第二部分: 业务逻辑
+- [ ] 实现核心处理函数
+- [ ] 添加错误处理
+
+## 第三部分: 集成与测试
+- [ ] 连接各模块
+- [ ] 编写集成测试
+```
 
 **checklist.md** — 验收清单：
 - 逐条对照 spec.md 中的功能需求
@@ -65,5 +82,5 @@ mode_mark({action:"init", spec: "...", tasks: "...", checklist: "..."})
 
 完成后推进到 Phase 2：
 ```
-mode_mark({action:"done", id:0})
+workflow({action:"step", id:0, stepAction:"done"})
 ```

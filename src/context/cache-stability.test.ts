@@ -109,7 +109,7 @@ describe('Cache Stability — 全链路长对话前缀缓存模拟', () => {
       getContent: () => {
         const tools = [
           'read', 'write', 'edit', 'bash', 'glob', 'grep',
-          'task_start', 'task_mark', 'interrupt',
+          'workflow', 'interrupt',
           'list_bundles', 'activate_bundle', 'deactivate_bundle', 'create_bundle',
           'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
           'list_tasks', 'mcp_status',

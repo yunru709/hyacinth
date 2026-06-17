@@ -1,23 +1,25 @@
+/**
+ * ## 配置管理 — 外部化原则
+ *
+ * 项目设计原则：所有可配置值必须通过配置体系读取，不得在代码中写死默认值。
+ *
+ * 配置层级：
+ *   内置默认值（src/runtime/defaults.ts）
+ *   → 用户项目配置（.agent/config.json）
+ *   → RuntimeConfigCenter（运行时读写，即时生效）
+ *
+ * 新增配置项：
+ *   1. 在 AgentConfig 接口中定义字段
+ *   2. 在 getDefaultConfig() 中提供默认值
+ *   3. 代码中通过 configCenter.get('path.to.key') 读取
+ *   4. 不要在模块内部硬编码 fallback 值——交给配置体系
+ */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getLocalProviderConfigLoader } from '../provider/local-config.js';
 import { DEFAULT_PROVIDERS } from '../provider/config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
-
-/** 训练配置 */
-export interface TrainingConfig {
-  /** 是否启用自动训练 */
-  enabled: boolean;
-  /** 训练调度时间 (HH:MM 格式) */
-  scheduleTime: string;
-  /** 训练检查间隔 (毫秒) */
-  checkIntervalMs: number;
-  /** 最小训练样本数 */
-  minSamples: number;
-  /** 基础模型路径 */
-  baseModel: string;
-}
 
 /** 安全配置 */
 export interface SafetyConfig {
@@ -133,8 +135,6 @@ export interface AgentConfig {
   fallbackProviders?: string[];
   /** Persona 模板文件目录 */
   personaDir?: string;
-  /** 训练配置 */
-  training?: TrainingConfig;
   /** 安全配置 */
   safety?: SafetyConfig;
   /** 上下文管理配置 */
@@ -158,13 +158,6 @@ const DEFAULT_CONFIG: AgentConfig = {
   model: DEFAULT_PROVIDERS.providers.anthropic?.defaultModel ?? 'unknown',
   maxTurns: getDefaultConfig().session.maxTurns,
   maxContext: 200000,
-  training: {
-    enabled: false,
-    scheduleTime: '03:00',
-    checkIntervalMs: 600000,
-    minSamples: 10,
-    baseModel: 'models/llama-3-8b-q4_k_m.gguf',
-  },
   safety: {
     dangerousTools: ['write', 'bash'],
     allowedTools: [],

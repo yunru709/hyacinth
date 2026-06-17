@@ -452,7 +452,7 @@ export async function runTui(
       const mn = workflowManager.getActive();
       if (mn) {
         const label = mn.charAt(0).toUpperCase() + mn.slice(1);
-        const completed = workflowManager.checkComplete();
+        const completed = workflowManager.isCompleteCheck();
         modeHeaderLabel = completed ? `${label} ✓` : `WF:${label}`;
       }
     }
@@ -2357,7 +2357,6 @@ export async function runTui(
         ['Storm', s.repair.storm.enabled ? 'on' : 'off'],
         ['Storm Window', s.repair.storm.windowSize],
         ['Storm Threshold', s.repair.storm.threshold],
-        ['Training', s.training.enabled ? 'on' : 'off'],
         ['Log Level', s.logging.level],
       ];
       chatLog.addSystem(theme.accent('\u2500\u2500 Status \u2500\u2500'));
@@ -2479,25 +2478,6 @@ if (input.startsWith('/threshold ')) {
         chatLog.addSystem(theme.success('Log level set to ') + theme.fg(arg));
       } else {
         chatLog.addSystem(theme.warning('Usage: /log <debug|info|warn|error|off>'));
-      }
-      tui.requestRender();
-      updateTokenEstimate();
-      return;
-    }
-
-    // ── /training on|off ──
-    if (input.startsWith('/training ')) {
-      const arg = input.slice(10).trim();
-      if (arg === 'on') {
-        cfg.set('training.enabled', true);
-        cfg.save().catch(() => {});
-        chatLog.addSystem(theme.success('Training mode ') + theme.fg('enabled'));
-      } else if (arg === 'off') {
-        cfg.set('training.enabled', false);
-        cfg.save().catch(() => {});
-        chatLog.addSystem(theme.warning('Training mode ') + theme.fg('disabled'));
-      } else {
-        chatLog.addSystem(theme.warning('Usage: /training <on|off>'));
       }
       tui.requestRender();
       updateTokenEstimate();

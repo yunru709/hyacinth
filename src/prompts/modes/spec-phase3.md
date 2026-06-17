@@ -7,7 +7,7 @@
 {{currentStep}}
 {{progress}}
 
-通过: `mode_mark({action:"done", id:N})`
-不通过: `mode_mark({action:"blocked", id:N, message:"原因"})`
+通过: `workflow({action:"step", id:N, stepAction:"done"})`
+不通过: `workflow({action:"step", id:N, stepAction:"blocked", message:"原因"})`
 
 全部通过后自动结束 Spec 模式。

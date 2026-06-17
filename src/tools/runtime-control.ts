@@ -6,7 +6,6 @@ import type { ModelRouter } from '../provider/model-router.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { TrainingScheduler } from '../training/scheduler.js';
 import type { HeartbeatScheduler } from '../schedule/scheduler.js';
 import type { ScheduledTask } from '../schedule/types.js';
 import type { MCPSystem } from '../mcp/system.js';
@@ -755,48 +754,6 @@ export function createSessionStatsTool(agentLoop: AgentLoop): Tool {
         return JSON.stringify(info, null, 2);
       } catch (err) {
         return `Error getting session stats: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
-}
-
-/**
- * trigger_training — trigger training immediately regardless of schedule.
- */
-export function createTriggerTrainingTool(trainingScheduler: TrainingScheduler): Tool {
-  return {
-    name: 'trigger_training',
-    description: 'Trigger a training run immediately, bypassing the scheduled time. If preconditions are not met (e.g. no local model), training will fail.',
-    inputSchema: { type: 'object', properties: {} },
-    async execute(_args: Record<string, unknown>): Promise<string> {
-      try {
-        const result = await trainingScheduler.triggerNow();
-        return `Training triggered successfully.\n${result.summary}\n\nDetails:\n${JSON.stringify(result.run, null, 2)}`;
-      } catch (err) {
-        return `Training failed: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
-}
-
-/**
- * cancel_training — cancel the currently running training process.
- */
-export function createCancelTrainingTool(trainingScheduler: TrainingScheduler): Tool {
-  return {
-    name: 'cancel_training',
-    description: 'Cancel the currently running training process if one is in progress.',
-    inputSchema: { type: 'object', properties: {} },
-    async execute(_args: Record<string, unknown>): Promise<string> {
-      try {
-        const status = trainingScheduler.getStatus();
-        if (!status.isTraining) {
-          return 'No training is currently running.';
-        }
-        trainingScheduler.cancelTraining();
-        return 'Training cancelled. The current run will be marked as cancelled.';
-      } catch (err) {
-        return `Error cancelling training: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
   };

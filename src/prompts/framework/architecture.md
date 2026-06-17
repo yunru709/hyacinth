@@ -45,7 +45,6 @@
 | 配置路径 | 含义 | 默认值 | 修改命令 |
 |---------|------|--------|---------|
 | `logging.level` | 日志级别 | info | `/log <debug\|info\|warn\|error\|off>` |
-| `training.enabled` | 训练模式开关 | false | `/training <on\|off>` |
 
 ## 其他可编辑文件
 

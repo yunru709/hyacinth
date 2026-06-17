@@ -43,7 +43,7 @@ import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
-import { extractTextContent } from '../modes/index.js';
+import { extractTextContent } from '../utils/misc.js';
 import type { WorkflowManager } from '../workflow/index.js';
 import * as sessionAllowlist from '../memory/session-allowlist.js';
 
@@ -235,7 +235,6 @@ export class AgentLoop {
   private logger: ReturnType<typeof createLogger>;
   private bootstrapStatus: 'pending' | 'complete';
   private activeProvider?: Provider;
-  private trainingScheduler?: import('../training/scheduler.js').TrainingScheduler;
   private scheduler: HeartbeatScheduler | null = null;
   private schedulerInitialized = false;
   /** 定时任务触发后待注入对话的通知 */
@@ -262,8 +261,6 @@ export class AgentLoop {
   private allowlistTools: Set<string>;
   /** Allowed bash commands (glob pattern matched, from config) */
   private allowedCommands: Set<string> = new Set();
-  /** Time of day for nightly training schedule (HH:mm format) */
-  private trainingScheduleTime: string;
   private configCenter?: RuntimeConfigCenter;
   private contextDirty = false;
   private loopGuard: LoopGuard;
@@ -301,10 +298,8 @@ export class AgentLoop {
     private personaDir?: string,
     bootstrapStatus?: 'pending' | 'complete',
     private providerRouter?: ProviderRouter,
-    trainingScheduler?: import('../training/scheduler.js').TrainingScheduler,
     dangerousTools?: Set<string>,
     allowlistTools?: Set<string>,
-    trainingScheduleTime?: string,
     configCenter?: RuntimeConfigCenter,
     private workflowManager?: WorkflowManager,
     private modelRouter?: ModelRouter,
@@ -315,7 +310,6 @@ export class AgentLoop {
     this.bootstrapStatus = bootstrapStatus ?? 'complete';
     this.dangerousTools = dangerousTools ?? new Set(['write', 'bash']);
     this.allowlistTools = allowlistTools ?? new Set();
-    this.trainingScheduleTime = trainingScheduleTime ?? '03:00';
     this.configCenter = configCenter;
     this.maxContextTokens = configCenter
       ? configCenter.get<number>('session.maxContext')
@@ -364,11 +358,6 @@ export class AgentLoop {
       ? (this.configCenter.get('logging.logCacheHits') as boolean) === true
       : false;
 
-    if (trainingScheduler) {
-      this.trainingScheduler = trainingScheduler;
-      trainingScheduler.start();
-    }
-
     // ── Restore persisted values from configCenter ──
     if (this.configCenter) {
       // Restore allowedTools (session-level allowlist)
@@ -387,12 +376,6 @@ export class AgentLoop {
       const persistedDangerousTools = this.configCenter.get('safety.dangerousTools') as unknown as string[] | undefined;
       if (Array.isArray(persistedDangerousTools)) {
         this.dangerousTools = new Set(persistedDangerousTools);
-      }
-
-      // Restore training scheduleTime
-      const persistedScheduleTime = this.configCenter.get('training.scheduleTime') as string | undefined;
-      if (typeof persistedScheduleTime === 'string') {
-        this.trainingScheduleTime = persistedScheduleTime;
       }
 
       // Restore thinking mode
@@ -422,13 +405,6 @@ export class AgentLoop {
       // Subscribe to allowed commands (bash glob patterns)
       this.configCenter.watch('safety.allowedCommands', (event) => {
         this.allowedCommands = new Set(event.newValue as string[]);
-      });
-
-      // Subscribe to training schedule time changes
-      this.configCenter.watch('training.scheduleTime', (event) => {
-        if (typeof event.newValue === 'string') {
-          this.trainingScheduleTime = event.newValue;
-        }
       });
 
       // Subscribe to context changes (mark dirty for next compose)
@@ -960,16 +936,9 @@ export class AgentLoop {
     // 每次用户输入重置防重复检测窗口
     this.loopGuard.reset();
 
-    // 启动调度器（首次调用时自动注册 nightly-training 任务）
+    // 启动调度器
     if (this.scheduler && !this.schedulerInitialized) {
       await this.scheduler.start();
-      await this.scheduler.addTask(
-        'nightly-training',
-        'daily',
-        { time: this.trainingScheduleTime },
-        { type: 'skill', target: 'training-nightly', payload: {} },
-        ['training', 'auto'],
-      );
       this.schedulerInitialized = true;
     }
 
@@ -1246,7 +1215,7 @@ export class AgentLoop {
     });
     this.pendingImpactInfo = null; // 清除已使用的影响面信息
     const messages = layeredResult.messages;
-    // Mode 注入已迁移至 Zone 5（ContextSource 'mode-injection'，走 manifest 统一管理）
+    // 工作流注入在 Zone 5（workflow-persistent / workflow-step），由 manifest 统一管理
 
 
     // 更新 current_context_tokens 到 Stats
@@ -1714,20 +1683,7 @@ export class AgentLoop {
       });
     }
 
-    // Workflow completion check
-    let workflowCompleted = false;
-    let allDoneDetected = false;
-    let completedWorkflowName: string | null = null;
-
-    if (this.workflowManager?.isActive()) {
-      completedWorkflowName = this.workflowManager.getActive();
-      workflowCompleted = this.workflowManager.checkComplete();
-      if (workflowCompleted) {
-        allDoneDetected = true;
-      } else {
-        completedWorkflowName = null;
-      }
-    }
+    // 工作流完成检测在工具执行后进行（工具可能完成最后一步）
 
     // 异步分析本轮对话（精确模式关键词提取）
     if (this.composeStrategy && this.composeStrategy.name === 'precise') {
@@ -1748,16 +1704,18 @@ export class AgentLoop {
       assistantContent.push({ type: 'text', text: textParts.join('') });
     }
 
-    // 添加工具调用
+    // 添加工具调用（workflow 管理操作不记入历史，只记事件）
     for (const tc of toolCalls) {
-      assistantContent.push({
-        type: 'tool_use',
-        id: tc.id,
-        name: tc.name,
-        input: tc.input,
-      });
+      if (tc.name !== 'workflow') {
+        assistantContent.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.name,
+          input: tc.input,
+        });
+      }
 
-      // 记录工具调用事件
+      // 事件记录保留全部（含 workflow），用于诊断
       await this.eventStore.append(this.sessionDir, {
         type: 'tool_call',
         tool_name: tc.name,
@@ -1775,18 +1733,11 @@ export class AgentLoop {
       await this.conversationStore.append(this.sessionDir, assistantMessage);
     }
 
-    // Workflow 完成时追加系统通知
-    if (workflowCompleted && allDoneDetected && completedWorkflowName) {
-      const completedMsg: Message = {
-        role: 'user',
-        content: { type: 'text', text: `[System] Workflow "${completedWorkflowName}" completed. All steps finished.` },
-      };
-      await this.conversationStore.append(this.sessionDir, completedMsg);
-      this.outputHandler?.onStatus?.(`Workflow "${completedWorkflowName}" completed`, 'info');
-    }
-
     // 如果有工具调用，执行工具并将结果追加到 conversation
     if (toolCalls.length > 0) {
+      // 工具执行前保存工作流状态快照，用于检测完成
+      const hadActiveWorkflow = this.workflowManager?.isActive() ?? false;
+      const activeWorkflowName = hadActiveWorkflow ? this.workflowManager?.getActive() ?? null : null;
       // 更新 recentToolNames 用于模式检测
       this.recentToolNames = toolCalls.map(tc => tc.name);
 
@@ -1804,6 +1755,25 @@ export class AgentLoop {
       } else {
         // Fallback: execute tools after stream (for providers that don't emit TOOL_USE events mid-stream)
         await this.executeTools(toolCalls);
+      }
+
+      // 工具执行完毕后，检测工作流是否被完成
+      if (hadActiveWorkflow && activeWorkflowName && !(this.workflowManager?.isActive() ?? false)) {
+        // 工作流刚被 workfow tool 在工具执行中完成（调用了 deactivate）
+        const completedMsg: Message = {
+          role: 'user',
+          content: { type: 'text', text: `[System] Workflow "${activeWorkflowName}" completed. All steps finished.` },
+        };
+        await this.conversationStore.append(this.sessionDir, completedMsg);
+        this.outputHandler?.onStatus?.(`Workflow "${activeWorkflowName}" completed`, 'info');
+        await this.checkTextLoop(textParts);
+        // 工作流已完成，跳过额外 API 调用，直接结束
+        appendEvent(this.sessionDir, {
+          type: 'stop',
+          reason: 'workflow_completed',
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
+        return { stop: true, stopReason: 'workflow_completed' };
       }
 
       // 工具执行完毕后，不停止，继续下一轮
@@ -1975,8 +1945,12 @@ export class AgentLoop {
     // 但读缓冲文件本身的结果不再二次缓冲（避免递归缓冲）
     const bufferDir = this.resultBuffer.getBufferDir();
     for (const result of results) {
-      const sanitized = sanitizeToolResult(result.content);
       const call = executableCalls.find(c => c.id === result.tool_use_id);
+
+      // workflow 工具结果不记入历史 — 状态由 Zone 5 注入体现
+      if (call?.name === 'workflow') continue;
+
+      const sanitized = sanitizeToolResult(result.content);
       const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
         call.input.file_path.startsWith(bufferDir);
       const content = skipBuffer ? sanitized : this.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
@@ -2147,6 +2121,9 @@ export class AgentLoop {
 
     // Append stored inline results to conversation
     for (const tc of toolCalls) {
+      // workflow 工具结果不记入历史 — 状态由 Zone 5 注入体现
+      if (tc.name === 'workflow') continue;
+
       const stored = this.inlineToolResults.get(tc.id);
       if (!stored) {
         // Tool wasn't executed inline (e.g., filtered out) — skip

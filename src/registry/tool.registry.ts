@@ -2,18 +2,12 @@ import { GenericRegistry, type RegistryItem } from './base.js';
 import type { Tool } from '../tools/interface.js';
 import type { ToolDefinition } from '../types.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
-import type { TrainingScheduler } from '../training/scheduler.js';
 import {
   createGetConfigTool,
   createUpdateConfigTool,
   createConfigSchemaTool,
   createResetConfigTool,
 } from '../tools/config.js';
-import {
-  createToggleTrainingTool,
-  createTrainingStatusTool,
-  createSetTrainingScheduleTool,
-} from '../tools/training.js';
 import {
   createSwitchProviderTool,
   createListProvidersTool,
@@ -30,8 +24,6 @@ import {
   createUpdateSubAgentTool,
   createInterruptTool,
   createSessionStatsTool,
-  createTriggerTrainingTool,
-  createCancelTrainingTool,
   createAllowToolTool,
   createDisallowToolTool,
   createListAllowlistTool,
@@ -112,15 +104,6 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
   }
 
   /**
-   * 注册训练控制工具（toggle_training, training_status, set_training_schedule）
-   */
-  registerTrainingTools(trainingScheduler: TrainingScheduler, configCenter: RuntimeConfigCenter): void {
-    this.register(createToggleTrainingTool(trainingScheduler, configCenter));
-    this.register(createTrainingStatusTool(trainingScheduler));
-    this.register(createSetTrainingScheduleTool(trainingScheduler, configCenter));
-  }
-
-  /**
    * 注册所有运行时控制工具（30+ tools）
    *
    * ⚠️ 新增运行时工具的正确方式：
@@ -136,8 +119,8 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
    *   toggle_sub_agent, list_sub_agents, spawn_sub_agent, create_sub_agent,
    *   update_sub_agent
    *
-   * Session/Training control tools (4):
-   *   interrupt, session_stats, trigger_training, cancel_training
+   * Session control tools (2):
+   *   interrupt, session_stats
    *
    * Permission whitelist tools (3):
    *   allow_tool, disallow_tool, list_allowlist
@@ -150,7 +133,6 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     providerRouter: any,
     skillRegistry: any,
     agentRegistry: any,
-    trainingScheduler: any,
     configCenter: any,
     cwd: string,
     heartbeatScheduler?: any,
@@ -187,11 +169,9 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     // destroy_sub_agent needs factory.ts sessionDir; register in factory.ts after loop is created
     // (handled by importing and registering createDestroySubAgentTool directly in factory.ts)
 
-    // ── Session / Training control tools (5) ────────────────────────
+    // ── Session control tools (2) ────────────────────────
     this.register(createInterruptTool(agentLoop));
     this.register(createSessionStatsTool(agentLoop));
-    this.register(createTriggerTrainingTool(trainingScheduler));
-    this.register(createCancelTrainingTool(trainingScheduler));
 
     // ── MCP status tool ────────────────────────────────────────────
     if (mcpSystem) {

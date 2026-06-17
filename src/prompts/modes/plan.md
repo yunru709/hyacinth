@@ -40,14 +40,11 @@
 
 ### 第三步：提交计划
 
-前两步完成后，用 `mode_mark` 创建 plan.md：
+前两步完成后，用 `write` 创建 plan.md：
 
 ```
-mode_mark({action:"init", content: "你的plan完整内容"})
+write({file_path: "<planDir>/plan.md", content: "你的plan完整内容"})
 ```
-
-**⚠️ 必须用 `mode_mark`，不要用 `write` 创建 plan.md。**
-`write` 仅用于后续修改已有 plan.md 中的步骤描述。
 
 **格式要求**：每行一个步骤，格式 `- [ ] 描述文字`（只有这种格式才能被解析）。
 
@@ -60,8 +57,8 @@ mode_mark({action:"init", content: "你的plan完整内容"})
 计划创建后，按顺序执行每个步骤：
 
 ```
-mode_mark({action:"done", id:N})         // 标记完成
-mode_mark({action:"blocked", id:N, message:"原因"})  // 标记受阻
+workflow({action:"step", id:N, stepAction:"done"})         // 标记完成
+workflow({action:"step", id:N, stepAction:"blocked", message:"原因"})  // 标记受阻
 ```
 
 每步只做一件事，完成后立即标记。受阻时说明具体原因和可能的解决方向。

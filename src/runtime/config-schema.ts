@@ -44,18 +44,6 @@ export interface FullConfig {
     compressionStrategy: 'A' | 'C'; // 'A' — 独立压缩提示词（默认），'C' — 克隆对话缓存友好
   };
 
-  training: {
-    enabled: boolean; // false
-    scheduleTime: string; // '03:00'
-    checkIntervalMs: number; // 600000
-    minSamples: number; // 10
-    baseModel: string;
-    adapter: {
-      maxAdapters: number; // 5
-      minSamplesPerAdapter: number; // 10
-    };
-  };
-
   schedule: {
     heartbeatMs: number; // 5000
     maxConcurrent: number; // 10

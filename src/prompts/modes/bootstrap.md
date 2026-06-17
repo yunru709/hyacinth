@@ -25,8 +25,8 @@ Persona 目录: `{{personaDir}}`
 
 写入后向用户简短总结捕获到的信息。如果用户确认或没有纠正，调用:
 
-```json
-bootstrap_mark({ "action": "complete" })
+```
+workflow({action:"step", stepAction:"complete"})
 ```
 
-如果信息还不够，继续自然追问。不要退出 Bootstrap 模式，直到 `bootstrap_mark` 返回完成。
+如果信息还不够，继续自然追问。不要退出 Bootstrap 模式，直到 `workflow` 返回完成。

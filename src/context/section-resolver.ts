@@ -85,6 +85,17 @@ function resolveTemplate(
 }
 
 // --- Runtime ---
+//
+// 运行时 Section 解析器。
+//
+// Zone 布局（详见 manifest-defaults.ts）：
+//   Zone 1 (Anchor)  — 身份/环境/注册表/记忆（稳定，享受前缀缓存）
+//   Zone 2 (Manifest) — 辅助索引区（默认关闭）
+//   Zone 3 (History)  — 摘要/项目上下文/历史消息（持续增长，压缩器管理）
+//   Zone 4 (Context)  — 知识库检索（可独立开关）
+//   Zone 5 (Live)     — 工作流注入/时间戳/用户输入（每轮变化，不缓存）
+//
+// 通用回退规则：runtime:xxx → 查找 ctx.sources.get('xxx')，若存在则取其内容。
 
 async function resolveRuntime(
   sec: SectionEntry,
@@ -102,7 +113,10 @@ async function resolveRuntime(
     return ctx.historySummary ? `[Context Summary]\n${ctx.historySummary}` : undefined;
   }
   if (src === 'runtime:timestamp') {
-    return `Current Time: ${ctx.timestamp}`;
+    // # currentDate 是系统元数据标记（非用户输入），模型训练数据中识别为背景信息
+    const [datePart, timePart] = ctx.timestamp.split(' ');
+    const dateSlash = datePart.replace(/-/g, '/');
+    return `# currentDate\nToday is ${dateSlash}, ${timePart}.`;
   }
   if (src === 'runtime:userInput') {
     return ctx.userInput || undefined;
@@ -143,9 +157,7 @@ async function resolveRuntime(
   }
 
   // 模式注入（Zone 5）：plan/spec 激活时注入提示词
-  if (src === 'runtime:mode_injection') {
-    return resolveContextSourceContent('mode-injection', ctx);
-  }
+  // ── 工作流注入已迁移至 Zone 5（workflow-persistent / workflow-step）──
 
   // runtime:history 由 composer.ts assembleZone() 专门处理（展开为 Message[]）。
   // 此处的 handler 仅作为防护：如果未来 manifest 将 history section 从 Zone 3 移走，
