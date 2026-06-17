@@ -82,5 +82,5 @@ write({file_path: "<specDir>/checklist.md", content: "..."})
 
 完成后推进到 Phase 2：
 ```
-workflow({action:"step", id:0, stepAction:"done"})
+workflow({action:"step", stepAction:"complete"})
 ```

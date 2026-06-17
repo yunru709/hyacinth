@@ -217,10 +217,11 @@ function buildMemorySteps(state: WorkflowState, source: StepSourceDef): Workflow
 
 function compileCreateState(ir: WorkflowIR): (params: Record<string, unknown>) => WorkflowState {
   return (params: Record<string, unknown>) => {
-    // 1. Resolve static vars
+    // 1. Resolve static vars (order matters: task → slug → workDir)
     const staticVars: Record<string, string> = {};
+    staticVars.name = ir.name;
 
-    // taskFrom shortcut
+    // 1a. taskFrom shortcut
     if (ir.init.taskFrom) {
       const paramKey = ir.init.taskFrom.startsWith('params.')
         ? ir.init.taskFrom.slice('params.'.length)
@@ -228,26 +229,20 @@ function compileCreateState(ir: WorkflowIR): (params: Record<string, unknown>) =
       staticVars.task = String(params[paramKey] ?? '');
     }
 
-    // workDir shortcut
+    // 1b. Explicit staticVars (slug etc.) — must resolve before workDir
+    for (const [key, def] of Object.entries(ir.init.staticVars)) {
+      staticVars[key] = resolveStaticVar(def, staticVars);
+    }
+
+    // 1c. workDir shortcut — now {slug} is resolved
     if (ir.init.workDir) {
       const wd = ir.init.workDir;
-      // Resolve name from IR
-      staticVars.name = ir.name;
-      // First pass: resolve segments we can (name and any existing staticVars)
-      const segments = wd.segments.map(s => sub(s, { ...staticVars, name: ir.name }));
+      const segments = wd.segments.map(s => sub(s, staticVars));
       const joined = segments.join('/');
       const resolved = joined.replace(/^~/, os.homedir());
       try { fs.mkdirSync(resolved, { recursive: true }); } catch { /* ignore */ }
       staticVars.workDir = resolved;
     }
-
-    // Explicit staticVars
-    for (const [key, def] of Object.entries(ir.init.staticVars)) {
-      staticVars[key] = resolveStaticVar(def, staticVars);
-    }
-
-    // Also add IR name to vars
-    staticVars.name = ir.name;
 
     // 2. Build data object
     const dataObj: Record<string, unknown> = {};
