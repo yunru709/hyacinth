@@ -497,6 +497,7 @@ export async function runTui(
     }
     contextBarText.setText(ctxBar);
     tui.requestRender();
+    updateTokenEstimate(); // 同步刷新 footer（工作流状态等）
   }
 
   // ── Output handler ──
