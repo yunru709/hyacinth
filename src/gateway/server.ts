@@ -5,6 +5,7 @@ import { SessionManager } from '../memory/session.js';
 import { ChannelManager } from '../channels/manager.js';
 import { HttpWebhookChannel } from '../channels/builtin/http-webhook.js';
 import { WebUIChannel } from '../channels/builtin/webui-channel.js';
+import { TuiWsSession } from '../channels/builtin/tui-ws-session.js';
 import { registerConfigChannels } from '../channels/auto-detect.js';
 import { createAgent } from './factory.js';
 import { createLogger } from '../logging/logger.js';
@@ -16,6 +17,7 @@ import type { ChannelsInfo } from '../env/env-collector.js';
 import type { AgentFactory } from '../channels/interface.js';
 import { watchFile } from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const logger = createLogger('server');
 

@@ -14,6 +14,7 @@ import type {
   ChannelReply,
   ChannelConfig,
   ChannelStatus,
+  AgentFactory,
 } from '../interface.js';
 import type { Provider } from '../../provider/interface.js';
 import type { SessionManager } from '../../memory/session.js';
@@ -101,9 +102,12 @@ export class HttpWebhookChannel implements ChannelHandler {
   private maxTurns!: number;
   private maxContext!: number;
   private activeComponents: AgentComponents | null = null;
+  private wsAgentFactory: AgentFactory | null = null;
 
   async start(config: ChannelConfig): Promise<void> {
     const { port = 3000, host = '0.0.0.0' } = config;
+    // 从 config 获取 agentFactory（由 ChannelManager.startChannel 注入）
+    this.wsAgentFactory = (config.agentFactory as AgentFactory) ?? null;
 
     this.provider = config.provider as Provider;
     this.sessionManager = config.sessionManager as SessionManager;
@@ -248,6 +252,47 @@ export class HttpWebhookChannel implements ChannelHandler {
         source: s.source,
       }));
       return reply.send(skills);
+    });
+
+    // ── TUI WebSocket 端点（让 TUI 客户端通过 ws://host:port/tui 连接统一后端） ─
+    const { WebSocketServer } = await import('ws');
+    const { TuiWsSession } = await import('./tui-ws-session.js');
+    const { randomBytes } = await import('node:crypto');
+    const tuiWss = new WebSocketServer({ noServer: true });
+
+    this.app.server.on('upgrade', (request, socket, head) => {
+      if (request.url === '/tui') {
+        tuiWss.handleUpgrade(request, socket, head, (ws) => {
+          tuiWss.emit('connection', ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
+
+    tuiWss.on('connection', (ws) => {
+      const sessionId = `tui-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+      const session = new TuiWsSession(ws, sessionId);
+      logger.info('TUI WS client connected', { sessionId });
+
+      if (this.wsAgentFactory) {
+        session.initialize(this.wsAgentFactory).catch((err: unknown) => {
+          logger.error('TUI WS init failed', err instanceof Error ? err : new Error(String(err)));
+        });
+      } else {
+        logger.warn('TUI WS agentFactory not available');
+      }
+
+      ws.on('message', (data: Buffer) => {
+        session.handleMessage(data).catch((err: unknown) => {
+          logger.error('TUI WS msg error', err instanceof Error ? err : new Error(String(err)));
+        });
+      });
+
+      ws.on('close', () => {
+        session.close().catch(() => {});
+        logger.info('TUI WS client disconnected', { sessionId });
+      });
     });
 
     // ── Start ───────────────────────────────────────────────────

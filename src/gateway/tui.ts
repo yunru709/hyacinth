@@ -15,6 +15,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import http from 'node:http';
 import {
   CombinedAutocompleteProvider,
   Container,
@@ -737,47 +738,100 @@ export async function runTui(
   }
   tui.requestRender();
 
-  // ── Agent + Session ──
-  const agent = await createAgent({
-    cwd: process.cwd(),
-    provider: activeProvider,
-    maxTurns,
-    maxContext,
-    outputHandler: tuiHandler,
-    sessionId,
-    shouldContinue,
-    maxMessages,
-    personaDir,
-    bootstrapStatus: resolvedBootstrapStatus,
-    localModelProvider,
-  });
-  const loop = agent.loop;
-  let sessionDir = agent.sessionDir;
-  const workflowManager = agent.workflowManager;
-  const backgroundRegistry = agent.backgroundRegistry;
-  const modelRouter = agent.modelRouter;
-  const knowledgeBase = agent.knowledgeBase;
-  const composeStrategy = agent.composeStrategy;
-  const sessionManager = agent.sessionManager;
-  const contextComposer = agent.contextComposer;
+  // ── 检测统一后端是否已运行 ──
+  let remoteWs: any = null;
+  try {
+    const healthy = await new Promise<boolean>((resolve) => {
+      const req = http.get('http://127.0.0.1:3000/api/health', (res) => {
+        let d = ''; res.on('data', (c: string) => d += c); res.on('end', () => resolve(d.includes('"ok"')));
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(1500, () => { req.destroy(); resolve(false); });
+    });
+    if (healthy) {
+      const { default: WebSocket } = await import('ws');
+      remoteWs = await new Promise<any>((resolve) => {
+        const ws = new WebSocket('ws://127.0.0.1:3000/tui');
+        ws.on('open', () => resolve(ws));
+        ws.on('error', () => resolve(null));
+        setTimeout(() => resolve(null), 3000);
+      });
+    }
+  } catch { /* fall through to standalone */ }
+
+  // ── Agent + Session（远程模式下跳过，使用 WebSocket 连接） ──
+  let agent: Awaited<ReturnType<typeof createAgent>> | undefined;
+  let sessionDir: string;
+
+  if (!remoteWs) {
+    agent = await createAgent({
+      cwd: process.cwd(),
+      provider: activeProvider,
+      maxTurns,
+      maxContext,
+      outputHandler: tuiHandler,
+      sessionId,
+      shouldContinue,
+      maxMessages,
+      personaDir,
+      bootstrapStatus: resolvedBootstrapStatus,
+      localModelProvider,
+    });
+    sessionDir = agent.sessionDir;
+  } else {
+    agent = undefined as any;
+    sessionDir = '';
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loop: any = agent?.loop ?? {
+    getActiveProvider: () => activeProvider,
+    getProviderRoutingInfo: () => null,
+    getTurnInfo: (_tc: number, _tu: number) => ({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 }),
+    setLifecycleSupervisor: () => {},
+    run: async () => {},
+    switchSession: async () => {},
+    switchProvider: async () => {},
+    getModelSources: () => null,
+    composeStrategy: null,
+    setScheduler: () => {},
+    notifyTaskFired: async () => {},
+    subscribeConfig: () => {},
+    isBootstrapPending: () => false,
+    startBootstrap: async () => {},
+  };
+  // 远程模式下 agent 为 undefined，这些变量仅用于本地 TUI 功能（斜杠命令等），用 any 避免 null 检查
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workflowManager: any = agent?.workflowManager;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const backgroundRegistry: any = agent?.backgroundRegistry;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const modelRouter: any = agent?.modelRouter;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const knowledgeBase: any = agent?.knowledgeBase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const composeStrategy: any = agent?.composeStrategy;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sessionManager: any = agent?.sessionManager;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contextComposer: any = agent?.contextComposer;
   let originalSessionDir: string | null = null;  // /precise on 前保存的原始 session
   let preciseModeActive = false;
 
-  // 检测启动时恢复的 session 类型：如果是 precise session，自动激活精确模式
-  const currentSessionId = path.basename(sessionDir);
-  const sessions = await sessionManager.list();
-  const resumedSession = sessions.find(s => s.id === currentSessionId);
-  if (resumedSession?.type === 'precise') {
-    const { PreciseStrategy } = await import('../context/precision/index.js');
-    loop.composeStrategy = new PreciseStrategy(sessionDir);
-    preciseModeActive = true;
-    // 保存原始 session：精确模式通过 --session 启动时，originalSessionDir 需要指向一个有效的普通 session
-    // 用于 /precise off 时恢复。如果当前项目有普通 session，就用最新的普通 session 作为 fallback。
-    const normalSessions = sessions.filter(s => (s.type ?? 'normal') === 'normal');
-    if (normalSessions.length > 0) {
-      originalSessionDir = sessionManager.getSessionDir(normalSessions[0]!.id);
+  // 检测启动时恢复的 session 类型（仅本地模式）
+  if (!remoteWs) {
+    const currentSessionId = path.basename(sessionDir);
+    const sessions = await sessionManager.list();
+    const resumedSession = sessions.find((s: { id: string; type?: string }) => s.id === currentSessionId);
+    if (resumedSession?.type === 'precise') {
+      const { PreciseStrategy } = await import('../context/precision/index.js');
+      loop.composeStrategy = new PreciseStrategy(sessionDir);
+      preciseModeActive = true;
+      const normalSessions = sessions.filter((s: { type?: string }) => (s.type ?? 'normal') === 'normal');
+      if (normalSessions.length > 0) {
+        originalSessionDir = sessionManager.getSessionDir(normalSessions[0]!.id);
+      }
+      chatLog.addSystem(theme.dim('精确模式 session 已恢复'));
     }
-    chatLog.addSystem(theme.dim('精确模式 session 已恢复'));
   }
 
   // 注入 LifecycleSupervisor，实现运行时 provider 切换时自动管理本地模型进程
@@ -837,13 +891,54 @@ export async function runTui(
     },
   };
 
-  // 设置 TUI 渠道的消息处理回调（使用主 loop）
-  tuiChannel.onHandleMessage = async (event: ChannelMessageEvent, replyFn: ReplyFn) => {
-    await loop.run(event.content);
-    const stats = await statsManager.get(sessionDir);
-    const tc = stats.turn_count ?? 0;
-    refreshStatus(loop.getTurnInfo(tc, stats.current_context_tokens ?? 0));
-  };
+  // 设置 TUI 渠道的消息处理回调
+  if (remoteWs) {
+    // ── 远程模式：通过 WebSocket 连接统一后端 ──
+    chatLog.addSystem(theme.success('🔗 Connected to running backend (port 3000)'));
+
+    remoteWs.on('message', (data: Buffer) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        switch (msg.type) {
+          case 'text': tuiHandler.onText?.(msg.content); break;
+          case 'thinking': tuiHandler.onThinking?.(msg.content); break;
+          case 'tool_use': tuiHandler.onToolUse?.(msg.name, msg.inputSummary, msg.id); break;
+          case 'tool_result': tuiHandler.onToolResult?.(msg.content, msg.isError, msg.id); break;
+          case 'diff': tuiHandler.onDiff?.(msg.id, msg.filePath, msg.diffLines); break;
+          case 'status': tuiHandler.onStatus?.(msg.message, msg.level); break;
+          case 'turn_start': tuiHandler.onTurnStart?.(); break;
+          case 'flush': tuiHandler.onFlush?.(); break;
+          case 'interrupt': tuiHandler.onInterrupt?.(); break;
+          case 'turn_info': {
+            lastTurnCount = (msg as any).turnCount ?? lastTurnCount;
+            lastTokensUsed = (msg as any).tokensUsed ?? lastTokensUsed;
+            refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
+            break;
+          }
+          case 'error':
+            chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(msg.message));
+            break;
+        }
+      } catch { /* ignore */ }
+    });
+
+    remoteWs.on('close', () => {
+      chatLog.addSystem(theme.warning('⚠ Backend connection lost. Restart to reconnect.'));
+    });
+
+    tuiChannel.onHandleMessage = async (event: ChannelMessageEvent) => {
+      if (remoteWs?.readyState === 1) {
+        remoteWs.send(JSON.stringify({ type: 'chat', content: event.content }));
+      }
+    };
+  } else {
+    tuiChannel.onHandleMessage = async (event: ChannelMessageEvent) => {
+      await loop.run(event.content);
+      const stats = await statsManager.get(sessionDir);
+      const tc = stats.turn_count ?? 0;
+      refreshStatus(loop.getTurnInfo(tc, stats.current_context_tokens ?? 0));
+    };
+  }
 
   // 启动所有渠道（每个渠道自行处理消息）
   await channelManager.startAll(agentFactory);
@@ -2192,7 +2287,7 @@ export async function runTui(
       if (!originalSessionDir) originalSessionDir = sessionDir;
       // 复用已有 precise session（保留积累的关键词和摘要）
       const existingPrecise = (await sessionManager.list())
-        .find(s => s.type === 'precise');
+        .find((s: { type?: string }) => s.type === 'precise');
       const newSession = existingPrecise ?? await sessionManager.create('precise');
       const newSessionDir = sessionManager.getSessionDir(newSession.id);
       const precise = new PreciseStrategy(newSessionDir);
