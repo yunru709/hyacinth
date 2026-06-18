@@ -738,6 +738,9 @@ export async function runTui(
   }
   tui.requestRender();
 
+  // ── 确保 CommandRegistry 已初始化（远程模式下跳过 createAgent，需手动初始化） ──
+  try { CommandRegistry.getInstance(process.cwd()); } catch { /* already initialized */ }
+
   // ── 检测统一后端是否已运行 ──
   let remoteWs: any = null;
   try {
