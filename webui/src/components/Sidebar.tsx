@@ -16,7 +16,7 @@ const CHANNEL_META: Record<string, { label: string; icon: string }> = {
   feishu: { label: 'Feishu', icon: '💬' },
 };
 
-export function Sidebar() {
+export function Sidebar({ switchSession }: { switchSession: (id: string) => void }) {
   const sessions = useStore(s => s.sessions);
   const activeSessionId = useStore(s => s.sessionId);
   const sidebarOpen = useStore(s => s.sidebarOpen);
@@ -24,6 +24,7 @@ export function Sidebar() {
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);
   const [creating, setCreating] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
   // 默认展开所有 channel section
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -69,9 +70,31 @@ export function Sidebar() {
     }
   };
 
-  const handleSelect = (id: string) => {
-    useStore.setState({ activeSessionId: id });
-    useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
+  const handleSelect = async (id: string) => {
+    if (id === useStore.getState().sessionId) return; // 已经是当前 session
+    setSwitching(id);
+    try {
+      // 1. 加载历史事件
+      const res = await fetch(`/api/sessions/${id}/events?limit=50`);
+      if (res.ok) {
+        const events = await res.json();
+        if (Array.isArray(events) && events.length > 0) {
+          useStore.getState().loadHistory(events);
+          useStore.getState().addSystemMsg(`Loaded ${events.length} events from session`, 'info');
+        } else {
+          useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
+          useStore.getState().addSystemMsg('Empty session', 'info');
+        }
+      } else {
+        useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
+      }
+      // 2. 通知后端切换 session
+      useStore.setState({ activeSessionId: id });
+      switchSession(id);
+    } catch {
+      useStore.getState().addSystemMsg('Failed to load session history', 'error');
+    }
+    setSwitching(null);
   };
 
   const toggleChannel = (ch: string) => {

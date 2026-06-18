@@ -25,7 +25,10 @@ export interface WsLike {
 }
 
 export class WebUIWsSession {
+  /** WebSocket 连接 ID（Map key，不变） */
   readonly sessionId: string;
+  /** 当前活跃的 session（可切换） */
+  private _activeSessionId: string;
   private ws: WsLike;
   private outputHandler: WebUIOutputHandler;
   private loop: import('../../orchestrator/loop.js').AgentLoop | null = null;
@@ -35,12 +38,15 @@ export class WebUIWsSession {
   private createdAt: number;
   private config: WebUISessionConfig | null = null;
   private _onClose?: (sessionId: string) => void;
+  /** 保存 agentFactory 引用，供 switchSession 使用 */
+  private _agentFactory: AgentFactory | null = null;
   /** 初始化完成前缓冲的消息 */
   private _pendingMessages: WebUIClientMessage[] = [];
 
   constructor(ws: WsLike, sessionId: string) {
     this.ws = ws;
     this.sessionId = sessionId;
+    this._activeSessionId = sessionId;
     this.outputHandler = new WebUIOutputHandler(ws);
     this.createdAt = Date.now();
   }
@@ -56,6 +62,7 @@ export class WebUIWsSession {
     config: WebUISessionConfig,
   ): Promise<void> {
     this.config = config;
+    this._agentFactory = agentFactory;
 
     // 保存 init Promise，handleMessage 可以用它来等待
     this._initPromise = (async () => {
@@ -70,7 +77,7 @@ export class WebUIWsSession {
         // 发送连接成功消息
         this.send({
           type: 'connected',
-          sessionId: this.sessionId,
+          sessionId: this._activeSessionId,
           config: this.config!,
         });
 
@@ -155,6 +162,10 @@ export class WebUIWsSession {
 
       case 'rollback':
         await this.handleRollback(msg.toTurnId);
+        break;
+
+      case 'switch_session':
+        await this.handleSwitchSession(msg.sessionId);
         break;
 
       default:
@@ -303,6 +314,15 @@ export class WebUIWsSession {
     }
   }
 
+  /** 处理 session 切换 */
+  private async handleSwitchSession(sessionId: string): Promise<void> {
+    if (!this._agentFactory || !this.config) {
+      this.send({ type: 'error', message: 'Agent factory not available' });
+      return;
+    }
+    await this.switchSession(sessionId, this._agentFactory);
+  }
+
   /** 切换模式 */
   private async handleSetMode(mode: 'normal' | 'precise'): Promise<void> {
     if (!this.loop) return;
@@ -333,6 +353,55 @@ export class WebUIWsSession {
         type: 'error',
         message: `Failed to set mode: ${err instanceof Error ? err.message : String(err)}`,
       });
+    }
+  }
+
+  /** 切换到另一个 session */
+  async switchSession(
+    newSessionId: string,
+    agentFactory: AgentFactory,
+  ): Promise<void> {
+    if (newSessionId === this._activeSessionId) {
+      this.send({
+        type: 'status',
+        message: `Already on session ${newSessionId.slice(0, 12)}...`,
+        level: 'info',
+      });
+      return;
+    }
+
+    // 清理旧 loop
+    if (this.loop && typeof (this.loop as any).requestStop === 'function') {
+      (this.loop as any).requestStop();
+    }
+    this.loop = null;
+    this._initialized = false;
+    this._pendingMessages = [];
+
+    try {
+      const result = await agentFactory.createAgent({
+        sessionId: newSessionId,
+        outputHandler: this.outputHandler as OutputHandler,
+      });
+      this.loop = (result as { loop: import('../../orchestrator/loop.js').AgentLoop }).loop;
+      this._activeSessionId = newSessionId;
+      this._initialized = true;
+
+      this.send({
+        type: 'session_switched',
+        sessionId: newSessionId,
+      });
+
+      logger.info('WebUI session switched', {
+        wsId: this.sessionId,
+        newSessionId,
+      });
+    } catch (err) {
+      this.send({
+        type: 'error',
+        message: `Failed to switch session: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      logger.error('WebUI session switch failed', err instanceof Error ? err : new Error(String(err)));
     }
   }
 

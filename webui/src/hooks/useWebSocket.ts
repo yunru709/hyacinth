@@ -122,6 +122,11 @@ export function useWebSocket() {
       case 'error':
         store.addSystemMsg(msg.message, 'error');
         break;
+
+      case 'session_switched':
+        useStore.setState({ sessionId: msg.sessionId, ready: true });
+        store.addSystemMsg(`Switched to ${msg.sessionId.slice(0, 12)}...`, 'info');
+        break;
     }
   };
 
@@ -190,6 +195,10 @@ export function useWebSocket() {
     send({ type: 'rollback', toTurnId });
   }, [send]);
 
+  const switchSession = useCallback((sessionId: string) => {
+    send({ type: 'switch_session', sessionId });
+  }, [send]);
+
   useEffect(() => {
     connect();
     return () => {
@@ -203,6 +212,7 @@ export function useWebSocket() {
     sendStop,
     respondPermission,
     sendRollback,
+    switchSession,
     connected: store.connected,
     ready: store.ready,
   };

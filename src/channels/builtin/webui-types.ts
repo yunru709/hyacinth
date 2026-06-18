@@ -14,7 +14,8 @@ export type WebUIClientMessage =
   | WebUIStopMessage
   | WebUIPermissionResponse
   | WebUISetModeMessage
-  | WebUIRollbackMessage;
+  | WebUIRollbackMessage
+  | WebUISwitchSessionMessage;
 
 export interface WebUIChatMessage {
   type: 'chat';
@@ -42,6 +43,11 @@ export interface WebUIRollbackMessage {
   toTurnId: number;
 }
 
+export interface WebUISwitchSessionMessage {
+  type: 'switch_session';
+  sessionId: string;
+}
+
 // ── Server → Client ─────────────────────────────────────────
 
 export type WebUIServerMessage =
@@ -57,7 +63,8 @@ export type WebUIServerMessage =
   | WebUIInterruptMessage
   | WebUITurnInfoMessage
   | WebUIPermissionRequestMessage
-  | WebUIErrorMessage;
+  | WebUIErrorMessage
+  | WebUISessionSwitchedMessage;
 
 /** 连接成功 + session 初始化信息 */
 export interface WebUIConnectedMessage {
@@ -152,4 +159,9 @@ export interface WebUIPermissionRequestMessage {
 export interface WebUIErrorMessage {
   type: 'error';
   message: string;
+}
+
+export interface WebUISessionSwitchedMessage {
+  type: 'session_switched';
+  sessionId: string;
 }

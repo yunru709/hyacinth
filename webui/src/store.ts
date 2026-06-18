@@ -13,6 +13,7 @@ import type {
   AgentInfo,
   WorkflowInfo,
   PermissionRequestMsg,
+  ConversationEvent,
 } from './types';
 
 let nextId = 1;
@@ -76,6 +77,7 @@ interface WebUIState {
   setPermission: (req: PermissionRequestMsg | null) => void;
   setConnected: (sessionId: string, config: WebUIState['config']) => void;
   setSessions: (sessions: SessionInfo[]) => void;
+  loadHistory: (events: ConversationEvent[]) => void;
   setCapabilities: (tools: ToolInfo[], skills: SkillInfo[], agents: AgentInfo[], workflows: WorkflowInfo[]) => void;
   toggleToolExpanded: (toolId: string) => void;
   toggleThinkingCollapsed: (nodeId: string) => void;
@@ -165,6 +167,86 @@ export const useStore = create<WebUIState>((set, get) => ({
   setPermission(req) { set({ permissionRequest: req }); },
   setConnected(sessionId, config) { set({ connected: true, sessionId, config }); },
   setSessions(sessions) { set({ sessions }); },
+  loadHistory(events) {
+    const messages: MessageNode[] = [];
+    // 用于关联 tool_call ↔ tool_result
+    const pendingTools = new Map<string, ToolCallNode>();
+
+    for (const ev of events) {
+      switch (ev.type) {
+        case 'user_input':
+          // 如果前面有没匹配到的 tool calls，先 flush
+          pendingTools.clear();
+          messages.push({
+            kind: 'user',
+            content: ev.content ?? '',
+            id: uid(),
+            turnId: 0,
+          } as UserMsgNode);
+          break;
+
+        case 'thinking':
+          messages.push({
+            kind: 'thinking',
+            content: ev.content ?? '',
+            id: uid(),
+            collapsed: true, // 历史记录默认折叠
+          } as ThinkingMsgNode);
+          break;
+
+        case 'text':
+          // 合并连续的 text 消息
+          if (ev.content) {
+            const last = messages[messages.length - 1];
+            if (last?.kind === 'text') {
+              last.content += '\n' + ev.content;
+            } else {
+              messages.push({
+                kind: 'text',
+                content: ev.content,
+                id: uid(),
+              } as TextMsgNode);
+            }
+          }
+          break;
+
+        case 'tool_call': {
+          const node: ToolCallNode = {
+            kind: 'tool',
+            id: uid(),
+            name: ev.name ?? 'unknown',
+            inputSummary: ev.input ? JSON.stringify(ev.input).slice(0, 100) : '',
+            expanded: false, // 历史记录默认折叠
+          };
+          messages.push(node);
+          if (ev.id) pendingTools.set(ev.id, node);
+          break;
+        }
+
+        case 'tool_result':
+          if (ev.tool_use_id && pendingTools.has(ev.tool_use_id)) {
+            const node = pendingTools.get(ev.tool_use_id)!;
+            node.result = ev.content ?? '';
+            node.isError = ev.content?.startsWith('Error:') ?? false;
+            pendingTools.delete(ev.tool_use_id);
+          }
+          break;
+
+        case 'error':
+          messages.push({
+            kind: 'system',
+            content: ev.message ?? ev.content ?? 'Error',
+            level: 'error',
+            id: uid(),
+          } as SystemMsgNode);
+          break;
+
+        // stop / usage — 不显示
+      }
+    }
+
+    set({ messages });
+  },
   setCapabilities(tools, skills, agents, workflows) { set({ tools, skills, agents, workflows }); },
   toggleToolExpanded(toolId) { set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === toolId ? { ...m, expanded: !(m as ToolCallNode).expanded } : m) })); },
   toggleThinkingCollapsed(nodeId) { set(s => ({ messages: s.messages.map(m => m.kind === 'thinking' && m.id === nodeId ? { ...m, collapsed: !(m as ThinkingMsgNode).collapsed } : m) })); },

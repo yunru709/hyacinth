@@ -88,7 +88,24 @@ export type ServerMessage =
   | ErrorMsg
   | { type: 'turn_start' }
   | { type: 'flush' }
-  | { type: 'interrupt' };
+  | { type: 'interrupt' }
+  | { type: 'session_switched'; sessionId: string };
+
+// ── REST API: Session history events ────────────────────
+
+export interface ConversationEvent {
+  type: 'user_input' | 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'error' | 'stop' | 'usage';
+  content?: string;
+  name?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  message?: string;
+  reason?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  timestamp: string;
+}
 
 // ── Client → Server messages ─────────────────────────────
 
@@ -97,7 +114,8 @@ export type ClientMessage =
   | { type: 'stop' }
   | { type: 'permission'; result: 'yes' | 'no' | 'always' }
   | { type: 'set_mode'; mode: 'normal' | 'precise' }
-  | { type: 'rollback'; toTurnId: number };
+  | { type: 'rollback'; toTurnId: number }
+  | { type: 'switch_session'; sessionId: string };
 
 // ── Chat message nodes ───────────────────────────────────
 

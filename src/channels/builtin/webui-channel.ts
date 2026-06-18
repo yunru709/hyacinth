@@ -330,9 +330,11 @@ export class WebUIChannel implements ChannelHandler {
       '/api/sessions/:id/events',
       async (req: FastifyRequest, reply: FastifyReply) => {
         const { id } = req.params as { id: string };
+        const { limit } = req.query as { limit?: string };
+        const eventLimit = limit ? parseInt(limit, 10) || 50 : 50;
         try {
           const sessionDir = this.sessionManager.getSessionDir(id);
-          const events = await this.loadRecentEvents(sessionDir, 50);
+          const events = await this.loadRecentEvents(sessionDir, eventLimit);
           return reply.send(events);
         } catch {
           return reply.status(404).send({ error: 'Session not found' });
