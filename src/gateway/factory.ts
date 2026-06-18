@@ -60,6 +60,7 @@ import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { WorkflowRegistry, WorkflowManager, createWorkflowTool, createConvertSkillToWorkflowTool } from '../workflow/index.js';
+import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
 import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
@@ -166,6 +167,11 @@ export async function createAgent(
 
   // ── Git 基础设施 ──────────────────────────────────────────────────
   const gitManager = new GitManager(cwd);
+
+  // ── 回合回滚 ──────────────────────────────────────────────────────
+  const rollbackDir = path.join(cwd, '.agent', 'rollback');
+  const turnStore = new TurnStore(rollbackDir);
+  const turnRecorder = new TurnRecorder(gitManager, turnStore, cwd);
 
   // ── 配置加载 ──────────────────────────────────────────────────────
   const configManager = new ConfigManager(cwd);
@@ -554,6 +560,7 @@ export async function createAgent(
     configCenter,
     workflowManager,
     modelRouter,
+    turnRecorder,
   );
 
   // 注入知识库状态引用
@@ -610,6 +617,10 @@ export async function createAgent(
   // destroy_sub_agent 需要 sessionDir，在此单独注册
   const { createDestroySubAgentTool } = await import('../tools/runtime-control.js');
   toolRegistry.register(createDestroySubAgentTool(agentRegistry, sessionDir));
+
+  // ── 回合回滚工具 ──
+  toolRegistry.register(createRollbackStatusTool(turnStore, () => loop.turnNumber));
+  toolRegistry.register(createRollbackTool(turnStore, gitManager, () => loop.turnNumber));
 
   // 注册 MCP 状态变更回调 — 消息通过 ContextSource (runtime:mcp_status) 自动注入 Zone 5，
   // 此处仅保留日志记录（未来可扩展为 TUI 状态栏更新）

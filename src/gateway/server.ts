@@ -1,8 +1,10 @@
 import { ConfigManager } from '../setup/config.js';
 import { ProviderManager } from '../provider/manager.js';
+import { getProviderConfigLoader } from '../provider/config.js';
 import { SessionManager } from '../memory/session.js';
 import { ChannelManager } from '../channels/manager.js';
 import { HttpWebhookChannel } from '../channels/builtin/http-webhook.js';
+import { WebUIChannel } from '../channels/builtin/webui-channel.js';
 import { registerConfigChannels } from '../channels/auto-detect.js';
 import { createAgent } from './factory.js';
 import { createLogger } from '../logging/logger.js';
@@ -26,6 +28,12 @@ export interface ServerOptions {
   maxContext?: number;
   apiKey?: string;
   corsOrigin?: string;
+  /** 启用 WebUI 渠道 */
+  enableWebui?: boolean;
+  /** WebUI 端口 */
+  webuiPort?: number;
+  /** 仅启动 WebUI（不启动 HTTP API） */
+  webuiOnly?: boolean;
 }
 
 export interface ServerInstance {
@@ -39,6 +47,9 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   // 加载配置
   const configManager = new ConfigManager(cwd);
   await configManager.loadEnvKeys();
+
+  // 初始化 ProviderConfigLoader（必须在使用 ProviderManager 之前）
+  getProviderConfigLoader(cwd);
 
   // 创建 Provider
   const providerManager = await ProviderManager.createFromConfigFile(
@@ -54,18 +65,37 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   // Session manager
   const sessionManager = new SessionManager(cwd);
 
-  // 创建渠道管理器并注册内置 HTTP 渠道
+  // 创建渠道管理器并注册渠道
   const manager = new ChannelManager();
-  manager.register(new HttpWebhookChannel(), {
-    port,
-    cwd,
-    provider,
-    sessionManager,
-    maxTurns,
-    maxContext,
-    apiKey: options.apiKey,
-    corsOrigin: options.corsOrigin,
-  });
+  const enableWebui = options.enableWebui ?? false;
+  const webuiOnly = options.webuiOnly ?? false;
+  const webuiPort = options.webuiPort ?? (port + 100);
+
+  // HTTP API 渠道（webui-only 模式下不启动）
+  if (!webuiOnly) {
+    manager.register(new HttpWebhookChannel(), {
+      port,
+      cwd,
+      provider,
+      sessionManager,
+      maxTurns,
+      maxContext,
+      apiKey: options.apiKey,
+      corsOrigin: options.corsOrigin,
+    });
+  }
+
+  // WebUI 渠道
+  if (enableWebui || webuiOnly) {
+    manager.register(new WebUIChannel(), {
+      port: webuiPort,
+      cwd,
+      provider,
+      sessionManager,
+      maxTurns,
+      maxContext,
+    });
+  }
 
   // ── 配置热监听（fs.watchFile） ────────────────────────────────────
 
@@ -126,7 +156,12 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
 
   await manager.startAll(agentFactory);
 
-  console.log(`Server listening on http://localhost:${port}`);
+  if (!webuiOnly) {
+    console.log(`HTTP API: http://localhost:${port}`);
+  }
+  if (enableWebui || webuiOnly) {
+    console.log(`WebUI:    http://localhost:${webuiPort}`);
+  }
 
   return { manager, port };
 }

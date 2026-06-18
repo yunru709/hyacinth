@@ -45,6 +45,7 @@ import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
 import { extractTextContent } from '../utils/misc.js';
 import type { WorkflowManager } from '../workflow/index.js';
+import type { TurnRecorder } from '../rollback/turn-recorder.js';
 import * as sessionAllowlist from '../memory/session-allowlist.js';
 
 /** Format a Date as YYYY-MM-DD HH:mm (cache-friendly, minute precision) */
@@ -229,6 +230,8 @@ export class AgentLoop {
   private cacheTurns: CacheTurnRecord[] = [];
   private logCacheHits: boolean;
   private currentTurn = 0;
+  /** 公开只读访问器 — 供 TurnRecorder / RollbackTool 等查询当前回合号 */
+  get turnNumber(): number { return this.currentTurn; }
   private lastSavedSummary: string | undefined;
   private pendingImpactInfo: string | null = null;
   private requestId: string;
@@ -303,6 +306,7 @@ export class AgentLoop {
     configCenter?: RuntimeConfigCenter,
     private workflowManager?: WorkflowManager,
     private modelRouter?: ModelRouter,
+    private turnRecorder?: TurnRecorder,
   ) {
     this.orchestrator = orchestrator;
     this.outputHandler = outputHandler ?? null;
@@ -1060,6 +1064,12 @@ export class AgentLoop {
    */
   private async runTurn(): Promise<{ stop: boolean; stopReason?: string }> {
     this.currentTurn++;
+    // ── 回合回滚：记录回合开始前状态 ──
+    if (this.turnRecorder) {
+      this.turnRecorder.startTurn(this.currentTurn).catch(err => {
+        this.logger.warn('TurnRecorder startTurn failed', { error: (err as Error).message });
+      });
+    }
     // 从 conversation 读取历史
     const history = await this.conversationStore.readAll(this.sessionDir);
 
@@ -1773,11 +1783,23 @@ export class AgentLoop {
           reason: 'workflow_completed',
           timestamp: new Date().toISOString(),
         }).catch(() => {});
+        // ── 回合回滚：回合结束记录 ──
+        if (this.turnRecorder) {
+          this.turnRecorder.endTurn().catch(err => {
+            this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
+          });
+        }
         return { stop: true, stopReason: 'workflow_completed' };
       }
 
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
+      // ── 回合回滚：回合结束记录 ──
+      if (this.turnRecorder) {
+        this.turnRecorder.endTurn().catch(err => {
+          this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
+        });
+      }
       return { stop: false };
     }
 
@@ -1788,6 +1810,12 @@ export class AgentLoop {
       reason: stopReason || 'end_turn',
       timestamp: new Date().toISOString(),
     }).catch(() => {});
+    // ── 回合回滚：回合结束记录 ──
+    if (this.turnRecorder) {
+      this.turnRecorder.endTurn().catch(err => {
+        this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
+      });
+    }
     return { stop: true, stopReason: stopReason ?? 'end_turn' };
   }
 
@@ -1918,8 +1946,31 @@ export class AgentLoop {
 
     if (executableCalls.length === 0) return;
 
+    // ── 回合回滚：记录写操作的前置状态 ──
+    if (this.turnRecorder) {
+      const projectDir = this.gitManager.getRepoPath();
+      for (const tc of executableCalls) {
+        if (['write', 'edit', 'multi_edit'].includes(tc.name)) {
+          const filePath = tc.input.file_path as string;
+          if (filePath) {
+            this.turnRecorder.recordPreState(path.resolve(projectDir, filePath));
+          }
+        }
+      }
+    }
+
     // Execute permitted tools
     const results = await this.toolExecutor.executeParallel(executableCalls);
+
+    // ── 回合回滚：记录 bash 命令 ──
+    if (this.turnRecorder) {
+      for (const tc of executableCalls) {
+        if (tc.name === 'bash') {
+          const cmd = tc.input.command as string;
+          if (cmd) this.turnRecorder.recordCommand(cmd);
+        }
+      }
+    }
 
     // 影响面分析：检查是否有 edit 或 write 工具被调用
     if (this.dependencyAnalyzer && permittedCalls.some(tc => tc.name === 'edit' || tc.name === 'write')) {
@@ -2052,6 +2103,19 @@ export class AgentLoop {
           timestamp: new Date().toISOString(),
         }).catch(() => {});
         return;
+      }
+    }
+
+    // ── 回合回滚：记录写操作前置状态 ──
+    if (this.turnRecorder) {
+      if (['write', 'edit', 'multi_edit'].includes(name)) {
+        const filePath = input.file_path as string;
+        if (filePath) {
+          this.turnRecorder.recordPreState(path.resolve(this.gitManager.getRepoPath(), filePath));
+        }
+      } else if (name === 'bash') {
+        const cmd = input.command as string;
+        if (cmd) this.turnRecorder.recordCommand(cmd);
       }
     }
 

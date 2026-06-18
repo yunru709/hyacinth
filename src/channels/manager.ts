@@ -96,6 +96,9 @@ export class ChannelManager {
     try {
       state.status = 'starting';
 
+      // 将 agentFactory 注入到渠道配置中（WebUI 等渠道需要它来创建 AgentLoop）
+      (config as Record<string, unknown>).agentFactory = agentFactory;
+
       // 设置事件处理：渠道收到消息 → 调用 handler.handleMessage
       handler.onEvent(async (event: ChannelEvent) => {
         if (event.type === 'message') {

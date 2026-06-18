@@ -26,8 +26,8 @@ export class GitManager {
     this.repoPath = repoPath;
   }
 
-  // Run git command in repoPath
-  private async git(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  /** Run a raw git command in repoPath. Public for use by TurnRecorder etc. */
+  async git(args: string[]): Promise<{ stdout: string; stderr: string }> {
     try {
       return await execFileAsync('git', args, { cwd: this.repoPath, maxBuffer: 10 * 1024 * 1024 });
     } catch (err: any) {
