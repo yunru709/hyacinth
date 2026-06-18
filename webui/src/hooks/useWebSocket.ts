@@ -184,6 +184,10 @@ export function useWebSocket() {
     store.setPermission(null);
   }, [send]);
 
+  const sendRollback = useCallback((toTurnId: number) => {
+    send({ type: 'rollback', toTurnId });
+  }, [send]);
+
   useEffect(() => {
     connect();
     return () => {
@@ -196,6 +200,7 @@ export function useWebSocket() {
     sendChat,
     sendStop,
     respondPermission,
+    sendRollback,
     connected: store.connected,
     ready: store.ready,
   };

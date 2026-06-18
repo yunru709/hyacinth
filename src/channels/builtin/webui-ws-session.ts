@@ -153,6 +153,10 @@ export class WebUIWsSession {
         await this.handleSetMode(msg.mode);
         break;
 
+      case 'rollback':
+        await this.handleRollback(msg.toTurnId);
+        break;
+
       default:
         logger.warn('Unknown WebUI client message type', {
           type: (msg as { type: string }).type,
@@ -215,6 +219,87 @@ export class WebUIWsSession {
     // AgentLoop 的 interrupt 机制
     if (this.loop && typeof (this.loop as any).requestStop === 'function') {
       (this.loop as any).requestStop();
+    }
+  }
+
+  /** 回滚到指定回合 */
+  private async handleRollback(toTurnId: number): Promise<void> {
+    if (!this.config?.cwd) {
+      this.send({ type: 'error', message: 'No project directory configured' });
+      return;
+    }
+
+    try {
+      const path = await import('node:path');
+      const { TurnStore } = await import('../../rollback/turn-store.js');
+      const { GitManager } = await import('../../evolution/git-manager.js');
+
+      const rollbackDir = path.join(this.config.cwd, '.agent', 'rollback');
+      const turnStore = new TurnStore(rollbackDir);
+      const gitManager = new GitManager(this.config.cwd);
+
+      // 检查是否是 git 仓库
+      if (!(await gitManager.isRepo())) {
+        this.send({ type: 'error', message: 'Rollback requires a git repository' });
+        return;
+      }
+
+      // 找到最近的 ≤ toTurnId 的记录
+      const records = await turnStore.list();
+      if (records.length === 0) {
+        this.send({ type: 'error', message: 'No rollback history available' });
+        return;
+      }
+
+      const targetRecord = records
+        .filter(r => r.turnId <= toTurnId)
+        .sort((a, b) => b.turnId - a.turnId)[0];
+
+      if (!targetRecord) {
+        this.send({
+          type: 'error',
+          message: `Turn ${toTurnId} not found in rollback history. Oldest: ${records[0]?.turnId}`,
+        });
+        return;
+      }
+
+      if (!targetRecord.preCommit) {
+        this.send({ type: 'error', message: 'No git commit for target turn' });
+        return;
+      }
+
+      // 执行回滚
+      await gitManager.resetHard(targetRecord.preCommit);
+
+      // 清理记录
+      await turnStore.deleteRange(targetRecord.turnId + 1);
+
+      // 清理 tag
+      const rolledBackTurns = records.filter(r => r.turnId > targetRecord.turnId);
+      for (const r of rolledBackTurns) {
+        try { await gitManager.git(['tag', '-d', `rollback-turn-${r.turnId}`]); } catch {}
+      }
+
+      const fileList = rolledBackTurns
+        .flatMap(r => r.changedFiles.map(f => f.path))
+        .filter((v, i, a) => a.indexOf(v) === i);
+
+      this.send({
+        type: 'status',
+        message: `↩ Rolled back to turn ${targetRecord.turnId}. ${fileList.length} file(s) restored.`,
+        level: 'info',
+      });
+
+      logger.info('WebUI rollback executed', {
+        sessionId: this.sessionId,
+        toTurnId,
+        targetTurn: targetRecord.turnId,
+        filesRestored: fileList.length,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.send({ type: 'error', message: `Rollback failed: ${msg}` });
+      logger.error('WebUI rollback error', err instanceof Error ? err : new Error(String(err)));
     }
   }
 

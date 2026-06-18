@@ -1,18 +1,24 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useStore } from '../store';
-import type {
-  UserMsgNode,
-  TextMsgNode,
-  ThinkingMsgNode,
-  ToolCallNode,
-  SystemMsgNode,
-} from '../types';
+import type { UserMsgNode, TextMsgNode, ThinkingMsgNode, ToolCallNode, SystemMsgNode } from '../types';
 
-function UserBubble({ msg }: { msg: UserMsgNode }) {
+function UserBubble({ msg, onRollback }: { msg: UserMsgNode; onRollback: (turnId: number) => void }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div className="flex justify-end mb-3">
-      <div className="max-w-[80%] bg-accent/15 text-text-bright rounded-lg px-4 py-2">
-        <pre className="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
+    <div className="flex items-start gap-1 mb-4 px-4 group"
+         onMouseEnter={() => setHovered(true)}
+         onMouseLeave={() => setHovered(false)}>
+      {/* Rollback button — appears on hover, left of message */}
+      <button
+        onClick={() => onRollback(msg.turnId)}
+        className="flex-shrink-0 mt-1 btn-ghost btn-sm opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{color:'var(--muted)'}}
+        title={`Rollback to before turn ${msg.turnId}`}
+      >↩</button>
+
+      <div className="max-w-[80%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed ml-auto"
+           style={{background:'var(--accent)', color:'#fff'}}>
+        {msg.content}
       </div>
     </div>
   );
@@ -20,28 +26,26 @@ function UserBubble({ msg }: { msg: UserMsgNode }) {
 
 function TextBlock({ msg }: { msg: TextMsgNode }) {
   return (
-    <div className="mb-2">
-      <div className="text-text text-sm whitespace-pre-wrap leading-relaxed">
-        {msg.content}
-      </div>
+    <div className="mb-3 px-4 text-sm leading-relaxed" style={{color:'var(--text)'}}>
+      {msg.content.split('\n').map((line, i) => (
+        <div key={i}>{line || ' '}</div>
+      ))}
     </div>
   );
 }
 
 function ThinkingBlock({ msg }: { msg: ThinkingMsgNode }) {
-  const toggle = useStore((s) => s.toggleThinkingCollapsed);
-
+  const toggle = useStore(s => s.toggleThinkingCollapsed);
   return (
-    <div className="mb-2">
-      <button
-        onClick={() => toggle(msg.id)}
-        className="flex items-center gap-2 text-xs text-muted hover:text-text transition-colors mb-1"
-      >
-        <span>{msg.collapsed ? '▶' : '▼'}</span>
-        <span>🧠 Thinking</span>
+    <div className="mb-2 px-4">
+      <button onClick={() => toggle(msg.id)}
+              className="flex items-center gap-1.5 text-xs transition-colors mb-1"
+              style={{color:'var(--muted)'}}>
+        <span className="text-[10px]">{msg.collapsed ? '▶' : '▼'}</span>
+        <span>Thinking</span>
       </button>
       {!msg.collapsed && (
-        <div className="pl-5 border-l-2 border-border ml-1 text-xs text-muted whitespace-pre-wrap italic">
+        <div className="pl-3 ml-1 text-xs leading-relaxed whitespace-pre-wrap italic" style={{color:'var(--text-dim)', borderLeft:'2px solid var(--border)'}}>
           {msg.content}
         </div>
       )}
@@ -50,84 +54,48 @@ function ThinkingBlock({ msg }: { msg: ThinkingMsgNode }) {
 }
 
 function ToolCard({ msg }: { msg: ToolCallNode }) {
-  const toggle = useStore((s) => s.toggleToolExpanded);
-
+  const toggle = useStore(s => s.toggleToolExpanded);
   return (
-    <div className="mb-2 border border-border rounded-md overflow-hidden">
-      {/* Tool header */}
-      <button
-        onClick={() => toggle(msg.id)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-surface hover:bg-border/30 transition-colors text-left"
-      >
-        <span className="text-xs">{msg.expanded ? '▼' : '▶'}</span>
-        <span className="text-accent text-sm font-mono font-bold">
-          {msg.name}
-        </span>
-        <span className="text-muted text-xs truncate flex-1">
-          {msg.inputSummary.length > 80
-            ? msg.inputSummary.slice(0, 77) + '...'
-            : msg.inputSummary}
+    <div className="mb-3 mx-4 card overflow-hidden">
+      <button onClick={() => toggle(msg.id)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors"
+              style={{background:'var(--surface)'}}>
+        <span className="text-[10px]">{msg.expanded ? '▼' : '▶'}</span>
+        <span className="font-mono font-semibold" style={{color:'var(--accent)'}}>{msg.name}</span>
+        <span className="truncate flex-1" style={{color:'var(--text-dim)'}}>
+          {msg.inputSummary.length > 80 ? msg.inputSummary.slice(0,77)+'...' : msg.inputSummary}
         </span>
         {msg.result !== undefined && (
-          <span
-            className={`text-xs px-1.5 py-0.5 rounded ${
-              msg.isError
-                ? 'bg-red-500/15 text-red-400'
-                : 'bg-green-500/15 text-green-400'
-            }`}
-          >
-            {msg.isError ? '✗' : '✓'}
-          </span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{
+            background: msg.isError ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+            color: msg.isError ? 'var(--danger)' : 'var(--success)',
+          }}>{msg.isError ? '✗' : '✓'}</span>
         )}
       </button>
-
-      {/* Expanded content */}
       {msg.expanded && (
-        <div className="border-t border-border">
-          {/* Diff view */}
+        <div style={{borderTop:'1px solid var(--border)'}}>
           {msg.diff && (
-            <div className="p-3 border-b border-border">
-              <div className="text-xs text-muted mb-1 font-mono">
-                📄 {msg.diff.filePath}
-              </div>
-              <pre className="text-xs font-mono overflow-x-auto max-h-48">
+            <div className="p-3" style={{borderBottom:'1px solid var(--border)'}}>
+              <div className="text-[11px] mb-1 font-mono" style={{color:'var(--muted)'}}>📄 {msg.diff.filePath}</div>
+              <pre className="text-[11px] font-mono overflow-x-auto max-h-44 leading-relaxed">
                 {msg.diff.diffLines.map((line, i) => (
-                  <div
-                    key={i}
-                    className={
-                      line.kind === '+'
-                        ? 'bg-green-500/10 text-green-400'
-                        : line.kind === '-'
-                        ? 'bg-red-500/10 text-red-400'
-                        : 'text-muted'
-                    }
-                  >
+                  <div key={i} className={line.kind === '+' ? 'diff-add' : line.kind === '-' ? 'diff-remove' : 'diff-context'}>
                     {line.kind} {line.text}
                   </div>
                 ))}
               </pre>
             </div>
           )}
-
-          {/* Tool result */}
           {msg.result !== undefined && (
-            <div className="p-3">
-              <pre
-                className={`text-xs font-mono whitespace-pre-wrap max-h-64 overflow-y-auto ${
-                  msg.isError ? 'text-red-400' : 'text-muted'
-                }`}
-              >
-                {msg.result.length > 5000
-                  ? msg.result.slice(0, 5000) +
-                    '\n\n... (truncated, showing first 5000 chars)'
-                  : msg.result}
+            <div className="p-3 overflow-y-auto max-h-64">
+              <pre className={`text-[11px] font-mono whitespace-pre-wrap leading-relaxed ${msg.isError ? 'diff-remove' : ''}`}
+                   style={{color: msg.isError ? 'var(--danger)' : 'var(--text-dim)'}}>
+                {msg.result.length > 5000 ? msg.result.slice(0,5000)+'\n\n... (truncated)' : msg.result}
               </pre>
             </div>
           )}
-
-          {/* Pending (tool in flight) */}
           {msg.result === undefined && (
-            <div className="p-3 text-muted text-xs">⏳ Executing...</div>
+            <div className="p-3 text-xs" style={{color:'var(--muted)'}}>⏳ Executing...</div>
           )}
         </div>
       )}
@@ -136,65 +104,55 @@ function ToolCard({ msg }: { msg: ToolCallNode }) {
 }
 
 function SystemMsg({ msg }: { msg: SystemMsgNode }) {
-  const colorClass =
-    msg.level === 'error'
-      ? 'text-red-400'
-      : msg.level === 'warn'
-      ? 'text-yellow-400'
-      : 'text-muted';
-
+  const colors = { error: 'var(--danger)', warn: 'var(--warning)', info: 'var(--muted)' };
   return (
-    <div className={`mb-2 text-xs ${colorClass}`}>
+    <div className="mb-2 px-4 text-xs" style={{color: colors[msg.level] || 'var(--muted)'}}>
       {msg.content}
     </div>
   );
 }
 
-export function ChatLog() {
-  const messages = useStore((s) => s.messages);
-  const currentText = useStore((s) => s.currentText);
+export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => void }) {
+  const messages = useStore(s => s.messages);
+  const currentText = useStore(s => s.currentText);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动到底部
+  const handleRollback = (turnId: number) => {
+    useStore.getState().addSystemMsg(`↩ Rolling back to turn ${turnId}...`, 'info');
+    sendRollback(turnId);
+  };
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentText]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3">
+    <div className="flex-1 overflow-y-auto py-4" style={{minHeight:0}}>
       {messages.length === 0 && !currentText && (
-        <div className="flex items-center justify-center h-full text-muted text-sm">
+        <div className="flex items-center justify-center h-full" style={{color:'var(--muted)'}}>
           <div className="text-center">
-            <div className="text-3xl mb-2">DeepThink</div>
-            <div>Type a message to start</div>
+            <div className="text-4xl mb-3" style={{color:'var(--accent)'}}>DeepThink</div>
+            <div className="text-sm">Type a message to start</div>
+            <div className="text-xs mt-2" style={{color:'var(--text-dim)'}}>/help for commands</div>
           </div>
         </div>
       )}
 
-      {messages.map((msg) => {
+      {messages.map(msg => {
         switch (msg.kind) {
-          case 'user':
-            return <UserBubble key={msg.id} msg={msg} />;
-          case 'text':
-            return <TextBlock key={msg.id} msg={msg} />;
-          case 'thinking':
-            return <ThinkingBlock key={msg.id} msg={msg} />;
-          case 'tool':
-            return <ToolCard key={msg.id} msg={msg} />;
-          case 'system':
-            return <SystemMsg key={msg.id} msg={msg} />;
-          default:
-            return null;
+          case 'user': return <UserBubble key={msg.id} msg={msg} onRollback={handleRollback} />;
+          case 'text': return <TextBlock key={msg.id} msg={msg} />;
+          case 'thinking': return <ThinkingBlock key={msg.id} msg={msg} />;
+          case 'tool': return <ToolCard key={msg.id} msg={msg} />;
+          case 'system': return <SystemMsg key={msg.id} msg={msg} />;
+          default: return null;
         }
       })}
 
-      {/* Streaming text */}
       {currentText && (
-        <div className="mb-2">
-          <div className="text-text text-sm whitespace-pre-wrap leading-relaxed">
-            {currentText}
-            <span className="inline-block w-2 h-4 bg-accent animate-pulse ml-0.5 align-middle" />
-          </div>
+        <div className="mb-3 px-4 text-sm leading-relaxed" style={{color:'var(--text)'}}>
+          {currentText}
+          <span className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse rounded-sm" style={{background:'var(--accent)'}} />
         </div>
       )}
 

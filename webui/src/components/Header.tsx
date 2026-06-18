@@ -1,51 +1,45 @@
 import { useStore } from '../store';
 
 export function Header() {
-  const connected = useStore((s) => s.connected);
-  const config = useStore((s) => s.config);
-  const turnCount = useStore((s) => s.turnCount);
-  const maxTurns = useStore((s) => s.maxTurns);
-  const tokensUsed = useStore((s) => s.tokensUsed);
-  const maxTokens = useStore((s) => s.maxTokens);
-  const cacheHitRate = useStore((s) => s.cacheHitRate);
-  const compressCount = useStore((s) => s.compressCount);
+  const connected = useStore(s => s.connected);
+  const ready = useStore(s => s.ready);
+  const config = useStore(s => s.config);
+  const turnCount = useStore(s => s.turnCount);
+  const maxTurns = useStore(s => s.maxTurns);
+  const tokensUsed = useStore(s => s.tokensUsed);
+  const maxTokens = useStore(s => s.maxTokens);
+  const cacheHitRate = useStore(s => s.cacheHitRate);
+  const compressCount = useStore(s => s.compressCount);
+  const toggleSidebar = useStore(s => s.toggleSidebar);
+  const sidebarOpen = useStore(s => s.sidebarOpen);
 
   const ratio = Math.min(tokensUsed / Math.max(maxTokens, 1), 1);
-  const filledW = Math.floor(ratio * 40);
-  const emptyW = 40 - filledW;
   const pct = (ratio * 100).toFixed(0);
-
-  let barColor = 'bg-green-500';
-  if (ratio > 0.8) barColor = 'bg-red-500';
-  else if (ratio > 0.5) barColor = 'bg-yellow-500';
+  let barColor = ratio > 0.8 ? 'var(--danger)' : ratio > 0.5 ? 'var(--warning)' : 'var(--success)';
 
   return (
-    <div className="flex flex-col gap-1 border-b border-border px-4 py-2 bg-surface">
-      {/* Status line */}
+    <div className="flex flex-col gap-1 px-4 py-2.5 border-b flex-shrink-0" style={{background:'var(--surface)', borderColor:'var(--border)'}}>
+      {/* Top row */}
       <div className="flex items-center gap-3 text-sm flex-wrap">
-        <span className="font-bold text-accent">DeepThink</span>
-
-        {/* Connection dot */}
-        <span
-          className={`inline-block w-2 h-2 rounded-full ${
-            connected ? 'bg-green-500' : 'bg-red-500'
-          }`}
-          title={connected ? 'Connected' : 'Disconnected'}
-        />
+        {!sidebarOpen && (
+          <button onClick={toggleSidebar} className="btn-ghost btn-sm" title="Show sidebar">☰</button>
+        )}
+        <span className="font-bold tracking-tight" style={{color:'var(--accent)', fontSize:15}}>DeepThink</span>
 
         {config && (
           <>
-            <span className="text-muted">·</span>
-            <span className="text-accent">{config.model}</span>
-            <span className="text-muted">·</span>
-            <span className="text-text">
-              Turns: <span className="font-mono">{turnCount}</span>/{maxTurns}
+            <span className="inline-flex items-center gap-1.5 text-xs" style={{color:'var(--text-dim)'}}>
+              <span className="w-1.5 h-1.5 rounded-full"
+                    style={{background: connected ? (ready ? 'var(--success)' : 'var(--warning)') : 'var(--danger)'}} />
+              {config.model}
             </span>
+
+            <span className="text-xs font-mono" style={{color:'var(--text-dim)'}}>
+              Turn {turnCount}/{maxTurns}
+            </span>
+
             {compressCount > 0 && (
-              <>
-                <span className="text-muted">·</span>
-                <span className="text-yellow-500">Compr: {compressCount}</span>
-              </>
+              <span className="text-xs" style={{color:'var(--warning)'}}>Compr: {compressCount}</span>
             )}
           </>
         )}
@@ -53,23 +47,14 @@ export function Header() {
 
       {/* Context bar */}
       <div className="flex items-center gap-2 text-xs font-mono">
-        <span className="text-muted">Context:</span>
-        <span className="inline-flex">
-          <span className={`${barColor} text-transparent`}>
-            {'█'.repeat(filledW)}
-          </span>
-          <span className="text-border">
-            {'░'.repeat(emptyW)}
-          </span>
-        </span>
-        <span className="text-text">{pct}%</span>
-        <span className="text-muted">
-          ({(tokensUsed / 1000).toFixed(0)}K / {(maxTokens / 1000).toFixed(0)}K)
-        </span>
+        <span style={{color:'var(--muted)'}}>Context</span>
+        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{background:'var(--border)', maxWidth: 220}}>
+          <div className="h-full rounded-full transition-all duration-300" style={{width: `${ratio*100}%`, background: barColor}} />
+        </div>
+        <span style={{color:'var(--text)'}}>{pct}%</span>
+        <span style={{color:'var(--muted)'}}>{(tokensUsed/1000).toFixed(0)}K/{(maxTokens/1000).toFixed(0)}K</span>
         {cacheHitRate != null && (
-          <span className="text-muted">
-            Cache: {cacheHitRate.toFixed(1)}%
-          </span>
+          <span style={{color:'var(--muted)'}}>Cache {cacheHitRate.toFixed(0)}%</span>
         )}
       </div>
     </div>

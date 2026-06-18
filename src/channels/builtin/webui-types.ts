@@ -13,7 +13,8 @@ export type WebUIClientMessage =
   | WebUIChatMessage
   | WebUIStopMessage
   | WebUIPermissionResponse
-  | WebUISetModeMessage;
+  | WebUISetModeMessage
+  | WebUIRollbackMessage;
 
 export interface WebUIChatMessage {
   type: 'chat';
@@ -33,6 +34,12 @@ export interface WebUIPermissionResponse {
 export interface WebUISetModeMessage {
   type: 'set_mode';
   mode: 'normal' | 'precise';
+}
+
+export interface WebUIRollbackMessage {
+  type: 'rollback';
+  /** 回退到第几个回合之前的状态 */
+  toTurnId: number;
 }
 
 // ── Server → Client ─────────────────────────────────────────

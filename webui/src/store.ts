@@ -16,48 +16,47 @@ import type {
 } from './types';
 
 let nextId = 1;
-function uid(): string {
-  return `msg_${nextId++}_${Date.now().toString(36)}`;
-}
+function uid(): string { return `msg_${nextId++}_${Date.now().toString(36)}`; }
 
 interface WebUIState {
-  // ── 连接 ──
-  connected: boolean;
-  ready: boolean;  // WebSocket 连上 + AgentLoop 初始化完成
-  sessionId: string | null;
-  config: {
-    cwd: string;
-    provider: string;
-    model: string;
-    maxTurns: number;
-    maxContext: number;
-  } | null;
+  // ── Theme ──
+  theme: 'dark' | 'light';
+  toggleTheme: () => void;
 
-  // ── 消息流 ──
+  // ── Sidebar ──
+  sidebarOpen: boolean;
+  toggleSidebar: () => void;
+
+  // ── Connection ──
+  connected: boolean;
+  ready: boolean;
+  sessionId: string | null;
+  config: { cwd: string; provider: string; model: string; maxTurns: number; maxContext: number } | null;
+
+  // ── Messages ──
   messages: MessageNode[];
   currentText: string;
   currentThinking: string;
   pendingThinking: string;
 
-  // ── 工具状态 ──
-  activeToolIds: Map<string, string>; // toolId → display id
+  // ── Tools ──
+  activeToolIds: Map<string, string>;
 
-  // ── 回合状态 ──
+  // ── Turn ──
   isProcessing: boolean;
-  turnCount: number;
-  maxTurns: number;
-  tokensUsed: number;
-  maxTokens: number;
+  turnCount: number; maxTurns: number;
+  tokensUsed: number; maxTokens: number;
   cacheHitRate: number | null;
   compressCount: number;
 
-  // ── 权限 ──
+  // ── Permission ──
   permissionRequest: PermissionRequestMsg | null;
 
-  // ── Session 列表 ──
+  // ── Sessions ──
   sessions: SessionInfo[];
+  activeSessionId: string | null;
 
-  // ── 能力注册表 ──
+  // ── Registry ──
   tools: ToolInfo[];
   skills: SkillInfo[];
   agents: AgentInfo[];
@@ -73,14 +72,7 @@ interface WebUIState {
   addSystemMsg: (content: string, level: 'info' | 'warn' | 'error') => void;
   startTurn: () => void;
   flushCurrent: () => void;
-  updateTurnInfo: (info: {
-    turnCount: number;
-    maxTurns: number;
-    tokensUsed: number;
-    maxTokens: number;
-    cacheHitRate: number | null;
-    compressCount: number;
-  }) => void;
+  updateTurnInfo: (info: { turnCount: number; maxTurns: number; tokensUsed: number; maxTokens: number; cacheHitRate: number | null; compressCount: number }) => void;
   setPermission: (req: PermissionRequestMsg | null) => void;
   setConnected: (sessionId: string, config: WebUIState['config']) => void;
   setSessions: (sessions: SessionInfo[]) => void;
@@ -89,7 +81,22 @@ interface WebUIState {
   toggleThinkingCollapsed: (nodeId: string) => void;
 }
 
+// Theme persistence
+const savedTheme = (typeof localStorage !== 'undefined' && localStorage.getItem('deepthink-theme')) || 'dark';
+if (typeof document !== 'undefined') { document.documentElement.className = savedTheme; }
+
 export const useStore = create<WebUIState>((set, get) => ({
+  theme: savedTheme as 'dark' | 'light',
+  toggleTheme: () => {
+    const next = get().theme === 'dark' ? 'light' : 'dark';
+    if (typeof document !== 'undefined') document.documentElement.className = next;
+    if (typeof localStorage !== 'undefined') localStorage.setItem('deepthink-theme', next);
+    set({ theme: next });
+  },
+
+  sidebarOpen: true,
+  toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
+
   connected: false,
   ready: false,
   sessionId: null,
@@ -100,199 +107,65 @@ export const useStore = create<WebUIState>((set, get) => ({
   pendingThinking: '',
   activeToolIds: new Map(),
   isProcessing: false,
-  turnCount: 0,
-  maxTurns: 20,
-  tokensUsed: 0,
-  maxTokens: 200000,
-  cacheHitRate: null,
-  compressCount: 0,
+  turnCount: 0, maxTurns: 20,
+  tokensUsed: 0, maxTokens: 200000,
+  cacheHitRate: null, compressCount: 0,
   permissionRequest: null,
   sessions: [],
-  tools: [],
-  skills: [],
-  agents: [],
-  workflows: [],
+  activeSessionId: null,
+  tools: [], skills: [], agents: [], workflows: [],
 
-  addUserMsg(content: string) {
-    const msg: UserMsgNode = { kind: 'user', content, id: uid() };
-    set((s) => ({ messages: [...s.messages, msg] }));
+  addUserMsg(content) {
+    const turnId = get().turnCount + 1; // 新消息属于下一回合
+    set(s => ({ messages: [...s.messages, { kind: 'user', content, id: uid(), turnId } as UserMsgNode] }));
   },
-
-  appendText(content: string) {
-    const { currentText, messages } = get();
-    if (currentText === '' && messages.length > 0) {
-      // 开始新的 assistant 消息段——先 flush pending thinking
-      const { pendingThinking } = get();
-      if (pendingThinking.trim()) {
-        const thinkNode: ThinkingMsgNode = {
-          kind: 'thinking',
-          content: pendingThinking.trim(),
-          id: uid(),
-          collapsed: true,
-        };
-        set((s) => ({
-          messages: [...s.messages, thinkNode],
-          pendingThinking: '',
-        }));
-      }
-    }
-    set((s) => ({ currentText: s.currentText + content }));
-  },
-
-  appendThinking(content: string) {
-    set((s) => ({ pendingThinking: s.pendingThinking + content }));
-  },
-
-  addToolCall(id: string, name: string, inputSummary: string) {
-    // Flush pending thinking
-    const { pendingThinking, currentText, messages } = get();
-    const updates: Partial<WebUIState> = {};
-    const newMsgs = [...messages];
-
+  appendText(content) {
+    const { messages, pendingThinking } = get();
+    const msgs = [...messages];
     if (pendingThinking.trim()) {
-      newMsgs.push({
-        kind: 'thinking',
-        content: pendingThinking.trim(),
-        id: uid(),
-        collapsed: true,
-      });
-      updates.pendingThinking = '';
+      msgs.push({ kind: 'thinking', content: pendingThinking.trim(), id: uid(), collapsed: true } as ThinkingMsgNode);
     }
-    if (currentText.trim()) {
-      newMsgs.push({ kind: 'text', content: currentText.trim(), id: uid() });
-      updates.currentText = '';
-    }
-
-    const node: ToolCallNode = {
-      kind: 'tool',
-      id: uid(),
-      name,
-      inputSummary,
-      expanded: true,
-    };
-    newMsgs.push(node);
-
-    const { activeToolIds } = get();
-    const newMap = new Map(activeToolIds);
-    newMap.set(id, node.id);
-    updates.activeToolIds = newMap;
-
-    set({ ...updates, messages: newMsgs } as Partial<WebUIState>);
+    set(s => ({ messages: msgs, pendingThinking: '', currentText: s.currentText + content }));
   },
-
-  completeToolCall(id: string, content: string, isError: boolean) {
-    const { activeToolIds } = get();
-    const displayId = activeToolIds.get(id);
+  appendThinking(content) { set(s => ({ pendingThinking: s.pendingThinking + content })); },
+  addToolCall(id, name, inputSummary) {
+    const { pendingThinking, currentText, messages, activeToolIds } = get();
+    const msgs = [...messages];
+    if (pendingThinking.trim()) msgs.push({ kind: 'thinking', content: pendingThinking.trim(), id: uid(), collapsed: true } as ThinkingMsgNode);
+    if (currentText.trim()) msgs.push({ kind: 'text', content: currentText.trim(), id: uid() } as TextMsgNode);
+    const nodeId = uid();
+    msgs.push({ kind: 'tool', id: nodeId, name, inputSummary, expanded: true } as ToolCallNode);
+    const map = new Map(activeToolIds); map.set(id, nodeId);
+    set({ messages: msgs, currentText: '', pendingThinking: '', activeToolIds: map });
+  },
+  completeToolCall(id, content, isError) {
+    const displayId = get().activeToolIds.get(id);
     if (!displayId) return;
-
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.kind === 'tool' && m.id === displayId
-          ? { ...m, result: content, isError }
-          : m,
-      ),
-    }));
+    set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === displayId ? { ...m, result: content, isError } : m) }));
   },
-
-  showDiff(id: string, filePath: string, diffLines) {
-    const { activeToolIds } = get();
-    const displayId = activeToolIds.get(id);
+  showDiff(id, filePath, diffLines) {
+    const displayId = get().activeToolIds.get(id);
     if (!displayId) return;
-
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.kind === 'tool' && m.id === displayId
-          ? { ...m, diff: { filePath, diffLines } }
-          : m,
-      ),
-    }));
+    set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === displayId ? { ...m, diff: { filePath, diffLines } } : m) }));
   },
-
-  addSystemMsg(content: string, level: 'info' | 'warn' | 'error') {
-    const msg: SystemMsgNode = { kind: 'system', content, level, id: uid() };
-    set((s) => ({ messages: [...s.messages, msg] }));
-  },
-
+  addSystemMsg(content, level) { set(s => ({ messages: [...s.messages, { kind: 'system', content, level, id: uid() } as SystemMsgNode] })); },
   startTurn() {
-    // Flush any pending text
     const { currentText } = get();
-    if (currentText.trim()) {
-      set((s) => ({
-        messages: [...s.messages, { kind: 'text', content: currentText.trim(), id: uid() }],
-        currentText: '',
-      }));
-    }
-    set({ isProcessing: true, currentText: '', currentThinking: '', pendingThinking: '' });
+    set(s => ({ isProcessing: true, currentText: '', currentThinking: '', pendingThinking: '',
+      messages: currentText.trim() ? [...s.messages, { kind: 'text', content: currentText.trim(), id: uid() } as TextMsgNode] : s.messages }));
   },
-
   flushCurrent() {
     const { currentText, pendingThinking, messages } = get();
-    const newMsgs = [...messages];
-
-    if (pendingThinking.trim()) {
-      newMsgs.push({
-        kind: 'thinking',
-        content: pendingThinking.trim(),
-        id: uid(),
-        collapsed: true,
-      });
-    }
-    if (currentText.trim()) {
-      newMsgs.push({ kind: 'text', content: currentText.trim(), id: uid() });
-    }
-
-    set({
-      messages: newMsgs,
-      currentText: '',
-      pendingThinking: '',
-      isProcessing: false,
-    });
+    const msgs = [...messages];
+    if (pendingThinking.trim()) msgs.push({ kind: 'thinking', content: pendingThinking.trim(), id: uid(), collapsed: true } as ThinkingMsgNode);
+    if (currentText.trim()) msgs.push({ kind: 'text', content: currentText.trim(), id: uid() } as TextMsgNode);
+    set({ messages: msgs, currentText: '', pendingThinking: '', isProcessing: false });
   },
-
-  updateTurnInfo(info) {
-    set({
-      turnCount: info.turnCount,
-      maxTurns: info.maxTurns,
-      tokensUsed: info.tokensUsed,
-      maxTokens: info.maxTokens,
-      cacheHitRate: info.cacheHitRate,
-      compressCount: info.compressCount,
-    });
-  },
-
-  setPermission(req: PermissionRequestMsg | null) {
-    set({ permissionRequest: req });
-  },
-
-  setConnected(sessionId: string, config) {
-    set({ connected: true, sessionId, config });
-  },
-
-  setSessions(sessions: SessionInfo[]) {
-    set({ sessions });
-  },
-
-  setCapabilities(tools: ToolInfo[], skills: SkillInfo[], agents: AgentInfo[], workflows: WorkflowInfo[]) {
-    set({ tools, skills, agents, workflows });
-  },
-
-  toggleToolExpanded(toolId: string) {
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.kind === 'tool' && m.id === toolId
-          ? { ...m, expanded: !(m as ToolCallNode).expanded }
-          : m,
-      ),
-    }));
-  },
-
-  toggleThinkingCollapsed(nodeId: string) {
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        m.kind === 'thinking' && m.id === nodeId
-          ? { ...m, collapsed: !(m as ThinkingMsgNode).collapsed }
-          : m,
-      ),
-    }));
-  },
+  updateTurnInfo(info) { set(info); },
+  setPermission(req) { set({ permissionRequest: req }); },
+  setConnected(sessionId, config) { set({ connected: true, sessionId, config }); },
+  setSessions(sessions) { set({ sessions }); },
+  setCapabilities(tools, skills, agents, workflows) { set({ tools, skills, agents, workflows }); },
+  toggleToolExpanded(toolId) { set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === toolId ? { ...m, expanded: !(m as ToolCallNode).expanded } : m) })); },
+  toggleThinkingCollapsed(nodeId) { set(s => ({ messages: s.messages.map(m => m.kind === 'thinking' && m.id === nodeId ? { ...m, collapsed: !(m as ThinkingMsgNode).collapsed } : m) })); },
 }));

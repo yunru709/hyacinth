@@ -96,7 +96,8 @@ export type ClientMessage =
   | { type: 'chat'; content: string; images?: Array<{ data: string; media_type: string }> }
   | { type: 'stop' }
   | { type: 'permission'; result: 'yes' | 'no' | 'always' }
-  | { type: 'set_mode'; mode: 'normal' | 'precise' };
+  | { type: 'set_mode'; mode: 'normal' | 'precise' }
+  | { type: 'rollback'; toTurnId: number };
 
 // ── Chat message nodes ───────────────────────────────────
 
@@ -111,6 +112,8 @@ export interface UserMsgNode {
   kind: 'user';
   content: string;
   id: string;
+  /** 这条消息属于第几个回合（用于回滚定位） */
+  turnId: number;
 }
 
 export interface TextMsgNode {
