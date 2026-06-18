@@ -94,6 +94,8 @@ export function useWebSocket() {
 
       case 'flush':
         store.flushCurrent();
+        // 每回合结束后刷新 session 列表（Agent 可能增删了 session）
+        fetch('/api/sessions').then(r => r.json()).then(list => store.setSessions(list)).catch(() => {});
         break;
 
       case 'interrupt':

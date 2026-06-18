@@ -154,6 +154,7 @@ export interface SessionInfo {
   createdAt: string;
   updatedAt?: string;
   type?: string;
+  channel?: string;
 }
 
 export interface ToolInfo {

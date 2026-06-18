@@ -80,6 +80,8 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   type?: 'normal' | 'precise';
+  /** 创建此 session 的渠道：'webui' | 'tui' | 'feishu' 等 */
+  channel?: string;
 }
 
 export interface SessionStats {

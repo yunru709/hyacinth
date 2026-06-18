@@ -67,7 +67,7 @@ export class SessionManager {
   /**
    * 创建新 session
    */
-  async create(type: 'normal' | 'precise' = 'normal'): Promise<Session> {
+  async create(type: 'normal' | 'precise' = 'normal', channel?: string): Promise<Session> {
     // 清理过期 session
     await this.cleanup();
 
@@ -79,6 +79,7 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       type,
+      channel,
     };
 
     const sessionDir = getSessionDir(id);
@@ -89,10 +90,10 @@ export class SessionManager {
     await ensureFile(path.join(sessionDir, 'events.jsonl'));
     await ensureFile(path.join(sessionDir, 'stats.json'));
 
-    // 持久化 session 元信息（type、projectKey 等）
+    // 持久化 session 元信息（type、projectKey、channel 等）
     await fs.writeFile(
       path.join(sessionDir, 'meta.json'),
-      JSON.stringify({ type, createdAt: now, projectKey: this.projectKey }),
+      JSON.stringify({ type, createdAt: now, projectKey: this.projectKey, channel }),
       'utf-8',
     );
 
@@ -216,11 +217,13 @@ export class SessionManager {
         // 读取 session 元信息
         let sessionType: 'normal' | 'precise' | undefined;
         let projectKey = '';
+        let channel: string | undefined;
         try {
           const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
           const meta = JSON.parse(metaRaw);
           if (meta.type === 'precise' || meta.type === 'normal') sessionType = meta.type;
           projectKey = meta.projectKey ?? '';
+          channel = meta.channel;
         } catch { /* 旧 session 没有 meta.json，默认为 normal */ }
         sessions.push({
           id: entry.name,
@@ -228,6 +231,7 @@ export class SessionManager {
           createdAt: stat.birthtime.toISOString(),
           updatedAt: stat.mtime.toISOString(),
           type: sessionType ?? 'normal',
+          channel,
         });
       } catch {
         // 跳过无法访问的目录
