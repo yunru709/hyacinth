@@ -40,6 +40,8 @@ export class WebUIWsSession {
   private _onClose?: (sessionId: string) => void;
   /** 保存 agentFactory 引用，供 switchSession 使用 */
   private _agentFactory: AgentFactory | null = null;
+  /** 切换代数（防止并发切换） */
+  private _switchGeneration = 0;
   /** 初始化完成前缓冲的消息 */
   private _pendingMessages: WebUIClientMessage[] = [];
 
@@ -124,15 +126,16 @@ export class WebUIWsSession {
           message: 'Session is initializing, message queued...',
           level: 'info',
         });
-        // 确保初始化已经开始
-        if (!this._initPromise && this.config) {
-          // config 已设置但未开始初始化 —— 不太可能，但兜底
-        }
         return;
       }
-      // stop / permission 即使在初始化期间也可以处理
+      // stop / permission / switch_session 即使在初始化期间也可以处理
       if (msg.type === 'permission') {
         this.outputHandler.resolvePermission(msg.result);
+        return;
+      }
+      if (msg.type === 'switch_session') {
+        // 直接处理，不缓冲（会中断当前初始化并重新开始）
+        await this.handleSwitchSession(msg.sessionId);
         return;
       }
       return;
@@ -370,12 +373,15 @@ export class WebUIWsSession {
       return;
     }
 
+    const gen = ++this._switchGeneration;
+
     // 清理旧 loop
     if (this.loop && typeof (this.loop as any).requestStop === 'function') {
       (this.loop as any).requestStop();
     }
     this.loop = null;
     this._initialized = false;
+    this.isProcessing = false;
     this._pendingMessages = [];
 
     try {
@@ -383,6 +389,18 @@ export class WebUIWsSession {
         sessionId: newSessionId,
         outputHandler: this.outputHandler as OutputHandler,
       });
+
+      // 如果在此期间又发起了新的切换，放弃本次结果
+      if (this._switchGeneration !== gen) {
+        logger.info('WebUI session switch superseded', {
+          wsId: this.sessionId,
+          newSessionId,
+          generation: gen,
+          current: this._switchGeneration,
+        });
+        return;
+      }
+
       this.loop = (result as { loop: import('../../orchestrator/loop.js').AgentLoop }).loop;
       this._activeSessionId = newSessionId;
       this._initialized = true;
@@ -397,6 +415,9 @@ export class WebUIWsSession {
         newSessionId,
       });
     } catch (err) {
+      // 如果已被取代，不发送错误消息
+      if (this._switchGeneration !== gen) return;
+
       this.send({
         type: 'error',
         message: `Failed to switch session: ${err instanceof Error ? err.message : String(err)}`,
