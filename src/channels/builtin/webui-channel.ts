@@ -285,10 +285,17 @@ export class WebUIChannel implements ChannelHandler {
     });
 
     // 创建 session
-    this.app.post('/api/sessions', async (_req: FastifyRequest, reply: FastifyReply) => {
+    this.app.post('/api/sessions', async (req: FastifyRequest, reply: FastifyReply) => {
       try {
-        const session = await this.sessionManager.create('normal', 'webui');
-        return reply.send({ id: session.id, createdAt: session.createdAt });
+        const body = req.body as { type?: 'normal' | 'precise' } | undefined;
+        const type = body?.type === 'precise' ? 'precise' : 'normal';
+        const session = await this.sessionManager.create(type, 'webui');
+        return reply.send({
+          id: session.id,
+          createdAt: session.createdAt,
+          type: session.type,
+          channel: session.channel,
+        });
       } catch (err) {
         return reply.status(500).send({
           error: err instanceof Error ? err.message : String(err),
@@ -303,7 +310,13 @@ export class WebUIChannel implements ChannelHandler {
         const { id } = req.params as { id: string };
         try {
           const session = await this.sessionManager.resume(id);
-          return reply.send({ id: session.id, createdAt: session.createdAt });
+          return reply.send({
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            type: session.type,
+            channel: session.channel,
+          });
         } catch {
           return reply.status(404).send({ error: 'Session not found' });
         }

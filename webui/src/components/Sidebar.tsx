@@ -4,16 +4,19 @@ import type { SessionInfo } from '../types';
 
 /** 从 session ID 或 channel 字段检测渠道 */
 function detectChannel(s: SessionInfo): string {
-  if (s.channel) return s.channel;
+  if (s.channel) return CHANNEL_META[s.channel] ? s.channel : 'unknown';
   if (/^feishu_|^feishu-/.test(s.id)) return 'feishu';
   if (/^webui-/.test(s.id)) return 'webui';
-  return 'tui';
+  if (/^tui-/.test(s.id)) return 'tui';
+  return 'legacy';
 }
 
 const CHANNEL_META: Record<string, { label: string; icon: string }> = {
   webui: { label: 'Web UI', icon: '🌐' },
   tui: { label: 'Terminal', icon: '⬛' },
   feishu: { label: 'Feishu', icon: '💬' },
+  legacy: { label: 'Legacy', icon: '📁' },
+  unknown: { label: 'Unknown', icon: '❓' },
 };
 
 export function Sidebar({ switchSession }: { switchSession: (id: string) => void }) {
@@ -24,6 +27,7 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);
   const [creating, setCreating] = useState(false);
+  const [newSessionType, setNewSessionType] = useState<'normal' | 'precise'>('normal');
   const [switching, setSwitching] = useState<string | null>(null);
   // 默认展开所有 channel section
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -40,13 +44,24 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const res = await fetch('/api/sessions', { method: 'POST' });
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: newSessionType }),
+      });
       const data = await res.json();
       const listRes = await fetch('/api/sessions');
       const list = await listRes.json();
       useStore.getState().setSessions(list);
-      useStore.setState({ activeSessionId: data.id });
-      useStore.getState().addSystemMsg(`New session created`, 'info');
+      useStore.setState({
+        activeSessionId: data.id,
+        messages: [],
+        currentText: '',
+        currentThinking: '',
+        pendingThinking: '',
+        activeToolIds: new Map(),
+      });
+      switchSession(data.id);
     } catch {
       useStore.getState().addSystemMsg('Failed to create session', 'error');
     }
@@ -116,9 +131,12 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
     if (!grouped[ch]) grouped[ch] = [];
     grouped[ch].push(s);
   }
-  // 排序：webui 在前，tui 其次，feishu 最后
-  const channelOrder = ['webui', 'tui', 'feishu'];
-  const channels = channelOrder.filter(ch => grouped[ch]?.length > 0);
+  // 排序：webui 在前，tui 其次，feishu 最后，旧/未知 session 兜底展示
+  const channelOrder = ['webui', 'tui', 'feishu', 'legacy', 'unknown'];
+  const channels = [
+    ...channelOrder.filter(ch => grouped[ch]?.length > 0),
+    ...Object.keys(grouped).filter(ch => !channelOrder.includes(ch)),
+  ];
 
   return (
     <div className="flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
@@ -132,7 +150,23 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
       </div>
 
       {/* New Session */}
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 space-y-2">
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            onClick={() => setNewSessionType('normal')}
+            disabled={creating}
+            className={`btn-sm ${newSessionType === 'normal' ? 'btn btn-primary' : 'btn-ghost'}`}
+          >
+            Normal
+          </button>
+          <button
+            onClick={() => setNewSessionType('precise')}
+            disabled={creating}
+            className={`btn-sm ${newSessionType === 'precise' ? 'btn btn-primary' : 'btn-ghost'}`}
+          >
+            Precise
+          </button>
+        </div>
         <button onClick={handleCreate} disabled={creating} className="btn btn-primary btn-sm w-full justify-center">
           {creating ? '⏳' : '+'} New Session
         </button>

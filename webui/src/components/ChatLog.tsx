@@ -106,7 +106,7 @@ function ToolCard({ msg }: { msg: ToolCallNode }) {
 function SystemMsg({ msg }: { msg: SystemMsgNode }) {
   const colors = { error: 'var(--danger)', warn: 'var(--warning)', info: 'var(--muted)' };
   return (
-    <div className="mb-2 px-4 text-xs" style={{color: colors[msg.level] || 'var(--muted)'}}>
+    <div className="mb-2 px-4 text-xs whitespace-pre-wrap" style={{color: colors[msg.level] || 'var(--muted)'}}>
       {msg.content}
     </div>
   );
@@ -115,6 +115,11 @@ function SystemMsg({ msg }: { msg: SystemMsgNode }) {
 export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => void }) {
   const messages = useStore(s => s.messages);
   const currentText = useStore(s => s.currentText);
+  const clearChatLog = useStore(s => s.clearChatLog);
+  const setAllToolsExpanded = useStore(s => s.setAllToolsExpanded);
+  const showHelp = useStore(s => s.showHelp);
+  const hasTools = messages.some(msg => msg.kind === 'tool');
+  const allToolsExpanded = hasTools && messages.every(msg => msg.kind !== 'tool' || msg.expanded);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const handleRollback = (turnId: number) => {
@@ -128,6 +133,25 @@ export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => 
 
   return (
     <div className="flex-1 overflow-y-auto py-4" style={{minHeight:0}}>
+      <div className="sticky top-0 z-10 flex justify-end gap-2 px-4 pb-3" style={{background:'var(--bg)'}}>
+        <button
+          onClick={clearChatLog}
+          className="btn-ghost btn-sm"
+          title="Clear chat log"
+        >清屏</button>
+        <button
+          onClick={() => setAllToolsExpanded(!allToolsExpanded)}
+          disabled={!hasTools}
+          className="btn-ghost btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          title={allToolsExpanded ? 'Collapse all tool cards' : 'Expand all tool cards'}
+        >{allToolsExpanded ? '折叠工具' : '展开工具'}</button>
+        <button
+          onClick={showHelp}
+          className="btn-ghost btn-sm"
+          title="Show help"
+        >帮助</button>
+      </div>
+
       {messages.length === 0 && !currentText && (
         <div className="flex items-center justify-center h-full" style={{color:'var(--muted)'}}>
           <div className="text-center">

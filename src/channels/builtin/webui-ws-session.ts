@@ -44,11 +44,19 @@ export class WebUIWsSession {
   private _switchGeneration = 0;
   /** 初始化完成前缓冲的消息 */
   private _pendingMessages: WebUIClientMessage[] = [];
+  /** WebUI 当前模式 */
+  private _mode: 'normal' | 'precise' = 'normal';
+  /** 进入 precise 前的 normal session，用于切回 */
+  private _normalSessionId: string;
+  /** WebSocket 首次初始化时的 normal session， precise → normal 时切回 */
+  private _originalNormalSessionId: string;
 
   constructor(ws: WsLike, sessionId: string) {
     this.ws = ws;
     this.sessionId = sessionId;
     this._activeSessionId = sessionId;
+    this._normalSessionId = sessionId;
+    this._originalNormalSessionId = sessionId;
     this.outputHandler = new WebUIOutputHandler(ws);
     this.createdAt = Date.now();
   }
@@ -72,6 +80,7 @@ export class WebUIWsSession {
         const result = await agentFactory.createAgent({
           sessionId: this.sessionId,
           outputHandler: this.outputHandler as OutputHandler,
+          channel: 'webui',
         });
         this.loop = (result as { loop: import('../../orchestrator/loop.js').AgentLoop }).loop;
         this._initialized = true;
@@ -80,6 +89,7 @@ export class WebUIWsSession {
         this.send({
           type: 'connected',
           sessionId: this._activeSessionId,
+          mode: this._mode,
           config: this.config!,
         });
 
@@ -328,47 +338,107 @@ export class WebUIWsSession {
 
   /** 切换模式 */
   private async handleSetMode(mode: 'normal' | 'precise'): Promise<void> {
-    if (!this.loop) return;
+    if (!this.loop || !this.config?.cwd) {
+      this.send({ type: 'error', message: 'Agent loop not available' });
+      return;
+    }
 
-    try {
-      if (mode === 'precise') {
-        const { PreciseStrategy } = await import(
-          '../../context/precision/index.js'
-        );
-        // 需要 sessionDir——从 loop 获取
-        const sessionDir = (this.loop as any).sessionDir as string;
-        if (sessionDir) {
-          this.loop.composeStrategy = new PreciseStrategy(sessionDir);
-        }
-      } else {
-        const { DefaultStrategy } = await import(
-          '../../context/precision/index.js'
-        );
-        this.loop.composeStrategy = new DefaultStrategy();
-      }
+    if (mode === this._mode) {
       this.send({
         type: 'status',
-        message: `Mode set to ${mode}`,
+        message: `Already in ${mode} mode`,
         level: 'info',
+        mode,
+        sessionId: this._activeSessionId,
+      });
+      return;
+    }
+
+    try {
+      const { SessionManager } = await import('../../memory/session.js');
+      const sessionManager = new SessionManager(this.config.cwd);
+
+      if (mode === 'precise') {
+        const sessions = await sessionManager.list();
+        const existingPrecise = sessions.find((s) => s.type === 'precise' && s.channel === 'webui');
+        const newSession = existingPrecise ?? (await sessionManager.create('precise', 'webui'));
+        const newSessionDir = sessionManager.getSessionDir(newSession.id);
+
+        const { PreciseStrategy } = await import('../../context/precision/index.js');
+        this.loop.composeStrategy = new PreciseStrategy(newSessionDir);
+        await this.loop.switchSession(newSessionDir);
+
+        this._activeSessionId = newSession.id;
+        this._mode = 'precise';
+      } else {
+        const { DefaultStrategy } = await import('../../context/precision/index.js');
+        this.loop.composeStrategy = new DefaultStrategy();
+
+        const originalSessionDir = sessionManager.getSessionDir(this._originalNormalSessionId);
+        await this.loop.switchSession(originalSessionDir);
+
+        this._activeSessionId = this._originalNormalSessionId;
+        this._mode = 'normal';
+      }
+
+      this.send({
+        type: 'session_switched',
+        sessionId: this._activeSessionId,
+        mode: this._mode,
+      });
+
+      logger.info('WebUI mode switched', {
+        wsId: this.sessionId,
+        mode: this._mode,
+        activeSessionId: this._activeSessionId,
       });
     } catch (err) {
       this.send({
         type: 'error',
         message: `Failed to set mode: ${err instanceof Error ? err.message : String(err)}`,
       });
+      logger.error('WebUI mode switch failed', err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  private async getSessionForMode(mode: 'normal' | 'precise'): Promise<string> {
+    const { SessionManager } = await import('../../memory/session.js');
+    const sessionManager = new SessionManager(this.config!.cwd);
+    const sessions = await sessionManager.list();
+
+    if (mode === 'precise') {
+      if (this._mode === 'normal') {
+        this._normalSessionId = this._activeSessionId;
+      }
+      const existingPrecise = sessions.find(s => s.type === 'precise' && s.channel === 'webui');
+      return existingPrecise?.id ?? (await sessionManager.create('precise', 'webui')).id;
+    }
+
+    const currentNormal = sessions.find(s => s.id === this._normalSessionId && (s.type ?? 'normal') === 'normal');
+    return currentNormal?.id ?? (await sessionManager.create('normal', 'webui')).id;
+  }
+
+  private async getModeForSession(sessionId: string): Promise<'normal' | 'precise'> {
+    const { SessionManager } = await import('../../memory/session.js');
+    const sessionManager = new SessionManager(this.config!.cwd);
+    const session = await sessionManager.resume(sessionId);
+    return session.type === 'precise' ? 'precise' : 'normal';
   }
 
   /** 切换到另一个 session */
   async switchSession(
     newSessionId: string,
     agentFactory: AgentFactory,
+    mode?: 'normal' | 'precise',
   ): Promise<void> {
     if (newSessionId === this._activeSessionId) {
+      if (mode) this._mode = mode;
       this.send({
         type: 'status',
         message: `Already on session ${newSessionId.slice(0, 12)}...`,
         level: 'info',
+        mode: this._mode,
+        sessionId: this._activeSessionId,
       });
       return;
     }
@@ -388,6 +458,7 @@ export class WebUIWsSession {
       const result = await agentFactory.createAgent({
         sessionId: newSessionId,
         outputHandler: this.outputHandler as OutputHandler,
+        channel: 'webui',
       });
 
       // 如果在此期间又发起了新的切换，放弃本次结果
@@ -403,11 +474,16 @@ export class WebUIWsSession {
 
       this.loop = (result as { loop: import('../../orchestrator/loop.js').AgentLoop }).loop;
       this._activeSessionId = newSessionId;
+      this._mode = mode ?? await this.getModeForSession(newSessionId);
+      if (this._mode === 'normal') {
+        this._normalSessionId = newSessionId;
+      }
       this._initialized = true;
 
       this.send({
         type: 'session_switched',
         sessionId: newSessionId,
+        mode: this._mode,
       });
 
       logger.info('WebUI session switched', {

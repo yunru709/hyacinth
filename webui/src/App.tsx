@@ -7,7 +7,7 @@ import { ChatLog } from './components/ChatLog';
 import { InputArea } from './components/InputArea';
 
 export function App() {
-  const { sendChat, sendStop, respondPermission, sendRollback, switchSession, connected, ready } = useWebSocket();
+  const { sendChat, sendStop, respondPermission, sendRollback, sendMode, switchSession, connected, ready } = useWebSocket();
   const permissionRequest = useStore((s) => s.permissionRequest);
   const theme = useStore((s) => s.theme);
 
@@ -35,7 +35,7 @@ export function App() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <Header />
+        <Header sendMode={sendMode} />
         <ChatLog sendRollback={sendRollback} />
 
         {/* Permission bar */}

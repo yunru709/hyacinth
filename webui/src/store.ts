@@ -14,10 +14,24 @@ import type {
   WorkflowInfo,
   PermissionRequestMsg,
   ConversationEvent,
+  WebUIMode,
 } from './types';
 
 let nextId = 1;
 function uid(): string { return `msg_${nextId++}_${Date.now().toString(36)}`; }
+
+const helpText = [
+  '── Slash Commands ──',
+  '/clear        Clear chat log',
+  '/help         Show this help',
+  '/model <name> Switch model',
+  '/precise on|off  Toggle precise mode',
+  '/kb on|off    Toggle knowledge base',
+  '/rollback N   Roll back N turns',
+  '── Visual Actions ──',
+  'Use the ChatLog buttons to clear the log, collapse/expand all tool cards, or show this help.',
+  '── Or just type a message to chat with the agent ──',
+].join('\n');
 
 interface WebUIState {
   // ── Theme ──
@@ -32,6 +46,7 @@ interface WebUIState {
   connected: boolean;
   ready: boolean;
   sessionId: string | null;
+  mode: WebUIMode;
   config: { cwd: string; provider: string; model: string; maxTurns: number; maxContext: number } | null;
 
   // ── Messages ──
@@ -71,15 +86,19 @@ interface WebUIState {
   completeToolCall: (id: string, content: string, isError: boolean) => void;
   showDiff: (id: string, filePath: string, diffLines: Array<{ kind: string; text: string }>) => void;
   addSystemMsg: (content: string, level: 'info' | 'warn' | 'error') => void;
+  clearChatLog: () => void;
+  showHelp: () => void;
   startTurn: () => void;
   flushCurrent: () => void;
   updateTurnInfo: (info: { turnCount: number; maxTurns: number; tokensUsed: number; maxTokens: number; cacheHitRate: number | null; compressCount: number }) => void;
   setPermission: (req: PermissionRequestMsg | null) => void;
-  setConnected: (sessionId: string, config: WebUIState['config']) => void;
+  setConnected: (sessionId: string, mode: WebUIMode, config: WebUIState['config']) => void;
+  setMode: (mode: WebUIMode, sessionId?: string) => void;
   setSessions: (sessions: SessionInfo[]) => void;
   loadHistory: (events: ConversationEvent[]) => void;
   setCapabilities: (tools: ToolInfo[], skills: SkillInfo[], agents: AgentInfo[], workflows: WorkflowInfo[]) => void;
   toggleToolExpanded: (toolId: string) => void;
+  setAllToolsExpanded: (expanded: boolean) => void;
   toggleThinkingCollapsed: (nodeId: string) => void;
 }
 
@@ -102,6 +121,7 @@ export const useStore = create<WebUIState>((set, get) => ({
   connected: false,
   ready: false,
   sessionId: null,
+  mode: 'normal',
   config: null,
   messages: [],
   currentText: '',
@@ -151,6 +171,8 @@ export const useStore = create<WebUIState>((set, get) => ({
     set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === displayId ? { ...m, diff: { filePath, diffLines } } : m) }));
   },
   addSystemMsg(content, level) { set(s => ({ messages: [...s.messages, { kind: 'system', content, level, id: uid() } as SystemMsgNode] })); },
+  clearChatLog() { set({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' }); },
+  showHelp() { get().addSystemMsg(helpText, 'info'); },
   startTurn() {
     const { currentText } = get();
     set(s => ({ isProcessing: true, currentText: '', currentThinking: '', pendingThinking: '',
@@ -165,7 +187,8 @@ export const useStore = create<WebUIState>((set, get) => ({
   },
   updateTurnInfo(info) { set(info); },
   setPermission(req) { set({ permissionRequest: req }); },
-  setConnected(sessionId, config) { set({ connected: true, sessionId, config }); },
+  setConnected(sessionId, mode, config) { set({ connected: true, sessionId, activeSessionId: sessionId, mode, config }); },
+  setMode(mode, sessionId) { set({ mode, ...(sessionId ? { sessionId, activeSessionId: sessionId } : {}) }); },
   setSessions(sessions) { set({ sessions }); },
   loadHistory(events) {
     const messages: MessageNode[] = [];
@@ -249,5 +272,6 @@ export const useStore = create<WebUIState>((set, get) => ({
   },
   setCapabilities(tools, skills, agents, workflows) { set({ tools, skills, agents, workflows }); },
   toggleToolExpanded(toolId) { set(s => ({ messages: s.messages.map(m => m.kind === 'tool' && m.id === toolId ? { ...m, expanded: !(m as ToolCallNode).expanded } : m) })); },
+  setAllToolsExpanded(expanded) { set(s => ({ messages: s.messages.map(m => m.kind === 'tool' ? { ...m, expanded } : m) })); },
   toggleThinkingCollapsed(nodeId) { set(s => ({ messages: s.messages.map(m => m.kind === 'thinking' && m.id === nodeId ? { ...m, collapsed: !(m as ThinkingMsgNode).collapsed } : m) })); },
 }));

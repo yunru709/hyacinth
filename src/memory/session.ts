@@ -174,6 +174,7 @@ export class SessionManager {
       let type: 'normal' | 'precise' | undefined;
       let createdAt = '';
       let projectKey = this.projectKey;
+      let channel: string | undefined;
       try {
         const metaPath = path.join(sessionDir, 'meta.json');
         if (existsSync(metaPath)) {
@@ -181,6 +182,7 @@ export class SessionManager {
           createdAt = meta.createdAt ?? '';
           if (meta.type === 'precise' || meta.type === 'normal') type = meta.type;
           if (meta.projectKey) projectKey = meta.projectKey;
+          if (typeof meta.channel === 'string') channel = meta.channel;
         }
       } catch { /* meta.json 缺失或损坏，使用默认值 */ }
 
@@ -190,6 +192,7 @@ export class SessionManager {
         createdAt,
         updatedAt: new Date().toISOString(),
         type,
+        channel,
       };
       return session;
     }

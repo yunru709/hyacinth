@@ -1,8 +1,11 @@
 // ── Server → Client messages ─────────────────────────────
 
+export type WebUIMode = 'normal' | 'precise';
+
 export interface ConnectedMsg {
   type: 'connected';
   sessionId: string;
+  mode: WebUIMode;
   config: SessionConfig;
 }
 
@@ -50,6 +53,8 @@ export interface StatusMsg {
   type: 'status';
   message: string;
   level: 'info' | 'warn' | 'error';
+  mode?: WebUIMode;
+  sessionId?: string;
 }
 
 export interface TurnInfoMsg {
@@ -89,7 +94,7 @@ export type ServerMessage =
   | { type: 'turn_start' }
   | { type: 'flush' }
   | { type: 'interrupt' }
-  | { type: 'session_switched'; sessionId: string };
+  | { type: 'session_switched'; sessionId: string; mode: WebUIMode };
 
 // ── REST API: Session history events ────────────────────
 
@@ -113,7 +118,7 @@ export type ClientMessage =
   | { type: 'chat'; content: string; images?: Array<{ data: string; media_type: string }> }
   | { type: 'stop' }
   | { type: 'permission'; result: 'yes' | 'no' | 'always' }
-  | { type: 'set_mode'; mode: 'normal' | 'precise' }
+  | { type: 'set_mode'; mode: WebUIMode }
   | { type: 'rollback'; toTurnId: number }
   | { type: 'switch_session'; sessionId: string };
 

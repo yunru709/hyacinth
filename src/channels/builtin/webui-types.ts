@@ -70,6 +70,7 @@ export type WebUIServerMessage =
 export interface WebUIConnectedMessage {
   type: 'connected';
   sessionId: string;
+  mode: 'normal' | 'precise';
   config: WebUISessionConfig;
 }
 
@@ -117,6 +118,8 @@ export interface WebUIStatusMessage {
   type: 'status';
   message: string;
   level: 'info' | 'warn' | 'error';
+  mode?: 'normal' | 'precise';
+  sessionId?: string;
 }
 
 export interface WebUITurnStartMessage {
@@ -164,4 +167,5 @@ export interface WebUIErrorMessage {
 export interface WebUISessionSwitchedMessage {
   type: 'session_switched';
   sessionId: string;
+  mode: 'normal' | 'precise';
 }

@@ -1,6 +1,6 @@
 import { useStore } from '../store';
 
-export function Header() {
+export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') => void }) {
   const connected = useStore(s => s.connected);
   const ready = useStore(s => s.ready);
   const config = useStore(s => s.config);
@@ -12,6 +12,8 @@ export function Header() {
   const compressCount = useStore(s => s.compressCount);
   const toggleSidebar = useStore(s => s.toggleSidebar);
   const sidebarOpen = useStore(s => s.sidebarOpen);
+  const mode = useStore(s => s.mode);
+  const isProcessing = useStore(s => s.isProcessing);
 
   const ratio = Math.min(tokensUsed / Math.max(maxTokens, 1), 1);
   const pct = (ratio * 100).toFixed(0);
@@ -41,6 +43,39 @@ export function Header() {
             {compressCount > 0 && (
               <span className="text-xs" style={{color:'var(--warning)'}}>Compr: {compressCount}</span>
             )}
+
+            <div className="inline-flex items-center gap-1.5">
+              <div
+                className="inline-flex rounded-md overflow-hidden border"
+                style={{
+                  borderColor: mode === 'precise' ? 'var(--accent)' : 'var(--border)',
+                  boxShadow: mode === 'precise' ? '0 0 0 1px var(--accent)' : 'none',
+                }}
+              >
+                {(['normal', 'precise'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => sendMode(m)}
+                    disabled={!connected || !ready || isProcessing || mode === m}
+                    className="px-2 py-0.5 text-[11px] capitalize transition-colors"
+                    style={{
+                      background: mode === m ? 'var(--accent)' : 'transparent',
+                      color: mode === m ? '#fff' : 'var(--text-dim)',
+                      opacity: (!connected || !ready || isProcessing) && mode !== m ? 0.5 : 1,
+                    }}
+                    title={`Switch to ${m} mode`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {mode === 'precise' && (
+                <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide" style={{color:'var(--accent)'}}>
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'var(--accent)'}} />
+                  Precise
+                </span>
+              )}
+            </div>
           </>
         )}
       </div>

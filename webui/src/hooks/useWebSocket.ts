@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
-import type { ServerMessage, ClientMessage, TurnInfoMsg, PermissionRequestMsg } from '../types';
+import type { ServerMessage, ClientMessage, TurnInfoMsg, PermissionRequestMsg, WebUIMode } from '../types';
 
 /** 本地处理的斜杠命令 */
 const LOCAL_COMMANDS: Record<string, (args: string) => void> = {};
@@ -58,7 +58,7 @@ export function useWebSocket() {
   const handleServerMessage = (msg: ServerMessage) => {
     switch (msg.type) {
       case 'connected':
-        store.setConnected(msg.sessionId, msg.config);
+        store.setConnected(msg.sessionId, msg.mode, msg.config);
         // 收到 connected 表示后端初始化完成，可以发消息了
         useStore.setState({ ready: true });
         store.addSystemMsg('Connected — ready.', 'info');
@@ -85,6 +85,7 @@ export function useWebSocket() {
         break;
 
       case 'status':
+        if (msg.mode) store.setMode(msg.mode, msg.sessionId);
         store.addSystemMsg(msg.message, msg.level);
         break;
 
@@ -124,8 +125,9 @@ export function useWebSocket() {
         break;
 
       case 'session_switched':
-        useStore.setState({ sessionId: msg.sessionId, ready: true });
+        useStore.setState({ sessionId: msg.sessionId, activeSessionId: msg.sessionId, mode: msg.mode, ready: true });
         store.addSystemMsg(`Switched to ${msg.sessionId.slice(0, 12)}...`, 'info');
+        fetch('/api/sessions').then(r => r.json()).then(list => store.setSessions(list)).catch(() => {});
         break;
     }
   };
@@ -147,28 +149,19 @@ export function useWebSocket() {
 
       // /clear — 清屏
       if (cmd === '/clear') {
-        useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
+        store.clearChatLog();
         return;
       }
       // /help — 帮助
       if (cmd === '/help') {
-        const helpText = [
-          '── Slash Commands ──',
-          '/clear        Clear chat log',
-          '/help         Show this help',
-          '/model <name> Switch model',
-          '/precise on|off  Toggle precise mode',
-          '/kb on|off    Toggle knowledge base',
-          '/rollback N   Roll back N turns',
-          '── Or just type a message to chat with the agent ──',
-        ].join('\n');
-        store.addSystemMsg(helpText, 'info');
+        store.showHelp();
         return;
       }
       // /precise on|off
       if (cmd === '/precise') {
         if (args === 'on' || args === 'off') {
           send({ type: 'set_mode', mode: args === 'on' ? 'precise' : 'normal' });
+          useStore.setState({ ready: false });
           store.addSystemMsg(`Precise mode: ${args}`, 'info');
         } else {
           store.addSystemMsg('Usage: /precise on|off', 'warn');
@@ -195,6 +188,10 @@ export function useWebSocket() {
     send({ type: 'rollback', toTurnId });
   }, [send]);
 
+  const sendMode = useCallback((mode: WebUIMode) => {
+    send({ type: 'set_mode', mode });
+  }, [send]);
+
   const switchSession = useCallback((sessionId: string) => {
     send({ type: 'switch_session', sessionId });
   }, [send]);
@@ -212,6 +209,7 @@ export function useWebSocket() {
     sendStop,
     respondPermission,
     sendRollback,
+    sendMode,
     switchSession,
     connected: store.connected,
     ready: store.ready,
