@@ -1491,6 +1491,9 @@ export async function runTui(
                 // local-provider.json 已配置 → 直接切换
                 try {
                   await loop.switchProvider('local');
+                  // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+                  cfg.set('provider.active', 'local');
+                  cfg.save().catch(() => {});
                   modelName = loop.getActiveProvider().getModel();
                   providerTypeStart = loop.getActiveProvider().getProviderType();
                   chatLog.addSystem(theme.success(`Switched to local (${localCfg.baseUrl}, ${localCfg.defaultModel})`));
@@ -1520,6 +1523,9 @@ export async function runTui(
                 cfg.save().catch(() => {});
                 try {
                   await loop.switchProvider('local');
+                  // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+                  cfg.set('provider.active', 'local');
+                  cfg.save().catch(() => {});
                   modelName = loop.getActiveProvider().getModel();
                   providerTypeStart = loop.getActiveProvider().getProviderType();
                   chatLog.addSystem(theme.success(`Switched to local model: ${targetName} (port ${info.port})`));
@@ -1541,6 +1547,9 @@ export async function runTui(
           localModel.getBridge().stopAll().catch(() => {});
           try {
             await loop.switchProvider(restArgs);
+            // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+            cfg.set('provider.active', restArgs);
+            cfg.save().catch(() => {});
           } catch (e) {
             chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
             tui.requestRender();
@@ -1781,7 +1790,7 @@ export async function runTui(
                     cfg.set('provider.local', { type: 'local', model: info.modelFile ?? regModels[0].name, baseUrl: info.baseUrl });
                     cfg.set('provider.local.modelKey', regModels[0].name);
                     cfg.save().catch(() => {});
-                    try { await loop.switchProvider('local'); chatLog.addSystem(theme.success(`llama.cpp ${regModels[0].name} started`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
+                    try { await loop.switchProvider('local'); cfg.set('provider.active', 'local'); cfg.save().catch(() => {}); chatLog.addSystem(theme.success(`llama.cpp ${regModels[0].name} started`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
                     catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
                   }
                   tui.requestRender();
@@ -1803,7 +1812,7 @@ export async function runTui(
                   cfg.set('provider.local', { type: 'local', model: info.modelFile ?? restArgs, baseUrl: info.baseUrl });
                   cfg.set('provider.local.modelKey', restArgs);
                   cfg.save().catch(() => {});
-                  try { await loop.switchProvider('local'); chatLog.addSystem(theme.success(`${restArgs} started on port ${info.port}`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
+                  try { await loop.switchProvider('local'); cfg.set('provider.active', 'local'); cfg.save().catch(() => {}); chatLog.addSystem(theme.success(`${restArgs} started on port ${info.port}`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
                   catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
                 } else { chatLog.addSystem(theme.error(`Failed to start ${restArgs}`)); }
                 tui.requestRender();
@@ -1878,6 +1887,9 @@ export async function runTui(
         case 'model/local/switch': {
           try {
             await loop.switchProvider('local');
+            // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+            cfg.set('provider.active', 'local');
+            cfg.save().catch(() => {});
             modelName = loop.getActiveProvider().getModel();
             providerTypeStart = loop.getActiveProvider().getProviderType();
             chatLog.addSystem(theme.success(`Switched to local (${loop.getActiveProvider().getProviderType()})`));
@@ -1945,6 +1957,9 @@ export async function runTui(
                 cfg.set(`provider.${provider}.model`, sub);
                 cfg.save().catch(() => {});
                 await loop.switchProvider(provider);
+                // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+                cfg.set('provider.active', provider);
+                cfg.save().catch(() => {});
                 modelName = loop.getActiveProvider().getModel();
                 providerTypeStart = loop.getActiveProvider().getProviderType();
                 chatLog.addSystem(theme.success(`Switched to ${provider}/${sub}`));
@@ -1973,6 +1988,9 @@ export async function runTui(
                   cfg.save().catch(() => {});
                   try {
                     await loop.switchProvider('local');
+                    // 显式持久化 provider 选择（switchProvider 不再负责持久化）
+                    cfg.set('provider.active', 'local');
+                    cfg.save().catch(() => {});
                     modelName = loop.getActiveProvider().getModel();
                     providerTypeStart = loop.getActiveProvider().getProviderType();
                     refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));

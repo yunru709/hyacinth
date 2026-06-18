@@ -153,6 +153,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
         sessionId: options.sessionId,
         channelsInfo: options.channelsInfo as ChannelsInfo[] | undefined,
         channel: options.channel,
+        sessionManager,  // 注入共享实例
       });
     },
   };

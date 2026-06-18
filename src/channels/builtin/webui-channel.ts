@@ -109,7 +109,7 @@ export class WebUIChannel implements ChannelHandler {
 
     this.wss.on('connection', (ws: import('./webui-ws-session.js').WsLike) => {
       const sessionId = this.generateSessionId();
-      const session = new WebUIWsSession(ws, sessionId);
+      const session = new WebUIWsSession(ws, sessionId, this.sessionManager);
 
       session.onClose((sid) => {
         this.sessions.delete(sid);

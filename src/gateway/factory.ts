@@ -94,6 +94,8 @@ export interface CreateAgentOptions {
   channelsInfo?: ChannelsInfo[];
   /** 创建此 Agent 的渠道标识（'webui' | 'tui' | 'feishu' | 'http-webhook' 等） */
   channel?: string;
+  /** 外部注入的 SessionManager（避免多实例） */
+  sessionManager?: SessionManager;
 }
 
 export interface AgentComponents {
@@ -143,7 +145,7 @@ export async function createAgent(
   const { cwd, provider, maxTurns, maxContext, outputHandler, sessionId, shouldContinue, maxMessages = 10000, personaDir, bootstrapStatus, localModelProvider, channelsInfo } = options;
 
   // ── Session ──────────────────────────────────────────────────────
-  const sessionManager = new SessionManager(cwd);
+  const sessionManager = options.sessionManager ?? new SessionManager(cwd);
   let sessionDir: string;
   let currentSessionId: string;
   let sessionType: 'normal' | 'precise' = 'normal';

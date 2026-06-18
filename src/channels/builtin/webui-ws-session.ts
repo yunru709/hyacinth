@@ -12,6 +12,7 @@ import type { AgentFactory, ChannelMessageEvent, ReplyFn } from '../interface.js
 import type { WebUIClientMessage, WebUISessionConfig } from './webui-types.js';
 import { WebUIOutputHandler } from './webui-output-handler.js';
 import type { OutputHandler, TurnInfo } from '../../orchestrator/loop.js';
+import type { SessionManager } from '../../memory/session.js';
 import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('webui-session');
@@ -50,8 +51,10 @@ export class WebUIWsSession {
   private _normalSessionId: string;
   /** WebSocket 首次初始化时的 normal session， precise → normal 时切回 */
   private _originalNormalSessionId: string;
+  /** 注入的 SessionManager（避免多实例） */
+  private _sessionManager: SessionManager | null = null;
 
-  constructor(ws: WsLike, sessionId: string) {
+  constructor(ws: WsLike, sessionId: string, sessionManager?: SessionManager) {
     this.ws = ws;
     this.sessionId = sessionId;
     this._activeSessionId = sessionId;
@@ -59,6 +62,7 @@ export class WebUIWsSession {
     this._originalNormalSessionId = sessionId;
     this.outputHandler = new WebUIOutputHandler(ws);
     this.createdAt = Date.now();
+    this._sessionManager = sessionManager ?? null;
   }
 
   /** 注册关闭回调 */
@@ -355,8 +359,7 @@ export class WebUIWsSession {
     }
 
     try {
-      const { SessionManager } = await import('../../memory/session.js');
-      const sessionManager = new SessionManager(this.config.cwd);
+      const sessionManager = this._sessionManager!;
 
       if (mode === 'precise') {
         const sessions = await sessionManager.list();
@@ -402,8 +405,7 @@ export class WebUIWsSession {
   }
 
   private async getSessionForMode(mode: 'normal' | 'precise'): Promise<string> {
-    const { SessionManager } = await import('../../memory/session.js');
-    const sessionManager = new SessionManager(this.config!.cwd);
+    const sessionManager = this._sessionManager!;
     const sessions = await sessionManager.list();
 
     if (mode === 'precise') {
@@ -419,8 +421,7 @@ export class WebUIWsSession {
   }
 
   private async getModeForSession(sessionId: string): Promise<'normal' | 'precise'> {
-    const { SessionManager } = await import('../../memory/session.js');
-    const sessionManager = new SessionManager(this.config!.cwd);
+    const sessionManager = this._sessionManager!;
     const session = await sessionManager.resume(sessionId);
     return session.type === 'precise' ? 'precise' : 'normal';
   }

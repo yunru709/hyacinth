@@ -278,6 +278,9 @@ export class AgentLoop {
   pendingCompressionStrategy: string | null = null;
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
+  /** 当前 AgentLoop 的 thinking 状态（per-session 隔离） */
+  private thinkingEnabled: boolean = false;
+  private thinkingEffort: string | number | undefined = undefined;
 
   constructor(
     private provider: Provider,
@@ -385,6 +388,7 @@ export class AgentLoop {
       // Restore thinking mode
       const persistedThinking = this.configCenter.get('provider.enableThinking') as boolean | undefined;
       if (typeof persistedThinking === 'boolean') {
+        this.thinkingEnabled = persistedThinking;
         this.provider.setThinking?.(persistedThinking);
       }
     }
@@ -419,7 +423,7 @@ export class AgentLoop {
       // Subscribe to thinking mode changes
       this.configCenter.watch('provider.enableThinking', (event) => {
         const enabled = event.newValue as boolean;
-        this.getActiveProvider().setThinking?.(enabled);
+        this.thinkingEnabled = enabled;
         this.outputHandler?.onStatus?.(
           `Thinking mode ${enabled ? 'enabled' : 'disabled'}`,
           'info',
@@ -752,10 +756,9 @@ export class AgentLoop {
     }
     // 3. 当前上下文和新模型上限都够用 → 无需操作
 
-    if (this.configCenter) {
-      this.configCenter.set('provider.active', providerName);
-      this.configCenter.save().catch(() => {});
-    }
+    // 注意：不再在此处写 configCenter.set('provider.active') + save()，
+    // 避免共享同一 RuntimeConfigCenter 单例的其他 AgentLoop 被迫切换 provider。
+    // 持久化由调用方（如 TUI /model 命令）显式负责。
     this.outputHandler?.onStatus?.(
       `Provider switched to ${providerName} (${newProvider.getProviderType()}/${newProvider.getModel()})`,
       'info',
@@ -797,7 +800,11 @@ export class AgentLoop {
     // provider.active 变更 → 自动切换 provider
     this.configCenter.watch('provider.active', (event) => {
       const name = event.newValue as string;
-      if (name && typeof name === 'string' && this.providerRouter?.get(name)) {
+      if (!name || typeof name !== 'string') return;
+      // 守卫：如果与当前 provider 相同，跳过，避免重复切换
+      const currentType = this.getActiveProvider().getProviderType();
+      if (name === currentType) return;
+      if (this.providerRouter?.get(name)) {
         this.switchProvider(name).catch(() => {
           this.outputHandler?.onStatus?.(`Config changed provider to "${name}" but switch failed`, 'error');
         });
@@ -1487,6 +1494,8 @@ export class AgentLoop {
     });
 
     // 调用 provider 流式请求 LLM
+    // 应用当前 AgentLoop 的 thinking 状态到共享 provider（per-session 隔离）
+    this.getActiveProvider().setThinking?.(this.thinkingEnabled, this.thinkingEffort);
     const stream = activeProvider.createStream(messages, toolDefinitions, this.abortController?.signal);
 
     // 使用 OutputRouter 解析流式输出
