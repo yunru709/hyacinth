@@ -287,7 +287,7 @@ export class WebUIChannel implements ChannelHandler {
     // 创建 session
     this.app.post('/api/sessions', async (_req: FastifyRequest, reply: FastifyReply) => {
       try {
-        const session = await this.sessionManager.create();
+        const session = await this.sessionManager.create('normal', 'webui');
         return reply.send({ id: session.id, createdAt: session.createdAt });
       } catch (err) {
         return reply.status(500).send({

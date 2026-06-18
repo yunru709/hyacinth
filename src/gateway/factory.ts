@@ -92,6 +92,8 @@ export interface CreateAgentOptions {
   localModelProvider?: Provider;
   /** 渠道信息（注入到 System Prompt 的 environment section） */
   channelsInfo?: ChannelsInfo[];
+  /** 创建此 Agent 的渠道标识（'webui' | 'tui' | 'feishu' | 'http-webhook' 等） */
+  channel?: string;
 }
 
 export interface AgentComponents {
@@ -159,10 +161,10 @@ export async function createAgent(
     sessionType = session.type ?? 'normal';
     logger.info('Continued session', { sessionId: session.id, type: sessionType });
   } else {
-    const session = await sessionManager.create();
+    const session = await sessionManager.create('normal', options.channel);
     sessionDir = sessionManager.getSessionDir(session.id);
     currentSessionId = session.id;
-    logger.info('New session', { sessionId: session.id });
+    logger.info('New session', { sessionId: session.id, channel: options.channel });
   }
 
   // ── Git 基础设施 ──────────────────────────────────────────────────

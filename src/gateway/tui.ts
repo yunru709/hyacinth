@@ -449,7 +449,7 @@ export async function runTui(
     const currentProviderInfo = providerInfo ?? { providerLabel: currentProviderType, isLocal: false, mode: 'auto' };
     // Build workflow label for header display
     let modeHeaderLabel: string | null = null;
-    if (workflowManager.isActive()) {
+    if (workflowManager?.isActive()) {
       const mn = workflowManager.getActive();
       if (mn) {
         const label = mn.charAt(0).toUpperCase() + mn.slice(1);
@@ -738,8 +738,25 @@ export async function runTui(
   }
   tui.requestRender();
 
-  // ── 确保 CommandRegistry 已初始化（远程模式下跳过 createAgent，需手动初始化） ──
+  // ── 远程模式下跳过 createAgent，这些组件需手动初始化 ──
   try { CommandRegistry.getInstance(process.cwd()); } catch { /* already initialized */ }
+  try {
+    const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+    const { getDefaultConfig } = await import('../runtime/defaults.js');
+    const configCenter = RuntimeConfigCenter.getInstance();
+    // 尝试读取配置——如果未初始化会抛异常
+    configCenter.get<number>('session.maxTurns');
+  } catch {
+    // 初始化 RuntimeConfigCenter
+    const { ConfigManager } = await import('../setup/config.js');
+    const { getDefaultConfig } = await import('../runtime/defaults.js');
+    const { RuntimeConfigCenter: RCC } = await import('../runtime/config-center.js');
+    const cm = new ConfigManager(process.cwd());
+    await cm.loadEnvKeys();
+    const cfg = await cm.load();
+    RCC.getInstance().initialize(getDefaultConfig(), cm);
+    RCC.getInstance().merge(cfg as any);
+  }
 
   // ── 检测统一后端是否已运行 ──
   let remoteWs: any = null;
@@ -779,6 +796,7 @@ export async function runTui(
       personaDir,
       bootstrapStatus: resolvedBootstrapStatus,
       localModelProvider,
+      channel: 'tui',
     });
     sessionDir = agent.sessionDir;
   } else {
@@ -890,6 +908,7 @@ export async function runTui(
         maxContext: maxContext ?? 40_000,
         outputHandler: options.outputHandler as OutputHandler,
         sessionId: options.sessionId,
+        channel: options.channel ?? 'tui',
       });
     },
   };
@@ -2341,7 +2360,7 @@ export async function runTui(
       const items: [string, unknown][] = [
         ['Provider', s.provider.active],
         ['Model', s.provider[s.provider.active as keyof typeof s.provider] as { model?: string } | string[] | undefined],
-        ['Active Workflow', workflowManager.isActive() ? workflowManager.getActive() : 'none'],
+        ['Active Workflow', workflowManager?.isActive() ? workflowManager?.getActive() : 'none'],
         ['Max Context', `${s.session.maxContext.toLocaleString()} tokens`],
         ['Max Turns', s.session.maxTurns],
         ['Compress Threshold', s.context.compressThreshold.toFixed(2)],

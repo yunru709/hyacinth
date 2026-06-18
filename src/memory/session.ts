@@ -135,7 +135,10 @@ export class SessionManager {
 
         const now = new Date().toISOString();
         // 检测 sessionId 前缀判断渠道来源
-        const channel = sessionId.startsWith('feishu_') ? 'feishu' : undefined;
+        let channel: string | undefined;
+        if (sessionId.startsWith('feishu_')) channel = 'feishu';
+        else if (sessionId.startsWith('webui-')) channel = 'webui';
+        else if (sessionId.startsWith('tui-')) channel = 'tui';
         await fs.writeFile(
           path.join(sessionDir, 'meta.json'),
           JSON.stringify({ type: 'normal', createdAt: now, channel, projectKey: this.projectKey }),

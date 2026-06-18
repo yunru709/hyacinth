@@ -94,6 +94,8 @@ export interface AgentFactory {
     sessionId?: string;
     outputHandler: ChannelOutputHandler;
     channelsInfo?: unknown;
+    /** 渠道标识 */
+    channel?: string;
   }): Promise<{ loop: ChannelSessionRunner }>;
 }
 

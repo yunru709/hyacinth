@@ -152,6 +152,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
         outputHandler: options.outputHandler as OutputHandler,
         sessionId: options.sessionId,
         channelsInfo: options.channelsInfo as ChannelsInfo[] | undefined,
+        channel: options.channel,
       });
     },
   };

@@ -206,7 +206,7 @@ export class HttpWebhookChannel implements ChannelHandler {
     });
 
     this.app.post('/api/sessions', async (_req: FastifyRequest, reply: FastifyReply) => {
-      const session = await this.sessionManager.create();
+      const session = await this.sessionManager.create('normal', 'http-webhook');
       return reply.send({ id: session.id, createdAt: session.createdAt });
     });
 
