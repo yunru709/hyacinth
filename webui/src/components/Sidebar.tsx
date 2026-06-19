@@ -17,7 +17,7 @@ const CHANNEL_META: Record<string, { label: string; icon: string }> = {
   webui: { label: 'Web UI', icon: '🌐' },
   tui: { label: '终端', icon: '⬛' },
   feishu: { label: '飞书', icon: '💬' },
-  legacy: { label: '旧版', icon: '📁' },
+  legacy: { label: '其他', icon: '📁' },
   unknown: { label: '未知', icon: '❓' },
 };
 
@@ -90,18 +90,24 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     if (!confirm(`删除会话 ${id.slice(0, 10)}...?`)) return;
     try {
       await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
       const listRes = await fetch('/api/sessions');
       const list = await listRes.json();
-      useStore.getState().setSessions(list);
-      if (activeSessionId === id) {
-        useStore.setState({ activeSessionId: list[0]?.id ?? null });
-      }
-      useStore.getState().addSystemMsg(`会话已删除`, 'info');
+      // 延迟到事件循环结束后更新，避免 click 处理过程中触发重渲染导致状态不一致
+      setTimeout(() => {
+        useStore.getState().setSessions(list);
+        if (activeSessionId === id) {
+          useStore.setState({ activeSessionId: list[0]?.id ?? null });
+        }
+        useStore.getState().addSystemMsg(`会话已删除`, 'info');
+      }, 0);
     } catch {
-      useStore.getState().addSystemMsg('删除会话失败', 'error');
+      setTimeout(() => {
+        useStore.getState().addSystemMsg('删除会话失败', 'error');
+      }, 0);
     }
   };
 
@@ -202,16 +208,44 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
           return (
             <div key={ch}>
               {/* Channel header */}
-              <button
+              <div
                 onClick={() => toggleChannel(ch)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-colors sticky top-0 z-10"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-colors sticky top-0 z-10 cursor-pointer"
                 style={{background:'var(--surface)', color:'var(--text-dim)', borderBottom:'1px solid var(--border)'}}
               >
                 <span className="text-[10px]">{isCollapsed ? '▶' : '▼'}</span>
                 <span>{meta.icon}</span>
                 <span>{meta.label}</span>
                 <span className="ml-auto opacity-50">{chSessions.length}</span>
-              </button>
+                {ch === 'legacy' && chSessions.length > 0 && (
+                  <button
+                    className="ml-2 px-1.5 py-0.5 text-[10px] rounded hover:opacity-80"
+                    style={{ background: 'var(--danger)', color: '#fff' }}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      if (!confirm(`确定删除全部 ${chSessions.length} 个其他会话？`)) return;
+                      try {
+                        const res = await fetch('/api/sessions/channel/legacy', { method: 'DELETE' });
+                        const data = await res.json();
+                        const listRes = await fetch('/api/sessions');
+                        const list = await listRes.json();
+                        // 延迟到事件循环结束后更新，避免 click 处理过程中触发重渲染导致状态不一致
+                        setTimeout(() => {
+                          useStore.getState().setSessions(list);
+                          useStore.getState().addSystemMsg(`已删除 ${data.deleted} 个会话`, 'info');
+                        }, 0);
+                      } catch {
+                        setTimeout(() => {
+                          useStore.getState().addSystemMsg('删除失败', 'error');
+                        }, 0);
+                      }
+                    }}
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
 
               {/* Session list */}
               {!isCollapsed && chSessions.map(s => {
@@ -219,8 +253,7 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
                 return (
                   <div
                     key={s.id}
-                    onClick={() => handleSelect(s.id)}
-                    className="group flex items-center gap-2 px-2 pl-7 py-1.5 cursor-pointer transition-colors text-xs"
+                    className="group flex items-center gap-2 px-2 pl-7 py-1.5 transition-colors text-xs"
                     style={{
                       background: isActive ? 'var(--accent)' : 'transparent',
                       color: isActive ? '#fff' : 'var(--text)',
@@ -228,15 +261,54 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
                     onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-hover)'; }}
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <span className="flex-1 truncate font-mono text-[11px]">{s.id.slice(0, 12)}...</span>
-                    <span className="flex-shrink-0 text-[10px]" style={{color: isActive ? 'rgba(255,255,255,0.5)' : 'var(--muted)'}}>
-                      {formatDate(s.createdAt)}
-                    </span>
-                    <button
-                      onClick={(e) => handleDelete(s.id, e)}
-                      className="btn-ghost btn-sm opacity-0 group-hover:opacity-100 flex-shrink-0"
-                      style={{color: isActive ? 'rgba(255,255,255,0.6)' : 'var(--danger)', padding:'1px 4px', fontSize:10}}
-                    >✕</button>
+                    {/* 点击主体加载会话 */}
+                    <div
+                      onClick={() => !isActive && handleSelect(s.id)}
+                      className="flex-1 flex items-center gap-2 cursor-pointer min-w-0"
+                    >
+                      <span className="truncate font-mono text-[11px]">{s.id.slice(0, 12)}...</span>
+                      <span className="flex-shrink-0 text-[10px]" style={{color: isActive ? 'rgba(255,255,255,0.5)' : 'var(--muted)'}}>
+                        {formatDate(s.createdAt)}
+                      </span>
+                    </div>
+
+                    {/* 操作按钮 */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {!isActive && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleSelect(s.id);
+                          }}
+                          className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                          style={{
+                            background: isActive ? 'rgba(255,255,255,0.15)' : 'var(--surface)',
+                            color: isActive ? '#fff' : 'var(--accent)',
+                            border: '1px solid var(--border)',
+                          }}
+                          title="加载会话"
+                        >
+                          加载
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          handleDelete(s.id, e);
+                        }}
+                        className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                        style={{
+                          background: isActive ? 'rgba(255,255,255,0.15)' : 'var(--surface)',
+                          color: 'var(--danger)',
+                          border: '1px solid var(--border)',
+                        }}
+                        title="删除会话"
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 );
               })}

@@ -9,15 +9,30 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const store = useStore();
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectAttempt = useRef(0);
+  const maxReconnectAttempts = 20;
 
   const connect = useCallback(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/ws`;
+    // 从 localStorage 获取或生成 clientId，用于重连时复用 session
+    let clientId: string | null = null;
+    try {
+      clientId = localStorage.getItem('deepthink_webui_client_id');
+      if (!clientId) {
+        clientId = 'webui-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+        localStorage.setItem('deepthink_webui_client_id', clientId);
+      }
+    } catch {
+      // localStorage 不可用时退化为临时 clientId
+      clientId = 'webui-tmp-' + Math.random().toString(36).slice(2, 8);
+    }
+    const wsUrl = `${protocol}//${location.host}/ws?clientId=${encodeURIComponent(clientId)}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      reconnectAttempt.current = 0;
       // WebSocket 已连接，隐藏断线遮罩（但还没 ready，不能发消息）
       useStore.setState({ connected: true });
       // 加载能力数据
@@ -46,14 +61,22 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       useStore.setState({ connected: false, ready: false });
-      // 自动重连（3 秒后）
-      reconnectTimer.current = setTimeout(() => {
-        connect();
-      }, 3000);
+      // 自动重连：指数退避，最大 30 秒，最多 20 次
+      if (reconnectAttempt.current < maxReconnectAttempts) {
+        reconnectAttempt.current++;
+        const delay = Math.min(1000 * 2 ** (reconnectAttempt.current - 1), 30000);
+        console.log(`[WebSocket] reconnecting in ${delay}ms (attempt ${reconnectAttempt.current}/${maxReconnectAttempts})`);
+        reconnectTimer.current = setTimeout(() => {
+          connect();
+        }, delay);
+      } else {
+        console.error('[WebSocket] max reconnect attempts reached');
+        store.addSystemMsg('连接失败，请刷新页面重试', 'error');
+      }
     };
 
-    ws.onerror = () => {
-      // 错误由 onclose 处理
+    ws.onerror = (err) => {
+      console.error('[WebSocket] error', err);
     };
   }, []);
 

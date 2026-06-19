@@ -65,6 +65,8 @@ export class WebUIChannel implements ChannelHandler {
 
   // WebSocket 连接管理
   private sessions = new Map<string, WebUIWsSession>();
+  /** clientId → sessionId 映射，用于重连时复用 session */
+  private clientSessionMap = new Map<string, string>();
   private activeComponents: AgentComponents | null = null;
 
   async start(config: ChannelConfig): Promise<void> {
@@ -95,7 +97,8 @@ export class WebUIChannel implements ChannelHandler {
     const { WebSocketServer: WSServer } = await import('ws');
 
     this.app.server.on('upgrade', (request, socket, head) => {
-      if (request.url === '/ws' && this.wss) {
+      const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+      if (url.pathname === '/ws' && this.wss) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.wss.handleUpgrade(request, socket, head, (ws: any) => {
           this.wss!.emit('connection', ws, request);
@@ -108,12 +111,43 @@ export class WebUIChannel implements ChannelHandler {
     // 创建 WebSocket Server（绑定到 Fastify 的 HTTP server）
     this.wss = new WSServer({ noServer: true });
 
-    this.wss.on('connection', (ws: import('./webui-ws-session.js').WsLike) => {
-      const sessionId = this.generateSessionId();
+    this.wss.on('connection', (ws: import('./webui-ws-session.js').WsLike, request?: any) => {
+      // 从 URL 中提取 clientId
+      let clientId: string | undefined;
+      try {
+        if (request?.url) {
+          const url = new URL(request.url, `http://${request.headers?.host ?? 'localhost'}`);
+          clientId = url.searchParams.get('clientId') ?? undefined;
+        }
+      } catch { /* ignore */ }
+
+      // 如果 clientId 已有映射，复用旧 sessionId；否则创建新 sessionId
+      let sessionId: string;
+      if (clientId && this.clientSessionMap.has(clientId)) {
+        sessionId = this.clientSessionMap.get(clientId)!;
+        logger.info('WebUI reusing session for clientId', { clientId, sessionId });
+      } else {
+        sessionId = this.generateSessionId();
+        if (clientId) {
+          this.clientSessionMap.set(clientId, sessionId);
+          logger.info('WebUI new session for clientId', { clientId, sessionId });
+        }
+      }
+
+      // 同一 clientId 重连时，如果旧 session 仍在管理中，先关闭旧连接
+      const existingSession = this.sessions.get(sessionId);
+      if (existingSession) {
+        logger.info('WebUI closing stale session for clientId', { clientId, sessionId });
+        existingSession.close().catch(() => {});
+      }
+
       const session = new WebUIWsSession(ws, sessionId, this.sessionManager);
 
       session.onClose((sid) => {
-        this.sessions.delete(sid);
+        // 只有当前存活的 session 实例匹配时才删除（避免复用/覆盖时误删新 session）
+        if (this.sessions.get(sid) === session) {
+          this.sessions.delete(sid);
+        }
         logger.info('WebUI client disconnected', {
           sessionId: sid,
           remaining: this.sessions.size,
@@ -338,6 +372,28 @@ export class WebUIChannel implements ChannelHandler {
         }
       },
     );
+
+    // 批量删除 "其他" 渠道的 session（不匹配 webui-/tui-/feishu_ 前缀）
+    this.app.delete('/api/sessions/channel/legacy', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const sessions = await this.sessionManager.list();
+        const legacySessions = sessions.filter(s => {
+          const id = s.id;
+          return !id.startsWith('webui-') && !id.startsWith('tui-') && !id.startsWith('feishu_');
+        });
+        let deleted = 0;
+        for (const s of legacySessions) {
+          try {
+            const sessionDir = this.sessionManager.getSessionDir(s.id);
+            await fs.promises.rm(sessionDir, { recursive: true, force: true });
+            deleted++;
+          } catch { /* skip */ }
+        }
+        return reply.send({ ok: true, deleted, total: legacySessions.length });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
 
     // 获取 session 历史事件（重放用）
     this.app.get(
