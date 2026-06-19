@@ -20,6 +20,11 @@ import type {
   PanelView,
   WebUIConfig,
   ModelStatus,
+  QueuedMessage,
+  LocalModelDetectResult,
+  SchedulerStatus,
+  ScheduledTask,
+  TaskExecutionRecord,
 } from './types';
 
 let nextId = 1;
@@ -56,10 +61,13 @@ interface WebUIState {
   // ── Sidebar ──
   sidebarOpen: boolean;
   toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
 
   // ── Connection ──
   connected: boolean;
   ready: boolean;
+  initError: string | null;
+  setInitError: (error: string | null) => void;
   sessionId: string | null;
   mode: WebUIMode;
   config: { cwd: string; provider: string; model: string; maxTurns: number; maxContext: number } | null;
@@ -84,9 +92,10 @@ interface WebUIState {
   permissionRequest: PermissionRequestMsg | null;
 
   // ── Queue ──
-  queuedMessages: string[];
-  addQueuedMessage: (content: string) => void;
-  removeQueuedMessage: (index: number) => void;
+  queuedMessages: QueuedMessage[];
+  setQueuedMessages: (items: QueuedMessage[]) => void;
+  addQueuedMessage: (content: string, mode?: 'queue' | 'insert') => void;
+  removeQueuedMessage: (id: string) => void;
   clearQueuedMessages: () => void;
 
   // ── Command Palette ──
@@ -106,6 +115,18 @@ interface WebUIState {
   // ── Model Center ──
   modelStatus: ModelStatus | null;
   setModelStatus: (status: ModelStatus) => void;
+  localModelLoading: boolean;
+  detectLocalModels: () => Promise<LocalModelDetectResult | null>;
+  registerLocalModels: () => Promise<string[]>;
+  unregisterLocalModel: (name: string) => Promise<boolean>;
+  startLocalModel: (name?: string) => Promise<boolean>;
+  stopLocalModel: (name?: string) => Promise<boolean>;
+  switchLocalModel: (name?: string) => Promise<boolean>;
+  channelLoading: boolean;
+  addChannel: (name: string, provider?: string, model?: string, description?: string) => Promise<boolean>;
+  removeChannel: (name: string) => Promise<boolean>;
+  setRoleMapping: (role: string, channel: string) => Promise<boolean>;
+  refreshModelStatus: () => Promise<void>;
 
   // ── Config Panel ──
   webuiConfig: WebUIConfig | null;
@@ -114,6 +135,21 @@ interface WebUIState {
   toast: { message: string; type: 'success' | 'error' } | null;
   fetchConfig: () => Promise<void>;
   patchConfig: (updates: Record<string, unknown>) => Promise<boolean>;
+
+  // ── Scheduler ──
+  schedulerLoading: boolean;
+  schedulerStatus: SchedulerStatus | null;
+  schedulerTasks: ScheduledTask[];
+  schedulerRecords: TaskExecutionRecord[];
+  schedulerStatusError: string | null;
+  schedulerTasksError: string | null;
+  schedulerRecordsError: string | null;
+  fetchSchedulerStatus: () => Promise<void>;
+  fetchSchedulerTasks: () => Promise<void>;
+  fetchSchedulerRecords: () => Promise<void>;
+  addSchedulerTask: (name: string, time: string) => Promise<boolean>;
+  deleteSchedulerTask: (id: string) => Promise<boolean>;
+  toggleSchedulerTask: (id: string, enabled: boolean) => Promise<boolean>;
 
   // ── Actions ──
   addUserMsg: (content: string) => void;
@@ -163,9 +199,12 @@ export const useStore = create<WebUIState>((set, get) => ({
 
   sidebarOpen: true,
   toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
   connected: false,
   ready: false,
+  initError: null,
+  setInitError: (error) => set({ initError: error }),
   sessionId: null,
   mode: 'normal',
   config: null,
@@ -180,16 +219,173 @@ export const useStore = create<WebUIState>((set, get) => ({
   cacheHitRate: null, compressCount: 0,
   permissionRequest: null,
   queuedMessages: [],
-  addQueuedMessage: (content) => set(s => ({ queuedMessages: [...s.queuedMessages, content] })),
-  removeQueuedMessage: (index) => set(s => ({ queuedMessages: s.queuedMessages.filter((_, i) => i !== index) })),
+  setQueuedMessages: (items) => set({ queuedMessages: items }),
+  addQueuedMessage: (content, mode = 'queue') => set(s => ({
+    queuedMessages: [...s.queuedMessages, { id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, content, mode }],
+  })),
+  removeQueuedMessage: (id) => set(s => ({ queuedMessages: s.queuedMessages.filter(m => m.id !== id) })),
   clearQueuedMessages: () => set({ queuedMessages: [] }),
   commandPaletteOpen: false,
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   sessions: [],
   activeSessionId: null,
   tools: [], skills: [], agents: [], workflows: [],
+  // ── Model Center ──
   modelStatus: null,
   setModelStatus: (status) => set({ modelStatus: status }),
+  localModelLoading: false,
+  detectLocalModels: async () => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/detect', { method: 'POST' });
+      const data = await res.json() as LocalModelDetectResult;
+      if (!res.ok) throw new Error((data as unknown as { error?: string }).error || `HTTP ${res.status}`);
+      set({ localModelLoading: false });
+      return data;
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `检测失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return null;
+    }
+  },
+  registerLocalModels: async () => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/register', { method: 'POST' });
+      const data = await res.json() as { registered?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ localModelLoading: false, toast: { message: `已注册 ${data.registered?.length ?? 0} 个模型`, type: 'success' } });
+      return data.registered ?? [];
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `注册失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return [];
+    }
+  },
+  unregisterLocalModel: async (name) => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/unregister', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ localModelLoading: false, toast: { message: `已注销模型: ${name}`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `注销失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  startLocalModel: async (name) => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ localModelLoading: false, toast: { message: `已启动本地模型${name ? ': ' + name : ''}`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `启动失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  stopLocalModel: async (name) => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ localModelLoading: false, toast: { message: `已停止本地模型${name ? ': ' + name : ''}`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `停止失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  switchLocalModel: async (name) => {
+    set({ localModelLoading: true });
+    try {
+      const res = await fetch('/api/local-models/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ localModelLoading: false, toast: { message: `已切换到本地模型${name ? ': ' + name : ''}`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ localModelLoading: false, toast: { message: `切换失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  channelLoading: false,
+  addChannel: async (name, provider, model, description) => {
+    set({ channelLoading: true });
+    try {
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, provider, model, description }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ channelLoading: false, toast: { message: `通道 "${name}" 已保存`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ channelLoading: false, toast: { message: `保存通道失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  removeChannel: async (name) => {
+    set({ channelLoading: true });
+    try {
+      const res = await fetch(`/api/channels/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ channelLoading: false, toast: { message: `通道 "${name}" 已删除`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ channelLoading: false, toast: { message: `删除通道失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  setRoleMapping: async (role, channel) => {
+    set({ channelLoading: true });
+    try {
+      const res = await fetch('/api/channels/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, channel }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      set({ channelLoading: false, toast: { message: `角色 "${role}" → 通道 "${channel}"`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ channelLoading: false, toast: { message: `映射失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  refreshModelStatus: async () => {
+    try {
+      const res = await fetch('/api/model-status');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const status = await res.json() as ModelStatus;
+      set({ modelStatus: status });
+    } catch (err) {
+      set({ toast: { message: `刷新模型状态失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+    }
+  },
 
   // ── Config Panel ──
   webuiConfig: null,
@@ -223,6 +419,98 @@ export const useStore = create<WebUIState>((set, get) => ({
       return true;
     } catch (err) {
       set({ configSaving: false, toast: { message: `Failed to save: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+
+  // ── Scheduler ──
+  schedulerLoading: false,
+  schedulerStatus: null,
+  schedulerTasks: [],
+  schedulerRecords: [],
+  schedulerStatusError: null,
+  schedulerTasksError: null,
+  schedulerRecordsError: null,
+  fetchSchedulerStatus: async () => {
+    try {
+      const res = await fetch('/api/scheduler/status');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const status = await res.json() as SchedulerStatus;
+      set({ schedulerStatus: status, schedulerStatusError: null });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ schedulerStatusError: `获取调度器状态失败: ${msg}` });
+    }
+  },
+  fetchSchedulerTasks: async () => {
+    set({ schedulerLoading: true });
+    try {
+      const res = await fetch('/api/scheduler/tasks');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { tasks: ScheduledTask[] };
+      set({ schedulerTasks: data.tasks ?? [], schedulerLoading: false, schedulerTasksError: null });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ schedulerLoading: false, schedulerTasksError: `获取任务列表失败: ${msg}` });
+    }
+  },
+  fetchSchedulerRecords: async () => {
+    try {
+      const res = await fetch('/api/scheduler/records');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { records: TaskExecutionRecord[] };
+      set({ schedulerRecords: data.records ?? [], schedulerRecordsError: null });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ schedulerRecordsError: `获取执行记录失败: ${msg}` });
+    }
+  },
+  addSchedulerTask: async (name, time) => {
+    set({ schedulerLoading: true });
+    try {
+      const res = await fetch('/api/scheduler/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, time }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await get().fetchSchedulerTasks();
+      await get().fetchSchedulerStatus();
+      set({ schedulerLoading: false, toast: { message: `任务 "${name}" 已创建`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ schedulerLoading: false, toast: { message: `创建任务失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  deleteSchedulerTask: async (id) => {
+    set({ schedulerLoading: true });
+    try {
+      const res = await fetch(`/api/scheduler/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await get().fetchSchedulerTasks();
+      await get().fetchSchedulerStatus();
+      set({ schedulerLoading: false, toast: { message: '任务已删除', type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ schedulerLoading: false, toast: { message: `删除任务失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
+  toggleSchedulerTask: async (id, enabled) => {
+    set({ schedulerLoading: true });
+    try {
+      const res = await fetch(`/api/scheduler/tasks/${encodeURIComponent(id)}/toggle`, { method: 'POST' });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await get().fetchSchedulerTasks();
+      await get().fetchSchedulerStatus();
+      set({ schedulerLoading: false, toast: { message: `任务已${enabled ? '禁用' : '启用'}`, type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ schedulerLoading: false, toast: { message: `切换任务状态失败: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
       return false;
     }
   },

@@ -133,7 +133,9 @@ export type ServerMessage =
   | { type: 'turn_start' }
   | { type: 'flush' }
   | { type: 'interrupt' }
-  | { type: 'session_switched'; sessionId: string; mode: WebUIMode };
+  | { type: 'session_switched'; sessionId: string; mode: WebUIMode }
+  | { type: 'model_status'; provider: string; model: string }
+  | { type: 'queue_updated'; items: QueuedMessage[] };
 
 // ── REST API: Session history events ────────────────────
 
@@ -159,7 +161,13 @@ export type ClientMessage =
   | { type: 'permission'; result: 'yes' | 'no' | 'always' }
   | { type: 'set_mode'; mode: WebUIMode }
   | { type: 'rollback'; toTurnId: number }
-  | { type: 'switch_session'; sessionId: string };
+  | { type: 'switch_session'; sessionId: string }
+  | { type: 'switch_provider'; provider: string }
+  | { type: 'switch_model'; model: string }
+  | { type: 'queue_message'; content: string }
+  | { type: 'queue_insert'; content: string }
+  | { type: 'queue_remove'; id: string }
+  | { type: 'queue_clear' };
 
 // ── Chat message nodes ───────────────────────────────────
 
@@ -244,10 +252,26 @@ export interface WorkflowInfo {
 // ── Model Center types ───────────────────────────────────
 
 export interface OnlineProviderInfo {
-  name: string;
+  /** provider 类型标识，如 anthropic / openai / deepseek */
   type: string;
+  name: string;
   description: string;
   status: 'available' | 'coming_soon';
+}
+
+export interface LocalModelDetectResult {
+  detected: { backend: string; baseUrl: string; port: number } | null;
+  ollamaInstalled: boolean;
+  ollamaPath: string | null;
+  llamacppInstalled: boolean;
+  llamacppPath: string | null;
+  registeredModels: string[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  mode: 'queue' | 'insert';
 }
 
 export interface LocalModelStatus {
@@ -269,6 +293,7 @@ export interface ModelChannelInfo {
   name: string;
   provider: string;
   model: string;
+  description?: string;
   roles: string[];
 }
 
@@ -285,4 +310,48 @@ export interface ModelStatus {
   channels: ModelChannelInfo[];
   roleMappings: Record<string, string>;
   note: string;
+}
+
+// ── Scheduler types ──────────────────────────────────────
+
+export type ScheduleType = 'interval' | 'cron' | 'daily' | 'fixed-time' | 'random';
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  scheduleType: ScheduleType;
+  schedule: Record<string, unknown>;
+  action: { type: string; target: string; payload?: Record<string, unknown> };
+  enabled: boolean;
+  createdAt: string;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  runCount: number;
+  errorCount: number;
+  tags: string[];
+}
+
+export interface SchedulerStatus {
+  running: boolean;
+  startedAt: string | null;
+  taskCount: number;
+  enabledTaskCount: number;
+  recentExecutions: unknown[];
+  uptime: number | null;
+}
+
+export interface TaskExecutionRecord {
+  taskId: string;
+  taskName: string;
+  executedAt: string;
+  durationMs: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface CommandItem {
+  id: string;
+  label: string;
+  description: string;
+  category?: string;
 }

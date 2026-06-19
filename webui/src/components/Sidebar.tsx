@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import type { SessionInfo } from '../types';
-import { KnowledgePanel } from './KnowledgePanel';
-import { SchedulerPanel } from './SchedulerPanel';
 
 /** 从 session ID 或 channel 字段检测渠道 */
 function detectChannel(s: SessionInfo): string {
@@ -25,7 +23,6 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
   const sessions = useStore(s => s.sessions);
   const activeSessionId = useStore(s => s.sessionId);
   const sidebarOpen = useStore(s => s.sidebarOpen);
-  const activeActivity = useStore(s => s.activeActivity);
   const toggleSidebar = useStore(s => s.toggleSidebar);
   const [creating, setCreating] = useState(false);
   const [newSessionType, setNewSessionType] = useState<'normal' | 'precise'>('normal');
@@ -35,31 +32,7 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
 
   if (!sidebarOpen) return null;
 
-  if (activeActivity !== 'sessions') {
-    const panelTitle: Record<string, string> = {
-      model: '模型中心',
-      context: '上下文',
-      knowledge: '知识库',
-      scheduler: '调度',
-      settings: '设置',
-    };
-
-    return (
-      <div className="flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
-        <div className="flex items-center justify-between px-3 py-3 border-b" style={{borderColor:'var(--border)'}}>
-          <span className="font-semibold text-sm" style={{color:'var(--text)'}}>{panelTitle[activeActivity]}</span>
-          <button onClick={toggleSidebar} className="btn-ghost btn-sm">◁</button>
-        </div>
-        {activeActivity === 'knowledge' && <KnowledgePanel />}
-        {activeActivity === 'scheduler' && <SchedulerPanel />}
-        {activeActivity !== 'knowledge' && activeActivity !== 'scheduler' && (
-          <div className="flex-1 flex items-center justify-center px-5 text-center text-xs leading-relaxed" style={{color:'var(--muted)'}}>
-            {panelTitle[activeActivity]} 面板占位。详细控件将在后续任务中添加。
-          </div>
-        )}
-      </div>
-    );
-  }
+  const handleOverlayClick = () => toggleSidebar();
 
   const handleCreate = async () => {
     setCreating(true);
@@ -165,7 +138,9 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
   ];
 
   return (
-    <div className="flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
+    <>
+      <div className="mobile-overlay hidden max-lg:block" onClick={handleOverlayClick} aria-hidden="true" />
+      <div className="sidebar-panel flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b" style={{borderColor:'var(--border)'}}>
         <span className="font-semibold text-sm" style={{color:'var(--text)'}}>会话</span>
@@ -219,7 +194,7 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
                 <span className="ml-auto opacity-50">{chSessions.length}</span>
                 {ch === 'legacy' && chSessions.length > 0 && (
                   <button
-                    className="ml-2 px-1.5 py-0.5 text-[10px] rounded hover:opacity-80"
+                    className="ml-2 px-2 py-1 text-[10px] rounded hover:opacity-80 min-w-[2rem]"
                     style={{ background: 'var(--danger)', color: '#fff' }}
                     onClick={async (e) => {
                       e.stopPropagation();
@@ -281,7 +256,7 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
                             e.preventDefault();
                             handleSelect(s.id);
                           }}
-                          className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                          className="rounded px-2 py-1 text-[10px] transition-colors hover:opacity-80 min-w-[2rem]"
                           style={{
                             background: isActive ? 'rgba(255,255,255,0.15)' : 'var(--surface)',
                             color: isActive ? '#fff' : 'var(--accent)',
@@ -298,7 +273,7 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
                           e.preventDefault();
                           handleDelete(s.id, e);
                         }}
-                        className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                        className="rounded px-2 py-1 text-[10px] transition-colors hover:opacity-80 min-w-[2rem]"
                         style={{
                           background: isActive ? 'rgba(255,255,255,0.15)' : 'var(--surface)',
                           color: 'var(--danger)',
@@ -322,5 +297,6 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
         {sessions.length} 会话 · {channels.length} 渠道
       </div>
     </div>
+    </>
   );
 }

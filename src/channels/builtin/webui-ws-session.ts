@@ -14,6 +14,8 @@ import { WebUIOutputHandler } from './webui-output-handler.js';
 import type { OutputHandler, TurnInfo } from '../../orchestrator/loop.js';
 import type { SessionManager } from '../../memory/session.js';
 import { createLogger } from '../../logging/logger.js';
+import { MessageQueue, QueueMessageMode } from '../message-queue.js';
+import { RuntimeConfigCenter } from '../../runtime/config-center.js';
 
 const logger = createLogger('webui-session');
 
@@ -53,6 +55,13 @@ export class WebUIWsSession {
   private _originalNormalSessionId: string;
   /** 注入的 SessionManager（避免多实例） */
   private _sessionManager: SessionManager | null = null;
+  /** 消息队列（类似 TUI 的排队/插队） */
+  private messageQueue = new MessageQueue();
+  /** 带 ID 的队列项（前端显示/移除需要 id） */
+  private queueItems: Array<{ id: string; text: string; mode: QueueMessageMode }> = [];
+  /** 队列是否正在消费 */
+  private queueConsuming = false;
+  private nextQueueItemId = 0;
 
   constructor(ws: WsLike, sessionId: string, sessionManager?: SessionManager) {
     this.ws = ws;
@@ -185,6 +194,27 @@ export class WebUIWsSession {
         await this.handleSwitchSession(msg.sessionId);
         break;
 
+      case 'switch_provider':
+        await this.handleSwitchProvider(msg.provider);
+        break;
+
+      case 'switch_model':
+        await this.handleSwitchModel(msg.model);
+        break;
+
+      case 'queue_message':
+      case 'queue_insert':
+        await this.handleQueueMessage(msg.type, msg.content);
+        break;
+
+      case 'queue_remove':
+        this.handleQueueRemove(msg.id);
+        break;
+
+      case 'queue_clear':
+        this.handleQueueClear();
+        break;
+
       default:
         logger.warn('Unknown WebUI client message type', {
           type: (msg as { type: string }).type,
@@ -203,16 +233,27 @@ export class WebUIWsSession {
       return;
     }
 
+    if (!content.trim()) return;
+
     if (this.isProcessing) {
+      const id = this.addQueueItem(content, QueueMessageMode.Queue);
+      this.sendQueueUpdate();
       this.send({
         type: 'status',
-        message: 'Already processing a message. Use stop to interrupt.',
-        level: 'warn',
+        message: `Agent 正在处理，消息已加入队列 (#${id})`,
+        level: 'info',
       });
       return;
     }
 
-    if (!content.trim()) return;
+    await this.runChat(content, images);
+  }
+
+  private async runChat(
+    content: string,
+    images?: Array<{ data: string; media_type: string }>,
+  ): Promise<void> {
+    if (!this.loop) return;
 
     this.isProcessing = true;
 
@@ -239,7 +280,49 @@ export class WebUIWsSession {
       });
     } finally {
       this.isProcessing = false;
+      // 消费队列中的下一条消息
+      setTimeout(() => this.consumeQueue(), 0);
     }
+  }
+
+  /** 消费队列中的下一条消息 */
+  private consumeQueue(): void {
+    if (this.queueConsuming || this.isProcessing || !this.loop) return;
+    const next = this.shiftQueueItem();
+    if (!next) return;
+    this.queueConsuming = true;
+    this.sendQueueUpdate();
+    this.runChat(next.text)
+      .finally(() => {
+        this.queueConsuming = false;
+        setTimeout(() => this.consumeQueue(), 0);
+      });
+  }
+
+  private addQueueItem(text: string, mode: QueueMessageMode): string {
+    const id = `q-${++this.nextQueueItemId}`;
+    this.messageQueue.enqueue(text, mode);
+    this.queueItems.push({ id, text, mode });
+    if (this.queueItems.length > MessageQueue.MAX_QUEUE_SIZE) {
+      this.queueItems.shift();
+    }
+    return id;
+  }
+
+  private shiftQueueItem(): { text: string; mode: QueueMessageMode } | undefined {
+    const item = this.messageQueue.dequeue();
+    this.queueItems.shift();
+    return item ? { text: item.text, mode: item.mode } : undefined;
+  }
+
+  /** 发送队列状态更新 */
+  private sendQueueUpdate(): void {
+    const items = this.queueItems.map((m) => ({
+      id: m.id,
+      content: m.text,
+      mode: m.mode === QueueMessageMode.Insert ? 'insert' as const : 'queue' as const,
+    }));
+    this.send({ type: 'queue_updated', items });
   }
 
   /** 停止当前处理 */
@@ -338,6 +421,107 @@ export class WebUIWsSession {
       return;
     }
     await this.switchSession(sessionId, this._agentFactory);
+  }
+
+  /** 切换 Provider */
+  private async handleSwitchProvider(provider: string): Promise<void> {
+    if (!this.loop) {
+      this.send({ type: 'error', message: 'Agent loop not available' });
+      return;
+    }
+    try {
+      await this.loop.switchProvider(provider);
+      const cfg = RuntimeConfigCenter.getInstance();
+      cfg.set('provider.active', provider);
+      cfg.save().catch(() => {});
+      const activeProvider = this.loop.getActiveProvider();
+      this.send({
+        type: 'model_status',
+        provider: activeProvider.getProviderType(),
+        model: activeProvider.getModel(),
+      });
+      this.send({
+        type: 'status',
+        message: `已切换到 provider: ${activeProvider.getProviderType()}`,
+        level: 'success',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.send({ type: 'error', message: `切换 Provider 失败: ${msg}` });
+    }
+  }
+
+  /** 切换 Model */
+  private async handleSwitchModel(model: string): Promise<void> {
+    if (!this.loop) {
+      this.send({ type: 'error', message: 'Agent loop not available' });
+      return;
+    }
+    try {
+      const activeProvider = this.loop.getActiveProvider();
+      const providerType = activeProvider.getProviderType();
+      const cfg = RuntimeConfigCenter.getInstance();
+      cfg.set(`provider.${providerType}.model`, model);
+      cfg.save().catch(() => {});
+      this.send({
+        type: 'model_status',
+        provider: providerType,
+        model,
+      });
+      this.send({
+        type: 'status',
+        message: `已设置模型: ${model}（provider: ${providerType}）`,
+        level: 'success',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.send({ type: 'error', message: `切换模型失败: ${msg}` });
+    }
+  }
+
+  /** 处理队列消息 */
+  private handleQueueMessage(
+    type: 'queue_message' | 'queue_insert',
+    content: string,
+  ): void {
+    const isInsert = type === 'queue_insert';
+    const mode = isInsert ? QueueMessageMode.Insert : QueueMessageMode.Queue;
+    const id = this.addQueueItem(content, mode);
+    if (isInsert) {
+      if (this.isProcessing && this.loop && typeof (this.loop as any).requestStop === 'function') {
+        (this.loop as any).requestStop();
+      }
+      this.send({
+        type: 'status',
+        message: `消息已插队 (#${id})，当前处理将被中断`,
+        level: 'info',
+      });
+    } else {
+      this.send({
+        type: 'status',
+        message: `消息已加入队列 (#${id})`,
+        level: 'info',
+      });
+    }
+    this.sendQueueUpdate();
+    setTimeout(() => this.consumeQueue(), 0);
+  }
+
+  /** 移除队列中的消息 */
+  private handleQueueRemove(id: string): void {
+    const index = this.queueItems.findIndex((item) => item.id === id);
+    if (index >= 0) {
+      this.queueItems.splice(index, 1);
+      this.messageQueue.removeAt(index);
+    }
+    this.sendQueueUpdate();
+  }
+
+  /** 清空队列 */
+  private handleQueueClear(): void {
+    this.messageQueue.clear();
+    this.queueItems = [];
+    this.sendQueueUpdate();
   }
 
   /** 切换模式 */
@@ -543,5 +727,13 @@ export class WebUIWsSession {
   /** 获取存活时间（秒） */
   get aliveSeconds(): number {
     return Math.floor((Date.now() - this.createdAt) / 1000);
+  }
+
+  /** 通知当前 loop 执行定时任务（由 WebUIChannel 调度器转发调用） */
+  async notifyTask(taskName: string): Promise<void> {
+    if (!this.loop) {
+      throw new Error('Agent loop not initialized');
+    }
+    await this.loop.notifyTaskFired(taskName);
   }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
+import { LoadingState } from './ui/PanelStates';
 
 export function ContextPanel() {
   const tokensUsed = useStore(s => s.tokensUsed);
@@ -8,7 +9,6 @@ export function ContextPanel() {
   const compressCount = useStore(s => s.compressCount);
   const turnCount = useStore(s => s.turnCount);
   const maxTurns = useStore(s => s.maxTurns);
-  const config = useStore(s => s.config);
   const webuiConfig = useStore(s => s.webuiConfig);
   const configSaving = useStore(s => s.configSaving);
   const fetchConfig = useStore(s => s.fetchConfig);
@@ -39,58 +39,73 @@ export function ContextPanel() {
     });
   };
 
+  if (!webuiConfig) {
+    return (
+      <div className="space-y-4">
+        <LoadingState text="加载上下文设置中..." />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {/* Token usage */}
-      <div className="card p-3 space-y-2">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Token 用量</div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>已用</span>
-          <span className="font-mono" style={{ color: 'var(--text)' }}>{tokensUsed.toLocaleString()}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>上限</span>
-          <span className="font-mono" style={{ color: 'var(--text)' }}>{maxTokens.toLocaleString()}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-            <div className="h-full rounded-full transition-all duration-300" style={{ width: `${ratio * 100}%`, background: barColor }} />
-          </div>
-          <span className="text-xs font-mono" style={{ color: 'var(--text)' }}>{pct}%</span>
-        </div>
-      </div>
-
-      {/* Cache & Compression */}
-      <div className="card p-3 space-y-2">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>缓存与压缩</div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>缓存命中率</span>
-          <span className="font-mono" style={{ color: cacheHitRate != null && cacheHitRate > 50 ? 'var(--success)' : 'var(--text)' }}>
-            {cacheHitRate != null ? `${cacheHitRate.toFixed(0)}%` : 'N/A'}
-          </span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>压缩次数</span>
-          <span className="font-mono" style={{ color: compressCount > 0 ? 'var(--warning)' : 'var(--text)' }}>{compressCount}</span>
-        </div>
-      </div>
-
-      {/* Turns */}
-      <div className="card p-3 space-y-2">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>回合</div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>当前</span>
-          <span className="font-mono" style={{ color: 'var(--text)' }}>{turnCount}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span style={{ color: 'var(--muted)' }}>上限</span>
-          <span className="font-mono" style={{ color: 'var(--text)' }}>{maxTurns}</span>
-        </div>
-      </div>
-
-      {/* Editable limits */}
+      {/* ── Runtime Data ── */}
       <div className="card p-3 space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>编辑限制</div>
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>运行时数据</div>
+
+        <div className="space-y-2">
+          <div className="text-[11px]" style={{ color: 'var(--muted)' }}>Token 用量</div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>已用</span>
+            <span className="font-mono" style={{ color: 'var(--text)' }}>{tokensUsed.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>上限</span>
+            <span className="font-mono" style={{ color: 'var(--text)' }}>{maxTokens.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${ratio * 100}%`, background: barColor }} />
+            </div>
+            <span className="text-xs font-mono" style={{ color: 'var(--text)' }}>{pct}%</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[11px]" style={{ color: 'var(--muted)' }}>缓存与压缩</div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>缓存命中率</span>
+            <span className="font-mono" style={{ color: cacheHitRate != null && cacheHitRate > 50 ? 'var(--success)' : 'var(--text)' }}>
+              {cacheHitRate != null ? `${cacheHitRate.toFixed(0)}%` : 'N/A'}
+            </span>
+          </div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>压缩次数</span>
+            <span className="font-mono" style={{ color: compressCount > 0 ? 'var(--warning)' : 'var(--text)' }}>{compressCount}</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[11px]" style={{ color: 'var(--muted)' }}>回合</div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>当前</span>
+            <span className="font-mono" style={{ color: 'var(--text)' }}>{turnCount}</span>
+          </div>
+          <div className="flex justify-between gap-3 text-sm">
+            <span style={{ color: 'var(--muted)' }}>上限</span>
+            <span className="font-mono" style={{ color: 'var(--text)' }}>{maxTurns}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Limits ── */}
+      <div className="card p-3 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>限制设置</div>
+
+        <div className="text-[11px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+          修改后点击保存会影响新会话。
+        </div>
+
         <div className="space-y-1">
           <label className="text-[11px]" style={{ color: 'var(--muted)' }}>最大上下文 (tokens)</label>
           <input

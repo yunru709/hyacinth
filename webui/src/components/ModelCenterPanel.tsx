@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import type { OnlineProviderInfo, ModelChannelInfo } from '../types';
+import { EmptyState, LoadingState } from './ui/PanelStates';
 
 /** 检测 provider 与 model 名称是否可能不匹配 */
 function isProviderModelMismatch(provider: string, model: string): boolean {
@@ -15,13 +16,36 @@ function isProviderModelMismatch(provider: string, model: string): boolean {
   return false;
 }
 
-export function ModelCenterPanel() {
+interface ModelCenterPanelProps {
+  switchProvider: (provider: string) => void;
+  switchModel: (model: string) => void;
+}
+
+export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPanelProps) {
   const config = useStore(s => s.config);
   const modelStatus = useStore(s => s.modelStatus);
   const webuiConfig = useStore(s => s.webuiConfig);
   const patchConfig = useStore(s => s.patchConfig);
   const fetchConfig = useStore(s => s.fetchConfig);
   const configSaving = useStore(s => s.configSaving);
+  const localModelLoading = useStore(s => s.localModelLoading);
+  const channelLoading = useStore(s => s.channelLoading);
+  const detectLocalModels = useStore(s => s.detectLocalModels);
+  const registerLocalModels = useStore(s => s.registerLocalModels);
+  const unregisterLocalModel = useStore(s => s.unregisterLocalModel);
+  const startLocalModel = useStore(s => s.startLocalModel);
+  const stopLocalModel = useStore(s => s.stopLocalModel);
+  const switchLocalModel = useStore(s => s.switchLocalModel);
+  const refreshModelStatus = useStore(s => s.refreshModelStatus);
+  const addChannel = useStore(s => s.addChannel);
+  const removeChannel = useStore(s => s.removeChannel);
+  const setRoleMapping = useStore(s => s.setRoleMapping);
+
+  // 本地检测结果的临时状态（用于显示安装情况）
+  const [detectResult, setDetectResult] = useState<{ ollamaInstalled: boolean; llamacppInstalled: boolean } | null>(null);
+  const [localModelInput, setLocalModelInput] = useState('');
+  const [channelForm, setChannelForm] = useState({ name: '', provider: '', model: '', description: '' });
+  const [roleForm, setRoleForm] = useState({ role: '', channel: '' });
 
   // 确保配置已加载
   useEffect(() => {
@@ -43,10 +67,23 @@ export function ModelCenterPanel() {
 
   const mismatch = isProviderModelMismatch(provider, model);
 
+  const handleDetect = async () => {
+    const result = await detectLocalModels();
+    if (result) {
+      setDetectResult({ ollamaInstalled: result.ollamaInstalled, llamacppInstalled: result.llamacppInstalled });
+    }
+    await refreshModelStatus();
+  };
+
+  const handleRegister = async () => {
+    await registerLocalModels();
+    await refreshModelStatus();
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm" style={{color:'var(--text)'}}>
       {/* ── Current Provider / Model / Routing ── */}
-      <div className="card p-3 space-y-2">
+      <div className="card p-3 space-y-3">
         <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>当前模型</div>
         <div className="flex justify-between gap-3">
           <span style={{color:'var(--muted)'}}>提供商</span>
@@ -76,13 +113,46 @@ export function ModelCenterPanel() {
         <div className="flex items-center justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>在线提供商</div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {(onlineProviders.length > 0 ? onlineProviders : DEFAULT_ONLINE_PROVIDERS).map((p: OnlineProviderInfo) => (
-            <ProviderCard key={p.type} provider={p} isActive={provider === p.type} />
+            <ProviderCard
+              key={p.type}
+              provider={p}
+              isActive={provider === p.type}
+              onClick={() => switchProvider(p.type)}
+            />
           ))}
         </div>
-        <div className="text-[11px] text-center" style={{color:'var(--muted)'}}>
-          提供商切换将通过 API 可用
+      </div>
+
+      {/* ── Model Name Switch ── */}
+      <div className="card p-3 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>切换模型</div>
+        <div className="flex flex-col gap-2">
+          <input
+            type="text"
+            className="input w-full text-xs"
+            placeholder="输入模型名，如 deepseek-chat"
+            defaultValue={model}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                switchModel((e.target as HTMLInputElement).value);
+              }
+            }}
+          />
+          <button
+            onClick={(e) => {
+              const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+              switchModel(input.value);
+            }}
+            className="btn btn-primary btn-sm w-full"
+            disabled={configSaving}
+          >
+            切换
+          </button>
+        </div>
+        <div className="text-[11px]" style={{color:'var(--muted)'}}>
+          模型名会保存到当前 provider 的配置中。
         </div>
       </div>
 
@@ -90,27 +160,59 @@ export function ModelCenterPanel() {
       <div className="card p-3 space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>本地模型</div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleDetect}
+              disabled={localModelLoading}
+              className="btn btn-sm btn-ghost"
+              title="重新检测本地后端"
+            >
+              {localModelLoading ? '检测中...' : '检测'}
+            </button>
+            <button
+              onClick={refreshModelStatus}
+              disabled={localModelLoading}
+              className="btn btn-sm btn-ghost"
+              title="刷新状态"
+            >
+              刷新
+            </button>
+          </div>
         </div>
 
         {!localModel.detected ? (
-          <div className="flex items-center justify-center h-16 rounded-lg border border-dashed" style={{borderColor:'var(--border)', color:'var(--muted)'}}>
-            <span className="text-xs">未检测到本地模型后端</span>
+          <div className="space-y-3">
+            <EmptyState icon="💻" text="未检测到本地模型后端" hint="点击检测或扫描注册本地模型" />
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={handleDetect} disabled={localModelLoading} className="btn btn-sm btn-primary">检测后端</button>
+              <button onClick={handleRegister} disabled={localModelLoading} className="btn btn-sm">扫描注册</button>
+            </div>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex justify-between gap-3">
-              <span style={{color:'var(--muted)'}}>后端</span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full" style={{background: 'var(--success)'}} />
-                <span>{localModel.backend ?? '未检测到'}</span>
-              </span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span style={{color:'var(--muted)'}}>状态</span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full" style={{background: localModel.running ? 'var(--success)' : 'var(--warning)'}} />
-                <span>{localModel.running ? '运行中' : '已停止'}</span>
-              </span>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-2 text-xs">
+              <div className="flex justify-between gap-2">
+                <span style={{color:'var(--muted)'}}>Ollama</span>
+                <span>{detectResult?.ollamaInstalled ?? localModel.backend === 'ollama' ? '已安装/运行' : '未检测到'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span style={{color:'var(--muted)'}}>llama.cpp</span>
+                <span>{detectResult?.llamacppInstalled ? '已安装' : '未检测到'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span style={{color:'var(--muted)'}}>后端</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{background: 'var(--success)'}} />
+                  <span>{localModel.backend ?? '未检测到'}</span>
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span style={{color:'var(--muted)'}}>状态</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{background: localModel.running ? 'var(--success)' : 'var(--warning)'}} />
+                  <span>{localModel.running ? '运行中' : '已停止'}</span>
+                </span>
+              </div>
             </div>
 
             <div>
@@ -118,14 +220,73 @@ export function ModelCenterPanel() {
               {localModel.registeredModels.length > 0 ? (
                 <div className="space-y-1">
                   {localModel.registeredModels.map((m: string) => (
-                    <div key={m} className="text-xs px-2 py-1 rounded border" style={{borderColor:'var(--border)'}}>{m}</div>
+                    <div key={m} className="flex items-center justify-between text-xs px-2 py-1.5 rounded border" style={{borderColor:'var(--border)'}}>
+                      <span className="truncate pr-2">{m}</span>
+                      <div className="flex items-center flex-wrap justify-end gap-1">
+                        <button
+                          onClick={() => { startLocalModel(m).then(refreshModelStatus); }}
+                          disabled={localModelLoading}
+                          className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
+                          style={{background:'var(--accent)', color:'#fff'}}
+                          title="启动"
+                        >
+                          启动
+                        </button>
+                        <button
+                          onClick={() => { switchLocalModel(m).then(refreshModelStatus); }}
+                          disabled={localModelLoading}
+                          className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
+                          style={{background:'var(--success)', color:'#fff'}}
+                          title="切换并使用"
+                        >
+                          切换
+                        </button>
+                        <button
+                          onClick={() => { unregisterLocalModel(m).then(refreshModelStatus); }}
+                          disabled={localModelLoading}
+                          className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
+                          style={{background:'var(--danger)', color:'#fff'}}
+                          title="注销"
+                        >
+                          注销
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-16 rounded-lg border border-dashed" style={{borderColor:'var(--border)', color:'var(--muted)'}}>
-                  <span className="text-xs">未注册模型 — 连接 API</span>
-                </div>
+                <EmptyState icon="🧩" text="未注册模型" hint="扫描注册或手动输入模型名启动" />
               )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex flex-col gap-2">
+                <input
+                  type="text"
+                  className="input w-full text-xs"
+                  placeholder="模型名 / ollama / llamacpp"
+                  value={localModelInput}
+                  onChange={(e) => setLocalModelInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && localModelInput.trim()) {
+                      startLocalModel(localModelInput.trim()).then(() => { setLocalModelInput(''); refreshModelStatus(); });
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => { if (localModelInput.trim()) { startLocalModel(localModelInput.trim()).then(() => { setLocalModelInput(''); refreshModelStatus(); }); } }}
+                  disabled={localModelLoading || !localModelInput.trim()}
+                  className="btn btn-primary btn-sm w-full"
+                >
+                  启动
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => { startLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm btn-primary">启动默认</button>
+                <button onClick={() => { stopLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm">停止全部</button>
+                <button onClick={handleRegister} disabled={localModelLoading} className="btn btn-sm">扫描注册</button>
+                <button onClick={() => { switchLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm">切到本地</button>
+              </div>
             </div>
           </div>
         )}
@@ -135,8 +296,8 @@ export function ModelCenterPanel() {
       <div className="card p-3 space-y-3">
         <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>思考</div>
 
-        <div className="flex items-center justify-between">
-          <span style={{color:'var(--text)'}}>启用思考</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0" style={{color:'var(--text)'}}>启用思考</span>
           <ToggleSwitch
             checked={enableThinking}
             disabled={configSaving}
@@ -144,10 +305,10 @@ export function ModelCenterPanel() {
           />
         </div>
 
-        <div className="flex items-center justify-between">
-          <span style={{color:'var(--text)'}}>思考深度</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0" style={{color:'var(--text)'}}>思考深度</span>
           <select
-            className="text-xs rounded px-2 py-1"
+            className="text-xs rounded px-2 py-1 flex-shrink-0"
             style={{background:'var(--bg)', border:'1px solid var(--border)', color:'var(--text)'}}
             value={thinkingEffort ?? ''}
             disabled={configSaving}
@@ -163,8 +324,8 @@ export function ModelCenterPanel() {
           </select>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span style={{color:'var(--text)'}}>显示思考</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0" style={{color:'var(--text)'}}>显示思考</span>
           <ToggleSwitch
             checked={showThinking}
             disabled={configSaving}
@@ -179,15 +340,65 @@ export function ModelCenterPanel() {
           <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>模型通道路由</div>
         </div>
 
+        {/* Add channel form */}
+        <div className="space-y-2 p-2 rounded-lg" style={{background:'var(--bg)'}}>
+          <div className="text-[11px]" style={{color:'var(--muted)'}}>新增通道</div>
+          <div className="grid grid-cols-1 gap-2">
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="名称"
+              value={channelForm.name}
+              onChange={(e) => setChannelForm(s => ({ ...s, name: e.target.value }))}
+            />
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="provider"
+              value={channelForm.provider}
+              onChange={(e) => setChannelForm(s => ({ ...s, provider: e.target.value }))}
+            />
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="模型名"
+              value={channelForm.model}
+              onChange={(e) => setChannelForm(s => ({ ...s, model: e.target.value }))}
+            />
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="描述"
+              value={channelForm.description}
+              onChange={(e) => setChannelForm(s => ({ ...s, description: e.target.value }))}
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (!channelForm.name.trim()) return;
+              addChannel(channelForm.name.trim(), channelForm.provider.trim() || undefined, channelForm.model.trim() || undefined, channelForm.description.trim() || undefined)
+                .then((ok) => { if (ok) { setChannelForm({ name: '', provider: '', model: '', description: '' }); refreshModelStatus(); } });
+            }}
+            disabled={channelLoading || !channelForm.name.trim()}
+            className="btn btn-primary btn-sm w-full"
+          >
+            {channelLoading ? '保存中...' : '添加通道'}
+          </button>
+        </div>
+
         {/* Channels list */}
         <div className="space-y-2">
           <div className="text-[11px]" style={{color:'var(--muted)'}}>通道</div>
           {channels.length > 0 ? (
             channels.map((ch: ModelChannelInfo) => (
-              <ChannelCard key={ch.name} channel={ch} />
+              <ChannelCard
+                key={ch.name}
+                channel={ch}
+                onRemove={ch.name === 'main' ? undefined : () => { removeChannel(ch.name).then(refreshModelStatus); }}
+              />
             ))
           ) : (
-            <div className="text-xs text-center py-2" style={{color:'var(--muted)'}}>未配置通道</div>
+            <EmptyState text="未配置通道" />
           )}
         </div>
 
@@ -209,8 +420,36 @@ export function ModelCenterPanel() {
           </div>
         )}
 
-        <div className="text-[11px] text-center" style={{color:'var(--muted)'}}>
-          通道路由将通过 API 配置
+        {/* Add role mapping form */}
+        <div className="space-y-2 p-2 rounded-lg" style={{background:'var(--bg)'}}>
+          <div className="text-[11px]" style={{color:'var(--muted)'}}>新增角色映射</div>
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="角色，如 compression"
+              value={roleForm.role}
+              onChange={(e) => setRoleForm(s => ({ ...s, role: e.target.value }))}
+            />
+            <input
+              type="text"
+              className="input text-xs"
+              placeholder="通道名"
+              value={roleForm.channel}
+              onChange={(e) => setRoleForm(s => ({ ...s, channel: e.target.value }))}
+            />
+            <button
+              onClick={() => {
+                if (!roleForm.role.trim() || !roleForm.channel.trim()) return;
+                setRoleMapping(roleForm.role.trim(), roleForm.channel.trim())
+                  .then((ok) => { if (ok) { setRoleForm({ role: '', channel: '' }); refreshModelStatus(); } });
+              }}
+              disabled={channelLoading || !roleForm.role.trim() || !roleForm.channel.trim()}
+              className="btn btn-primary btn-sm w-full"
+            >
+              映射
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -223,7 +462,7 @@ function ToggleSwitch({ checked, disabled, onClick }: { checked: boolean; disabl
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
-      className="inline-flex items-center rounded-full transition-colors"
+      className="inline-flex items-center rounded-full transition-colors flex-shrink-0"
       style={{
         width: 36, height: 20, padding: 2,
         background: checked ? 'var(--accent)' : 'var(--border)',
@@ -244,10 +483,12 @@ function ToggleSwitch({ checked, disabled, onClick }: { checked: boolean; disabl
 }
 
 /** Provider card in the online providers grid */
-function ProviderCard({ provider, isActive }: { provider: OnlineProviderInfo; isActive: boolean }) {
+function ProviderCard({ provider, isActive, onClick }: { provider: OnlineProviderInfo; isActive: boolean; onClick: () => void }) {
   return (
-    <div
-      className="rounded-lg border px-2 py-2 text-xs transition-colors"
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border px-2 py-2 text-xs transition-colors text-left"
       style={{
         borderColor: isActive ? 'var(--accent)' : 'var(--border)',
         background: isActive ? 'rgba(79,142,247,0.08)' : 'var(--bg)',
@@ -259,18 +500,33 @@ function ProviderCard({ provider, isActive }: { provider: OnlineProviderInfo; is
         <span className="font-medium truncate" style={{color: isActive ? 'var(--accent)' : 'var(--text)'}}>{provider.name}</span>
       </div>
       <div className="text-[10px] leading-tight" style={{color:'var(--muted)'}}>{provider.description}</div>
-    </div>
+    </button>
   );
 }
 
 /** Channel card */
-function ChannelCard({ channel }: { channel: ModelChannelInfo }) {
+function ChannelCard({ channel, onRemove }: { channel: ModelChannelInfo; onRemove?: () => void }) {
   return (
     <div className="rounded-lg border px-3 py-2 text-xs" style={{borderColor:'var(--border)', background:'var(--bg)'}}>
       <div className="flex items-center justify-between mb-1">
         <span className="font-medium" style={{color:'var(--text)'}}>{channel.name}</span>
-        <span style={{color:'var(--muted)'}}>{channel.provider}/{channel.model}</span>
+        <div className="flex items-center gap-2">
+          <span style={{color:'var(--muted)'}}>{channel.provider}/{channel.model}</span>
+          {onRemove && (
+            <button
+              onClick={onRemove}
+              className="text-[10px] px-2 py-1 rounded hover:opacity-80 min-w-[2rem]"
+            style={{background:'var(--danger)', color:'#fff'}}
+              title="删除通道"
+            >
+              删除
+            </button>
+          )}
+        </div>
       </div>
+      {channel.description && (
+        <div className="text-[10px] mb-1" style={{color:'var(--muted)'}}>{channel.description}</div>
+      )}
       <div className="flex flex-wrap gap-1">
         {channel.roles.map(r => (
           <span key={r} className="text-[10px] px-1.5 py-0.5 rounded" style={{background:'var(--border)', color:'var(--text-dim)'}}>{r}</span>
@@ -289,5 +545,10 @@ const DEFAULT_ONLINE_PROVIDERS: OnlineProviderInfo[] = [
   { name: 'Groq', type: 'groq', description: 'Llama 4, Mixtral', status: 'available' },
   { name: 'xAI', type: 'xai', description: 'Grok 3', status: 'available' },
   { name: 'Mistral', type: 'mistral', description: 'Mistral Large 2', status: 'available' },
-  { name: 'OpenRouter', type: 'openrouter', description: 'Multi-provider', status: 'available' },
+  { name: 'OpenRouter', type: 'openrouter', description: 'Multi-provider routing', status: 'available' },
+  { name: 'Moonshot', type: 'moonshot', description: 'Moonshot (Kimi)', status: 'available' },
+  { name: 'Qwen', type: 'qwen', description: 'Qwen (阿里百炼)', status: 'available' },
+  { name: 'Zhipu', type: 'zhipu', description: 'Zhipu (智谱)', status: 'available' },
+  { name: 'MiniMax', type: 'minimax', description: 'MiniMax', status: 'available' },
+  { name: 'MiMo', type: 'mimo', description: 'MiMo (小米)', status: 'available' },
 ];

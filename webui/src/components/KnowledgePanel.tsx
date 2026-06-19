@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import { EmptyState, LoadingState, ErrorState } from './ui/PanelStates';
 
 interface KbStats {
   totalEntries: number;
@@ -155,12 +156,8 @@ export function KnowledgePanel() {
       {/* KB Stats */}
       <div className="p-3 space-y-2 border-b" style={{borderColor: 'var(--border)'}}>
         <div className="text-xs font-semibold uppercase tracking-wide" style={{color: 'var(--muted)'}}>统计</div>
-        {statsLoading && (
-          <div className="text-xs" style={{color: 'var(--muted)'}}>加载统计中...</div>
-        )}
-        {statsError && (
-          <div className="text-xs" style={{color: 'var(--danger)'}}>{statsError}</div>
-        )}
+        {statsLoading && <LoadingState text="加载统计中..." />}
+        {statsError && <ErrorState error={statsError} onRetry={fetchStats} />}
         {stats && !statsLoading && (
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
@@ -212,20 +209,10 @@ export function KnowledgePanel() {
 
       {/* Results */}
       <div className="flex-1 p-3 overflow-y-auto" style={{minHeight: 0}}>
-        {searching && (
-          <div className="text-xs text-center py-4" style={{color: 'var(--muted)'}}>搜索中...</div>
-        )}
-        {searchError && (
-          <div className="text-xs p-2 rounded" style={{background: 'var(--danger)', color: '#fff'}}>{searchError}</div>
-        )}
+        {searching && <LoadingState text="搜索中..." />}
+        {searchError && <ErrorState error={searchError} onRetry={handleSearch} retryText="重新搜索" />}
         {!searching && !searchError && searched && results.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="text-2xl mb-2 opacity-30">🔍</div>
-            <div className="text-xs" style={{color: 'var(--muted)'}}>未找到结果</div>
-            <div className="text-[11px] mt-1" style={{color: 'var(--muted)', opacity: 0.7}}>
-              尝试其他关键词
-            </div>
-          </div>
+          <EmptyState icon="🔍" text="未找到结果" hint="尝试其他关键词" />
         )}
         {!searching && !searchError && results.length > 0 && (
           <div className="space-y-2">
@@ -254,13 +241,7 @@ export function KnowledgePanel() {
           </div>
         )}
         {!searching && !searched && (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="text-2xl mb-2 opacity-30">📚</div>
-            <div className="text-xs" style={{color: 'var(--muted)'}}>输入关键词搜索</div>
-            <div className="text-[11px] mt-1" style={{color: 'var(--muted)', opacity: 0.7}}>
-              结果将显示在这里
-            </div>
-          </div>
+          <EmptyState icon="📚" text="输入关键词搜索" hint="结果将显示在这里" />
         )}
       </div>
     </div>

@@ -34,6 +34,13 @@ import type { WebUISessionConfig } from './webui-types.js';
 import { createLogger } from '../../logging/logger.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
 import { RuntimeConfigCenter } from '../../runtime/config-center.js';
+import { LocalModelModule } from '../../local-model/index.js';
+import { ModelChannelRegistry } from '../../provider/model-channel-registry.js';
+import { detectLocalBackend } from '../../provider/local-config.js';
+import { HeartbeatScheduler } from '../../schedule/scheduler.js';
+import type { ScheduledTask, TaskAction, ScheduleConfig } from '../../schedule/types.js';
+import { CommandRegistry } from '../../ui/command-registry.js';
+import type { SlashCommandDef } from '../../ui/command-registry.js';
 
 const logger = createLogger('webui-channel');
 
@@ -69,6 +76,10 @@ export class WebUIChannel implements ChannelHandler {
   private clientSessionMap = new Map<string, string>();
   private activeComponents: AgentComponents | null = null;
 
+  // 本地模型与通道路由管理
+  private localModelModule = LocalModelModule.getInstance();
+  private channelRegistry: ModelChannelRegistry | null = null;
+
   async start(config: ChannelConfig): Promise<void> {
     const { port = 3100, host = '0.0.0.0', devMode = false, devServerUrl } = config;
 
@@ -81,6 +92,14 @@ export class WebUIChannel implements ChannelHandler {
     this.personaDir = (config.personaDir as string) ?? 'default';
     // 从 config 中获取 agentFactory（由 ChannelManager.startChannel 注入）
     this.agentFactory = (config.agentFactory as AgentFactory) ?? null;
+
+    // 初始化本地模型模块（若未初始化则使用当前项目根目录）
+    if (!this.localModelModule.isInitialized()) {
+      this.localModelModule.initialize(this.cwd);
+    }
+    // 初始化模型通道路由注册表
+    this.channelRegistry = new ModelChannelRegistry(this.cwd);
+    this.channelRegistry.load();
 
     const fastify = (await import('fastify')).default;
     this.app = fastify({ logger: false });
@@ -220,6 +239,14 @@ export class WebUIChannel implements ChannelHandler {
     this.registerKbRoutes();
     // Processes
     this.registerProcessRoutes();
+    // Local Models
+    this.registerLocalModelRoutes();
+    // Model Channels
+    this.registerChannelRoutes();
+    // Scheduler
+    this.registerSchedulerRoutes();
+    // Command palette
+    this.registerCommandRoutes();
 
     // ── 静态文件服务 ──────────────────────────────────────
     await this.registerStaticFiles(devMode as boolean, devServerUrl as string | undefined);
@@ -467,70 +494,8 @@ export class WebUIChannel implements ChannelHandler {
     });
 
     this.app.get('/api/model-status', async (_req: FastifyRequest, reply: FastifyReply) => {
-      const providerType = this.provider.getProviderType();
-      const modelName = this.provider.getModel();
-
-      // Online providers (mock — available for selection)
-      const onlineProviders = [
-        { name: 'Anthropic', type: 'anthropic', description: 'Claude Opus 4, Sonnet 4', status: 'available' as const },
-        { name: 'OpenAI', type: 'openai', description: 'GPT-4o, GPT-4.1', status: 'available' as const },
-        { name: 'DeepSeek', type: 'deepseek', description: 'DeepSeek V4', status: 'available' as const },
-        { name: 'Gemini', type: 'gemini', description: 'Gemini 2.5 Pro', status: 'available' as const },
-        { name: 'Groq', type: 'groq', description: 'Llama 4, Mixtral', status: 'available' as const },
-        { name: 'xAI', type: 'xai', description: 'Grok 3', status: 'available' as const },
-        { name: 'Mistral', type: 'mistral', description: 'Mistral Large 2', status: 'available' as const },
-        { name: 'OpenRouter', type: 'openrouter', description: 'Multi-provider routing', status: 'available' as const },
-      ];
-
-      // Local model status
-      const localModel = {
-        detected: false,
-        backend: null as string | null,
-        running: false,
-        registeredModels: [] as string[],
-        note: 'connect to API',
-      };
-
-      // Thinking settings (read from config center at runtime)
-      const configCenter = RuntimeConfigCenter.getInstance();
-      let thinkingConfig: Record<string, unknown> = {};
-      try {
-        thinkingConfig = (configCenter.get('provider') as Record<string, unknown>) ?? {};
-      } catch {
-        // configCenter 可能尚未初始化，回退到默认值
-      }
-      const thinking = {
-        enableThinking: thinkingConfig['enableThinking'] ?? false,
-        thinkingEffort: thinkingConfig['thinkingEffort'] ?? null,
-        showThinking: thinkingConfig['showThinking'] ?? false,
-      };
-
-      // Model channel routing (mock)
-      const channels = [
-        { name: 'main', provider: providerType, model: modelName, roles: ['assessment', 'planning', 'compression'] },
-      ];
-
-      const roleMappings: Record<string, string> = {
-        assessment: 'main',
-        planning: 'main',
-        compression: 'main',
-        'sub-agent': 'main',
-      };
-
-      return reply.send({
-        provider: providerType,
-        model: modelName,
-        routing: {
-          mode: 'auto',
-          isLocal: false,
-        },
-        onlineProviders,
-        localModel,
-        thinking,
-        channels,
-        roleMappings,
-        note: 'Model Center data — some fields are UI skeletons (connect to API)',
-      });
+      const status = await this.buildModelStatus();
+      return reply.send(status);
     });
   }
 
@@ -787,6 +752,545 @@ export class WebUIChannel implements ChannelHandler {
     }
   }
 
+  /** 注册本地模型 API */
+  private registerLocalModelRoutes(): void {
+    if (!this.app) return;
+
+    // 检测本地模型后端状态
+    this.app.post('/api/local-models/detect', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const detected = await detectLocalBackend();
+        const ollamaBin = this.localModelModule.checkOllama();
+        const llamacppBin = this.localModelModule.checkLlamacpp();
+        return reply.send({
+          detected,
+          ollamaInstalled: !!ollamaBin,
+          ollamaPath: ollamaBin,
+          llamacppInstalled: !!llamacppBin,
+          llamacppPath: llamacppBin,
+          registeredModels: this.localModelModule.list().map((m) => m.name),
+        });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 扫描并注册未注册的模型
+    this.app.post('/api/local-models/register', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const found = await this.localModelModule.scanUnregistered();
+        const registered: string[] = [];
+        for (const f of found) {
+          this.localModelModule.registerModel({
+            name: f.name,
+            modelFile: f.modelFile,
+            backend: f.backend as 'llama.cpp' | 'ollama' | undefined,
+          });
+          registered.push(f.name);
+        }
+        return reply.send({ ok: true, registered, count: registered.length });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 注销模型
+    this.app.post('/api/local-models/unregister', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { name?: string } | undefined;
+      const name = body?.name;
+      if (!name) {
+        return reply.status(400).send({ error: 'Model name is required' });
+      }
+      try {
+        const ok = this.localModelModule.unregisterModel(name);
+        return reply.send({ ok, name });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 启动模型 / 本地后端
+    this.app.post('/api/local-models/start', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { name?: string } | undefined;
+      const name = body?.name;
+      try {
+        const detected = await detectLocalBackend();
+        // 无指定名称且 Ollama 可用：优先启动 Ollama 服务
+        if (!name) {
+          const ollamaBin = this.localModelModule.checkOllama();
+          if (ollamaBin) {
+            if (detected?.backend === 'ollama') {
+              return reply.send({ ok: true, backend: 'ollama', message: 'Ollama 已在运行' });
+            }
+            const { LifecycleSupervisor } = await import('../../lifecycle/supervisor.js');
+            const supervisor = new LifecycleSupervisor();
+            const info = await supervisor.startOllamaOnDemand(this.cwd);
+            return reply.send({ ok: !!info, backend: 'ollama', info });
+          }
+          const models = this.localModelModule.list();
+          if (models.length === 0) {
+            return reply.status(400).send({ error: '没有已注册的本地模型，请先注册或安装 Ollama' });
+          }
+          const first = models[0]!;
+          const info = await this.localModelModule.start(first.name);
+          return reply.send({ ok: !!info, name: first.name, info });
+        }
+
+        // 指定了 backend 名称
+        const backend = name.toLowerCase();
+        if (backend === 'ollama') {
+          if (detected?.backend === 'ollama') {
+            return reply.send({ ok: true, backend: 'ollama', message: 'Ollama 已在运行' });
+          }
+          const { LifecycleSupervisor } = await import('../../lifecycle/supervisor.js');
+          const supervisor = new LifecycleSupervisor();
+          const info = await supervisor.startOllamaOnDemand(this.cwd);
+          return reply.send({ ok: !!info, backend: 'ollama', info });
+        }
+        if (backend === 'llamacpp' || backend === 'llama.cpp') {
+          const models = this.localModelModule.list();
+          if (models.length === 0) {
+            return reply.status(400).send({ error: '没有已注册的 llama.cpp 模型' });
+          }
+          const first = models[0]!;
+          const info = await this.localModelModule.start(first.name);
+          return reply.send({ ok: !!info, backend: 'llamacpp', name: first.name, info });
+        }
+
+        // 指定了模型名
+        const model = this.localModelModule.list().find((m) => m.name === name);
+        if (!model) {
+          return reply.status(404).send({ error: `模型 "${name}" 未注册` });
+        }
+        const info = await this.localModelModule.start(name);
+        return reply.send({ ok: !!info, name, info });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 停止模型 / 本地后端
+    this.app.post('/api/local-models/stop', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { name?: string } | undefined;
+      const name = body?.name;
+      try {
+        // 停止指定模型
+        if (name) {
+          const backend = name.toLowerCase();
+          if (backend === 'ollama') {
+            const { LifecycleSupervisor } = await import('../../lifecycle/supervisor.js');
+            const supervisor = new LifecycleSupervisor();
+            await supervisor.stopModel('ollama');
+            return reply.send({ ok: true, name: 'ollama' });
+          }
+          await this.localModelModule.stop(name);
+          return reply.send({ ok: true, name });
+        }
+
+        // 停止所有运行中的本地模型
+        const running = this.localModelModule.getBridge().getAllStatus().filter((s) => s.state === 'running');
+        const stopped: string[] = [];
+        const detected = await detectLocalBackend();
+        if (detected?.backend === 'ollama') {
+          const { LifecycleSupervisor } = await import('../../lifecycle/supervisor.js');
+          const supervisor = new LifecycleSupervisor();
+          await supervisor.stopModel('ollama');
+          stopped.push('ollama');
+        }
+        for (const m of running) {
+          await this.localModelModule.getBridge().stop(m.name);
+          stopped.push(m.name);
+        }
+        return reply.send({ ok: true, stopped });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 切换到本地模型（启动并切换 provider）
+    this.app.post('/api/local-models/switch', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { name?: string } | undefined;
+      const name = body?.name;
+      try {
+        let targetName = name;
+        if (!targetName) {
+          const models = this.localModelModule.list();
+          if (models.length === 0) {
+            return reply.status(400).send({ error: '没有已注册的本地模型' });
+          }
+          targetName = models[0]!.name;
+        }
+        const info = await this.localModelModule.switch(targetName);
+        if (!info) {
+          return reply.status(500).send({ error: `启动本地模型 ${targetName} 失败` });
+        }
+        // 更新 provider 配置
+        const cfg = RuntimeConfigCenter.getInstance();
+        cfg.set('provider.local', { type: 'local', model: info.modelFile ?? targetName, baseUrl: info.baseUrl });
+        cfg.set('provider.local.modelKey', targetName);
+        cfg.set('provider.active', 'local');
+        cfg.save().catch(() => {});
+        return reply.send({ ok: true, name: targetName, info });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
+
+  /** 注册模型通道路由 API */
+  private registerChannelRoutes(): void {
+    if (!this.app) return;
+
+    // 列出通道与角色映射
+    this.app.get('/api/channels', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const registry = this.getChannelRegistry();
+        const channels = registry.listChannels().map((ch) => {
+          const info = registry.getChannelInfo(ch.name);
+          return {
+            name: ch.name,
+            provider: info?.provider ?? ch.provider ?? 'unknown',
+            model: info?.model ?? ch.model ?? '',
+            description: ch.description ?? '',
+            roles: info?.roles ?? Object.entries(registry.listRoles())
+              .filter(([, cn]) => cn === ch.name)
+              .map(([r]) => r),
+          };
+        });
+        return reply.send({ channels, roleMappings: registry.listRoles() });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 新增/更新通道
+    this.app.post('/api/channels', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { name?: string; provider?: string; model?: string; description?: string } | undefined;
+      const name = body?.name?.trim();
+      if (!name) {
+        return reply.status(400).send({ error: 'Channel name is required' });
+      }
+      try {
+        const registry = this.getChannelRegistry();
+        registry.upsertChannel(name, {
+          provider: body?.provider,
+          model: body?.model,
+          description: body?.description,
+        });
+        return reply.send({ ok: true, name });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 删除通道
+    this.app.delete('/api/channels/:name', async (req: FastifyRequest, reply: FastifyReply) => {
+      const { name } = req.params as { name: string };
+      try {
+        const registry = this.getChannelRegistry();
+        registry.removeChannel(name);
+        return reply.send({ ok: true, name });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 设置角色映射
+    this.app.post('/api/channels/roles', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as { role?: string; channel?: string } | undefined;
+      const role = body?.role?.trim();
+      const channel = body?.channel?.trim();
+      if (!role || !channel) {
+        return reply.status(400).send({ error: 'role and channel are required' });
+      }
+      try {
+        const registry = this.getChannelRegistry();
+        registry.setRoleMapping(role, channel);
+        return reply.send({ ok: true, role, channel });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 运行时切换通道模型（不持久化）
+    this.app.post('/api/channels/:name/model', async (req: FastifyRequest, reply: FastifyReply) => {
+      const { name } = req.params as { name: string };
+      const body = req.body as { provider?: string; model?: string } | undefined;
+      const provider = body?.provider?.trim();
+      if (!provider) {
+        return reply.status(400).send({ error: 'provider is required' });
+      }
+      try {
+        const registry = this.getChannelRegistry();
+        registry.setChannelModel(name, provider, body?.model);
+        return reply.send({ ok: true, name, provider, model: body?.model });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 重置通道为持久化配置
+    this.app.post('/api/channels/:name/reset', async (req: FastifyRequest, reply: FastifyReply) => {
+      const { name } = req.params as { name: string };
+      try {
+        const registry = this.getChannelRegistry();
+        registry.resetChannelModel(name);
+        return reply.send({ ok: true, name });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
+
+  /** 注册定时任务 API */
+  private registerSchedulerRoutes(): void {
+    if (!this.app) return;
+
+    // 调度器状态
+    this.app.get('/api/scheduler/status', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.send({ running: false, taskCount: 0, enabledTaskCount: 0 });
+        }
+        return reply.send(scheduler.getStatus());
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 任务列表
+    this.app.get('/api/scheduler/tasks', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.send({ tasks: [] });
+        }
+        return reply.send({ tasks: scheduler.getTasks() });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 新增任务
+    this.app.post('/api/scheduler/tasks', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || typeof body !== 'object') {
+        return reply.status(400).send({ error: 'Request body is required' });
+      }
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.status(503).send({ error: 'Scheduler is not available' });
+        }
+
+        const name = String(body.name ?? '').trim();
+        if (!name) {
+          return reply.status(400).send({ error: 'Task name is required' });
+        }
+
+        // 兼容 TUI /schedule-add <name> <HH:mm>：只传 name + time 时创建每日 scheduled 任务
+        if (body.time && !body.scheduleType) {
+          const time = String(body.time).trim();
+          if (!/^\d{2}:\d{2}$/.test(time)) {
+            return reply.status(400).send({ error: 'Time must be in HH:mm format' });
+          }
+          const task = await scheduler.addTask(
+            name,
+            'daily',
+            { time },
+            { type: 'scheduled', target: name, payload: {} },
+            [],
+          );
+          return reply.send({ ok: true, task });
+        }
+
+        const scheduleType = String(body.scheduleType ?? '');
+        if (!['interval', 'cron', 'daily', 'fixed-time', 'random'].includes(scheduleType)) {
+          return reply.status(400).send({ error: 'Invalid scheduleType' });
+        }
+
+        const schedule = body.schedule as ScheduleConfig;
+        const action = (body.action as TaskAction | undefined) ?? { type: 'scheduled', target: name, payload: {} };
+        const tags = Array.isArray(body.tags) ? body.tags.map(String) : [];
+        const task = await scheduler.addTask(name, scheduleType as ScheduledTask['scheduleType'], schedule, action, tags);
+        return reply.send({ ok: true, task });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 删除任务
+    this.app.delete('/api/scheduler/tasks/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.status(503).send({ error: 'Scheduler is not available' });
+        }
+        const ok = await scheduler.deleteTask(id);
+        return reply.send({ ok, id });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 启用/禁用切换
+    this.app.post('/api/scheduler/tasks/:id/toggle', async (req: FastifyRequest, reply: FastifyReply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.status(503).send({ error: 'Scheduler is not available' });
+        }
+        const task = scheduler.getTask(id);
+        if (!task) {
+          return reply.status(404).send({ error: 'Task not found' });
+        }
+        const ok = task.enabled ? await scheduler.disableTask(id) : await scheduler.enableTask(id);
+        return reply.send({ ok, id, enabled: !task.enabled });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // 执行记录
+    this.app.get('/api/scheduler/records', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const scheduler = await this.getScheduler();
+        if (!scheduler) {
+          return reply.send({ records: [] });
+        }
+        const records = await scheduler.getRecentRecords(20);
+        return reply.send({ records });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
+
+  /** 注册命令面板 API */
+  private registerCommandRoutes(): void {
+    if (!this.app) return;
+
+    this.app.get('/api/commands', async (_req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const registry = CommandRegistry.getInstance(this.cwd);
+        const commands = registry.getAll();
+        const items = commands.flatMap((cmd) => this.flattenCommand(cmd));
+        return reply.send(items);
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  }
+
+  private flattenCommand(cmd: SlashCommandDef, prefix = ''): Array<{ id: string; label: string; description: string; category?: string }> {
+    const fullName = prefix ? `${prefix}/${cmd.name}` : cmd.name;
+    const item: { id: string; label: string; description: string; category?: string } = {
+      id: fullName,
+      label: fullName,
+      description: cmd.description,
+      category: cmd.category,
+    };
+    const children = cmd.children?.flatMap((c) => this.flattenCommand(c, fullName)) ?? [];
+    return [item, ...children];
+  }
+
+  /** 获取调度器（通过 ensureComponents 复用 factory 创建的实例） */
+  private async getScheduler(): Promise<HeartbeatScheduler | null> {
+    const components = await this.ensureComponents();
+    return components.scheduler ?? null;
+  }
+
+  /** 获取模型通道路由注册表（懒加载） */
+  private getChannelRegistry(): ModelChannelRegistry {
+    if (!this.channelRegistry) {
+      this.channelRegistry = new ModelChannelRegistry(this.cwd);
+      this.channelRegistry.load();
+    }
+    return this.channelRegistry;
+  }
+
+  /** 构建模型中心状态 */
+  private async buildModelStatus(): Promise<Record<string, unknown>> {
+    const providerType = this.provider.getProviderType();
+    const modelName = this.provider.getModel();
+
+    const onlineProviders = [
+      { name: 'Anthropic', type: 'anthropic', description: 'Claude Opus 4, Sonnet 4', status: 'available' as const },
+      { name: 'OpenAI', type: 'openai', description: 'GPT-4o, GPT-4.1', status: 'available' as const },
+      { name: 'DeepSeek', type: 'deepseek', description: 'DeepSeek V4', status: 'available' as const },
+      { name: 'Gemini', type: 'gemini', description: 'Gemini 2.5 Pro', status: 'available' as const },
+      { name: 'Groq', type: 'groq', description: 'Llama 4, Mixtral', status: 'available' as const },
+      { name: 'xAI', type: 'xai', description: 'Grok 3', status: 'available' as const },
+      { name: 'Mistral', type: 'mistral', description: 'Mistral Large 2', status: 'available' as const },
+      { name: 'OpenRouter', type: 'openrouter', description: 'Multi-provider routing', status: 'available' as const },
+      { name: 'Moonshot', type: 'moonshot', description: 'Moonshot (Kimi)', status: 'available' as const },
+      { name: 'Qwen', type: 'qwen', description: 'Qwen (阿里百炼)', status: 'available' as const },
+      { name: 'Zhipu', type: 'zhipu', description: 'Zhipu (智谱)', status: 'available' as const },
+      { name: 'MiniMax', type: 'minimax', description: 'MiniMax', status: 'available' as const },
+      { name: 'MiMo', type: 'mimo', description: 'MiMo (小米)', status: 'available' as const },
+    ];
+
+    // 本地模型状态
+    const detected = await detectLocalBackend();
+    const registeredModels = this.localModelModule.list();
+    const runningModels = this.localModelModule.getBridge().getAllStatus();
+    const localModel = {
+      detected: !!(detected || this.localModelModule.checkOllama() || this.localModelModule.checkLlamacpp()),
+      backend: detected?.backend ?? (this.localModelModule.checkOllama() ? 'ollama' : this.localModelModule.checkLlamacpp() ? 'llamacpp' : null),
+      running: runningModels.some((s) => s.state === 'running'),
+      registeredModels: registeredModels.map((m) => m.name),
+      note: '本地模型服务状态',
+    };
+
+    // Thinking 配置
+    const configCenter = RuntimeConfigCenter.getInstance();
+    let thinkingConfig: Record<string, unknown> = {};
+    try {
+      thinkingConfig = (configCenter.get('provider') as Record<string, unknown>) ?? {};
+    } catch {
+      // configCenter 可能尚未初始化
+    }
+    const thinking = {
+      enableThinking: thinkingConfig['enableThinking'] ?? false,
+      thinkingEffort: thinkingConfig['thinkingEffort'] ?? null,
+      showThinking: thinkingConfig['showThinking'] ?? false,
+      note: '',
+    };
+
+    // 模型通道路由
+    const registry = this.getChannelRegistry();
+    const channels = registry.listChannels().map((ch) => {
+      const info = registry.getChannelInfo(ch.name);
+      return {
+        name: ch.name,
+        provider: info?.provider ?? ch.provider ?? 'unknown',
+        model: info?.model ?? ch.model ?? '',
+        description: ch.description ?? '',
+        roles: info?.roles ?? Object.entries(registry.listRoles())
+          .filter(([, cn]) => cn === ch.name)
+          .map(([r]) => r),
+      };
+    });
+
+    return {
+      provider: providerType,
+      model: modelName,
+      routing: {
+        mode: 'auto',
+        isLocal: providerType === 'local',
+      },
+      onlineProviders,
+      localModel,
+      thinking,
+      channels,
+      roleMappings: registry.listRoles(),
+      note: '模型中心实时状态',
+    };
+  }
+
   /** 确保 AgentComponents 已创建（懒加载） */
   private async ensureComponents(): Promise<AgentComponents> {
     if (!this.activeComponents) {
@@ -811,6 +1315,31 @@ export class WebUIChannel implements ChannelHandler {
         maxContext: this.maxContext,
         outputHandler: dummyHandler,
         personaDir: this.personaDir,
+      });
+
+      // 覆盖 ensureComponents 调度器的执行处理器：
+      // command 类型直接执行 shell；scheduled 类型优先转发给活跃的 WebSocket session，否则回退到当前 loop。
+      this.activeComponents.scheduler.setHandler(async (task) => {
+        if (task.action.type === 'command') {
+          const { exec } = await import('node:child_process');
+          exec(task.action.target, { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) logger.error(`Scheduled command failed: ${task.name}`, err, { stderr: stderr.trim() });
+            else logger.info(`Scheduled command OK: ${task.name}`, { stdout: stdout.trim() });
+          });
+          return;
+        }
+
+        for (const session of this.sessions.values()) {
+          try {
+            await session.notifyTask(task.name);
+            return;
+          } catch {
+            // session 未初始化，尝试下一个
+          }
+        }
+
+        // 没有可用 WebSocket session，回退到当前 loop
+        await this.activeComponents!.loop.notifyTaskFired(task.name);
       });
     }
     return this.activeComponents;

@@ -119,6 +119,7 @@ export interface AgentComponents {
   structuredStore: StructuredStore;
   composeStrategy: ComposeStrategy;
   backgroundRegistry: BackgroundProcessRegistry;
+  scheduler: HeartbeatScheduler;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -762,5 +763,6 @@ export async function createAgent(
     structuredStore,
     composeStrategy,
     backgroundRegistry,
+    scheduler: heartbeatScheduler,
   };
 }

@@ -99,4 +99,11 @@ export class MessageQueue {
   getItems(): readonly QueueItem[] {
     return this.items;
   }
+
+  /** Remove item at the specified index. */
+  removeAt(index: number): void {
+    if (index >= 0 && index < this.items.length) {
+      this.items.splice(index, 1);
+    }
+  }
 }

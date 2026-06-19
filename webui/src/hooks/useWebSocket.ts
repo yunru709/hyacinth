@@ -10,6 +10,7 @@ export function useWebSocket() {
   const store = useStore();
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const reconnectAttempt = useRef(0);
+  const connectedReceived = useRef(false);
   const maxReconnectAttempts = 20;
 
   const connect = useCallback(() => {
@@ -60,7 +61,8 @@ export function useWebSocket() {
     };
 
     ws.onclose = () => {
-      useStore.setState({ connected: false, ready: false });
+      connectedReceived.current = false;
+      useStore.setState({ connected: false, ready: false, initError: null });
       // 自动重连：指数退避，最大 30 秒，最多 20 次
       if (reconnectAttempt.current < maxReconnectAttempts) {
         reconnectAttempt.current++;
@@ -83,9 +85,10 @@ export function useWebSocket() {
   const handleServerMessage = (msg: ServerMessage) => {
     switch (msg.type) {
       case 'connected':
+        connectedReceived.current = true;
         store.setConnected(msg.sessionId, msg.mode, msg.config);
         // 收到 connected 表示后端初始化完成，可以发消息了
-        useStore.setState({ ready: true });
+        useStore.setState({ ready: true, initError: null });
         store.addSystemMsg('Connected — ready.', 'info');
         break;
 
@@ -146,13 +149,31 @@ export function useWebSocket() {
         break;
 
       case 'error':
-        store.addSystemMsg(msg.message, 'error');
+        // 尚未 ready 时收到的 error 视为初始化错误，以独立卡片呈现
+        if (!store.ready) {
+          store.setInitError(msg.message);
+        } else {
+          store.addSystemMsg(msg.message, 'error');
+        }
         break;
 
       case 'session_switched':
         useStore.setState({ sessionId: msg.sessionId, activeSessionId: msg.sessionId, mode: msg.mode, ready: true });
         store.addSystemMsg(`Switched to ${msg.sessionId.slice(0, 12)}...`, 'info');
         fetch('/api/sessions').then(r => r.json()).then(list => store.setSessions(list)).catch(() => {});
+        break;
+
+      case 'model_status':
+        useStore.setState({
+          config: store.config ? { ...store.config, provider: msg.provider, model: msg.model } : null,
+        });
+        fetch('/api/model-status').then(r => r.json()).then(status => {
+          if (status) store.setModelStatus(status);
+        }).catch(() => {});
+        break;
+
+      case 'queue_updated':
+        store.setQueuedMessages(msg.items);
         break;
     }
   };
@@ -206,9 +227,8 @@ export function useWebSocket() {
 
   const sendInsert = useCallback((content: string) => {
     if (!content.trim()) return;
-    send({ type: 'stop' });
     store.addUserMsg(content);
-    send({ type: 'chat', content });
+    send({ type: 'queue_insert', content });
   }, [send]);
 
   const respondPermission = useCallback((result: 'yes' | 'no' | 'always') => {
@@ -228,6 +248,30 @@ export function useWebSocket() {
     send({ type: 'switch_session', sessionId });
   }, [send]);
 
+  const switchProvider = useCallback((provider: string) => {
+    send({ type: 'switch_provider', provider });
+  }, [send]);
+
+  const switchModel = useCallback((model: string) => {
+    send({ type: 'switch_model', model });
+  }, [send]);
+
+  const queueMessage = useCallback((content: string) => {
+    send({ type: 'queue_message', content });
+  }, [send]);
+
+  const queueInsert = useCallback((content: string) => {
+    send({ type: 'queue_insert', content });
+  }, [send]);
+
+  const queueRemove = useCallback((id: string) => {
+    send({ type: 'queue_remove', id });
+  }, [send]);
+
+  const queueClear = useCallback(() => {
+    send({ type: 'queue_clear' });
+  }, [send]);
+
   useEffect(() => {
     connect();
     return () => {
@@ -244,6 +288,12 @@ export function useWebSocket() {
     sendRollback,
     sendMode,
     switchSession,
+    switchProvider,
+    switchModel,
+    queueMessage,
+    queueInsert,
+    queueRemove,
+    queueClear,
     connected: store.connected,
     ready: store.ready,
   };

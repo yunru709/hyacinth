@@ -17,12 +17,9 @@ export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') =>
   const connected = useStore(s => s.connected);
   const ready = useStore(s => s.ready);
   const config = useStore(s => s.config);
-  const turnCount = useStore(s => s.turnCount);
-  const maxTurns = useStore(s => s.maxTurns);
   const tokensUsed = useStore(s => s.tokensUsed);
   const maxTokens = useStore(s => s.maxTokens);
   const cacheHitRate = useStore(s => s.cacheHitRate);
-  const compressCount = useStore(s => s.compressCount);
   const setActiveActivity = useStore(s => s.setActiveActivity);
   const openInspector = useStore(s => s.openInspector);
   const openPanel = useStore(s => s.openPanel);
@@ -38,14 +35,15 @@ export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') =>
     <div className="flex flex-col gap-1 px-4 py-2.5 border-b flex-shrink-0" style={{background:'var(--surface)', borderColor:'var(--border)'}}>
       {/* Top row */}
       <div className="flex items-center gap-3 text-sm flex-wrap">
+        <button onClick={() => setActiveActivity('sessions')} className="font-bold tracking-tight" style={{color:'var(--accent)', fontSize:15, background:'transparent', border:'none', cursor:'pointer'}}>DeepThink</button>
+
         {!sidebarOpen && (
           <button onClick={() => setActiveActivity('sessions')} className="btn-ghost btn-sm" title="显示会话面板">☰</button>
         )}
-        <button onClick={() => setActiveActivity('sessions')} className="font-bold tracking-tight" style={{color:'var(--accent)', fontSize:15, background:'transparent', border:'none', cursor:'pointer'}}>DeepThink</button>
 
         {config && (
           <>
-            <button onClick={() => { setActiveActivity('model'); openInspector('model'); }} className="inline-flex items-center gap-1.5 text-xs rounded-md px-2 py-1 transition-colors" style={{color:'var(--text-dim)', background:'var(--bg)', border:'1px solid var(--border)'}} title="打开模型中心">
+            <button onClick={() => { setActiveActivity('model'); openPanel('models'); }} className="inline-flex items-center gap-1.5 text-xs rounded-md px-2 py-1 transition-colors" style={{color:'var(--text-dim)', background:'var(--bg)', border:'1px solid var(--border)'}} title="打开模型中心">
               <span className="w-1.5 h-1.5 rounded-full"
                     style={{background: connected ? (ready ? 'var(--success)' : 'var(--warning)') : 'var(--danger)'}} />
               <span className="truncate">{config.provider}</span>
@@ -53,33 +51,18 @@ export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') =>
               <span className="truncate" style={{color: isProviderModelMismatch(config.provider, config.model) ? 'var(--warning)' : 'var(--text-dim)'}}>{config.model}</span>
             </button>
 
-            <button onClick={() => openPanel('context')} className="text-xs font-mono rounded-md px-2 py-1 transition-colors" style={{color:'var(--text-dim)', background:'var(--bg)', border:'1px solid var(--border)'}} title="打开上下文面板">
-              回合 {turnCount}/{maxTurns}
-            </button>
-
-            <button onClick={() => openInspector('status')} className="inline-flex items-center gap-1.5 text-xs rounded-md px-2 py-1" style={{color:'var(--text-dim)', background:'var(--bg)', border:'1px solid var(--border)'}} title="打开连接状态">
-              <span className="w-1.5 h-1.5 rounded-full" style={{background: connected ? (ready ? 'var(--success)' : 'var(--warning)') : 'var(--danger)'}} />
-              {connected ? (ready ? '就绪' : '初始化') : '离线'}
-            </button>
-
-            {compressCount > 0 && (
-              <button onClick={() => openPanel('context')} className="text-xs rounded-md px-2 py-1" style={{color:'var(--warning)', background:'var(--bg)', border:'1px solid var(--border)'}}>压缩: {compressCount}</button>
-            )}
-
-            <div className="inline-flex items-center gap-1.5">
+            <div className="inline-flex items-center gap-1.5" title="模式切换">
               <div
-                onClick={() => openInspector('mode')}
                 className="inline-flex rounded-md overflow-hidden border"
                 style={{
                   borderColor: mode === 'precise' ? 'var(--accent)' : 'var(--border)',
                   boxShadow: mode === 'precise' ? '0 0 0 1px var(--accent)' : 'none',
                 }}
-                title="切换模式或打开模式详情"
               >
                 {(['normal', 'precise'] as const).map(m => (
                   <button
                     key={m}
-                    onClick={(e) => { e.stopPropagation(); openInspector('mode'); sendMode(m); }}
+                    onClick={() => sendMode(m)}
                     disabled={!connected || !ready || isProcessing || mode === m}
                     className="px-2 py-0.5 text-[11px] capitalize transition-colors"
                     style={{
@@ -87,7 +70,7 @@ export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') =>
                       color: mode === m ? '#fff' : 'var(--text-dim)',
                       opacity: (!connected || !ready || isProcessing) && mode !== m ? 0.5 : 1,
                     }}
-                    title={`切换到 ${m} 模式`}
+                    title={`切换到 ${m === 'normal' ? '普通' : '精确'} 模式`}
                   >
                     {m === 'normal' ? '普通' : '精确'}
                   </button>
@@ -105,7 +88,7 @@ export function Header({ sendMode }: { sendMode: (mode: 'normal' | 'precise') =>
       </div>
 
       {/* Context bar */}
-      <button onClick={() => { setActiveActivity('context'); openPanel('context'); }} className="flex items-center gap-2 text-xs font-mono text-left rounded-md" title="Open context panel">
+      <button onClick={() => { setActiveActivity('context'); openPanel('context'); }} className="flex items-center gap-2 text-xs font-mono text-left rounded-md" title="打开上下文面板">
         <span style={{color:'var(--muted)'}}>上下文</span>
         <div className="flex-1 h-2 rounded-full overflow-hidden" style={{background:'var(--border)', maxWidth: 220}}>
           <div className="h-full rounded-full transition-all duration-300" style={{width: `${ratio*100}%`, background: barColor}} />

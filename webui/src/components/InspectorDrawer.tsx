@@ -2,6 +2,8 @@ import { useStore } from '../store';
 import { ModelCenterPanel } from './ModelCenterPanel';
 import { ContextPanel } from './ContextPanel';
 import { SettingsPanel } from './SettingsPanel';
+import { KnowledgePanel } from './KnowledgePanel';
+import { SchedulerPanel } from './SchedulerPanel';
 
 const TITLES: Record<string, string> = {
   status: '连接状态',
@@ -12,10 +14,17 @@ const TITLES: Record<string, string> = {
   models: '模型中心',
   knowledge: '知识库',
   scheduler: '调度',
-  commands: '命令',
+  commands: '命令面板',
 };
 
-export function InspectorDrawer() {
+interface InspectorDrawerProps {
+  switchProvider: (provider: string) => void;
+  switchModel: (model: string) => void;
+  queueRemove: (id: string) => void;
+  queueClear: () => void;
+}
+
+export function InspectorDrawer({ switchProvider, switchModel, queueRemove, queueClear }: InspectorDrawerProps) {
   const inspectorOpen = useStore(s => s.inspectorOpen);
   const inspectorView = useStore(s => s.inspectorView);
   const activePanel = useStore(s => s.activePanel);
@@ -27,13 +36,16 @@ export function InspectorDrawer() {
   const tokensUsed = useStore(s => s.tokensUsed);
   const maxTokens = useStore(s => s.maxTokens);
   const toast = useStore(s => s.toast);
+  const setCommandPaletteOpen = useStore(s => s.setCommandPaletteOpen);
 
   if (!inspectorOpen) return null;
 
   const title = activePanel ? (TITLES[activePanel] || activePanel) : (TITLES[inspectorView] ?? inspectorView);
 
   return (
-    <aside className="flex flex-col flex-shrink-0 border-l" style={{width: 300, background:'var(--surface)', borderColor:'var(--border)'}}>
+    <>
+      <div className="mobile-overlay hidden max-lg:block" onClick={closeInspector} aria-hidden="true" />
+      <aside className="inspector-drawer flex flex-col flex-shrink-0 border-l" style={{width: 300, background:'var(--surface)', borderColor:'var(--border)'}}>
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{borderColor:'var(--border)'}}>
         <div>
           <div className="font-semibold text-sm" style={{color:'var(--text)'}}>{title}</div>
@@ -56,13 +68,36 @@ export function InspectorDrawer() {
         {/* Render panel based on activePanel */}
         {activePanel === 'context' && <ContextPanel />}
         {activePanel === 'settings' && <SettingsPanel />}
-        {activePanel === 'models' && <ModelCenterPanel />}
+        {activePanel === 'models' && <ModelCenterPanel switchProvider={switchProvider} switchModel={switchModel} />}
+        {activePanel === 'knowledge' && <KnowledgePanel />}
+        {activePanel === 'scheduler' && <SchedulerPanel />}
+        {activePanel === 'commands' && (
+          <div className="space-y-3 text-sm">
+            <div className="card p-3 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>命令面板</div>
+              <div className="text-xs" style={{color:'var(--text-dim)'}}>
+                使用键盘快捷键打开命令面板，快速访问所有功能。
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-1.5 py-0.5 rounded border" style={{borderColor:'var(--border)', background:'var(--bg)'}}>Ctrl</span>
+                <span>+</span>
+                <span className="px-1.5 py-0.5 rounded border" style={{borderColor:'var(--border)', background:'var(--bg)'}}>K</span>
+              </div>
+              <button
+                onClick={() => setCommandPaletteOpen(true)}
+                className="btn btn-primary btn-sm w-full justify-center"
+              >
+                打开命令面板
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Fallback: legacy inspector views */}
         {!activePanel && (
           <>
             {inspectorView === 'model' ? (
-              <ModelCenterPanel />
+              <ModelCenterPanel switchProvider={switchProvider} switchModel={switchModel} />
             ) : (
               <div className="space-y-3 text-sm">
                 <div className="card p-3 space-y-2">
@@ -93,5 +128,6 @@ export function InspectorDrawer() {
         )}
       </div>
     </aside>
+    </>
   );
 }
