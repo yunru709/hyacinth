@@ -1,66 +1,31 @@
-import { useEffect } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
-import { Sidebar } from './components/Sidebar';
+import { ActivityRail } from './components/ActivityRail';
+import { SessionsPanel } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ChatLog } from './components/ChatLog';
 import { InputArea } from './components/InputArea';
+import { InspectorDrawer } from './components/InspectorDrawer';
+import { PermissionModal } from './components/PermissionModal';
+import { CommandPalette } from './components/CommandPalette';
 
 export function App() {
-  const { sendChat, sendStop, respondPermission, sendRollback, sendMode, switchSession, connected, ready } = useWebSocket();
-  const permissionRequest = useStore((s) => s.permissionRequest);
+  const { sendChat, sendStop, sendInsert, respondPermission, sendRollback, sendMode, switchSession, connected, ready } = useWebSocket();
   const theme = useStore((s) => s.theme);
-
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (!permissionRequest) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      switch (e.key.toLowerCase()) {
-        case 'y': respondPermission('yes'); break;
-        case 'a': respondPermission('always'); break;
-        case 'n': respondPermission('no'); break;
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [permissionRequest, respondPermission]);
 
   const bg = theme === 'dark' ? '#0b0f19' : '#f8fafc';
 
   return (
     <div className="flex h-screen overflow-hidden" style={{background: bg}}>
-      {/* Sidebar */}
-      <Sidebar switchSession={switchSession} />
+      <ActivityRail />
+      <SessionsPanel switchSession={switchSession} />
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <Header sendMode={sendMode} />
         <ChatLog sendRollback={sendRollback} />
 
-        {/* Permission bar */}
-        {permissionRequest && (
-          <div className="mx-3 mb-1 p-3 rounded-lg flex items-center justify-between gap-3 text-sm"
-               style={{background:'var(--surface)', border:'1px solid var(--warning)', color:'var(--text)'}}>
-            <div className="min-w-0">
-              <span className="font-bold text-xs" style={{color:'var(--warning)'}}>⚠ {permissionRequest.toolName}</span>
-              <span className="ml-2 font-mono text-xs truncate" style={{color:'var(--text-dim)'}}>
-                {JSON.stringify(permissionRequest.input).slice(0, 100)}
-              </span>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              {[{key:'Y', label:'Yes', cls:'var(--success)'}, {key:'A', label:'Always', cls:'var(--accent)'}, {key:'N', label:'No', cls:'var(--danger)'}].map(({key, label, cls}) => (
-                <button key={key}
-                  onClick={() => respondPermission(key.toLowerCase() as 'yes'|'always'|'no')}
-                  className="btn btn-sm"
-                  style={{borderColor: cls, color: cls}}
-                >{label} ({key})</button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <InputArea sendChat={sendChat} sendStop={sendStop} ready={ready} />
+        <InputArea sendChat={sendChat} sendStop={sendStop} sendInsert={sendInsert} ready={ready} />
 
         {/* Overlays */}
         {(!connected || !ready) && (
@@ -68,10 +33,10 @@ export function App() {
             <div className="text-center card px-8 py-6">
               <div className="text-3xl mb-3">{!connected ? '⚡' : '⏳'}</div>
               <div className="font-medium" style={{color:'var(--text)'}}>
-                {!connected ? 'Connection lost' : 'Initializing agent...'}
+                {!connected ? '连接断开' : '初始化 Agent...'}
               </div>
               <div className="text-sm mt-1" style={{color:'var(--muted)'}}>
-                {!connected ? 'Reconnecting...' : 'Setting up your session'}
+                {!connected ? '重新连接中...' : '正在设置会话'}
               </div>
               {connected && !ready && (
                 <div className="mt-3 h-1 w-40 mx-auto rounded overflow-hidden" style={{background:'var(--border)'}}>
@@ -81,7 +46,14 @@ export function App() {
             </div>
           </div>
         )}
+
+        {/* Permission Modal */}
+        <PermissionModal respondPermission={respondPermission} />
+
+        {/* Command Palette */}
+        <CommandPalette />
       </div>
+      <InspectorDrawer />
     </div>
   );
 }

@@ -15,6 +15,11 @@ import type {
   PermissionRequestMsg,
   ConversationEvent,
   WebUIMode,
+  ActivityView,
+  InspectorView,
+  PanelView,
+  WebUIConfig,
+  ModelStatus,
 } from './types';
 
 let nextId = 1;
@@ -37,6 +42,16 @@ interface WebUIState {
   // ── Theme ──
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+
+  // ── Activity / Inspector ──
+  activeActivity: ActivityView;
+  setActiveActivity: (view: ActivityView) => void;
+  inspectorOpen: boolean;
+  inspectorView: InspectorView;
+  activePanel: PanelView | null;
+  openInspector: (view: InspectorView) => void;
+  openPanel: (panel: PanelView) => void;
+  closeInspector: () => void;
 
   // ── Sidebar ──
   sidebarOpen: boolean;
@@ -68,6 +83,16 @@ interface WebUIState {
   // ── Permission ──
   permissionRequest: PermissionRequestMsg | null;
 
+  // ── Queue ──
+  queuedMessages: string[];
+  addQueuedMessage: (content: string) => void;
+  removeQueuedMessage: (index: number) => void;
+  clearQueuedMessages: () => void;
+
+  // ── Command Palette ──
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
+
   // ── Sessions ──
   sessions: SessionInfo[];
   activeSessionId: string | null;
@@ -77,6 +102,18 @@ interface WebUIState {
   skills: SkillInfo[];
   agents: AgentInfo[];
   workflows: WorkflowInfo[];
+
+  // ── Model Center ──
+  modelStatus: ModelStatus | null;
+  setModelStatus: (status: ModelStatus) => void;
+
+  // ── Config Panel ──
+  webuiConfig: WebUIConfig | null;
+  configLoading: boolean;
+  configSaving: boolean;
+  toast: { message: string; type: 'success' | 'error' } | null;
+  fetchConfig: () => Promise<void>;
+  patchConfig: (updates: Record<string, unknown>) => Promise<boolean>;
 
   // ── Actions ──
   addUserMsg: (content: string) => void;
@@ -115,6 +152,15 @@ export const useStore = create<WebUIState>((set, get) => ({
     set({ theme: next });
   },
 
+  activeActivity: 'sessions',
+  setActiveActivity: (view) => set({ activeActivity: view, sidebarOpen: true }),
+  inspectorOpen: false,
+  inspectorView: 'status',
+  activePanel: null,
+  openInspector: (view) => set({ inspectorOpen: true, inspectorView: view, activePanel: null }),
+  openPanel: (panel) => set({ inspectorOpen: true, activePanel: panel }),
+  closeInspector: () => set({ inspectorOpen: false, activePanel: null }),
+
   sidebarOpen: true,
   toggleSidebar: () => set(s => ({ sidebarOpen: !s.sidebarOpen })),
 
@@ -133,9 +179,53 @@ export const useStore = create<WebUIState>((set, get) => ({
   tokensUsed: 0, maxTokens: 200000,
   cacheHitRate: null, compressCount: 0,
   permissionRequest: null,
+  queuedMessages: [],
+  addQueuedMessage: (content) => set(s => ({ queuedMessages: [...s.queuedMessages, content] })),
+  removeQueuedMessage: (index) => set(s => ({ queuedMessages: s.queuedMessages.filter((_, i) => i !== index) })),
+  clearQueuedMessages: () => set({ queuedMessages: [] }),
+  commandPaletteOpen: false,
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   sessions: [],
   activeSessionId: null,
   tools: [], skills: [], agents: [], workflows: [],
+  modelStatus: null,
+  setModelStatus: (status) => set({ modelStatus: status }),
+
+  // ── Config Panel ──
+  webuiConfig: null,
+  configLoading: false,
+  configSaving: false,
+  toast: null,
+  fetchConfig: async () => {
+    set({ configLoading: true });
+    try {
+      const res = await fetch('/api/config');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as WebUIConfig;
+      set({ webuiConfig: data, configLoading: false });
+    } catch (err) {
+      set({ configLoading: false, toast: { message: `Failed to load config: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+    }
+  },
+  patchConfig: async (updates) => {
+    set({ configSaving: true });
+    try {
+      const res = await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // 刷新配置
+      await get().fetchConfig();
+      set({ configSaving: false, toast: { message: 'Settings saved successfully', type: 'success' } });
+      return true;
+    } catch (err) {
+      set({ configSaving: false, toast: { message: `Failed to save: ${err instanceof Error ? err.message : String(err)}`, type: 'error' } });
+      return false;
+    }
+  },
 
   addUserMsg(content) {
     const turnId = get().turnCount + 1; // 新消息属于下一回合

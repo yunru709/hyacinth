@@ -33,6 +33,7 @@ import { WebUIWsSession } from './webui-ws-session.js';
 import type { WebUISessionConfig } from './webui-types.js';
 import { createLogger } from '../../logging/logger.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
+import { RuntimeConfigCenter } from '../../runtime/config-center.js';
 
 const logger = createLogger('webui-channel');
 
@@ -408,6 +409,73 @@ export class WebUIChannel implements ChannelHandler {
         model: this.provider.getModel(),
       });
     });
+
+    this.app.get('/api/model-status', async (_req: FastifyRequest, reply: FastifyReply) => {
+      const providerType = this.provider.getProviderType();
+      const modelName = this.provider.getModel();
+
+      // Online providers (mock — available for selection)
+      const onlineProviders = [
+        { name: 'Anthropic', type: 'anthropic', description: 'Claude Opus 4, Sonnet 4', status: 'available' as const },
+        { name: 'OpenAI', type: 'openai', description: 'GPT-4o, GPT-4.1', status: 'available' as const },
+        { name: 'DeepSeek', type: 'deepseek', description: 'DeepSeek V4', status: 'available' as const },
+        { name: 'Gemini', type: 'gemini', description: 'Gemini 2.5 Pro', status: 'available' as const },
+        { name: 'Groq', type: 'groq', description: 'Llama 4, Mixtral', status: 'available' as const },
+        { name: 'xAI', type: 'xai', description: 'Grok 3', status: 'available' as const },
+        { name: 'Mistral', type: 'mistral', description: 'Mistral Large 2', status: 'available' as const },
+        { name: 'OpenRouter', type: 'openrouter', description: 'Multi-provider routing', status: 'available' as const },
+      ];
+
+      // Local model status
+      const localModel = {
+        detected: false,
+        backend: null as string | null,
+        running: false,
+        registeredModels: [] as string[],
+        note: 'connect to API',
+      };
+
+      // Thinking settings (read from config center at runtime)
+      const configCenter = RuntimeConfigCenter.getInstance();
+      let thinkingConfig: Record<string, unknown> = {};
+      try {
+        thinkingConfig = (configCenter.get('provider') as Record<string, unknown>) ?? {};
+      } catch {
+        // configCenter 可能尚未初始化，回退到默认值
+      }
+      const thinking = {
+        enableThinking: thinkingConfig['enableThinking'] ?? false,
+        thinkingEffort: thinkingConfig['thinkingEffort'] ?? null,
+        showThinking: thinkingConfig['showThinking'] ?? false,
+      };
+
+      // Model channel routing (mock)
+      const channels = [
+        { name: 'main', provider: providerType, model: modelName, roles: ['assessment', 'planning', 'compression'] },
+      ];
+
+      const roleMappings: Record<string, string> = {
+        assessment: 'main',
+        planning: 'main',
+        compression: 'main',
+        'sub-agent': 'main',
+      };
+
+      return reply.send({
+        provider: providerType,
+        model: modelName,
+        routing: {
+          mode: 'auto',
+          isLocal: false,
+        },
+        onlineProviders,
+        localModel,
+        thinking,
+        channels,
+        roleMappings,
+        note: 'Model Center data — some fields are UI skeletons (connect to API)',
+      });
+    });
   }
 
   /** 注册配置 API */
@@ -416,11 +484,88 @@ export class WebUIChannel implements ChannelHandler {
 
     this.app.get('/api/config', async (_req: FastifyRequest, reply: FastifyReply) => {
       // 返回脱敏后的配置
+      const configCenter = RuntimeConfigCenter.getInstance();
+      let config: Record<string, unknown> = {};
+      try {
+        config = configCenter.getAll() as unknown as Record<string, unknown>;
+      } catch {
+        // configCenter 可能尚未初始化，回退到 channel 本地值
+      }
       return reply.send({
         cwd: this.cwd,
-        maxTurns: this.maxTurns,
-        maxContext: this.maxContext,
+        maxTurns: config['session'] ? (config['session'] as Record<string, unknown>).maxTurns ?? this.maxTurns : this.maxTurns,
+        maxContext: config['session'] ? (config['session'] as Record<string, unknown>).maxContext ?? this.maxContext : this.maxContext,
+        context: config['context'] ?? null,
+        repair: config['repair'] ?? null,
+        safety: config['safety'] ?? null,
+        logging: config['logging'] ?? null,
+        provider: config['provider'] ?? null,
+        kb: config['kb'] ?? null,
       });
+    });
+
+    // PATCH: 部分更新安全配置（仅允许白名单路径）
+    this.app.patch('/api/config', async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || typeof body !== 'object') {
+        return reply.status(400).send({ error: 'Request body must be a JSON object' });
+      }
+
+      const configCenter = RuntimeConfigCenter.getInstance();
+
+      // 白名单：只允许通过 WebUI 更新的安全配置路径
+      const allowedPaths = [
+        'session.maxTurns',
+        'session.maxContext',
+        'context.compressThreshold',
+        'context.emergencyThreshold',
+        'context.compressDepth',
+        'context.compressionStrategy',
+        'repair.scavenge.enabled',
+        'repair.storm.enabled',
+        'repair.storm.windowSize',
+        'repair.storm.threshold',
+        'safety.requireConfirmation',
+        'safety.dangerousTools',
+        'safety.allowedTools',
+        'safety.allowedCommands',
+        'logging.level',
+        'provider.enableThinking',
+        'provider.thinkingEffort',
+        'provider.showThinking',
+        'kb.enabled',
+        'kb.zone4',
+      ];
+
+      const updated: string[] = [];
+      const skipped: string[] = [];
+
+      for (const [key, value] of Object.entries(body)) {
+        if (!allowedPaths.includes(key)) {
+          skipped.push(key);
+          continue;
+        }
+        try {
+          configCenter.set(key, value);
+          updated.push(key);
+        } catch (err) {
+          logger.warn('Failed to set config key', { key, error: String(err) });
+          skipped.push(key);
+        }
+      }
+
+      try {
+        await configCenter.save();
+        logger.info('WebUI config updated via PATCH', { updated, skipped });
+        return reply.send({ ok: true, updated, skipped });
+      } catch (err) {
+        logger.error('Failed to save config after PATCH', err instanceof Error ? err : new Error(String(err)));
+        return reply.status(500).send({
+          error: 'Config updated in memory but failed to persist',
+          updated,
+          skipped,
+        });
+      }
     });
   }
 

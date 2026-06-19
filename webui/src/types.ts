@@ -1,6 +1,45 @@
 // ── Server → Client messages ─────────────────────────────
 
 export type WebUIMode = 'normal' | 'precise';
+export type ActivityView = 'sessions' | 'model' | 'context' | 'settings' | 'knowledge' | 'scheduler';
+export type InspectorView = 'status' | 'model' | 'mode' | 'context';
+export type PanelView = 'context' | 'settings' | 'models' | 'knowledge' | 'scheduler' | 'commands';
+
+// ── Config types for settings panel ──────────────────────
+
+export interface ContextConfig {
+  compressThreshold: number;
+  emergencyThreshold: number;
+  compressDepth: number;
+  compressionStrategy: 'A' | 'C';
+}
+
+export interface RepairConfig {
+  scavenge: { enabled: boolean };
+  storm: { enabled: boolean; windowSize: number; threshold: number };
+}
+
+export interface SafetyConfig {
+  requireConfirmation: boolean;
+  dangerousTools: string[];
+  allowedTools: string[];
+  allowedCommands: string[];
+}
+
+export interface LoggingConfig {
+  level: 'debug' | 'info' | 'warn' | 'error' | 'off';
+}
+
+export interface WebUIConfig {
+  maxTurns: number;
+  maxContext: number;
+  context: ContextConfig | null;
+  repair: RepairConfig | null;
+  safety: SafetyConfig | null;
+  logging: LoggingConfig | null;
+  provider?: { enableThinking?: boolean; thinkingEffort?: string | number | null; showThinking?: boolean };
+  kb?: { enabled?: boolean; zone4?: boolean };
+}
 
 export interface ConnectedMsg {
   type: 'connected';
@@ -200,4 +239,50 @@ export interface AgentInfo {
 export interface WorkflowInfo {
   name: string;
   description: string;
+}
+
+// ── Model Center types ───────────────────────────────────
+
+export interface OnlineProviderInfo {
+  name: string;
+  type: string;
+  description: string;
+  status: 'available' | 'coming_soon';
+}
+
+export interface LocalModelStatus {
+  detected: boolean;
+  backend: string | null;
+  running: boolean;
+  registeredModels: string[];
+  note: string;
+}
+
+export interface ThinkingSettings {
+  enableThinking: boolean;
+  thinkingEffort: string | number | null;
+  showThinking: boolean;
+  note: string;
+}
+
+export interface ModelChannelInfo {
+  name: string;
+  provider: string;
+  model: string;
+  roles: string[];
+}
+
+export interface ModelStatus {
+  provider: string;
+  model: string;
+  routing: {
+    mode: string;
+    isLocal: boolean;
+  };
+  onlineProviders: OnlineProviderInfo[];
+  localModel: LocalModelStatus;
+  thinking: ThinkingSettings;
+  channels: ModelChannelInfo[];
+  roleMappings: Record<string, string>;
+  note: string;
 }

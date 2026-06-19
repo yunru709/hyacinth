@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import type { SessionInfo } from '../types';
+import { KnowledgePanel } from './KnowledgePanel';
+import { SchedulerPanel } from './SchedulerPanel';
 
 /** 从 session ID 或 channel 字段检测渠道 */
 function detectChannel(s: SessionInfo): string {
@@ -13,30 +15,48 @@ function detectChannel(s: SessionInfo): string {
 
 const CHANNEL_META: Record<string, { label: string; icon: string }> = {
   webui: { label: 'Web UI', icon: '🌐' },
-  tui: { label: 'Terminal', icon: '⬛' },
-  feishu: { label: 'Feishu', icon: '💬' },
-  legacy: { label: 'Legacy', icon: '📁' },
-  unknown: { label: 'Unknown', icon: '❓' },
+  tui: { label: '终端', icon: '⬛' },
+  feishu: { label: '飞书', icon: '💬' },
+  legacy: { label: '旧版', icon: '📁' },
+  unknown: { label: '未知', icon: '❓' },
 };
 
-export function Sidebar({ switchSession }: { switchSession: (id: string) => void }) {
+export function SessionsPanel({ switchSession }: { switchSession: (id: string) => void }) {
   const sessions = useStore(s => s.sessions);
   const activeSessionId = useStore(s => s.sessionId);
   const sidebarOpen = useStore(s => s.sidebarOpen);
+  const activeActivity = useStore(s => s.activeActivity);
   const toggleSidebar = useStore(s => s.toggleSidebar);
-  const theme = useStore(s => s.theme);
-  const toggleTheme = useStore(s => s.toggleTheme);
   const [creating, setCreating] = useState(false);
   const [newSessionType, setNewSessionType] = useState<'normal' | 'precise'>('normal');
   const [switching, setSwitching] = useState<string | null>(null);
   // 默认展开所有 channel section
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  if (!sidebarOpen) {
+  if (!sidebarOpen) return null;
+
+  if (activeActivity !== 'sessions') {
+    const panelTitle: Record<string, string> = {
+      model: '模型中心',
+      context: '上下文',
+      knowledge: '知识库',
+      scheduler: '调度',
+      settings: '设置',
+    };
+
     return (
-      <div className="flex flex-col items-center py-3 gap-3 border-r flex-shrink-0" style={{width:44, borderColor:'var(--border)', background:'var(--surface)'}}>
-        <button onClick={toggleSidebar} className="btn-ghost btn-sm" title="Expand sidebar">☰</button>
-        <button onClick={toggleTheme} className="btn-ghost btn-sm" title="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
+      <div className="flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
+        <div className="flex items-center justify-between px-3 py-3 border-b" style={{borderColor:'var(--border)'}}>
+          <span className="font-semibold text-sm" style={{color:'var(--text)'}}>{panelTitle[activeActivity]}</span>
+          <button onClick={toggleSidebar} className="btn-ghost btn-sm">◁</button>
+        </div>
+        {activeActivity === 'knowledge' && <KnowledgePanel />}
+        {activeActivity === 'scheduler' && <SchedulerPanel />}
+        {activeActivity !== 'knowledge' && activeActivity !== 'scheduler' && (
+          <div className="flex-1 flex items-center justify-center px-5 text-center text-xs leading-relaxed" style={{color:'var(--muted)'}}>
+            {panelTitle[activeActivity]} 面板占位。详细控件将在后续任务中添加。
+          </div>
+        )}
       </div>
     );
   }
@@ -63,14 +83,14 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
       });
       switchSession(data.id);
     } catch {
-      useStore.getState().addSystemMsg('Failed to create session', 'error');
+      useStore.getState().addSystemMsg('创建会话失败', 'error');
     }
     setCreating(false);
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Delete session ${id.slice(0, 10)}...?`)) return;
+    if (!confirm(`删除会话 ${id.slice(0, 10)}...?`)) return;
     try {
       await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
       const listRes = await fetch('/api/sessions');
@@ -79,9 +99,9 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
       if (activeSessionId === id) {
         useStore.setState({ activeSessionId: list[0]?.id ?? null });
       }
-      useStore.getState().addSystemMsg(`Session deleted`, 'info');
+      useStore.getState().addSystemMsg(`会话已删除`, 'info');
     } catch {
-      useStore.getState().addSystemMsg('Failed to delete session', 'error');
+      useStore.getState().addSystemMsg('删除会话失败', 'error');
     }
   };
 
@@ -95,10 +115,10 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
         const events = await res.json();
         if (Array.isArray(events) && events.length > 0) {
           useStore.getState().loadHistory(events);
-          useStore.getState().addSystemMsg(`Loaded ${events.length} events from session`, 'info');
+          useStore.getState().addSystemMsg(`从会话加载了 ${events.length} 条事件`, 'info');
         } else {
           useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
-          useStore.getState().addSystemMsg('Empty session', 'info');
+          useStore.getState().addSystemMsg('空会话', 'info');
         }
       } else {
         useStore.setState({ messages: [], currentText: '', currentThinking: '', pendingThinking: '' });
@@ -107,7 +127,7 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
       useStore.setState({ activeSessionId: id });
       switchSession(id);
     } catch {
-      useStore.getState().addSystemMsg('Failed to load session history', 'error');
+      useStore.getState().addSystemMsg('加载会话历史失败', 'error');
     }
     setSwitching(null);
   };
@@ -142,11 +162,8 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
     <div className="flex flex-col flex-shrink-0" style={{width: 250, background:'var(--surface)', borderRight:'1px solid var(--border)'}}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b" style={{borderColor:'var(--border)'}}>
-        <span className="font-semibold text-sm" style={{color:'var(--text)'}}>Sessions</span>
-        <div className="flex gap-1">
-          <button onClick={toggleTheme} className="btn-ghost btn-sm">{theme === 'dark' ? '☀' : '☾'}</button>
-          <button onClick={toggleSidebar} className="btn-ghost btn-sm">◁</button>
-        </div>
+        <span className="font-semibold text-sm" style={{color:'var(--text)'}}>会话</span>
+        <button onClick={toggleSidebar} className="btn-ghost btn-sm">◁</button>
       </div>
 
       {/* New Session */}
@@ -157,25 +174,25 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
             disabled={creating}
             className={`btn-sm ${newSessionType === 'normal' ? 'btn btn-primary' : 'btn-ghost'}`}
           >
-            Normal
+            普通
           </button>
           <button
             onClick={() => setNewSessionType('precise')}
             disabled={creating}
             className={`btn-sm ${newSessionType === 'precise' ? 'btn btn-primary' : 'btn-ghost'}`}
           >
-            Precise
+            精确
           </button>
         </div>
         <button onClick={handleCreate} disabled={creating} className="btn btn-primary btn-sm w-full justify-center">
-          {creating ? '⏳' : '+'} New Session
+          {creating ? '⏳' : '+'} 新建会话
         </button>
       </div>
 
       {/* Channel sections */}
       <div className="flex-1 overflow-y-auto" style={{minHeight:0}}>
         {channels.length === 0 && (
-          <div className="text-xs px-3 py-3" style={{color:'var(--muted)'}}>No sessions</div>
+          <div className="text-xs px-3 py-3" style={{color:'var(--muted)'}}>无会话</div>
         )}
 
         {channels.map(ch => {
@@ -230,7 +247,7 @@ export function Sidebar({ switchSession }: { switchSession: (id: string) => void
 
       {/* Footer */}
       <div className="px-3 py-2 border-t text-[11px]" style={{borderColor:'var(--border)', color:'var(--muted)'}}>
-        {sessions.length} session{sessions.length !== 1 ? 's' : ''} · {channels.length} channel{channels.length !== 1 ? 's' : ''}
+        {sessions.length} 会话 · {channels.length} 渠道
       </div>
     </div>
   );

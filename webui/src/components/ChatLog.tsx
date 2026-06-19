@@ -13,7 +13,7 @@ function UserBubble({ msg, onRollback }: { msg: UserMsgNode; onRollback: (turnId
         onClick={() => onRollback(msg.turnId)}
         className="flex-shrink-0 mt-1 btn-ghost btn-sm opacity-0 group-hover:opacity-100 transition-opacity"
         style={{color:'var(--muted)'}}
-        title={`Rollback to before turn ${msg.turnId}`}
+        title={`回滚到第 ${msg.turnId} 回合前`}
       >↩</button>
 
       <div className="max-w-[80%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed ml-auto"
@@ -42,7 +42,7 @@ function ThinkingBlock({ msg }: { msg: ThinkingMsgNode }) {
               className="flex items-center gap-1.5 text-xs transition-colors mb-1"
               style={{color:'var(--muted)'}}>
         <span className="text-[10px]">{msg.collapsed ? '▶' : '▼'}</span>
-        <span>Thinking</span>
+        <span>思考</span>
       </button>
       {!msg.collapsed && (
         <div className="pl-3 ml-1 text-xs leading-relaxed whitespace-pre-wrap italic" style={{color:'var(--text-dim)', borderLeft:'2px solid var(--border)'}}>
@@ -90,12 +90,12 @@ function ToolCard({ msg }: { msg: ToolCallNode }) {
             <div className="p-3 overflow-y-auto max-h-64">
               <pre className={`text-[11px] font-mono whitespace-pre-wrap leading-relaxed ${msg.isError ? 'diff-remove' : ''}`}
                    style={{color: msg.isError ? 'var(--danger)' : 'var(--text-dim)'}}>
-                {msg.result.length > 5000 ? msg.result.slice(0,5000)+'\n\n... (truncated)' : msg.result}
+                {msg.result.length > 5000 ? msg.result.slice(0,5000)+'\n\n... (已截断)' : msg.result}
               </pre>
             </div>
           )}
           {msg.result === undefined && (
-            <div className="p-3 text-xs" style={{color:'var(--muted)'}}>⏳ Executing...</div>
+            <div className="p-3 text-xs" style={{color:'var(--muted)'}}>⏳ 执行中...</div>
           )}
         </div>
       )}
@@ -137,18 +137,18 @@ export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => 
         <button
           onClick={clearChatLog}
           className="btn-ghost btn-sm"
-          title="Clear chat log"
+          title="清除聊天记录"
         >清屏</button>
         <button
           onClick={() => setAllToolsExpanded(!allToolsExpanded)}
           disabled={!hasTools}
           className="btn-ghost btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
-          title={allToolsExpanded ? 'Collapse all tool cards' : 'Expand all tool cards'}
+          title={allToolsExpanded ? '折叠所有工具卡片' : '展开所有工具卡片'}
         >{allToolsExpanded ? '折叠工具' : '展开工具'}</button>
         <button
           onClick={showHelp}
           className="btn-ghost btn-sm"
-          title="Show help"
+          title="显示帮助"
         >帮助</button>
       </div>
 
@@ -156,8 +156,8 @@ export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => 
         <div className="flex items-center justify-center h-full" style={{color:'var(--muted)'}}>
           <div className="text-center">
             <div className="text-4xl mb-3" style={{color:'var(--accent)'}}>DeepThink</div>
-            <div className="text-sm">Type a message to start</div>
-            <div className="text-xs mt-2" style={{color:'var(--text-dim)'}}>/help for commands</div>
+            <div className="text-sm">输入消息开始</div>
+            <div className="text-xs mt-2" style={{color:'var(--text-dim)'}}>/help 查看命令</div>
           </div>
         </div>
       )}

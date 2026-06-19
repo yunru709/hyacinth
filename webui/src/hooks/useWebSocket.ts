@@ -27,9 +27,11 @@ export function useWebSocket() {
         fetch('/api/skills').then((r) => r.json()).catch(() => []),
         fetch('/api/agents').then((r) => r.json()).catch(() => []),
         fetch('/api/workflows').then((r) => r.json()).catch(() => []),
-      ]).then(([sessions, tools, skills, agents, workflows]) => {
+        fetch('/api/model-status').then((r) => r.json()).catch(() => null),
+      ]).then(([sessions, tools, skills, agents, workflows, modelStatus]) => {
         store.setSessions(sessions);
         store.setCapabilities(tools, skills, agents, workflows);
+        if (modelStatus) store.setModelStatus(modelStatus);
       }).catch(() => {});
     };
 
@@ -179,6 +181,13 @@ export function useWebSocket() {
     send({ type: 'stop' });
   }, [send]);
 
+  const sendInsert = useCallback((content: string) => {
+    if (!content.trim()) return;
+    send({ type: 'stop' });
+    store.addUserMsg(content);
+    send({ type: 'chat', content });
+  }, [send]);
+
   const respondPermission = useCallback((result: 'yes' | 'no' | 'always') => {
     send({ type: 'permission', result });
     store.setPermission(null);
@@ -207,6 +216,7 @@ export function useWebSocket() {
   return {
     sendChat,
     sendStop,
+    sendInsert,
     respondPermission,
     sendRollback,
     sendMode,
