@@ -15,7 +15,13 @@ export type WebUIClientMessage =
   | WebUIPermissionResponse
   | WebUISetModeMessage
   | WebUIRollbackMessage
-  | WebUISwitchSessionMessage;
+  | WebUISwitchSessionMessage
+  | WebUISwitchProviderMessage
+  | WebUISwitchModelMessage
+  | WebUIQueueMessage
+  | WebUIQueueInsertMessage
+  | WebUIQueueRemoveMessage
+  | WebUIQueueClearMessage;
 
 export interface WebUIChatMessage {
   type: 'chat';
@@ -48,6 +54,35 @@ export interface WebUISwitchSessionMessage {
   sessionId: string;
 }
 
+export interface WebUISwitchProviderMessage {
+  type: 'switch_provider';
+  provider: string;
+}
+
+export interface WebUISwitchModelMessage {
+  type: 'switch_model';
+  model: string;
+}
+
+export interface WebUIQueueMessage {
+  type: 'queue_message';
+  content: string;
+}
+
+export interface WebUIQueueInsertMessage {
+  type: 'queue_insert';
+  content: string;
+}
+
+export interface WebUIQueueRemoveMessage {
+  type: 'queue_remove';
+  id: string;
+}
+
+export interface WebUIQueueClearMessage {
+  type: 'queue_clear';
+}
+
 // ── Server → Client ─────────────────────────────────────────
 
 export type WebUIServerMessage =
@@ -64,7 +99,9 @@ export type WebUIServerMessage =
   | WebUITurnInfoMessage
   | WebUIPermissionRequestMessage
   | WebUIErrorMessage
-  | WebUISessionSwitchedMessage;
+  | WebUISessionSwitchedMessage
+  | WebUIModelStatusMessage
+  | WebUIQueueUpdatedMessage;
 
 /** 连接成功 + session 初始化信息 */
 export interface WebUIConnectedMessage {
@@ -168,4 +205,15 @@ export interface WebUISessionSwitchedMessage {
   type: 'session_switched';
   sessionId: string;
   mode: 'normal' | 'precise';
+}
+
+export interface WebUIModelStatusMessage {
+  type: 'model_status';
+  provider: string;
+  model: string;
+}
+
+export interface WebUIQueueUpdatedMessage {
+  type: 'queue_updated';
+  items: Array<{ id: string; content: string; mode: 'queue' | 'insert' }>;
 }

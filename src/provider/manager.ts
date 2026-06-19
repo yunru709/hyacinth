@@ -387,7 +387,13 @@ export class ProviderManager {
       (typeof rawProvider === 'string'
         ? rawProvider
         : (rawProvider as Record<string, unknown>)?.active)) as ProviderType;
-    const model = overrides?.model ?? agentConfig.model;
+
+    // 优先读取 provider.<type>.model，再回退到顶层 model 字段（旧格式）
+    const providerSection = typeof rawProvider === 'object' && rawProvider !== null
+      ? ((rawProvider as Record<string, unknown>)[providerType] as Record<string, unknown> | undefined)
+      : undefined;
+    const providerModel = typeof providerSection?.model === 'string' ? providerSection.model : undefined;
+    const model = overrides?.model ?? providerModel ?? agentConfig.model;
 
     // 获取 API Key
     const apiKey = overrides?.apiKey ?? process.env[configManager.getApiKeyEnvName(providerType) ?? ''] ?? '';
