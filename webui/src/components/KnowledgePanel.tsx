@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../store';
 import { EmptyState, LoadingState, ErrorState } from './ui/PanelStates';
 
@@ -35,9 +35,20 @@ export function KnowledgePanel() {
   const fetchConfig = useStore(s => s.fetchConfig);
   const configSaving = useStore(s => s.configSaving);
   const toast = useStore(s => s.toast);
+  const clearToast = useStore(s => s.clearToast);
 
   const kbEnabled = webuiConfig?.kb?.enabled ?? false;
   const zone4Enabled = webuiConfig?.kb?.zone4 ?? false;
+
+  // Toast 自动消失
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (toast) {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => clearToast(), 3000);
+    }
+    return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); };
+  }, [toast, clearToast]);
 
   // 确保配置已加载
   useEffect(() => {
@@ -95,14 +106,15 @@ export function KnowledgePanel() {
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-y-auto" style={{minHeight: 0}}>
+    <div className="flex-1 flex flex-col overflow-y-auto">
       {/* Toast feedback */}
       {toast && (
-        <div className="m-3 mb-0 px-3 py-2 rounded-md text-xs font-medium"
+        <div className="mx-3 mt-3 mb-0 px-3 py-2 rounded-md text-xs font-medium flex items-center justify-between"
              style={{background: toast.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
                      color: toast.type === 'success' ? 'var(--success)' : 'var(--danger)',
                      border: `1px solid ${toast.type === 'success' ? 'var(--success)' : 'var(--danger)'}`}}>
-          {toast.message}
+          <span>{toast.message}</span>
+          <button onClick={clearToast} className="ml-2 opacity-60 hover:opacity-100">✕</button>
         </div>
       )}
 

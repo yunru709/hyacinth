@@ -122,5 +122,9 @@ export function getDefaultConfig(): FullConfig {
       statsFile: 'stats.json',
       summaryFile: 'summary.md',
     },
+    kb: {
+      enabled: false,
+      zone4: false,
+    },
   };
 }

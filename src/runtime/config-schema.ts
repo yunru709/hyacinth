@@ -148,6 +148,11 @@ export interface FullConfig {
     summaryFile?: string;
     sessionDir?: string;
   };
+
+  kb?: {
+    enabled: boolean;
+    zone4: boolean;
+  };
 }
 
 export interface ConfigSchemaEntry {

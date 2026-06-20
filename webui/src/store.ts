@@ -133,6 +133,7 @@ interface WebUIState {
   configLoading: boolean;
   configSaving: boolean;
   toast: { message: string; type: 'success' | 'error' } | null;
+  clearToast: () => void;
   fetchConfig: () => Promise<void>;
   patchConfig: (updates: Record<string, unknown>) => Promise<boolean>;
 
@@ -392,6 +393,7 @@ export const useStore = create<WebUIState>((set, get) => ({
   configLoading: false,
   configSaving: false,
   toast: null,
+  clearToast: () => set({ toast: null }),
   fetchConfig: async () => {
     set({ configLoading: true });
     try {

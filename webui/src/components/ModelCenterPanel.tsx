@@ -82,52 +82,68 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm" style={{color:'var(--text)'}}>
-      {/* ── Current Provider / Model / Routing ── */}
+      {/* ── 当前状态 ── */}
       <div className="card p-3 space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>当前模型</div>
-        <div className="flex justify-between gap-3">
-          <span style={{color:'var(--muted)'}}>提供商</span>
-          <span className="truncate font-medium">{provider}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span style={{color:'var(--muted)'}}>模型</span>
-          <span className="truncate font-medium">{model}</span>
-        </div>
-        <div className="flex justify-between gap-3">
-          <span style={{color:'var(--muted)'}}>路由</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full" style={{background: routing.isLocal ? 'var(--success)' : 'var(--accent)'}} />
-            <span className="capitalize">{routing.mode}{routing.isLocal ? ' (本地)' : ' (在线)'}</span>
-          </span>
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>当前状态</div>
+        <div className="space-y-2">
+          <div className="flex justify-between gap-3">
+            <span style={{color:'var(--muted)'}}>提供商</span>
+            <span className="truncate font-medium">{provider}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span style={{color:'var(--muted)'}}>模型</span>
+            <span className="truncate font-medium">{model}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span style={{color:'var(--muted)'}}>运行模式</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full" style={{background: routing.isLocal ? 'var(--success)' : 'var(--accent)'}} />
+              <span>{routing.isLocal ? '本地模型' : '在线模型'}</span>
+            </span>
+          </div>
         </div>
         {mismatch && (
           <div className="mt-2 px-2.5 py-2 rounded-md text-[11px] leading-relaxed"
                style={{background:'rgba(245,158,11,0.1)', color:'var(--warning)', border:'1px solid var(--warning)'}}>
-            ⚠ 提供商与模型可能不匹配：当前提供商为 {provider}，但模型名 {model} 似乎属于其他提供商。请检查配置文件。
+            ⚠ 提供商与模型不匹配：当前提供商为 {provider}，但模型名 {model} 似乎属于其他提供商。
           </div>
         )}
       </div>
 
-      {/* ── Online Providers ── */}
+      {/* ── 在线模型 ── */}
       <div className="card p-3 space-y-3">
         <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>在线提供商</div>
+          <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>在线模型提供商</div>
+          <button
+            onClick={refreshModelStatus}
+            disabled={localModelLoading}
+            className="btn btn-sm btn-ghost"
+            title="刷新状态"
+          >
+            刷新
+          </button>
+        </div>
+        <div className="text-[11px] leading-relaxed" style={{color:'var(--muted)'}}>
+          点击提供商切换，已配置的提供商会显示 ✓ 标记。切换后可修改模型名。
         </div>
         <div className="grid grid-cols-1 gap-2">
           {(onlineProviders.length > 0 ? onlineProviders : DEFAULT_ONLINE_PROVIDERS).map((p: OnlineProviderInfo) => (
             <ProviderCard
               key={p.type}
               provider={p}
-              isActive={provider === p.type}
+              isActive={provider === p.type && !routing.isLocal}
               onClick={() => switchProvider(p.type)}
             />
           ))}
         </div>
       </div>
 
-      {/* ── Model Name Switch ── */}
+      {/* ── 自定义模型名 ── */}
       <div className="card p-3 space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>切换模型</div>
+        <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>自定义模型名</div>
+        <div className="text-[11px] leading-relaxed" style={{color:'var(--muted)'}}>
+          修改当前提供商使用的模型名称。例如 DeepSeek 提供商可以使用 deepseek-chat 或 deepseek-coder。
+        </div>
         <div className="flex flex-col gap-2">
           <input
             type="text"
@@ -148,15 +164,12 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
             className="btn btn-primary btn-sm w-full"
             disabled={configSaving}
           >
-            切换
+            应用模型名
           </button>
-        </div>
-        <div className="text-[11px]" style={{color:'var(--muted)'}}>
-          模型名会保存到当前 provider 的配置中。
         </div>
       </div>
 
-      {/* ── Local Model Status ── */}
+      {/* ── 本地模型 ── */}
       <div className="card p-3 space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide" style={{color:'var(--muted)'}}>本地模型</div>
@@ -165,7 +178,7 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
               onClick={handleDetect}
               disabled={localModelLoading}
               className="btn btn-sm btn-ghost"
-              title="重新检测本地后端"
+              title="检测本地后端（Ollama/llama.cpp）"
             >
               {localModelLoading ? '检测中...' : '检测'}
             </button>
@@ -182,7 +195,7 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
 
         {!localModel.detected ? (
           <div className="space-y-3">
-            <EmptyState icon="💻" text="未检测到本地模型后端" hint="点击检测或扫描注册本地模型" />
+            <EmptyState icon="💻" text="未检测到本地模型后端" hint="点击检测按钮扫描 Ollama 或 llama.cpp" />
             <div className="grid grid-cols-2 gap-2">
               <button onClick={handleDetect} disabled={localModelLoading} className="btn btn-sm btn-primary">检测后端</button>
               <button onClick={handleRegister} disabled={localModelLoading} className="btn btn-sm">扫描注册</button>
@@ -190,24 +203,25 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
           </div>
         ) : (
           <div className="space-y-3">
+            {/* 后端状态 */}
             <div className="grid grid-cols-1 gap-2 text-xs">
               <div className="flex justify-between gap-2">
                 <span style={{color:'var(--muted)'}}>Ollama</span>
-                <span>{detectResult?.ollamaInstalled ?? localModel.backend === 'ollama' ? '已安装/运行' : '未检测到'}</span>
+                <span>{detectResult?.ollamaInstalled ? '已安装' : localModel.backend === 'ollama' ? '运行中' : '未检测到'}</span>
               </div>
               <div className="flex justify-between gap-2">
                 <span style={{color:'var(--muted)'}}>llama.cpp</span>
-                <span>{detectResult?.llamacppInstalled ? '已安装' : '未检测到'}</span>
+                <span>{detectResult?.llamacppInstalled ? '已安装' : localModel.backend === 'llamacpp' ? '运行中' : '未检测到'}</span>
               </div>
               <div className="flex justify-between gap-2">
-                <span style={{color:'var(--muted)'}}>后端</span>
+                <span style={{color:'var(--muted)'}}>当前后端</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full" style={{background: 'var(--success)'}} />
                   <span>{localModel.backend ?? '未检测到'}</span>
                 </span>
               </div>
               <div className="flex justify-between gap-2">
-                <span style={{color:'var(--muted)'}}>状态</span>
+                <span style={{color:'var(--muted)'}}>运行状态</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full" style={{background: localModel.running ? 'var(--success)' : 'var(--warning)'}} />
                   <span>{localModel.running ? '运行中' : '已停止'}</span>
@@ -215,6 +229,7 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
               </div>
             </div>
 
+            {/* 已注册模型 */}
             <div>
               <div className="text-[11px] mb-1.5" style={{color:'var(--muted)'}}>已注册模型</div>
               {localModel.registeredModels.length > 0 ? (
@@ -224,29 +239,20 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
                       <span className="truncate pr-2">{m}</span>
                       <div className="flex items-center flex-wrap justify-end gap-1">
                         <button
-                          onClick={() => { startLocalModel(m).then(refreshModelStatus); }}
-                          disabled={localModelLoading}
-                          className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
-                          style={{background:'var(--accent)', color:'#fff'}}
-                          title="启动"
-                        >
-                          启动
-                        </button>
-                        <button
                           onClick={() => { switchLocalModel(m).then(refreshModelStatus); }}
                           disabled={localModelLoading}
                           className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
                           style={{background:'var(--success)', color:'#fff'}}
-                          title="切换并使用"
+                          title="切换并使用此模型"
                         >
-                          切换
+                          使用
                         </button>
                         <button
                           onClick={() => { unregisterLocalModel(m).then(refreshModelStatus); }}
                           disabled={localModelLoading}
                           className="px-2 py-1 rounded text-[10px] hover:opacity-80 min-w-[2rem]"
                           style={{background:'var(--danger)', color:'#fff'}}
-                          title="注销"
+                          title="注销此模型"
                         >
                           注销
                         </button>
@@ -255,16 +261,20 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
                   ))}
                 </div>
               ) : (
-                <EmptyState icon="🧩" text="未注册模型" hint="扫描注册或手动输入模型名启动" />
+                <EmptyState icon="🧩" text="未注册模型" hint="点击下方扫描注册或手动输入模型名" />
               )}
             </div>
 
+            {/* 操作区 - 根据状态显示不同按钮 */}
             <div className="space-y-2">
+              <div className="text-[11px]" style={{color:'var(--muted)'}}>操作</div>
+              
+              {/* 手动启动 */}
               <div className="flex flex-col gap-2">
                 <input
                   type="text"
                   className="input w-full text-xs"
-                  placeholder="模型名 / ollama / llamacpp"
+                  placeholder="模型名（如 llama3.1）或后端名（ollama/llamacpp）"
                   value={localModelInput}
                   onChange={(e) => setLocalModelInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -281,11 +291,20 @@ export function ModelCenterPanel({ switchProvider, switchModel }: ModelCenterPan
                   启动
                 </button>
               </div>
+
+              {/* 快捷操作 */}
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => { startLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm btn-primary">启动默认</button>
-                <button onClick={() => { stopLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm">停止全部</button>
-                <button onClick={handleRegister} disabled={localModelLoading} className="btn btn-sm">扫描注册</button>
-                <button onClick={() => { switchLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm">切到本地</button>
+                {!localModel.running ? (
+                  <>
+                    <button onClick={() => { startLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm btn-primary" title="使用默认配置启动">启动默认</button>
+                    <button onClick={handleRegister} disabled={localModelLoading} className="btn btn-sm" title="扫描并注册本地模型">扫描注册</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => { stopLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm" title="停止所有本地模型">停止全部</button>
+                    <button onClick={() => { switchLocalModel().then(refreshModelStatus); }} disabled={localModelLoading} className="btn btn-sm" title="切换到本地模型模式">切到本地</button>
+                  </>
+                )}
               </div>
             </div>
           </div>

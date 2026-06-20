@@ -1316,6 +1316,8 @@ export class WebUIChannel implements ChannelHandler {
         maxContext: this.maxContext,
         outputHandler: dummyHandler,
         personaDir: this.personaDir,
+        channel: 'webui',
+        shouldContinue: true, // 复用最近的 session，而不是创建新的
       });
 
       // 覆盖 ensureComponents 调度器的执行处理器：
