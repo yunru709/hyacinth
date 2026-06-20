@@ -285,4 +285,85 @@ body {
       z-index: 35;
     }
   }
+
+  /* ── Markdown rendering ── */
+  .markdown-body {
+    word-break: break-word;
+  }
+  .markdown-body p { margin: 0.5em 0; }
+  .markdown-body p:first-child { margin-top: 0; }
+  .markdown-body p:last-child { margin-bottom: 0; }
+  .markdown-body ul, .markdown-body ol {
+    padding-left: 1.25em;
+    margin: 0.5em 0;
+  }
+  .markdown-body li { margin: 0.25em 0; }
+  .markdown-body li > p { margin: 0.25em 0; }
+  .markdown-body blockquote {
+    margin: 0.5em 0;
+    padding-left: 0.75em;
+    border-left: 3px solid var(--border);
+    color: var(--text-dim);
+  }
+  .markdown-body hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1em 0;
+  }
+  .markdown-body a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .markdown-body a:hover { opacity: 0.8; }
+  .markdown-body strong { font-weight: 600; }
+  .markdown-body em { font-style: italic; }
+
+  .markdown-table-wrapper {
+    overflow-x: auto;
+    margin: 0.75em 0;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+  .markdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+  }
+  .markdown-table th,
+  .markdown-table td {
+    padding: 0.4em 0.6em;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .markdown-table th {
+    background: var(--surface);
+    font-weight: 600;
+  }
+  .markdown-table tr:nth-child(even) { background: rgba(128,128,128,0.05); }
+
+  .markdown-pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.75em;
+    margin: 0.75em 0;
+    overflow-x: auto;
+  }
+  .markdown-pre .markdown-code-block {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 0.85em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--text);
+  }
+  .markdown-code-inline {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    padding: 0.1em 0.35em;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--accent);
+  }
 }

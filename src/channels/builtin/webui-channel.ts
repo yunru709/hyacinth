@@ -140,13 +140,14 @@ export class WebUIChannel implements ChannelHandler {
         }
       } catch { /* ignore */ }
 
-      // 如果 clientId 已有映射，复用旧 sessionId；否则创建新 sessionId
+      // 使用 clientId 作为 sessionId，确保同一客户端复用同一 session
       let sessionId: string;
       if (clientId && this.clientSessionMap.has(clientId)) {
         sessionId = this.clientSessionMap.get(clientId)!;
         logger.info('WebUI reusing session for clientId', { clientId, sessionId });
       } else {
-        sessionId = this.generateSessionId();
+        // 使用 clientId 作为 sessionId（如果有的话），否则生成新的
+        sessionId = clientId ?? this.generateSessionId();
         if (clientId) {
           this.clientSessionMap.set(clientId, sessionId);
           logger.info('WebUI new session for clientId', { clientId, sessionId });

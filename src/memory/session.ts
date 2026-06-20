@@ -12,15 +12,24 @@ const logger = createLogger('session');
 const MAX_SESSION_AGE_DAYS = parseInt(process.env.AGENT_MAX_SESSION_AGE ?? '30', 10);
 
 /**
- * 生成 Session ID：YYYYMMDD-HHMMSS-XXXX（时间戳 + 4位随机hex）
+ * 生成 Session ID：根据渠道生成不同前缀的 ID
+ * - webui: webui-YYYYMMDD-HHMMSS-XXXX
+ * - tui: tui-YYYYMMDD-HHMMSS-XXXX
+ * - feishu: feishu_YYYYMMDD-HHMMSS-XXXX
+ * - 其他: YYYYMMDD-HHMMSS-XXXX（无前缀）
  */
-function generateSessionId(): string {
+function generateSessionId(channel?: string): string {
   const now = new Date();
   const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
   const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
   const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const randomPart = crypto.randomBytes(2).toString('hex');
-  return `${datePart}-${timePart}-${randomPart}`;
+  const baseId = `${datePart}-${timePart}-${randomPart}`;
+  
+  if (channel === 'webui') return `webui-${baseId}`;
+  if (channel === 'tui') return `tui-${baseId}`;
+  if (channel === 'feishu') return `feishu_${baseId}`;
+  return baseId;
 }
 
 /**
@@ -71,7 +80,7 @@ export class SessionManager {
     // 清理过期 session
     await this.cleanup();
 
-    const id = generateSessionId();
+    const id = generateSessionId(channel);
     const now = new Date().toISOString();
     const session: Session = {
       id,

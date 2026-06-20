@@ -1,6 +1,39 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, memo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useStore } from '../store';
 import type { UserMsgNode, TextMsgNode, ThinkingMsgNode, ToolCallNode, SystemMsgNode } from '../types';
+
+const MarkdownContent = memo(({ content }: { content: string }) => {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        pre: ({ children }) => <pre className="markdown-pre">{children}</pre>,
+        code: ({ className, children }) => {
+          const isInline = !className;
+          return isInline ? (
+            <code className="markdown-code-inline">{children}</code>
+          ) : (
+            <code className={`markdown-code-block ${className ?? ''}`}>{children}</code>
+          );
+        },
+        table: ({ children }) => (
+          <div className="markdown-table-wrapper">
+            <table className="markdown-table">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead>{children}</thead>,
+        tbody: ({ children }) => <tbody>{children}</tbody>,
+        tr: ({ children }) => <tr>{children}</tr>,
+        th: ({ children }) => <th>{children}</th>,
+        td: ({ children }) => <td>{children}</td>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 function UserBubble({ msg, onRollback }: { msg: UserMsgNode; onRollback: (turnId: number) => void }) {
   const [hovered, setHovered] = useState(false);
@@ -26,10 +59,8 @@ function UserBubble({ msg, onRollback }: { msg: UserMsgNode; onRollback: (turnId
 
 function TextBlock({ msg }: { msg: TextMsgNode }) {
   return (
-    <div className="mb-3 px-4 text-sm leading-relaxed" style={{color:'var(--text)'}}>
-      {msg.content.split('\n').map((line, i) => (
-        <div key={i}>{line || ' '}</div>
-      ))}
+    <div className="mb-3 px-4 text-sm leading-relaxed markdown-body" style={{color:'var(--text)'}}>
+      <MarkdownContent content={msg.content} />
     </div>
   );
 }
@@ -174,8 +205,8 @@ export function ChatLog({ sendRollback }: { sendRollback: (toTurnId: number) => 
       })}
 
       {currentText && (
-        <div className="mb-3 px-4 text-sm leading-relaxed" style={{color:'var(--text)'}}>
-          {currentText}
+        <div className="mb-3 px-4 text-sm leading-relaxed markdown-body" style={{color:'var(--text)'}}>
+          <MarkdownContent content={currentText} />
           <span className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse rounded-sm" style={{background:'var(--accent)'}} />
         </div>
       )}

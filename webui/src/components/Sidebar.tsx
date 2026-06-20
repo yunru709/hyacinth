@@ -73,7 +73,13 @@ export function SessionsPanel({ switchSession }: { switchSession: (id: string) =
       setTimeout(() => {
         useStore.getState().setSessions(list);
         if (activeSessionId === id) {
-          useStore.setState({ activeSessionId: list[0]?.id ?? null });
+          // 删除的是当前 session，切换到第一个可用的 session
+          const newActiveId = list[0]?.id ?? null;
+          useStore.setState({ activeSessionId: newActiveId });
+          if (newActiveId) {
+            // 通知后端切换 session
+            switchSession(newActiveId);
+          }
         }
         useStore.getState().addSystemMsg(`会话已删除`, 'info');
       }, 0);
