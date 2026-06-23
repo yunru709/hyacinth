@@ -1,15 +1,15 @@
 import type { ReactNode } from 'react';
 import { useStore } from '../store';
-import type { ActivityView, PanelView } from '../types';
+import type { ActivityView } from '../types';
 
-const ITEMS: Array<{ id: ActivityView; label: string; shortLabel: string; panel?: PanelView }> = [
+const ITEMS: Array<{ id: ActivityView; label: string; shortLabel: string }> = [
   { id: 'sessions', label: '会话', shortLabel: '会话' },
-  { id: 'model', label: '模型', shortLabel: '模型', panel: 'models' },
-  { id: 'context', label: '上下文', shortLabel: '上下', panel: 'context' },
-  { id: 'workflow', label: '工作流', shortLabel: '工作流', panel: 'workflow' },
-  { id: 'knowledge', label: '知识库', shortLabel: '知识', panel: 'knowledge' },
-  { id: 'scheduler', label: '调度', shortLabel: '调度', panel: 'scheduler' },
-  { id: 'settings', label: '设置', shortLabel: '设置', panel: 'settings' },
+  { id: 'model', label: '模型', shortLabel: '模型' },
+  { id: 'context', label: '上下文', shortLabel: '上下' },
+  { id: 'workflow', label: '工作流', shortLabel: '工作流' },
+  { id: 'knowledge', label: '知识库', shortLabel: '知识' },
+  { id: 'scheduler', label: '调度', shortLabel: '调度' },
+  { id: 'settings', label: '设置', shortLabel: '设置' },
 ];
 
 const ICONS: Record<ActivityView, ReactNode> = {
@@ -63,8 +63,6 @@ const ICONS: Record<ActivityView, ReactNode> = {
 export function ActivityRail() {
   const activeActivity = useStore(s => s.activeActivity);
   const setActiveActivity = useStore(s => s.setActiveActivity);
-  const openPanel = useStore(s => s.openPanel);
-  const closeInspector = useStore(s => s.closeInspector);
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);
 
@@ -76,14 +74,7 @@ export function ActivityRail() {
         return (
           <button
             key={item.id}
-            onClick={() => {
-              setActiveActivity(item.id);
-              if (item.panel) {
-                openPanel(item.panel);
-              } else if (item.id === 'sessions') {
-                closeInspector();
-              }
-            }}
+            onClick={() => setActiveActivity(item.id)}
             className="w-10 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
             style={{
               background: active ? 'var(--accent)' : 'transparent',

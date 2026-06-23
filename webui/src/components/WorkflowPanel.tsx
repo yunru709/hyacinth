@@ -372,7 +372,7 @@ export function WorkflowPanel() {
           </div>
 
           {/* 编辑器画布 */}
-          <div style={{ flex: 1, minHeight: 300, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
             <WorkflowGraphEditor graph={graph} onGraphChange={setGraph} />
           </div>
 
