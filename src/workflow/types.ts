@@ -1,26 +1,10 @@
 /**
  * Workflow System — 统一工作流类型定义
  *
- * ## 架构概览
- *
- * Workflow 是 Plan / Spec / TODO / (转换后的)Skill 的统一容器。
- * 三个内置 Workflow 共享以下通用模式：
- *
- *   analyze phase  → 一次性引导注入，模型分析+拆分任务
- *   execute phase → 分析结果持久注入 + 仅当前步骤，逐条驱动
- *   all done      → 框架自动停用
- *
  * 运行时由 WorkflowRegistry 注册、WorkflowManager 管理。
  * 注入架构（Zone 5）：
  *   renderPersistent → workflow_persistent（阶段引导/分析，阶段切换时变化）
  *   renderStep      → workflow_step（当前步骤指令，每步变化）
- *
- * ## 如何添加新的 Workflow
- *
- * 1. 实现 WorkflowDefinition 接口（参考 builtin/plan.workflow.ts）
- * 2. 使用 shared/file-steps.ts 中的共享工具（文件驱动型）或自行实现
- * 3. 在工厂中注册：workflowRegistry.registerBuiltin(createXxxWorkflow())
- * 4. 如需 prompt 模板，放入 src/prompts/modes/ 并通过 loadPrompt 加载
  *
  * ## handleStep 约定
  *
@@ -28,15 +12,11 @@
  *   - done / blocked  → 步骤推进（执行阶段）
  *   - add             → 追加步骤
  *   - note / progress → 记录信息（不改变步骤状态）
- *   - complete        → 阶段切换（analyze→execute）或全局完成标记
+ *   - complete        → 阶段切换或全局完成标记
  *
  * 返回值：
  *   - { newState, result } → 正常处理
  *   - null                 → 不支持该操作（框架返回 "not supported"）
- *
- * 阶段守卫模式（推荐）：
- *   分析阶段拒绝 done/blocked/add，引导模型用 complete 推进。
- *   执行阶段拒绝 complete（除非设计为手动结束）。
  */
 
 // ─── 步骤 ─────────────────────────────────────────────────────────────
@@ -61,20 +41,9 @@ export interface WorkflowStep {
 export interface WorkflowState {
   /** 工作流名称 */
   name: string;
-  /**
-   * 当前阶段。
-   * Plan:  undefined（analyze/execute 在 data.phase 中）
-   * Spec:  "spec" | "tasks" | "checklist"
-   * TODO:  undefined（analyze/execute 在 data.phase 中）
-   */
+  /** 当前阶段（由具体 Workflow 实现定义其枚举值） */
   phase?: string;
-  /**
-   * 工作流特定数据。
-   * 内置 Workflow 的 data 结构：
-   *   Plan: { task, planDir, phase }
-   *   Spec: { task, specDir, phase }
-   *   TODO: { task, analysis, steps: TodoStep[], phase }
-   */
+  /** 工作流特定数据（由具体 Workflow 实现定义其结构） */
   data: Record<string, unknown>;
   /** 步骤列表（与 handleStep 同步维护） */
   steps: WorkflowStep[];
