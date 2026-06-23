@@ -51,8 +51,8 @@ export function App() {
 
   /** 主内容区域：根据 ActivityRail 选择切换视图 */
   const renderMainContent = () => {
-    // 聊天视图（默认）
-    if (activeActivity === 'sessions' || activeActivity === 'model') {
+    // 聊天视图 — 仅 "会话" 按钮
+    if (activeActivity === 'sessions') {
       return (
         <>
           <Header sendMode={sendMode} />
@@ -83,6 +83,8 @@ export function App() {
 
     // 功能面板视图
     switch (activeActivity) {
+      case 'model':
+        return <MainPanelView title="模型中心"><ModelCenterPanel switchProvider={switchProvider} switchModel={switchModel} /></MainPanelView>;
       case 'workflow':
         return <MainPanelView title="工作流" scrollable={false}><WorkflowPanel /></MainPanelView>;
       case 'knowledge':
