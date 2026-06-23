@@ -1,5 +1,6 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import type { Tool } from './interface.js';
 
 const RESTART_EXIT_CODE = 42;
@@ -26,16 +27,16 @@ export class RestartTool implements Tool {
   constructor(private cwd: string) {}
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    // 写入重启标记文件，包含当前 session 目录名
+    const agentDir = join(homedir(), '.agent');
     try {
-      mkdirSync(join(this.cwd, '.agent'), { recursive: true });
+      mkdirSync(agentDir, { recursive: true });
       // 标记文件告诉 guardian 使用 --continue
-      writeFileSync(join(this.cwd, RESTART_FILE), 'true', 'utf-8');
+      writeFileSync(join(agentDir, '.restart-session'), 'true', 'utf-8');
 
       // 如果传了 message，保存续工指令
       const message = args.message as string | undefined;
       if (message) {
-        writeFileSync(join(this.cwd, CONTINUATION_FILE), message, 'utf-8');
+        writeFileSync(join(agentDir, '.restart-continuation'), message, 'utf-8');
       }
     } catch {}
 

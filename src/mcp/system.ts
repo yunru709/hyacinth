@@ -54,7 +54,7 @@ export class MCPSystem {
     this.cwd = deps.cwd;
     this.logger = deps.logger ?? createLogger('mcp:system');
     this.configLoader = new MCPConfigLoader();
-    this.installManager = new MCPInstallManager(deps.cwd);
+    this.installManager = new MCPInstallManager();
     this.bridge = new MCPBridge([]);
   }
 

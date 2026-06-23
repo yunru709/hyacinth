@@ -1,0 +1,19 @@
+- [ ] bundle-watcher.ts 使用 os.homedir() 而非 cwd
+- [ ] tool-watcher.ts 使用 os.homedir() 而非 cwd
+- [ ] plugin-watcher.ts 使用 os.homedir() 而非 cwd
+- [ ] agent-watcher.ts 不创建项目级目录
+- [ ] skill-watcher.ts 不创建项目级目录
+- [ ] prompt-watcher.ts 外部 prompts 使用 os.homedir()
+- [ ] provider-watcher.ts 使用 os.homedir() 而非 cwd
+- [ ] model-catalog-watcher.ts 使用 os.homedir() 而非 cwd
+- [ ] mcp-watcher.ts 添加 ~/.agent/mcp.json 为主监听路径
+- [ ] manifest-loader.ts generateDefaults 不创建目录
+- [ ] config-watcher.ts 不创建项目级目录
+- [ ] channel-watcher.ts 不创建项目级目录
+- [ ] tools/restart.ts 标记文件路径使用 os.homedir()
+- [ ] gateway/tui.ts /restart 和 /new 使用 os.homedir()
+- [ ] gateway/cli.ts 标记文件使用 os.homedir()
+- [ ] gateway/server.ts 配置监听使用 os.homedir()
+- [ ] gateway/factory.ts rollbackDir 使用 os.homedir()
+- [ ] 后端 tsc 编译无错误
+- [ ] 全局安装成功

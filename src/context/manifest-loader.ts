@@ -109,10 +109,6 @@ export class ManifestLoader {
     const m = JSON.parse(JSON.stringify(DEFAULT_CONTEXT_MANIFEST)) as ContextManifest;
 
     try {
-      const dir = path.dirname(this.manifestPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
       fs.writeFileSync(this.manifestPath, JSON.stringify(m, null, 2) + '\n', 'utf-8');
       logger.info('Generated default context-manifest.json');
     } catch (err) {

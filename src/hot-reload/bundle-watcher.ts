@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { createLogger } from '../logging/logger.js';
@@ -16,11 +17,7 @@ export interface BundleWatcherDeps {
  */
 export function watchBundles(deps: BundleWatcherDeps): fs.FSWatcher {
   const { registry, cwd, debounceMs } = deps;
-  const filePath = path.join(cwd, '.agent', 'tool-bundles.json');
-
-  // Ensure file exists on startup
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(os.homedir(), '.agent', 'tool-bundles.json');
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 

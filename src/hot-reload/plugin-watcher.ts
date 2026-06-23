@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { PluginManager } from '../plugins/manager.js';
 import { createLogger } from '../logging/logger.js';
@@ -21,18 +22,13 @@ interface PluginWatcherDeps {
  */
 export function watchPluginsDir(deps: PluginWatcherDeps): fs.FSWatcher[] {
   const logger = createLogger('hot-reload:plugins');
-  const dirs = [
-    path.join(deps.cwd, '.agent', 'plugins'),
-    path.join(deps.cwd, 'plugins'),
-  ];
+  const userPluginsDir = path.join(os.homedir(), '.agent', 'plugins');
+  try { fs.mkdirSync(userPluginsDir, { recursive: true }); } catch { /* ignore */ }
 
-  // 确保目录存在
-  for (const dir of dirs) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch {
-      // 目录创建失败（如权限不足），静默跳过
-    }
+  const dirs: string[] = [userPluginsDir];
+  const projectPluginsDir = path.join(deps.cwd, 'plugins');
+  if (fs.existsSync(projectPluginsDir)) {
+    dirs.push(projectPluginsDir);
   }
 
   let timer: ReturnType<typeof setTimeout> | null = null;

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { getProviderConfigLoader } from '../provider/config.js';
 import { createLogger } from '../logging/logger.js';
@@ -22,7 +23,7 @@ export function watchProviderConfig(deps: ProviderWatcherDeps): any[] {
   const logger = createLogger('hot-reload:provider');
   const { cwd } = deps;
 
-  const watchPath = path.join(cwd, '.agent', 'providers.json');
+  const watchPath = path.join(os.homedir(), '.agent', 'providers.json');
   const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
 
   let lastMtime = 0;

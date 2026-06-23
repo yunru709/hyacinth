@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('provider-config');
@@ -131,7 +132,7 @@ export class ProviderConfigLoader {
   private cache: ProvidersConfig = DEFAULT_PROVIDERS;
 
   constructor(cwd: string) {
-    this.configPath = path.join(cwd, '.agent', 'providers.json');
+    this.configPath = path.join(os.homedir(), '.agent', 'providers.json');
   }
 
   async load(): Promise<ProvidersConfig> {

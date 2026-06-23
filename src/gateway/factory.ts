@@ -60,6 +60,7 @@ import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { WorkflowRegistry, WorkflowManager, createWorkflowTool, createConvertSkillToWorkflowTool } from '../workflow/index.js';
+import { scanWorkflowsDir, getBuiltinWorkflowDir, getUserWorkflowDir } from '../workflow/loader.js';
 import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
@@ -174,7 +175,7 @@ export async function createAgent(
   const gitManager = new GitManager(cwd);
 
   // ── 回合回滚 ──────────────────────────────────────────────────────
-  const rollbackDir = path.join(cwd, '.agent', 'rollback');
+  const rollbackDir = path.join(os.homedir(), '.agent', 'rollback');
   const turnStore = new TurnStore(rollbackDir);
   const turnRecorder = new TurnRecorder(gitManager, turnStore, cwd);
 
@@ -443,6 +444,20 @@ export async function createAgent(
   const workflowRegistry = new WorkflowRegistry();
   const workflowManager = new WorkflowManager(workflowRegistry);
   workflowManager.setSessionDir(sessionDir);
+
+  // 注册内置工作流（todo/plan/spec/bootstrap）
+  const builtinDir = getBuiltinWorkflowDir();
+  const builtinCount = scanWorkflowsDir(builtinDir, workflowRegistry, 'builtin');
+  if (builtinCount > 0) {
+    console.log(`[workflow] Registered ${builtinCount} builtin workflows from ${builtinDir}`);
+  }
+
+  // 注册用户自定义工作流（~/.agent/workflows/*.json）
+  const userDir = getUserWorkflowDir();
+  const userCount = scanWorkflowsDir(userDir, workflowRegistry, 'file');
+  if (userCount > 0) {
+    console.log(`[workflow] Registered ${userCount} user workflows from ${userDir}`);
+  }
 
   // Zone 5 workflow persistent context（阶段引导、分析结果——阶段切换时变化，比 step 稳定）
   contextComposer.registerSource({

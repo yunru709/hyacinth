@@ -41,6 +41,7 @@ import { HeartbeatScheduler } from '../../schedule/scheduler.js';
 import type { ScheduledTask, TaskAction, ScheduleConfig } from '../../schedule/types.js';
 import { CommandRegistry } from '../../ui/command-registry.js';
 import type { SlashCommandDef } from '../../ui/command-registry.js';
+import { loadWorkflowFile } from '../../workflow/loader.js';
 
 const logger = createLogger('webui-channel');
 
@@ -479,8 +480,85 @@ export class WebUIChannel implements ChannelHandler {
       const workflows = components.workflowRegistry.getAll().map((w) => ({
         name: w.name,
         description: w.description,
+        source: w.source,
+        triggerKeywords: w.triggerKeywords ?? [],
+        relatedTools: w.relatedTools ?? [],
       }));
       return reply.send(workflows);
+    });
+
+    // 获取当前工作流状态
+    this.app.get('/api/workflows/status', async (_req: FastifyRequest, reply: FastifyReply) => {
+      const components = await this.ensureComponents();
+      const manager = components.workflowManager;
+      const active = manager.isActive();
+      const activeName = manager.getActive();
+      const state = manager.getState();
+      const def = activeName ? components.workflowRegistry.get(activeName) : null;
+      return reply.send({
+        active,
+        name: def?.name ?? null,
+        description: def?.description ?? null,
+        phase: state?.phase ?? null,
+        steps: state?.steps ?? [],
+        data: state?.data ?? {},
+        startedAt: state?.startedAt ?? null,
+      });
+    });
+
+    // 激活工作流
+    this.app.post('/api/workflows/activate', async (req: FastifyRequest, reply: FastifyReply) => {
+      const components = await this.ensureComponents();
+      const { name, params } = (req.body as { name: string; params?: Record<string, unknown> }) ?? {};
+      if (!name) {
+        return reply.code(400).send({ error: 'name is required' });
+      }
+      try {
+        const result = components.workflowManager.activate(name, params ?? {});
+        return reply.send({ success: true, message: result });
+      } catch (err) {
+        return reply.code(400).send({ error: String(err) });
+      }
+    });
+
+    // 停用工作流
+    this.app.post('/api/workflows/deactivate', async (_req: FastifyRequest, reply: FastifyReply) => {
+      const components = await this.ensureComponents();
+      components.workflowManager.deactivate();
+      return reply.send({ success: true });
+    });
+
+    // 保存工作流图 JSON
+    this.app.post('/api/workflows/save', async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const body = req.body as { name: string; graph: unknown };
+        if (!body.name || !body.graph) {
+          return reply.status(400).send({ error: 'name and graph are required' });
+        }
+
+        // 写入 ~/.agent/workflows/<name>.json
+        const userWorkflowDir = path.resolve(os.homedir(), '.agent', 'workflows');
+        if (!fs.existsSync(userWorkflowDir)) {
+          fs.mkdirSync(userWorkflowDir, { recursive: true });
+        }
+        const filePath = path.join(userWorkflowDir, `${body.name}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(body.graph, null, 2), 'utf-8');
+
+        // 编译并注册到 WorkflowRegistry（即时生效）
+        const components = await this.ensureComponents();
+        let registered = false;
+        try {
+          const def = loadWorkflowFile(filePath, 'file');
+          components.workflowRegistry.register(def);
+          registered = true;
+        } catch (err) {
+          logger.warn('Failed to compile saved workflow', { error: err instanceof Error ? err.message : String(err) });
+        }
+
+        return reply.send({ success: true, name: body.name, registered });
+      } catch (err) {
+        return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+      }
     });
 
     this.app.get('/api/status', async (_req: FastifyRequest, reply: FastifyReply) => {
@@ -599,7 +677,7 @@ export class WebUIChannel implements ChannelHandler {
       '/api/rollback/status',
       async (_req: FastifyRequest, reply: FastifyReply) => {
         try {
-          const rollbackDir = path.join(this.cwd, '.agent', 'rollback');
+          const rollbackDir = path.join(os.homedir(), '.agent', 'rollback');
           const indexFile = path.join(rollbackDir, 'index.json');
           if (!fs.existsSync(indexFile)) {
             return reply.send({ turns: [] });

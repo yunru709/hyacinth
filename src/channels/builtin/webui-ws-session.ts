@@ -342,10 +342,11 @@ export class WebUIWsSession {
 
     try {
       const path = await import('node:path');
+      const os = await import('node:os');
       const { TurnStore } = await import('../../rollback/turn-store.js');
       const { GitManager } = await import('../../evolution/git-manager.js');
 
-      const rollbackDir = path.join(this.config.cwd, '.agent', 'rollback');
+      const rollbackDir = path.join(os.homedir(), '.agent', 'rollback');
       const turnStore = new TurnStore(rollbackDir);
       const gitManager = new GitManager(this.config.cwd);
 

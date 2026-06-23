@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { MCPConfig } from '../types.js';
 import { createLogger } from '../logging/logger.js';
@@ -13,29 +14,45 @@ const BLOCKED_COMMANDS = new Set([
   'wscript', 'cscript',
 ]);
 
-const CONFIG_PATHS = ['.agent/mcp.json', '.mcp.json'];
-
 /**
  * MCPConfigLoader — 从配置文件加载 MCP Server 配置
+ *
+ * 查找顺序：
+ * 1. ~/.agent/mcp.json（用户级全局配置）
+ * 2. <cwd>/.mcp.json（项目级配置）
  */
 export class MCPConfigLoader {
-  /** 从项目目录加载 MCP 配置 */
+  /** 从配置目录加载 MCP 配置 */
   async load(projectDir: string): Promise<MCPConfig[]> {
-    for (const configPath of CONFIG_PATHS) {
-      const fullPath = path.join(projectDir, configPath);
-      try {
-        const content = await fs.readFile(fullPath, 'utf-8');
-        const config = JSON.parse(content);
-        if (config.mcpServers && typeof config.mcpServers === 'object') {
-          return this.parseConfig(
-            config.mcpServers as Record<string, unknown>,
-          );
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(`failed to load MCP config from ${configPath}: ${msg}`);
+    // 用户级全局配置优先
+    const userConfigPath = path.join(os.homedir(), '.agent', 'mcp.json');
+    try {
+      const content = await fs.readFile(userConfigPath, 'utf-8');
+      const config = JSON.parse(content);
+      if (config.mcpServers && typeof config.mcpServers === 'object') {
+        return this.parseConfig(
+          config.mcpServers as Record<string, unknown>,
+        );
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`failed to load MCP config from ~/.agent/mcp.json: ${msg}`);
     }
+
+    // 项目级 .mcp.json 作为补充
+    try {
+      const projectPath = path.join(projectDir, '.mcp.json');
+      const content = await fs.readFile(projectPath, 'utf-8');
+      const config = JSON.parse(content);
+      if (config.mcpServers && typeof config.mcpServers === 'object') {
+        return this.parseConfig(
+          config.mcpServers as Record<string, unknown>,
+        );
+      }
+    } catch (err) {
+      // 项目级配置不存在是正常的，不打印警告
+    }
+
     return [];
   }
 

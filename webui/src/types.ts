@@ -1,9 +1,9 @@
 // ── Server → Client messages ─────────────────────────────
 
 export type WebUIMode = 'normal' | 'precise';
-export type ActivityView = 'sessions' | 'model' | 'context' | 'settings' | 'knowledge' | 'scheduler';
+export type ActivityView = 'sessions' | 'model' | 'context' | 'settings' | 'knowledge' | 'scheduler' | 'workflow';
 export type InspectorView = 'status' | 'model' | 'mode' | 'context';
-export type PanelView = 'context' | 'settings' | 'models' | 'knowledge' | 'scheduler' | 'commands';
+export type PanelView = 'context' | 'settings' | 'models' | 'knowledge' | 'scheduler' | 'commands' | 'workflow';
 
 // ── Config types for settings panel ──────────────────────
 
@@ -247,6 +247,116 @@ export interface AgentInfo {
 export interface WorkflowInfo {
   name: string;
   description: string;
+  source?: string;
+  triggerKeywords?: string[];
+  relatedTools?: string[];
+}
+
+export interface WorkflowStepInfo {
+  id: number;
+  name: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  reason?: string;
+}
+
+export interface WorkflowStatus {
+  active: boolean;
+  name: string | null;
+  description: string | null;
+  phase: string | null;
+  steps: WorkflowStepInfo[];
+  data: Record<string, unknown>;
+  startedAt: string | null;
+}
+
+// ── Workflow Graph Editor types ─────────────────────────
+// 与后端 workflow JSON 对齐，支持无限子图嵌套
+
+/** 节点类型 — 与设计文档对齐 */
+export type WorkflowNodeType =
+  | 'start'        // 开始节点
+  | 'end'          // 结束节点
+  | 'agent'        // Agent 节点（核心）
+  | 'tool'         // 工具调用
+  | 'context'      // 上下文注入
+  | 'compressor'   // 压缩器
+  | 'prompt'       // 提示词模板
+  | 'transform'    // 数据转换
+  | 'branch'       // 条件分支
+  | 'loop'         // 循环
+  | 'parallel'     // 并行执行
+  | 'input'        // 输入端口
+  | 'output'       // 输出端口
+  | 'subworkflow'  // 子工作流（复合节点，可展开）
+  | 'note';        // 注释节点
+
+/** 节点端口定义 */
+export interface NodePort {
+  id: string;
+  label: string;
+  type: 'input' | 'output';
+}
+
+/** 图节点数据 */
+export interface GraphNodeData {
+  label: string;
+  description?: string;
+  nodeType: WorkflowNodeType;
+  config?: Record<string, unknown>;
+  /** 仅 subworkflow 类型 — 内嵌子图（inline 模式） */
+  subgraph?: WorkflowGraph;
+  /** 仅 subworkflow 类型 — 引用外部工作流名（reference 模式） */
+  subworkflowRef?: string;
+  /** 端口定义（可选，默认按 nodeType 自动生成） */
+  ports?: NodePort[];
+}
+
+/** React Flow 节点 */
+export interface WorkflowGraphNode {
+  id: string;
+  type: WorkflowNodeType;
+  position: { x: number; y: number };
+  data: GraphNodeData;
+}
+
+/** React Flow 边 */
+export interface WorkflowGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+  label?: string;
+  animated?: boolean;
+}
+
+/** 工作流图 — 可无限嵌套 */
+export interface WorkflowGraph {
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+  metadata?: {
+    name?: string;
+    description?: string;
+    version?: string;
+  };
+}
+
+/** 面包屑路径项（子图展开时使用） */
+export interface GraphBreadcrumb {
+  nodeId: string;
+  label: string;
+}
+
+/** 节点类型元信息（用于面板注册） */
+export interface NodeTypeMeta {
+  type: WorkflowNodeType;
+  label: string;
+  category: 'control' | 'agent' | 'data' | 'composite' | 'annotation';
+  icon: string;
+  color: string;
+  description: string;
+  hasSubgraph: boolean;
 }
 
 // ── Model Center types ───────────────────────────────────

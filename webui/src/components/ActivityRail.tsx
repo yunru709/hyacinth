@@ -6,6 +6,7 @@ const ITEMS: Array<{ id: ActivityView; label: string; shortLabel: string; panel?
   { id: 'sessions', label: '会话', shortLabel: '会话' },
   { id: 'model', label: '模型', shortLabel: '模型', panel: 'models' },
   { id: 'context', label: '上下文', shortLabel: '上下', panel: 'context' },
+  { id: 'workflow', label: '工作流', shortLabel: '工作流', panel: 'workflow' },
   { id: 'knowledge', label: '知识库', shortLabel: '知识', panel: 'knowledge' },
   { id: 'scheduler', label: '调度', shortLabel: '调度', panel: 'scheduler' },
   { id: 'settings', label: '设置', shortLabel: '设置', panel: 'settings' },
@@ -28,6 +29,15 @@ const ICONS: Record<ActivityView, ReactNode> = {
       <polygon points="12 2 2 7 12 12 22 7 12 2" />
       <polyline points="2 12 12 17 22 12" />
       <polyline points="2 17 12 22 22 17" />
+    </svg>
+  ),
+  workflow: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="6" height="6" rx="1" />
+      <rect x="16" y="3" width="6" height="6" rx="1" />
+      <rect x="9" y="15" width="6" height="6" rx="1" />
+      <path d="M5 9v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" />
+      <path d="M12 14v1" />
     </svg>
   ),
   knowledge: (

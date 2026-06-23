@@ -8,6 +8,7 @@ import { WebUIChannel } from '../channels/builtin/webui-channel.js';
 import { TuiWsSession } from '../channels/builtin/tui-ws-session.js';
 import { registerConfigChannels } from '../channels/auto-detect.js';
 import { createAgent } from './factory.js';
+import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
 import type { ProviderType } from '../types.js';
@@ -101,7 +102,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
 
   // ── 配置热监听（fs.watchFile） ────────────────────────────────────
 
-  const configPath = path.join(cwd, '.agent', 'config.json');
+  const configPath = path.join(os.homedir(), '.agent', 'config.json');
 
   /**
    * 监听 .agent/config.json 文件变更。

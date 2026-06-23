@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Tool } from '../tools/interface.js';
@@ -23,7 +24,7 @@ export interface ToolWatcherDeps {
  */
 export function watchTools(deps: ToolWatcherDeps): fs.FSWatcher {
   const { toolRegistry, cwd, debounceMs } = deps;
-  const toolsDir = path.join(cwd, '.agent', 'tools');
+  const toolsDir = path.join(os.homedir(), '.agent', 'tools');
 
   try { fs.mkdirSync(toolsDir, { recursive: true }); } catch { /* ignore */ }
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { clearPromptCache, getPromptsDir } from '../prompts/loader.js';
 import { createLogger } from '../logging/logger.js';
@@ -11,7 +12,7 @@ export interface PromptWatcherDeps {
 
 export function watchPrompts(deps: PromptWatcherDeps): fs.FSWatcher[] {
   const promptsDir = getPromptsDir();
-  const externalPromptsDir = path.join(process.cwd(), '.agent', 'prompts');
+  const externalPromptsDir = path.join(os.homedir(), '.agent', 'prompts');
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 

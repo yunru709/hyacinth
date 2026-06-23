@@ -1,0 +1,23 @@
+# Checklist
+
+- [x] `NodeExecutor` 接口定义清晰，输入输出类型明确
+- [x] `NodeExecutorRegistry` 提供 register/get/getAll 方法，支持覆盖注册
+- [x] 9 种核心节点执行器全部实现（start/end/note/prompt/context/agent/tool/branch/subworkflow）
+- [x] `subworkflow` 执行器支持 inline subgraph 和 ref 两种模式
+- [x] `branch` 执行器能根据条件选择 true/false 后继
+- [x] `compileGraphWorkflow()` 正确编译 graph JSON 为 WorkflowDefinition
+- [x] 拓扑排序正确处理分支与汇合
+- [x] `createState` 初始化图执行上下文（当前节点指针、输出表）
+- [x] `handleStep` 按拓扑推进节点执行
+- [x] `renderPersistent` 返回累积的 prompt/context 内容
+- [x] `renderStep` 返回当前节点的执行指令
+- [x] `isComplete` 在到达 end 节点时返回 true
+- [x] `loader.ts` 能自动识别 graph-based vs phase-based JSON
+- [x] 两者都有或都没有时抛出明确错误
+- [x] 现有 phase-based JSON 行为完全不变（向后兼容）
+- [x] `POST /api/workflows/save` 端点正确写入文件并即时注册
+- [x] 保存后无需重启即可在列表中看到并激活
+- [x] WebUI 编辑器保存按钮调用 API 并显示反馈
+- [x] 后端 `pnpm build` 无错误
+- [x] 前端 `pnpm build` 无错误
+- [x] 全局安装成功，`deepthink --version` 可用

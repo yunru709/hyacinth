@@ -1,0 +1,25 @@
+{
+  "name": "todo",
+  "description": "Lightweight task tracking — pure in-memory, no files required",
+  "triggerKeywords": ["todo", "task", "break down", "step by step"],
+  "relatedTools": ["read", "write", "edit", "glob", "grep", "bash"],
+  "phases": [
+    {
+      "name": "analyze",
+      "prompt": "## TODO Mode — Analyze\n\nYou are in TODO analyze phase. Your task:\n1. Analyze the user's request\n2. Break it down into actionable steps using `workflow step add`\n3. Each step should be a complete, independently executable operation\n4. When all steps are added, call `workflow step complete`\n\nStep format: concise description of what to do.\n\nUse `workflow step note` to record analysis findings.",
+      "allowedActions": ["add", "note", "progress", "complete"],
+      "onComplete": { "transitionTo": "execute" }
+    },
+    {
+      "name": "execute",
+      "prompt": "## TODO Mode — Execute\n\nExecute steps one by one. After completing a step, call `workflow step done` with the step id.\nIf blocked, call `workflow step blocked` with reason.\nAdd new steps with `workflow step add` if needed.",
+      "allowedActions": ["done", "blocked", "add", "note", "progress", "complete"],
+      "onComplete": null,
+      "stepPrompt": "**Current Step {stepId}:** {stepName}\n\nExecute this step now. When done, call `workflow step done` with id {stepId}."
+    }
+  ],
+  "complete": {
+    "condition": "all_done",
+    "phase": "execute"
+  }
+}

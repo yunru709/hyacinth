@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { MCPSystem } from '../mcp/system.js';
 import { createLogger } from '../logging/logger.js';
@@ -24,7 +25,7 @@ export function watchMcpConfig(deps: McpWatcherDeps): any[] {
   const { mcpSystem, cwd } = deps;
 
   const watchPaths = [
-    path.join(cwd, '.agent', 'mcp.json'),
+    path.join(os.homedir(), '.agent', 'mcp.json'),
     path.join(cwd, '.mcp.json'),
   ];
   const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响

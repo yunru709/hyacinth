@@ -1,6 +1,7 @@
 // Copy prompts from src to dist (cross-platform)
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 function cp(src, dst) {
   if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
@@ -12,6 +13,6 @@ function cp(src, dst) {
 }
 
 cp('src/prompts', 'dist/prompts');
-cp('src/tools/builtin', '.agent/tools');
-console.log('Builtin Python tools copied to .agent/tools');
+cp('src/tools/builtin', path.join(os.homedir(), '.agent', 'tools'));
+console.log('Builtin Python tools copied to ~/.agent/tools');
 console.log('Prompts copied to dist/prompts');

@@ -2678,7 +2678,7 @@ if (input.startsWith('/threshold ')) {
       chatLog.addSystem(theme.accent('Restarting...'));
       tui.requestRender();
       const fsSync = (await import('node:fs')).default;
-      const restartFile = path.join(process.cwd(), '.agent', '.restart-session');
+      const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
       fsSync.mkdirSync(path.dirname(restartFile), { recursive: true });
       fsSync.writeFileSync(restartFile, 'true', 'utf-8');
       setTimeout(() => process.exit(42), 200);
@@ -2690,7 +2690,7 @@ if (input.startsWith('/threshold ')) {
       chatLog.addSystem(theme.accent('Starting new session...'));
       tui.requestRender();
       const fsSync = (await import('node:fs')).default;
-      const newFlag = path.join(process.cwd(), '.agent', '.new-session');
+      const newFlag = path.join(os.homedir(), '.agent', '.new-session');
       fsSync.mkdirSync(path.dirname(newFlag), { recursive: true });
       fsSync.writeFileSync(newFlag, 'true', 'utf-8');
       setTimeout(() => process.exit(42), 200);

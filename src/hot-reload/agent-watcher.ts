@@ -73,7 +73,7 @@ export function watchAgentsJson(deps: AgentWatcherDeps): fs.FSWatcher[] {
     // 确保父目录存在
     const dir = path.dirname(watchPath);
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      // 静默跳过，目录不存在时 fs.watch 会抛出异常
     } catch {
       // 忽略
     }

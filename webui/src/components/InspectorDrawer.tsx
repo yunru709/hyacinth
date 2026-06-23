@@ -4,6 +4,7 @@ import { ContextPanel } from './ContextPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { KnowledgePanel } from './KnowledgePanel';
 import { SchedulerPanel } from './SchedulerPanel';
+import { WorkflowPanel } from './WorkflowPanel';
 
 const TITLES: Record<string, string> = {
   status: '连接状态',
@@ -15,6 +16,7 @@ const TITLES: Record<string, string> = {
   knowledge: '知识库',
   scheduler: '调度',
   commands: '命令面板',
+  workflow: '工作流',
 };
 
 interface InspectorDrawerProps {
@@ -71,6 +73,7 @@ export function InspectorDrawer({ switchProvider, switchModel, queueRemove, queu
         {activePanel === 'models' && <ModelCenterPanel switchProvider={switchProvider} switchModel={switchModel} />}
         {activePanel === 'knowledge' && <KnowledgePanel />}
         {activePanel === 'scheduler' && <SchedulerPanel />}
+        {activePanel === 'workflow' && <WorkflowPanel />}
         {activePanel === 'commands' && (
           <div className="space-y-3 text-sm">
             <div className="card p-3 space-y-2">

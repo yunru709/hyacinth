@@ -743,12 +743,12 @@ async function executeAction(
   let maxContext = parseInt(options.maxContext as string, 10) || DEFAULT_MAX_CONTEXT_TOKENS;
   const maxMessages = parseInt(options.maxMessages as string, 10) || 10000;
   // 新 session 标记（/new 命令或在重启前写入）
-  const newSessionFlag = path.join(process.cwd(), '.agent', '.new-session');
+  const newSessionFlag = path.join(os.homedir(), '.agent', '.new-session');
   const forceNewSession = fsSync.existsSync(newSessionFlag);
   if (forceNewSession) fsSync.unlinkSync(newSessionFlag);
 
   // 指定 session 恢复（/session <id>/load 写入）
-  const resumeFile = path.join(process.cwd(), '.agent', '.resume-session');
+  const resumeFile = path.join(os.homedir(), '.agent', '.resume-session');
   const resumeSessionId = fsSync.existsSync(resumeFile)
     ? (() => { const id = fsSync.readFileSync(resumeFile, 'utf-8').trim(); fsSync.unlinkSync(resumeFile); return id; })()
     : undefined;
@@ -757,7 +757,7 @@ async function executeAction(
     ? false
     : options.continue as boolean | undefined
       || (() => {
-        const restartFile = path.join(process.cwd(), '.agent', '.restart-session');
+        const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
         if (fsSync.existsSync(restartFile)) {
           fsSync.unlinkSync(restartFile);
           return true;
@@ -887,7 +887,7 @@ async function executeAction(
     if (useTui) {
       // 检测重启续工指令（TUI 模式下需在进入前读取）
       let continuationMessage: string | undefined;
-      const continuationFile = path.join(process.cwd(), '.agent', '.restart-continuation');
+      const continuationFile = path.join(os.homedir(), '.agent', '.restart-continuation');
       if (fsSync.existsSync(continuationFile)) {
         continuationMessage = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
         fsSync.unlinkSync(continuationFile);
@@ -933,7 +933,7 @@ async function executeAction(
 
     // 检测重启续工指令
     if (!prompt) {
-      const continuationFile = path.join(process.cwd(), '.agent', '.restart-continuation');
+      const continuationFile = path.join(os.homedir(), '.agent', '.restart-continuation');
       if (fsSync.existsSync(continuationFile)) {
         prompt = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
         fsSync.unlinkSync(continuationFile);

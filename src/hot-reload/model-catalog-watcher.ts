@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { modelCatalog } from '../provider/catalog.js';
 import { createLogger } from '../logging/logger.js';
@@ -22,7 +23,7 @@ export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): any[] {
   const logger = createLogger('hot-reload:model-catalog');
   const { cwd } = deps;
 
-  const watchPath = path.join(cwd, '.agent', 'models-catalog.json');
+  const watchPath = path.join(os.homedir(), '.agent', 'models-catalog.json');
   const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
 
   let lastMtime = 0;

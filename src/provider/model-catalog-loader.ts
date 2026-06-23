@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface ModelCatalogEntry {
@@ -68,7 +69,7 @@ export class ModelCatalogLoader {
   private config: ModelsCatalogConfig | null = null;
 
   constructor(cwd: string) {
-    this.configPath = path.join(cwd, '.agent', 'models-catalog.json');
+    this.configPath = path.join(os.homedir(), '.agent', 'models-catalog.json');
   }
 
   load(): ModelsCatalogConfig {

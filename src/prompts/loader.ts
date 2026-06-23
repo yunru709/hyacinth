@@ -18,6 +18,7 @@
  *   3. 需要变量的用 renderPrompt(template, { key: value })
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,7 +27,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptCache = new Map<string, string>();
 
 export function getExternalPromptsDir(): string {
-  return path.join(process.cwd(), '.agent', 'prompts');
+  return path.join(os.homedir(), '.agent', 'prompts');
 }
 
 /**

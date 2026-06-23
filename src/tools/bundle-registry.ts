@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('tool-bundle');
@@ -97,7 +98,7 @@ export class ToolBundleRegistry {
   private config: ToolBundlesConfig;
 
   constructor(cwd: string) {
-    this.configPath = path.join(cwd, '.agent', 'tool-bundles.json');
+    this.configPath = path.join(os.homedir(), '.agent', 'tool-bundles.json');
     this.config = this.load();
   }
 

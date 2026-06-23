@@ -17,6 +17,7 @@ const PANEL_MAP: Record<ActivityView, PanelView | null> = {
   settings: 'settings',
   knowledge: 'knowledge',
   scheduler: 'scheduler',
+  workflow: 'workflow',
 };
 
 /** 本地命令兜底与动作映射 */

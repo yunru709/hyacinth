@@ -54,7 +54,7 @@ export function watchSkills(deps: SkillWatcherDeps): fs.FSWatcher[] {
 
   for (const dir of dirs) {
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      // 静默跳过，目录不存在时 fs.watch 会抛出异常
     } catch { /* 忽略 */ }
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

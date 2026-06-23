@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { MCPConfig } from '../types.js';
@@ -21,8 +22,8 @@ interface InstalledIndex {
 /**
  * MCPInstallManager — 统一管理 MCP Server 的下载、版本检测和安全升级。
  *
- * 安装目录：.agent/mcp-servers/{name}/
- * 版本索引：.agent/mcp-installed.json
+ * 安装目录：~/.agent/mcp-servers/{name}/
+ * 版本索引：~/.agent/mcp-installed.json
  *
  * 安全升级：新版本先下载到 {name}.new/，成功后再替换 {name}/，失败则保留旧版。
  */
@@ -31,9 +32,9 @@ export class MCPInstallManager {
   private indexFilePath: string;
   private baseDir: string;
 
-  constructor(private cwd: string) {
-    this.baseDir = path.join(cwd, '.agent', 'mcp-servers');
-    this.indexFilePath = path.join(cwd, '.agent', 'mcp-installed.json');
+  constructor() {
+    this.baseDir = path.join(os.homedir(), '.agent', 'mcp-servers');
+    this.indexFilePath = path.join(os.homedir(), '.agent', 'mcp-installed.json');
     this.installed = this.loadIndex();
   }
 
