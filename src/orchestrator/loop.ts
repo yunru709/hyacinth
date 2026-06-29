@@ -42,7 +42,7 @@ import { scavengeToolCalls } from '../repair/scavenge.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
-import { getActiveProfile, isCompanionModeActive } from '../context/profiles.js';
+import { COMPANION_PROFILE, getActiveProfile, isCompanionModeActive } from '../context/profiles.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
@@ -1155,8 +1155,9 @@ export class AgentLoop {
     const history = await this.conversationStore.readAll(this.sessionDir);
 
     // 组装上下文 — 按当前模式 profile 过滤工具定义
-    let toolDefinitions = this.toolRegistry.getToolDefinitions();
     const profile = getActiveProfile();
+    const isCompanion = profile === COMPANION_PROFILE;
+    let toolDefinitions = this.toolRegistry.getToolDefinitions(isCompanion);
 
     // profile 指定工具白名单时，使用 profile 过滤（不走 bundle 机制）
     if (profile.tools.length > 0) {

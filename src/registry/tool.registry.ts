@@ -2,6 +2,8 @@ import { GenericRegistry, type RegistryItem } from './base.js';
 import type { Tool } from '../tools/interface.js';
 import type { ToolDefinition } from '../types.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   createGetConfigTool,
   createUpdateConfigTool,
@@ -24,6 +26,11 @@ import {
   createUpdateSubAgentTool,
   createInterruptTool,
   createSessionStatsTool,
+  createCurrentSessionTool,
+  createListSessionsTool,
+  createNewSessionTool,
+  createSwitchSessionTool,
+  createDeleteSessionTool,
   createAllowToolTool,
   createDisallowToolTool,
   createListAllowlistTool,
@@ -79,13 +86,19 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
   /**
    * 生成 LLM 格式的工具定义数组
    * 用于发送给 LLM API，告知可用工具及其参数格式
-   * 禁用的工具不会被包含
+   * 禁用的工具不会被包含。
+   *
+   * 陪伴模式下优先使用 companionDescription（拟人化描述），
+   * 避免「退出陪伴模式」等人设冲突措辞。
    */
-  getToolDefinitions(): ToolDefinition[] {
+  getToolDefinitions(companionMode?: boolean): ToolDefinition[] {
+    const isCompanion = companionMode ?? false;
     return this.getAll()
       .map((tool) => ({
         name: tool.name,
-        description: tool.description,
+        description: isCompanion && tool.companionDescription
+          ? tool.companionDescription
+          : tool.description,
         input_schema: tool.inputSchema,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -119,8 +132,8 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
    *   toggle_sub_agent, list_sub_agents, spawn_sub_agent, create_sub_agent,
    *   update_sub_agent
    *
-   * Session control tools (2):
-   *   interrupt, session_stats
+   * Session control tools (7):
+   *   interrupt, session_stats, current_session, list_sessions, new_session, switch_session, delete_session
    *
    * Permission whitelist tools (3):
    *   allow_tool, disallow_tool, list_allowlist
@@ -169,9 +182,14 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     // destroy_sub_agent needs factory.ts sessionDir; register in factory.ts after loop is created
     // (handled by importing and registering createDestroySubAgentTool directly in factory.ts)
 
-    // ── Session control tools (2) ────────────────────────
+    // ── Session control tools (7) ────────────────────────
     this.register(createInterruptTool(agentLoop));
     this.register(createSessionStatsTool(agentLoop));
+    this.register(createCurrentSessionTool(agentLoop));
+    this.register(createListSessionsTool(agentLoop, cwd));
+    this.register(createNewSessionTool(agentLoop, cwd));
+    this.register(createSwitchSessionTool(agentLoop, cwd));
+    this.register(createDeleteSessionTool(agentLoop, cwd));
 
     // ── MCP status tool ────────────────────────────────────────────
     if (mcpSystem) {
@@ -187,10 +205,42 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
 
     // ── Schedule task management tools (4) ───────────────────────────
     if (heartbeatScheduler) {
-      this.register(createAddTaskTool(heartbeatScheduler));
-      this.register(createRemoveTaskTool(heartbeatScheduler));
-      this.register(createListTasksTool(heartbeatScheduler));
-      this.register(createToggleTaskTool(heartbeatScheduler));
+      // 自动检测当前 session 的渠道（从 meta.json 读取），
+      // 这样模型无需手动指定 channel，任务自动归属到创建时的渠道。
+      const getChannel = () => {
+        try {
+          const sessionDir: string | undefined = agentLoop?.sessionDir;
+          if (sessionDir) {
+            const metaPath = path.join(sessionDir, 'meta.json');
+            if (fs.existsSync(metaPath)) {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              return (meta.channel as string) || undefined;
+            }
+          }
+        } catch { /* 读取失败不阻塞 */ }
+        return undefined;
+      };
+      // 自动检测当前 sessionId（多会话渠道如飞书需要此字段确定回复目标）
+      const getSessionId = () => {
+        try {
+          const sessionDir: string | undefined = agentLoop?.sessionDir;
+          if (sessionDir) {
+            return path.basename(sessionDir);
+          }
+        } catch { /* 读取失败不阻塞 */ }
+        return undefined;
+      };
+      // 自动检测当前模式（正常/陪伴），用于任务隔离
+      const getMode = (): 'normal' | 'companion' | undefined => {
+        const strategy = (agentLoop as any)?.composeStrategy;
+        if (strategy?.name === 'companion') return 'companion';
+        if (strategy?.name === 'default' || strategy?.name === 'precise') return 'normal';
+        return undefined;
+      };
+      this.register(createAddTaskTool(heartbeatScheduler, getChannel, getSessionId, getMode));
+      this.register(createRemoveTaskTool(heartbeatScheduler, getMode));
+      this.register(createListTasksTool(heartbeatScheduler, getMode));
+      this.register(createToggleTaskTool(heartbeatScheduler, getMode));
     }
   }
 

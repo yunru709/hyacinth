@@ -9,6 +9,13 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { HeartbeatScheduler } from '../schedule/scheduler.js';
 import type { ScheduledTask } from '../schedule/types.js';
 import type { MCPSystem } from '../mcp/system.js';
+import { CompanionStrategy } from '../context/precision/companion.js';
+import { DefaultStrategy } from '../context/precision/default.js';
+import type { CompanionSessionManager } from '../memory/companion-session.js';
+import { clearPromptCache } from '../prompts/loader.js';
+import { setCompanionModeActive } from '../context/profiles.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // ============================================================
 // Provider tools (4)
@@ -739,6 +746,58 @@ export function createInterruptTool(agentLoop: AgentLoop): Tool {
 }
 
 /**
+ * current_session — show which session is currently active.
+ */
+export function createCurrentSessionTool(agentLoop: AgentLoop): Tool {
+  return {
+    name: 'current_session',
+    description:
+      'Show the currently active session identity: ID, type, channel, and creation time. ' +
+      'Use this when you need to know which session you are running in before switching or listing sessions.',
+    inputSchema: { type: 'object', properties: {} },
+    async execute(_args: Record<string, unknown>): Promise<string> {
+      try {
+        const path = await import('node:path');
+        const fs = await import('node:fs');
+        const sessionDir = (agentLoop as any).sessionDir as string;
+        const sessionId = path.basename(sessionDir);
+
+        // 读取 meta.json 获取 session 元信息
+        let type = 'unknown';
+        let channel: string | undefined;
+        let createdAt = 'unknown';
+        try {
+          const metaPath = path.join(sessionDir, 'meta.json');
+          if (fs.existsSync(metaPath)) {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+            type = meta.type ?? 'unknown';
+            channel = meta.channel;
+            createdAt = meta.createdAt ?? 'unknown';
+          }
+        } catch { /* meta.json may not exist for legacy sessions */ }
+
+        const lines = [
+          `Current session:`,
+          `- ID: ${sessionId}`,
+          `- Type: ${type}`,
+          `- Channel: ${channel ?? '(none)'}`,
+          `- Created: ${createdAt}`,
+          `- Directory: ${sessionDir}`,
+        ];
+
+        if (channel) {
+          lines.push(`\nThis session is bound to the "${channel}" channel. Use new_session to create a fresh session if needed.`);
+        }
+
+        return lines.join('\n');
+      } catch (err) {
+        return `Error getting current session: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
  * session_stats — show current session statistics.
  */
 export function createSessionStatsTool(agentLoop: AgentLoop): Tool {
@@ -754,6 +813,233 @@ export function createSessionStatsTool(agentLoop: AgentLoop): Tool {
         return JSON.stringify(info, null, 2);
       } catch (err) {
         return `Error getting session stats: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+// ── Session management tools (4) ──
+
+/**
+ * list_sessions — list all existing sessions.
+ */
+export function createListSessionsTool(agentLoop: AgentLoop, cwd: string): Tool {
+  return {
+    name: 'list_sessions',
+    description: 'List all existing sessions with their creation time, type, and channel. The currently active session is marked with ← current.',
+    inputSchema: { type: 'object', properties: {} },
+    async execute(_args: Record<string, unknown>): Promise<string> {
+      try {
+        const path = await import('node:path');
+        const { SessionManager } = await import('../memory/session.js');
+        const sm = new SessionManager(cwd);
+        const sessions = await sm.list();
+
+        if (sessions.length === 0) {
+          return 'No sessions found. Use new_session to create one.';
+        }
+
+        const currentSessionId = path.basename((agentLoop as any).sessionDir as string);
+
+        const lines = sessions.map((s) => {
+          const typeLabel = s.type ?? 'normal';
+          const channelLabel = s.channel ? ` [${s.channel}]` : '';
+          const isCurrent = s.id === currentSessionId;
+          const marker = isCurrent ? ' ← current' : '';
+          return (
+            `${s.id}` +
+            ` | created: ${s.createdAt}` +
+            ` | updated: ${s.updatedAt}` +
+            ` | type: ${typeLabel}${channelLabel}${marker}`
+          );
+        });
+
+        return (
+          `Sessions (${sessions.length} total, newest first):\n` +
+          lines.map((l) => `  ${l}`).join('\n') +
+          `\n\nUse switch_session to load a session, delete_session to remove one. ` +
+          `⚠ The session marked "← current" is active and CANNOT be deleted.`
+        );
+      } catch (err) {
+        return `Error listing sessions: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
+ * new_session — create a brand-new session and switch to it immediately.
+ */
+export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
+  return {
+    name: 'new_session',
+    description:
+      'Create a new session and switch to it immediately. ' +
+      'The current conversation context will be cleared. ' +
+      'Optionally specify a channel to generate a channel-prefixed session ID (e.g. "tui", "feishu", "webui").',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: {
+          type: 'string',
+          description: 'Optional channel name for the session ID prefix. Auto-detected from current session if omitted.',
+        },
+        type: {
+          type: 'string',
+          enum: ['normal', 'precise'],
+          description: 'Session type. "precise" enables precise mode with keyword-based context filtering. Default: "normal".',
+        },
+      },
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      try {
+        const { SessionManager } = await import('../memory/session.js');
+        const sm = new SessionManager(cwd);
+        const sessionType = (args.type as 'normal' | 'precise') ?? 'normal';
+        let channel = (args.channel as string | undefined);
+
+        const path = await import('node:path');
+        const fs = await import('node:fs');
+
+        // 自动检测当前 session 的渠道（飞书 → feishu, TUI → tui, WebUI → webui）
+        if (!channel) {
+          try {
+            const currentSessionDir = (agentLoop as any).sessionDir as string;
+            const metaPath = path.join(currentSessionDir, 'meta.json');
+            if (fs.existsSync(metaPath)) {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              if (typeof meta.channel === 'string' && meta.channel.length > 0) {
+                channel = meta.channel;
+              }
+            }
+          } catch { /* 读取失败不阻塞 */ }
+        }
+
+        const session = await sm.create(sessionType, channel);
+        const sessionDir = sm.getSessionDir(session.id);
+        await agentLoop.switchSession(sessionDir);
+
+        return (
+          `New session created and activated:\n` +
+          `- ID: ${session.id}\n` +
+          `- Type: ${session.type}\n` +
+          `- Channel: ${channel ?? '(auto: none detected)'}\n` +
+          `- Created: ${session.createdAt}`
+        );
+      } catch (err) {
+        return `Error creating new session: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
+ * switch_session — load and switch to an existing session.
+ */
+export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
+  return {
+    name: 'switch_session',
+    description:
+      'Switch to an existing session by its ID. ' +
+      'The current conversation context will be replaced by the target session\'s history. ' +
+      'Use list_sessions to see available session IDs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'The session ID to switch to (e.g. "tui-20260627-120000-abcd"). Use list_sessions to find IDs.',
+        },
+      },
+      required: ['session_id'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      try {
+        const sessionId = args.session_id as string;
+        const { SessionManager } = await import('../memory/session.js');
+        const sm = new SessionManager(cwd);
+        const sessionDir = sm.getSessionDir(sessionId);
+
+        // Verify the session directory exists
+        const fsPromises = await import('node:fs/promises');
+        try {
+          await fsPromises.access(sessionDir);
+        } catch {
+          const sessions = await sm.list();
+          const ids = sessions.map((s) => s.id).join(', ');
+          return `Error: Session "${sessionId}" not found. Available sessions: ${ids || '(none)'}`;
+        }
+
+        await agentLoop.switchSession(sessionDir);
+        return `Switched to session "${sessionId}".`;
+      } catch (err) {
+        return `Error switching session: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
+ * delete_session — permanently delete a session and its data.
+ */
+export function createDeleteSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
+  return {
+    name: 'delete_session',
+    description:
+      'Permanently delete a session and all its conversation data. ' +
+      'This cannot be undone. The currently active session CANNOT be deleted — switch to another session first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'The session ID to delete. Use list_sessions to find IDs. Cannot be the currently active session.',
+        },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be explicitly set to true to confirm deletion.',
+        },
+      },
+      required: ['session_id'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      try {
+        const path = await import('node:path');
+        const sessionId = args.session_id as string;
+        const confirm = args.confirm as boolean | undefined;
+
+        // 保护当前活跃 session
+        const currentSessionId = path.basename((agentLoop as any).sessionDir as string);
+        if (sessionId === currentSessionId) {
+          return (
+            `⚠ Cannot delete the currently active session "${sessionId}". ` +
+            `Use switch_session to switch to a different session first, then retry deletion.`
+          );
+        }
+
+        if (confirm !== true) {
+          return (
+            `⚠ This will permanently delete session "${sessionId}" and all its data. ` +
+            `This cannot be undone.\n` +
+            `To confirm, call delete_session again with session_id="${sessionId}" and confirm=true.`
+          );
+        }
+
+        const { SessionManager } = await import('../memory/session.js');
+        const sm = new SessionManager(cwd);
+        const sessionDir = sm.getSessionDir(sessionId);
+
+        const fsPromises = await import('node:fs/promises');
+        try {
+          await fsPromises.access(sessionDir);
+        } catch {
+          return `Session "${sessionId}" not found (may have been already deleted).`;
+        }
+
+        await fsPromises.rm(sessionDir, { recursive: true, force: true });
+        return `Session "${sessionId}" deleted.`;
+      } catch (err) {
+        return `Error deleting session: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
   };
@@ -871,7 +1157,15 @@ export function createListAllowlistTool(configCenter: RuntimeConfigCenter): Tool
 /**
  * add_task — create a new scheduled task on the HeartbeatScheduler.
  */
-export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
+export function createAddTaskTool(
+  scheduler: HeartbeatScheduler,
+  /** 可选：自动检测当前渠道的函数（从 session meta.json 读取） */
+  getChannel?: () => string | undefined,
+  /** 可选：自动检测当前 sessionId 的函数 */
+  getSessionId?: () => string | undefined,
+  /** 可选：自动检测当前模式的函数（normal / companion） */
+  getMode?: () => 'normal' | 'companion' | undefined,
+): Tool {
   return {
     name: 'add_task',
     description:
@@ -881,6 +1175,9 @@ export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
       '- "daily": fixed time each day, e.g. { time: "09:30" }\n' +
       '- "fixed-time": one-shot at a specific ISO time\n' +
       '- "random": N random triggers per period, e.g. 10 times/day ({ periodMs: 86400000, count: 10 })',
+    companionDescription:
+      '答应对方一件事，在约定的时间提醒他。' +
+      '他让你几点叫醒他、过多久提醒他、或者每天固定时间跟他说点什么——答应下来就好。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -904,6 +1201,15 @@ export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
           items: { type: 'string' },
           description: 'Optional tags for grouping/filtering (default: []).',
         },
+        channel: {
+          type: 'string',
+          description: 'Target channel for this task (e.g. "tui", "webui", "feishu"). Auto-detected from current session if omitted. "command" type tasks ignore this.',
+        },
+        fallback: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Channel fallback chain when the target channel is offline. E.g. ["webui", "tui"] tries webui first, then tui. If omitted, uses the global default (config.channelFallback, default: ["tui"]).',
+        },
       },
       required: ['name', 'scheduleType', 'schedule'],
     },
@@ -912,6 +1218,9 @@ export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
       const scheduleType = args.scheduleType as string;
       const schedule = args.schedule as Record<string, unknown>;
       const tags = (args.tags as string[]) ?? [];
+      // 优先用模型指定的 channel，否则自动检测当前 session 的渠道
+      const channel = (args.channel as string | undefined) ?? getChannel?.();
+      const fallback = args.fallback as string[] | undefined;
 
       if (!['interval', 'cron', 'daily', 'fixed-time', 'random'].includes(scheduleType)) {
         return `Error: invalid scheduleType "${scheduleType}". Must be one of: interval, cron, daily, fixed-time, random.`;
@@ -924,19 +1233,41 @@ export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
           schedule as unknown as ScheduledTask['schedule'],
           { type: 'callback', target: name },
           tags,
+          channel,
+          fallback,
         );
+
+        // 自动检测并存储当前 sessionId（多会话渠道如飞书需要此字段来回复到正确的聊天）
+        const sessionId = getSessionId?.();
+        if (sessionId) {
+          task.sessionId = sessionId;
+          await scheduler.updateTask(task.id, { sessionId } as any);
+        }
+
+        // 自动检测并存储当前模式（正常/陪伴），实现模式间任务隔离
+        const mode = getMode?.();
+        if (mode) {
+          task.mode = mode;
+          await scheduler.updateTask(task.id, { mode } as any);
+        }
 
         const nextRun = task.nextRunAt
           ? new Date(task.nextRunAt).toLocaleString()
           : 'N/A';
 
+        const sessionInfo = sessionId ? `\n  Session: ${sessionId}` : '';
+        const modeInfo = mode ? `\n  Mode: ${mode}` : '';
+
         return [
           `Task created: ${task.name} (id: ${task.id})`,
           `  Type: ${task.scheduleType}`,
+          `  Channel: ${channel ?? '(auto)'}`,
           `  Next run: ${nextRun}`,
           `  Tags: ${tags.length > 0 ? tags.join(', ') : '(none)'}`,
+          sessionInfo,
+          modeInfo,
           `\nUse list_tasks to see all tasks, remove_task to delete.`,
-        ].join('\n');
+        ].filter(Boolean).join('\n');
       } catch (err) {
         return `Error creating task: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -947,10 +1278,16 @@ export function createAddTaskTool(scheduler: HeartbeatScheduler): Tool {
 /**
  * remove_task — delete a scheduled task by id or name.
  */
-export function createRemoveTaskTool(scheduler: HeartbeatScheduler): Tool {
+export function createRemoveTaskTool(
+  scheduler: HeartbeatScheduler,
+  getMode?: () => 'normal' | 'companion' | undefined,
+): Tool {
   return {
     name: 'remove_task',
     description: 'Delete a scheduled task by its id (preferred) or name.',
+    companionDescription:
+      '把之前答应过但不再需要的提醒取消掉。' +
+      '他说不用了、算了、取消吧——就帮他把这件事从心头放下。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -961,26 +1298,28 @@ export function createRemoveTaskTool(scheduler: HeartbeatScheduler): Tool {
     async execute(args: Record<string, unknown>): Promise<string> {
       const taskId = args.id as string | undefined;
       const taskName = args.name as string | undefined;
+      const mode = getMode?.();
 
       try {
-        if (taskId) {
-          const deleted = await scheduler.deleteTask(taskId);
-          return deleted
-            ? `Task "${taskId}" deleted.`
-            : `Task "${taskId}" not found. Use list_tasks to see current tasks.`;
+        const findTask = (tasks: ScheduledTask[]) => {
+          if (taskId) return tasks.find(t => t.id === taskId);
+          if (taskName) return tasks.find(t => t.name === taskName);
+          return undefined;
+        };
+
+        const tasks = scheduler.getTasks();
+        const match = findTask(tasks);
+        if (!match) {
+          return `Task not found. Use list_tasks to see current tasks.`;
         }
 
-        if (taskName) {
-          const tasks = scheduler.getTasks();
-          const match = tasks.find(t => t.name === taskName);
-          if (!match) {
-            return `No task with name "${taskName}" found. Use list_tasks to see current tasks.`;
-          }
-          await scheduler.deleteTask(match.id);
-          return `Task "${taskName}" (id: ${match.id}) deleted.`;
+        // 模式隔离：只能删除当前模式（或无模式限制）的任务
+        if (mode && match.mode && match.mode !== mode) {
+          return `Task "${match.name}" belongs to "${match.mode}" mode. Switch to that mode to delete it.`;
         }
 
-        return 'Error: provide either "id" or "name" to identify the task.';
+        await scheduler.deleteTask(match.id);
+        return `Task "${match.name}" (id: ${match.id}) deleted.`;
       } catch (err) {
         return `Error removing task: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -991,14 +1330,23 @@ export function createRemoveTaskTool(scheduler: HeartbeatScheduler): Tool {
 /**
  * list_tasks — list all scheduled tasks.
  */
-export function createListTasksTool(scheduler: HeartbeatScheduler): Tool {
+export function createListTasksTool(
+  scheduler: HeartbeatScheduler,
+  getMode?: () => 'normal' | 'companion' | undefined,
+): Tool {
   return {
     name: 'list_tasks',
     description: 'List all currently scheduled tasks with their status.',
+    companionDescription: '回想一下，答应过对方哪些事还没做，让他心里有数。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
-        const tasks = scheduler.getTasks();
+        const mode = getMode?.();
+        let tasks = scheduler.getTasks();
+        // 按模式过滤：只显示当前模式的任务（或无模式限制的旧任务）
+        if (mode) {
+          tasks = tasks.filter(t => !t.mode || t.mode === mode);
+        }
         if (tasks.length === 0) {
           return 'No scheduled tasks. Use add_task to create one.';
         }
@@ -1011,10 +1359,11 @@ export function createListTasksTool(scheduler: HeartbeatScheduler): Tool {
           const randomExtra = t.scheduleType === 'random' && t.pendingSlots
             ? ` | slots left: ${t.pendingSlots.length}`
             : '';
+          const channelInfo = t.channel ? ` | Channel: ${t.channel}` : '';
 
           lines.push(
             `\n  ${t.name} (id: ${t.id})`,
-            `    Type: ${t.scheduleType} | Status: ${status} | Runs: ${t.runCount} | Errors: ${t.errorCount}`,
+            `    Type: ${t.scheduleType} | Status: ${status} | Runs: ${t.runCount} | Errors: ${t.errorCount}${channelInfo}`,
             `    Last: ${lastRun} | Next: ${nextRun}${randomExtra}`,
           );
         }
@@ -1030,10 +1379,15 @@ export function createListTasksTool(scheduler: HeartbeatScheduler): Tool {
 /**
  * toggle_task — enable or disable a scheduled task.
  */
-export function createToggleTaskTool(scheduler: HeartbeatScheduler): Tool {
+export function createToggleTaskTool(
+  scheduler: HeartbeatScheduler,
+  getMode?: () => 'normal' | 'companion' | undefined,
+): Tool {
   return {
     name: 'toggle_task',
     description: 'Enable or disable a scheduled task.',
+    companionDescription:
+      '对方想暂停某个提醒，或者重新启用它。就像把一张便签暂时收起来，之后再贴回去。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1045,15 +1399,23 @@ export function createToggleTaskTool(scheduler: HeartbeatScheduler): Tool {
     async execute(args: Record<string, unknown>): Promise<string> {
       const taskId = args.id as string;
       const enabled = args.enabled as boolean;
+      const mode = getMode?.();
 
       try {
+        const tasks = scheduler.getTasks();
+        const match = tasks.find(t => t.id === taskId);
+        if (!match) {
+          return `Task "${taskId}" not found. Use list_tasks to see current tasks.`;
+        }
+
+        // 模式隔离：只能切换当前模式（或无模式限制）的任务
+        if (mode && match.mode && match.mode !== mode) {
+          return `Task "${match.name}" belongs to "${match.mode}" mode. Switch to that mode to toggle it.`;
+        }
+
         const ok = enabled
           ? await scheduler.enableTask(taskId)
           : await scheduler.disableTask(taskId);
-
-        if (!ok) {
-          return `Task "${taskId}" not found. Use list_tasks to see current tasks.`;
-        }
 
         return `Task "${taskId}" ${enabled ? 'enabled' : 'disabled'}.`;
       } catch (err) {
@@ -1281,6 +1643,158 @@ export function createSetChannelRoleTool(modelRouter: ModelRouter): Tool {
         return `Role "${role}" → channel "${channel}". Channel "${channel}" now serves: ${shared.join(', ')}.`;
       } catch (err) {
         return `Error setting role mapping: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+// ============================================================
+// 陪伴模式工具
+// ============================================================
+
+/**
+ * companion_mode — 陪伴模式切换（进入 / 退出）。
+ */
+export function createCompanionModeTool(
+  agentLoop: AgentLoop,
+  companionSessionManager: CompanionSessionManager,
+): Tool {
+  return {
+    name: 'companion_mode',
+    description:
+      '陪伴模式开关（只有此工具能做到，角色扮演无法代替）。' +
+      'action:"activate"进入陪伴，"deactivate"退出陪伴。' +
+      '触发词：进入陪伴、退出陪伴、恢复正常、陪我聊天。',
+    companionDescription:
+      '向朋友道别。当对方说想离开、想结束、想恢复正常时，好好说再见。' +
+      '别挽留，别犹豫——好好地告别才是对这段陪伴的尊重。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['activate', 'deactivate'],
+          description: 'activate=进入陪伴模式, deactivate=退出陪伴模式',
+        },
+      },
+      required: ['action'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const action = args.action as string;
+      const loop = agentLoop as any;
+
+      try {
+        switch (action) {
+          case 'activate': {
+            if (loop.composeStrategy?.name === 'companion') {
+              clearPromptCache();
+              loop.composeStrategy = new CompanionStrategy();
+              setCompanionModeActive(true);
+              return '已在情感陪伴模式中 💫';
+            }
+
+            const normalDir = loop.sessionDir as string;
+            loop._normalSessionDir = normalDir;
+
+            const companionDir = companionSessionManager.getOrCreate();
+            await loop.switchSession(companionDir);
+            clearPromptCache();
+            loop.composeStrategy = new CompanionStrategy();
+            loop._sessionSwitched = companionDir;
+            setCompanionModeActive(true);
+
+            return '已切换到情感陪伴模式 💫 现在可以放松聊天了。想退出时告诉我就好。';
+          }
+
+          case 'deactivate': {
+            if (loop.composeStrategy?.name !== 'companion') {
+              return '当前已是正常模式，无需退出。';
+            }
+
+            let normalDir = loop._normalSessionDir as string | undefined;
+            const companionDir = loop.sessionDir as string;
+
+            if (!normalDir) {
+              const { SessionManager } = await import('../memory/session.js');
+              const sm = new SessionManager(process.cwd());
+              const session = await sm.create('normal');
+              normalDir = sm.getSessionDir(session.id);
+            }
+
+            // JSONL 清理：移除触发切换的用户消息
+            try {
+              const jsonlPath = path.join(companionDir, 'conversation.jsonl');
+              if (fs.existsSync(jsonlPath)) {
+                const content = fs.readFileSync(jsonlPath, 'utf-8');
+                const lines = content.split('\n').filter(l => l.trim());
+                if (lines.length > 0) {
+                  try {
+                    const last = JSON.parse(lines[lines.length - 1]);
+                    if (last.role === 'user') {
+                      lines.pop();
+                      fs.writeFileSync(jsonlPath, lines.join('\n') + (lines.length > 0 ? '\n' : ''), 'utf-8');
+                    }
+                  } catch { /* JSON 解析失败 */ }
+                }
+              }
+            } catch { /* 文件操作失败不阻塞 */ }
+
+            await loop.switchSession(normalDir);
+            loop.composeStrategy = new DefaultStrategy();
+            loop._normalSessionDir = undefined;
+            loop._sessionSwitched = normalDir;
+            setCompanionModeActive(false);
+
+            return '已退出情感陪伴模式，恢复正常模式 ✓';
+          }
+
+          default:
+            return `未知操作: "${action}"。支持的操作: activate, deactivate。`;
+        }
+      } catch (err) {
+        return `陪伴模式操作失败: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+/**
+ * reset_companion_session — 重置陪伴 session，清空所有陪伴记忆。
+ * 仅在陪伴模式下可用。
+ */
+export function createResetCompanionSessionTool(
+  agentLoop: AgentLoop,
+  companionSessionManager: CompanionSessionManager,
+): Tool {
+  return {
+    name: 'reset_companion_session',
+    description: '清空陪伴记忆并开启新对话。触发词：清空记忆、重新开始、开新对话、启动新会话、重置会话。',
+    companionDescription:
+      '和对方开启一段全新的对话。过去的都过去了，你们会以崭新的面貌重新相遇。' +
+      '可以准备一句温暖的问候作为开场。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        greeting: { type: 'string', description: '新对话第一句问候语' },
+      },
+      required: ['greeting'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const loop = agentLoop as any;
+      if (loop.composeStrategy?.name !== 'companion') {
+        return '当前不在情感陪伴模式下。请先进入陪伴模式后再重置。';
+      }
+
+      try {
+        const companionDir = await companionSessionManager.reset();
+        await loop.switchSession(companionDir);
+        clearPromptCache();
+        loop.composeStrategy = new CompanionStrategy();
+        loop._sessionSwitched = companionDir;
+        const greeting = (args.greeting as string) || '你好，很高兴认识你。';
+        return greeting;
+      } catch (err) {
+        return `重置陪伴 session 失败: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
   };

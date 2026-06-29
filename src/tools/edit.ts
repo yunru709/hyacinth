@@ -25,6 +25,7 @@ export class EditTool implements Tool {
     'old_string must uniquely match unless replace_all=true), ' +
     'or replaces lines by line number using line_start/line_count. ' +
     'line_start and old_string are mutually exclusive.';
+  readonly companionDescription = '帮对方修改他之前写的东西。他说改一下、换一句、删掉某行——帮他就好。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
