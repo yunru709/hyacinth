@@ -2,6 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { SessionManager } from '../memory/session.js';
+import { CompanionSessionManager } from '../memory/companion-session.js';
+import { setCompanionModeActive } from '../context/profiles.js';
 import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -26,7 +28,7 @@ import {
   createKbUpdateTool,
   createKbToggleTool,
 } from '../knowledge/index.js';
-import { DefaultStrategy, PreciseStrategy, type ComposeStrategy } from '../context/precision/index.js';
+import { DefaultStrategy, PreciseStrategy, CompanionStrategy, type ComposeStrategy } from '../context/precision/index.js';
 import { CompressorOrchestrator, StructuredSummarizer } from '../context/compressor.js';
 import { TokenCounter } from '../context/tokenizer.js';
 import { LLMOrchestrator } from '../orchestrator/planner.js';
@@ -54,17 +56,19 @@ import { ModelRouter } from '../provider/model-router.js';
 import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js';
 import { ModelChannelRegistry } from '../provider/model-channel-registry.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
+import type { ScheduledTask } from '../schedule/types.js';
 import { HotReloadManager } from '../hot-reload/index.js';
 import { ProviderConfigLoader, getProviderConfigLoader } from '../provider/config.js';
 import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
-import { WorkflowRegistry, WorkflowManager, createWorkflowTool, createConvertSkillToWorkflowTool } from '../workflow/index.js';
-import { scanWorkflowsDir, getBuiltinWorkflowDir, getUserWorkflowDir } from '../workflow/loader.js';
 import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
+import { FlowRegistry, BootstrapFlow, TodoFlow, createCompleteFlowStepTool, createActivateTodoTool, createAddTodoStepTool } from '../flow/index.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
 import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
+import { createSystemInfoTool } from '../tools/system-info.js';
+import { createChannelInfoTool, setChannelsInfo } from '../tools/channel-info.js';
 
 import { collectSystemInfo, buildEnvironmentSection } from '../env/index.js';
 import type { ChannelsInfo } from '../env/index.js';
@@ -110,8 +114,6 @@ export interface AgentComponents {
   contextComposer: LayeredContextComposer;
   mcpSystem: MCPSystem;
   hotReloadManager: HotReloadManager;
-  workflowRegistry: WorkflowRegistry;
-  workflowManager: WorkflowManager;
   modelRouter: ModelRouter;
   providerConfigLoader: ProviderConfigLoader;
   knowledgeBase: KnowledgeBase;
@@ -119,8 +121,17 @@ export interface AgentComponents {
   kbWatcher: KnowledgeWatcher;
   structuredStore: StructuredStore;
   composeStrategy: ComposeStrategy;
+  companionSessionManager: CompanionSessionManager;
   backgroundRegistry: BackgroundProcessRegistry;
   scheduler: HeartbeatScheduler;
+  /** 渠道 Loop 注册表 — 供渠道注册自己的 loop，定时任务据此路由
+   *  key: channel name (e.g. "tui", "feishu")
+   *  对于多会话渠道（飞书等），notifyTaskFired 需要同时传入 sessionId */
+  channelLoops: Map<string, {
+    notifyTaskFired(name: string, sessionId?: string): Promise<void>;
+    /** 渠道主动推送消息（非回复模式），飞书等渠道用此方法发送定时任务结果 */
+    sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+  }>;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -128,11 +139,11 @@ export interface AgentComponents {
 // ## 组件装配原则
 //
 // 这是整个 Agent 的唯一装配入口。所有模块在此创建、配置、注入。
-// 如果你要新增系统级组件（如新的 ContextSource、Tool、Workflow）：
+// 如果你要新增系统级组件（如新的 ContextSource、Tool、Flow）：
 //
 //   1. 在此文件中注册 ContextSource 到 composer（Zone 注入）
 //   2. 在此文件中注册 Tool 到 toolRegistry
-//   3. 在此文件中注册 Workflow 到 workflowRegistry
+//   3. 在此文件中注册 Flow 到 flowRegistry
 //   4. 不要在其他地方分散注册——保持单一装配点
 //
 // 提示词、配置均通过外部化体系加载（loadPrompt / RuntimeConfigCenter），
@@ -150,7 +161,7 @@ export async function createAgent(
   const sessionManager = options.sessionManager ?? new SessionManager(cwd);
   let sessionDir: string;
   let currentSessionId: string;
-  let sessionType: 'normal' | 'precise' = 'normal';
+  let sessionType: 'normal' | 'precise' | 'companion' = 'normal';
 
   if (sessionId) {
     const session = await sessionManager.resume(sessionId);
@@ -179,6 +190,9 @@ export async function createAgent(
   const turnStore = new TurnStore(rollbackDir);
   const turnRecorder = new TurnRecorder(gitManager, turnStore, cwd);
 
+  // ── Flow 注册表（Flow 在 persona 初始化后注册） ────────────────────
+  const flowRegistry = new FlowRegistry();
+
   // ── 配置加载 ──────────────────────────────────────────────────────
   const configManager = new ConfigManager(cwd);
   const config = await configManager.load();
@@ -187,6 +201,10 @@ export async function createAgent(
   const personaSetup = await ensureGlobalPersonaFiles();
   const effectivePersonaDir = personaDir ?? personaSetup.personaDir;
   const effectiveBootstrapStatus = bootstrapStatus ?? (await getBootstrapStatus(effectivePersonaDir));
+
+  // ── 注册 Flow（Bootstrap + TODO）────────────────────────────────────
+  flowRegistry.register(new BootstrapFlow(effectivePersonaDir));
+  flowRegistry.register(new TodoFlow());
 
   // ── Provider Config Loader（必须在 getDefaultConfig 之前，确保 providerDefault 读到 JSON） ──
   const providerConfigLoader = getProviderConfigLoader(cwd);
@@ -253,6 +271,35 @@ export async function createAgent(
     getContent: () => buildEnvironmentSection(envInfo, channelsInfo, { cwd }),
   });
 
+  // 初始化渠道信息缓存（供 channel_info 工具查询）
+  setChannelsInfo(channelsInfo ?? []);
+
+  // ── 渠道上下文（告诉模型当前在哪个渠道、哪个 session） ──────────────
+  const currentChannel = options.channel;
+  const currentSessionIdForCtx = currentSessionId;
+  contextComposer.registerSource({
+    name: 'channel_context',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '当前渠道和会话上下文',
+    getContent: () => {
+      if (!currentChannel) return '';
+      return `You are currently communicating via **${currentChannel}** channel (session: ${currentSessionIdForCtx.slice(0, 20)}...).`;
+    },
+  });
+
+  // ── Flow 注入（Zone 5 flow_injection section）─────────────────────
+  contextComposer.registerSource({
+    name: 'flow',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: 'Flow 步骤注入（当前活跃 Flow 的步骤提示词）',
+    getContent: () => {
+      const active = flowRegistry.getActive();
+      return active?.getInjection() ?? '';
+    },
+  });
+
   // ── 跨会话 Memory 系统 ─────────────────────────────────────────────
   const memoryFilePath = config.memoryFile ?? path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md');
   const memoryDir = path.dirname(memoryFilePath);
@@ -269,28 +316,19 @@ export async function createAgent(
     getContent: () => memoryStore.formatForContext(),
   });
 
-  // ── 历史对话边界标记 — 对抗长上下文注意力漂移 ──────────────────────
+  // ── 陪伴模式 Memory ──────────────────────────────────────────────────
+  const companionMemoryPath = path.join(os.homedir(), '.agent', 'prompts', 'persona', 'PartnerMemory.md');
+  if (!fs.existsSync(path.dirname(companionMemoryPath))) {
+    fs.mkdirSync(path.dirname(companionMemoryPath), { recursive: true });
+  }
+  const companionMemoryStore = new MemoryStore(companionMemoryPath);
+  companionMemoryStore.initializeIfNeeded();
   contextComposer.registerSource({
-    name: 'history_boundary_before',
+    name: 'companion_memory',
     strategy: 'always_inline',
-    cacheability: 'live',
-    description: '历史对话开始标记',
-    getContent: () => {
-      return contextComposer.activeConditions.has('precise_mode')
-        ? '── 以下为检索有关信息 ──'
-        : '── 以下为此前对话 ──';
-    },
-  });
-  contextComposer.registerSource({
-    name: 'history_boundary_after',
-    strategy: 'always_inline',
-    cacheability: 'live',
-    description: '历史对话结束标记',
-    getContent: () => {
-      return contextComposer.activeConditions.has('precise_mode')
-        ? '── 以上为检索有关信息 ──'
-        : '── 以上为此前对话 ──';
-    },
+    cacheability: 'manifest',
+    description: '陪伴模式专属记忆',
+    getContent: () => companionMemoryStore.formatForContext(),
   });
 
   // ── 会话临时工具 ContextSource ──────────────────────────────────────
@@ -341,6 +379,9 @@ export async function createAgent(
   toolRegistry.register(createProcessListTool(backgroundRegistry));
   toolRegistry.register(createProcessKillTool(backgroundRegistry));
   toolRegistry.register(createProcessOutputTool(backgroundRegistry));
+  // 环境信息按需查询工具（替代 Zone 1 静态注入）
+  toolRegistry.register(createSystemInfoTool());
+  toolRegistry.register(createChannelInfoTool());
   const conversationStore = new ConversationStore(maxMessages);
   const eventStore = new EventStore();
   const statsManager = new StatsManager();
@@ -440,61 +481,6 @@ export async function createAgent(
     });
   }
 
-  // ── Workflow System ──────────────────────────────────────────────
-  const workflowRegistry = new WorkflowRegistry();
-  const workflowManager = new WorkflowManager(workflowRegistry);
-  workflowManager.setSessionDir(sessionDir);
-
-  // 注册内置工作流（todo/plan/spec/bootstrap）
-  const builtinDir = getBuiltinWorkflowDir();
-  const builtinCount = scanWorkflowsDir(builtinDir, workflowRegistry, 'builtin');
-  if (builtinCount > 0) {
-    console.log(`[workflow] Registered ${builtinCount} builtin workflows from ${builtinDir}`);
-  }
-
-  // 注册用户自定义工作流（~/.agent/workflows/*.json）
-  const userDir = getUserWorkflowDir();
-  const userCount = scanWorkflowsDir(userDir, workflowRegistry, 'file');
-  if (userCount > 0) {
-    console.log(`[workflow] Registered ${userCount} user workflows from ${userDir}`);
-  }
-
-  // Zone 5 workflow persistent context（阶段引导、分析结果——阶段切换时变化，比 step 稳定）
-  contextComposer.registerSource({
-    name: 'workflow-persistent',
-    strategy: 'always_inline',
-    cacheability: 'live',
-    description: '当前工作流持久上下文',
-    getContent: () => workflowManager.isActive() ? (workflowManager.renderPersistent() ?? '') : '',
-  });
-
-  // Zone 5 workflow current step（每轮变化）
-  contextComposer.registerSource({
-    name: 'workflow-step',
-    strategy: 'always_inline',
-    cacheability: 'live',
-    description: '当前工作流步骤指令',
-    getContent: () => workflowManager.isActive() ? (workflowManager.renderStep() ?? '') : '',
-  });
-
-  // Zone 2 manifest: 每个 Workflow 注册为 lazy_expand 源
-  for (const wf of workflowRegistry.getAll()) {
-    contextComposer.registerSource({
-      name: `workflow-${wf.name}`,
-      strategy: 'lazy_expand',
-      cacheability: 'manifest',
-      description: wf.description,
-      getContent: () => {
-        const w = workflowRegistry.get(wf.name);
-        return w ? workflowRegistry.getFullDefinitions([wf.name]) : '';
-      },
-    });
-  }
-
-  // 注册 workflow 工具（统一入口）+ 转换工具（模型专用）
-  toolRegistry.register(createWorkflowTool(workflowRegistry, workflowManager));
-  toolRegistry.register(createConvertSkillToWorkflowTool(skillRegistry, workflowRegistry, workflowManager));
-
   // ── 知识库（Zone 4，默认关闭）───────────────────────────────────────
   const kbDir = path.join(os.homedir(), '.agent', 'knowledge');
   const kbStorePath = path.join(kbDir, 'kb.sqlite');
@@ -573,12 +559,11 @@ export async function createAgent(
     dependencyAnalyzer,
     agentRegistry,
     effectivePersonaDir,
-    effectiveBootstrapStatus,
+    flowRegistry,
     providerRouter,
     new Set(config.safety?.dangerousTools ?? ['write', 'bash']),
     new Set(),
     configCenter,
-    workflowManager,
     modelRouter,
     turnRecorder,
   );
@@ -587,16 +572,31 @@ export async function createAgent(
   loop.kbState = kbState;
   loopRef = loop; // wire fallback notification
 
+  // ── Bootstrap Flow 自动激活（首次安装后自动运行） ──
+  if (effectiveBootstrapStatus === 'pending') {
+    flowRegistry.activate('bootstrap');
+  }
+
   // 注册后台进程注册表到 LifecycleSupervisor（优雅关闭时自动清理）
   if (supervisor) {
     supervisor.registerBackgroundRegistry(backgroundRegistry);
   }
 
+  // ── 陪伴模式 Session 管理（全局单例，所有渠道共享） ──────────────
+  const companionSessionManager = CompanionSessionManager.getInstance();
+
   // 注入精确模式策略（默认普通模式）
   const composeStrategy = sessionType === 'precise'
     ? new PreciseStrategy(sessionDir)
-    : new DefaultStrategy();
+    : sessionType === 'companion'
+      ? new CompanionStrategy()
+      : new DefaultStrategy();
   loop.composeStrategy = composeStrategy;
+
+  // 启动时恢复陪伴模式全局标志
+  if (sessionType === 'companion') {
+    setCompanionModeActive(true);
+  }
 
   // ── Read 工具的图片处理器 — 将读到的图片注入 ImageStore ──
   const readTool = toolRegistry.get('read');
@@ -638,9 +638,19 @@ export async function createAgent(
   const { createDestroySubAgentTool } = await import('../tools/runtime-control.js');
   toolRegistry.register(createDestroySubAgentTool(agentRegistry, sessionDir));
 
+  // ── 陪伴模式工具注册 ──────────────────────────────────────────────
+  const { createCompanionModeTool, createResetCompanionSessionTool } = await import('../tools/runtime-control.js');
+  toolRegistry.register(createCompanionModeTool(loop, companionSessionManager));
+  toolRegistry.register(createResetCompanionSessionTool(loop, companionSessionManager));
+
   // ── 回合回滚工具 ──
   toolRegistry.register(createRollbackStatusTool(turnStore, () => loop.turnNumber));
   toolRegistry.register(createRollbackTool(turnStore, gitManager, () => loop.turnNumber));
+
+  // ── Flow 控制工具 ──
+  toolRegistry.register(createCompleteFlowStepTool(flowRegistry));
+  toolRegistry.register(createActivateTodoTool(flowRegistry));
+  toolRegistry.register(createAddTodoStepTool(flowRegistry));
 
   // 注册 MCP 状态变更回调 — 消息通过 ContextSource (runtime:mcp_status) 自动注入 Zone 5，
   // 此处仅保留日志记录（未来可扩展为 TUI 状态栏更新）
@@ -650,19 +660,122 @@ export async function createAgent(
 
   loop.setScheduler(heartbeatScheduler);
 
-  // 定时任务处理器：任务触发时执行动作或唤醒 Agent
+  // ── 渠道 Loop 注册表（定时任务渠道感知路由） ──
+  // 导出为模块级单例，供 feishu-channel 等渠道在 start() 时自行注册
+  if (!(globalThis as any).__channelLoopRegistry) {
+    (globalThis as any).__channelLoopRegistry = new Map<string, {
+      notifyTaskFired(name: string, sessionId?: string): Promise<void>;
+      sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+    }>();
+  }
+  const channelLoops: Map<string, {
+    notifyTaskFired(name: string, sessionId?: string): Promise<void>;
+    sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+  }> = (globalThis as any).__channelLoopRegistry;
+  // 主 loop 注册为 'tui'（TUI 本地模式的默认渠道）
+  channelLoops.set('tui', loop);
+
+  /** 按降级链查找第一个在线的渠道 Loop */
+  const resolveChannelLoop = (task: ScheduledTask) => {
+    // 1) 首选渠道
+    if (task.channel) {
+      const l = channelLoops.get(task.channel);
+      if (l) return { loop: l, channel: task.channel, level: 'primary' as const };
+    }
+
+    // 2) 任务级降级链
+    const fallback = task.fallback ?? configCenter.get<string[]>('schedule.channelFallback');
+    if (fallback && fallback.length > 0) {
+      for (const ch of fallback) {
+        const l = channelLoops.get(ch);
+        if (l) return { loop: l, channel: ch, level: 'fallback' as const };
+      }
+    }
+
+    // 3) 最后兜底：飞书（持久消息渠道），再不行才用本地 loop
+    const feishuLoop = channelLoops.get('feishu');
+    if (feishuLoop) return { loop: feishuLoop, channel: 'feishu', level: 'last-resort' as const };
+    return { loop, channel: 'tui', level: 'last-resort' as const };
+  };
+
+  // 定时任务处理器：任务触发时根据 channel + 降级链路由到对应渠道的 Loop
   heartbeatScheduler.setHandler(async (task) => {
-    logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type });
+    logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type, channel: task.channel });
+
+    // 模式隔离：跳过不属于当前模式的任务
+    if (task.mode) {
+      const currentMode = (loop as any).composeStrategy?.name === 'companion' ? 'companion' : 'normal';
+      if (task.mode !== currentMode) {
+        logger.info(`Task "${task.name}" skipped: mode "${task.mode}" ≠ current "${currentMode}"`);
+        return;
+      }
+    }
+
     if (task.action.type === 'command') {
+      // 命令式任务 — 不需要渠道，直接执行 shell 命令
       const { exec } = await import('node:child_process');
       exec(task.action.target, { timeout: 30000 }, (err, stdout, stderr) => {
         if (err) logger.error(`Task command failed: ${task.name}`, err, { stderr: stderr.trim() });
         else logger.info(`Task command OK: ${task.name}`, { stdout: stdout.trim() });
       });
+      return;
+    }
+
+    // 陪伴模式：广播到所有活跃渠道（TUI + 飞书共享同一对话）
+    if (task.mode === 'companion') {
+      const feishuEntry = channelLoops.get('feishu');
+      const collectedTexts: string[] = [];
+
+      // 在 TUI loop 上运行 Agent，同时收集输出用于飞书推送
+      const originalHandler = (loop as any).outputHandler;
+      if (originalHandler) {
+        const dualHandler = {
+          ...originalHandler,
+          onText: (text: string) => {
+            collectedTexts.push(text);
+            originalHandler.onText?.(text);
+          },
+        };
+        (loop as any).outputHandler = dualHandler;
+      }
+      try {
+        await loop.notifyTaskFired(task.name);
+      } finally {
+        if (originalHandler) {
+          (loop as any).outputHandler = originalHandler;
+        }
+      }
+
+      // 将 Agent 回复推送到飞书
+      if (feishuEntry?.sendProactiveMessage && collectedTexts.length > 0) {
+        const response = collectedTexts.join('').trim();
+        if (response) {
+          const feishuSessionId = (task as any).sessionId as string | undefined;
+          await feishuEntry.sendProactiveMessage(feishuSessionId ?? '', response).catch((err: Error) =>
+            logger.error(`Companion task feishu push failed: ${task.name}`, err)
+          );
+        }
+      }
+      return;
+    }
+
+    // AI 交互式任务 — 按降级链查找可用渠道
+    const { loop: targetEntry, channel: usedChannel, level } = resolveChannelLoop(task);
+    if (level === 'fallback') {
+      logger.warn(`Task "${task.name}" channel "${task.channel}" offline, downgraded to "${usedChannel}"`, { taskId: task.id });
+    } else if (level === 'last-resort' && task.channel) {
+      logger.warn(`Task "${task.name}" channel "${task.channel}" and all fallbacks offline, last-resort to "${usedChannel}"`, { taskId: task.id });
+    }
+
+    // 非 TUI 渠道（飞书等）：主动推送模式
+    // handleTaskNotification 内部会运行 Agent、收集输出、发送到飞书聊天
+    const sessionId = (task as any).sessionId as string | undefined;
+    const entry = targetEntry as { notifyTaskFired: Function; sendProactiveMessage?: Function };
+    if (entry.sendProactiveMessage && usedChannel !== 'tui') {
+      await entry.notifyTaskFired(task.name, sessionId);
     } else {
-      // 唤醒 Agent，自动发起一轮对话执行任务
-      loop.notifyTaskFired(task.name).catch(err =>
-        logger.error(`Task notify failed: ${task.name}`, err instanceof Error ? err : new Error(String(err)))
+      entry.notifyTaskFired(task.name).catch((err: Error) =>
+        logger.error(`Task notify failed (channel: ${usedChannel}): ${task.name}`, err)
       );
     }
   });
@@ -768,8 +881,6 @@ export async function createAgent(
     contextComposer,
     mcpSystem,
     hotReloadManager,
-    workflowRegistry,
-    workflowManager,
     modelRouter,
     providerConfigLoader,
     knowledgeBase,
@@ -777,7 +888,9 @@ export async function createAgent(
     kbWatcher,
     structuredStore,
     composeStrategy,
+    companionSessionManager,
     backgroundRegistry,
     scheduler: heartbeatScheduler,
+    channelLoops,
   };
 }

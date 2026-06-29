@@ -261,7 +261,14 @@ export class FeishuChannel implements ChannelHandler {
    * 用于定时任务等场景，此时没有 incoming message，需要根据 sessionId 查找 chatId 再发送。
    */
   async sendProactiveMessage(sessionId: string, text: string): Promise<void> {
-    const session = this.sessionMap.get(sessionId);
+    let session = this.sessionMap.get(sessionId);
+    // 降级：陪伴模式下 sessionId 可能是 "companion" 等非飞书 ID
+    if (!session && this.lastUsedSessionId && this.lastUsedSessionId !== sessionId) {
+      session = this.sessionMap.get(this.lastUsedSessionId);
+      if (session) {
+        this.logger.info(`sendProactiveMessage: ${sessionId.slice(0, 20)}... not in sessionMap, fallback to lastUsedSessionId`);
+      }
+    }
     if (!session) {
       this.logger.error(`sendProactiveMessage: session ${sessionId} not found in sessionMap — has a message been received from this chat yet?`);
       return;
