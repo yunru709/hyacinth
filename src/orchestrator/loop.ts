@@ -29,7 +29,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { ImageStore, buildUserContentWithImages, buildUserContentWithInlineImages, createViewImageTool } from '../multimodal/index.js';
 import { createLogger } from '../logging/logger.js';
-import { getBootstrapStatus, markBootstrapComplete } from '../setup/persona-bootstrap.js';
+import type { FlowRegistry } from '../flow/flow-registry.js';
+import { isFlowTool } from '../flow/flow-tools.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from '../setup/config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
@@ -41,10 +42,11 @@ import { scavengeToolCalls } from '../repair/scavenge.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
+import { getActiveProfile, isCompanionModeActive } from '../context/profiles.js';
+import { CompanionSessionManager } from '../memory/companion-session.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
 import { extractTextContent } from '../utils/misc.js';
-import type { WorkflowManager } from '../workflow/index.js';
 import type { TurnRecorder } from '../rollback/turn-recorder.js';
 import * as sessionAllowlist from '../memory/session-allowlist.js';
 
@@ -236,12 +238,14 @@ export class AgentLoop {
   private pendingImpactInfo: string | null = null;
   private requestId: string;
   private logger: ReturnType<typeof createLogger>;
-  private bootstrapStatus: 'pending' | 'complete';
+  private flowRegistry: FlowRegistry;
   private activeProvider?: Provider;
   private scheduler: HeartbeatScheduler | null = null;
   private schedulerInitialized = false;
   /** 定时任务触发后待注入对话的通知 */
   pendingTaskNotifications: Array<{ name: string; firedAt: string }> = [];
+  /** 当前正在执行的定时任务名（供 TUI 显示上下文），run 前设置，run 后清除 */
+  pendingTaskName: string | null = null;
   /** 知识库状态引用（factory 注入） */
   kbState: { lastQuery: string } | null = null;
   /** 图片索引存储（会话级） */
@@ -302,19 +306,19 @@ export class AgentLoop {
     private dependencyAnalyzer?: DependencyAnalyzer,
     agentRegistry?: AgentRegistry,
     private personaDir?: string,
-    bootstrapStatus?: 'pending' | 'complete',
+    flowRegistry?: FlowRegistry,
     private providerRouter?: ProviderRouter,
     dangerousTools?: Set<string>,
     allowlistTools?: Set<string>,
     configCenter?: RuntimeConfigCenter,
-    private workflowManager?: WorkflowManager,
     private modelRouter?: ModelRouter,
     private turnRecorder?: TurnRecorder,
   ) {
     this.orchestrator = orchestrator;
     this.outputHandler = outputHandler ?? null;
     this.agentRegistry = agentRegistry;
-    this.bootstrapStatus = bootstrapStatus ?? 'complete';
+    // FlowRegistry 由 factory.ts 注入，不创建默认实例（空注册表无实际作用）
+    this.flowRegistry = flowRegistry!;
     this.dangerousTools = dangerousTools ?? new Set(['write', 'bash']);
     this.allowlistTools = allowlistTools ?? new Set();
     this.configCenter = configCenter;
@@ -481,16 +485,13 @@ export class AgentLoop {
     return this.recentToolNames;
   }
 
-  /** 是否为 bootstrap 引导模式 */
-  isBootstrapPending(): boolean {
-    return this.bootstrapStatus === 'pending';
+  /** Bootstrap Flow 是否活跃（供 CLI/TUI 判断是否需要发送空消息启动引导） */
+  get bootstrapActive(): boolean {
+    return this.flowRegistry.getActive()?.id === 'bootstrap';
   }
 
   /** 就地切换到指定 session，无需重启进程 */
   async switchSession(newSessionDir: string): Promise<void> {
-    // 1. 保存当前 session 的状态
-    this.workflowManager?.switchSession(newSessionDir);
-
     this.sessionDir = newSessionDir;
     this.currentSummary = undefined;
     this.compressCount = 0;
@@ -515,6 +516,88 @@ export class AgentLoop {
   /** 设置调度器 */
   setScheduler(scheduler: HeartbeatScheduler): void {
     this.scheduler = scheduler;
+  }
+
+  /**
+   * 陪伴模式：从 JSONL 中移除本轮工具调用完整回合。
+   * 找到最后一条 user 文本消息，从它开始截断文件——
+   * 整个工具调用回合（user → tool_use → tool_result → 跟进文本）都不留痕迹。
+   */
+  private async removeLastRoundFromJsonl(): Promise<void> {
+    try {
+      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
+      const fsSync = await import('node:fs');
+      if (!fsSync.existsSync(jsonlPath)) return;
+
+      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
+      const lines = content.split('\n').filter(l => l.trim());
+      if (lines.length === 0) return;
+
+      // 从末尾往前找本轮第一个 tool_use assistant 消息
+      let firstToolUse = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          if (msg.role === 'assistant' && Array.isArray(msg.content) &&
+              msg.content.some((b: any) => b.type === 'tool_use')) {
+            firstToolUse = i;
+          } else if (firstToolUse !== -1) {
+            break; // 遇到非 tool_use 消息，本轮的 tool 区域结束
+          }
+        } catch { /* skip */ }
+      }
+
+      if (firstToolUse === -1) return;
+
+      // 从 tool_use 往前找到触发它的 user 文本消息（排除 tool_result）
+      let cutIndex = firstToolUse;
+      for (let i = firstToolUse - 1; i >= 0; i--) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          if (msg.role === 'user') {
+            const c = msg.content;
+            if (!Array.isArray(c) || !c.some((b: any) => b.type === 'tool_result')) {
+              cutIndex = i;
+              break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+
+      // 截断：保留 cutIndex 之前的所有行
+      const kept = lines.slice(0, cutIndex);
+      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
+      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
+    } catch { /* 文件操作失败不阻塞 */ }
+  }
+
+  /** 跟踪本地 loop 是否已同步到全局陪伴模式（避免重复切换） */
+  private _syncedCompanionMode = false;
+
+  /**
+   * 同步全局陪伴模式标志到当前 loop。
+   * 每轮 runTurn 开头调用，所有渠道的 loop 自动切换会话。
+   */
+  private async syncCompanionMode(): Promise<void> {
+    const globalActive = isCompanionModeActive();
+    if (globalActive === this._syncedCompanionMode) return;
+
+    if (globalActive) {
+      // 保存正常 session 路径（仅首次，避免覆盖工具已保存的值）
+      if (!(this as any)._normalSessionDir) {
+        (this as any)._normalSessionDir = this.sessionDir;
+      }
+      const companionDir = CompanionSessionManager.getInstance().getOrCreate();
+      await this.switchSession(companionDir);
+    } else {
+      const normalDir = (this as any)._normalSessionDir as string | undefined;
+      if (normalDir) {
+        await this.switchSession(normalDir);
+        (this as any)._normalSessionDir = undefined;
+      }
+    }
+
+    this._syncedCompanionMode = globalActive;
   }
 
   /** 获取调度器 */
@@ -911,15 +994,10 @@ export class AgentLoop {
   /** 定时任务触发时唤醒 Agent，自动发起一轮对话 */
   async notifyTaskFired(taskName: string): Promise<void> {
     this.pendingTaskNotifications.push({ name: taskName, firedAt: new Date().toISOString() });
+    this.pendingTaskName = taskName;
     const prompt = `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered. Execute it now. If this was a one-shot task, it has completed — no need to reschedule.`;
     await this.run(prompt);
-  }
-
-  /** 启动 bootstrap 引导：用空消息触发 AI 主动对话 */
-  async startBootstrap(): Promise<void> {
-    if (this.bootstrapStatus !== 'pending') return;
-    this.outputHandler?.onStatus?.('Starting bootstrap initialization...', 'info');
-    await this.run('');
+    this.pendingTaskName = null;
   }
 
   /**
@@ -1024,16 +1102,6 @@ export class AgentLoop {
         // 更新 stats
         await this.statsManager.increment(this.sessionDir, 'turn_count', 1);
 
-        // Bootstrap 完成检测：每轮结束后检查 BOOTSTRAP.md 是否已被删除
-        if (this.bootstrapStatus === 'pending' && this.personaDir) {
-          const status = await getBootstrapStatus(this.personaDir);
-          if (status === 'complete') {
-            this.bootstrapStatus = 'complete';
-            await markBootstrapComplete(this.personaDir);
-            this.outputHandler?.onStatus?.('Bootstrap initialization complete.', 'info');
-          }
-        }
-
         if (result.stop) {
           break;
         }
@@ -1077,14 +1145,24 @@ export class AgentLoop {
         this.logger.warn('TurnRecorder startTurn failed', { error: (err as Error).message });
       });
     }
+    // ── 全局陪伴模式同步 ──────────────────────────────────────────
+    // 所有渠道共享同一份陪伴 session。检测全局标志变化，
+    // 自动切换当前 loop 的 sessionDir 和 composeStrategy。
+    await this.syncCompanionMode();
+
     // 从 conversation 读取历史
     const history = await this.conversationStore.readAll(this.sessionDir);
 
-    // 组装上下文 — 按当前激活的工具包过滤工具定义
+    // 组装上下文 — 按当前模式 profile 过滤工具定义
     let toolDefinitions = this.toolRegistry.getToolDefinitions();
-    // 工具包展开：激活时触发激进压缩 + pendingBundleSummary，下轮注入 summary 段（Zone 3）
-    // 后续轮次不重复注入（pendingBundleSummary 为 null 时不追加）
-    if (this.bundleRegistry) {
+    const profile = getActiveProfile();
+
+    // profile 指定工具白名单时，使用 profile 过滤（不走 bundle 机制）
+    if (profile.tools.length > 0) {
+      const allowed = new Set(profile.tools);
+      toolDefinitions = toolDefinitions.filter(t => allowed.has(t.name));
+    } else if (this.bundleRegistry) {
+      // 工具包展开：激活时触发激进压缩 + pendingBundleSummary，下轮注入 summary 段（Zone 3）
       const allowed = this.bundleRegistry.getActiveToolNames();
       if (allowed.length > 0) {
         const allowedSet = new Set(allowed);
@@ -1227,12 +1305,12 @@ export class AgentLoop {
       impactInfo: this.pendingImpactInfo ?? undefined,
       fullHistory: history,
       personaDir: effectivePersonaDir,
-      bootstrapStatus: this.bootstrapStatus,
       gitManager: this.gitManager,
+      profile,
     });
     this.pendingImpactInfo = null; // 清除已使用的影响面信息
     const messages = layeredResult.messages;
-    // 工作流注入在 Zone 5（workflow-persistent / workflow-step），由 manifest 统一管理
+    // Flow 注入在 Zone 5（flow_injection），由 manifest 统一管理
 
 
     // 更新 current_context_tokens 到 Stats
@@ -1313,8 +1391,8 @@ export class AgentLoop {
           impactInfo: this.pendingImpactInfo ?? undefined,
           fullHistory: history,
           personaDir: this.personaDir,
-          bootstrapStatus: this.bootstrapStatus,
           gitManager: this.gitManager,
+          profile,
         });
 
         layeredResult.messages.length = 0;
@@ -1443,8 +1521,8 @@ export class AgentLoop {
                 impactInfo: this.pendingImpactInfo ?? undefined,
                 fullHistory: history,
                 personaDir: this.personaDir,
-                bootstrapStatus: this.bootstrapStatus,
                 gitManager: this.gitManager,
+                profile,
               });
 
               layeredResult.messages.length = 0;
@@ -1723,9 +1801,9 @@ export class AgentLoop {
       assistantContent.push({ type: 'text', text: textParts.join('') });
     }
 
-    // 添加工具调用（workflow 管理操作不记入历史，只记事件）
+    // 添加工具调用（Flow 工具不记入历史，只记事件）
     for (const tc of toolCalls) {
-      if (tc.name !== 'workflow') {
+      if (!isFlowTool(tc.name)) {
         assistantContent.push({
           type: 'tool_use',
           id: tc.id,
@@ -1734,7 +1812,7 @@ export class AgentLoop {
         });
       }
 
-      // 事件记录保留全部（含 workflow），用于诊断
+      // 事件记录保留全部（含 Flow 工具），用于诊断
       await this.eventStore.append(this.sessionDir, {
         type: 'tool_call',
         tool_name: tc.name,
@@ -1754,9 +1832,6 @@ export class AgentLoop {
 
     // 如果有工具调用，执行工具并将结果追加到 conversation
     if (toolCalls.length > 0) {
-      // 工具执行前保存工作流状态快照，用于检测完成
-      const hadActiveWorkflow = this.workflowManager?.isActive() ?? false;
-      const activeWorkflowName = hadActiveWorkflow ? this.workflowManager?.getActive() ?? null : null;
       // 更新 recentToolNames 用于模式检测
       this.recentToolNames = toolCalls.map(tc => tc.name);
 
@@ -1765,6 +1840,9 @@ export class AgentLoop {
         const updatedPlan = this.orchestrator.updatePlanProgress(this.activePlan, toolCalls[0].name);
         this.activePlan = updatedPlan;
       }
+
+      // 工具执行前保存陪伴模式状态（工具可能改变全局标志，如 deactivate）
+      const wasCompanion = isCompanionModeActive();
 
       if (this.inlineToolExecuted) {
         // Tools were executed inline during the stream — flush results to conversation
@@ -1776,29 +1854,14 @@ export class AgentLoop {
         await this.executeTools(toolCalls);
       }
 
-      // 工具执行完毕后，检测工作流是否被完成
-      if (hadActiveWorkflow && activeWorkflowName && !(this.workflowManager?.isActive() ?? false)) {
-        // 工作流刚被 workfow tool 在工具执行中完成（调用了 deactivate）
-        const completedMsg: Message = {
-          role: 'user',
-          content: { type: 'text', text: `[System] Workflow "${activeWorkflowName}" completed. All steps finished.` },
-        };
-        await this.conversationStore.append(this.sessionDir, completedMsg);
-        this.outputHandler?.onStatus?.(`Workflow "${activeWorkflowName}" completed`, 'info');
-        await this.checkTextLoop(textParts);
-        // 工作流已完成，跳过额外 API 调用，直接结束
-        appendEvent(this.sessionDir, {
-          type: 'stop',
-          reason: 'workflow_completed',
-          timestamp: new Date().toISOString(),
-        }).catch(() => {});
-        // ── 回合回滚：回合结束记录 ──
-        if (this.turnRecorder) {
-          this.turnRecorder.endTurn().catch(err => {
-            this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
-          });
-        }
-        return { stop: true, stopReason: 'workflow_completed' };
+      // ── Flow 步骤完成检测 ──
+      if (toolCalls.some(tc => isFlowTool(tc.name))) {
+        await this.flowRegistry.onStepComplete();
+      }
+
+      // ── 陪伴模式：工具调用整轮不入历史 ──
+      if (wasCompanion && toolCalls.length > 0) {
+        await this.removeLastRoundFromJsonl();
       }
 
       // 工具执行完毕后，不停止，继续下一轮
@@ -2007,8 +2070,8 @@ export class AgentLoop {
     for (const result of results) {
       const call = executableCalls.find(c => c.id === result.tool_use_id);
 
-      // workflow 工具结果不记入历史 — 状态由 Zone 5 注入体现
-      if (call?.name === 'workflow') continue;
+      // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
+      if (call?.name && isFlowTool(call.name)) continue;
 
       const sanitized = sanitizeToolResult(result.content);
       const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
@@ -2097,8 +2160,8 @@ export class AgentLoop {
       ? (this.configCenter.get('repair.storm.enabled') as boolean)
       : true;
 
-    const STORM_EXEMPT = ['read', 'glob', 'grep', 'workflow'];
-    if (stormEnabled !== false && !isMutating(name) && !STORM_EXEMPT.includes(name)) {
+    const STORM_EXEMPT = ['read', 'glob', 'grep'];
+    if (stormEnabled !== false && !isMutating(name) && !STORM_EXEMPT.includes(name) && !isFlowTool(name)) {
       const { suppressed } = this.loopGuard.checkToolCalls([{ id, name, input }]);
       if (suppressed.has(id)) {
         const stormMsg = `[Storm suppressed] ${ToolGuard.reflectionPrompt({ id, name, input })}`;
@@ -2194,8 +2257,8 @@ export class AgentLoop {
 
     // Append stored inline results to conversation
     for (const tc of toolCalls) {
-      // workflow 工具结果不记入历史 — 状态由 Zone 5 注入体现
-      if (tc.name === 'workflow') continue;
+      // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
+      if (isFlowTool(tc.name)) continue;
 
       const stored = this.inlineToolResults.get(tc.id);
       if (!stored) {

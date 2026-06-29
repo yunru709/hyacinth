@@ -37,10 +37,16 @@ const BUILTIN_COMMON: ToolBundle = {
     'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep',
     'list_bundles', 'activate_bundle', 'deactivate_bundle',
     'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
-    'workflow', 'convert_skill_to_workflow', 'interrupt', 'restart',
+    'system_info', 'channel_info',
+    'interrupt', 'restart',
     'add_task', 'list_tasks', 'remove_task', 'toggle_task',
     'mcp_status', 'session_stats',
     'diff_files', 'json_edit', 'http_request', 'archive',
+    'companion_mode', 'reset_companion_session', 'trigger_compression',
+    'disk_usage', 'view_image',
+    'process_list', 'process_kill', 'process_output',
+    'rollback_status', 'rollback',
+    'complete_flow_step', 'activate_todo', 'add_todo_step',
   ],
 };
 
@@ -55,7 +61,7 @@ const BUILTIN_AGENT: ToolBundle = {
   name: 'agent',
   description: '子 Agent 编排 — 创建和管理子 Agent 执行复杂任务',
   builtin: true,
-  tools: ['spawn_sub_agent', 'create_sub_agent', 'update_sub_agent', 'delegate_to_agent', 'use_skill'],
+  tools: ['spawn_sub_agent', 'create_sub_agent', 'update_sub_agent', 'destroy_sub_agent', 'delegate_to_agent', 'use_skill'],
 };
 
 const BUILTIN_ADMIN: ToolBundle = {
@@ -68,7 +74,8 @@ const BUILTIN_ADMIN: ToolBundle = {
     'session_stats', 'list_tools', 'toggle_tool',
     'list_skills', 'toggle_skill', 'list_sub_agents', 'toggle_sub_agent',
     'allow_tool', 'disallow_tool', 'list_allowlist',
-    'trigger_training', 'cancel_training', 'toggle_training', 'training_status', 'set_training_schedule',
+    'list_model_channels', 'add_model_channel', 'remove_model_channel',
+    'set_channel_role', 'set_channel_model', 'reset_channel_model',
   ],
 };
 

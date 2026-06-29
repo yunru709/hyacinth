@@ -33,10 +33,6 @@ const TOOL_DISPLAY: Record<string, ToolSpec> = {
   config_schema:    { emoji: '\u{1F4CB}', label: 'Config Schema',    detailKeys: [] },
   reset_config:     { emoji: '\u{1F504}', label: 'Reset Config',     detailKeys: [] },
 
-  toggle_training:     { emoji: '\u{1F393}', label: 'Toggle Training',     detailKeys: [] },
-  training_status:     { emoji: '\u{1F4CA}', label: 'Training Status',     detailKeys: [] },
-  set_training_schedule:{ emoji: '\u23F0', label: 'Training Schedule',     detailKeys: ['schedule'] },
-
   switch_provider:     { emoji: '\u{1F50C}', label: 'Switch Provider',     detailKeys: ['provider'] },
   list_providers:      { emoji: '\u{1F4CB}', label: 'List Providers',      detailKeys: [] },
   provider_info:       { emoji: '\u2139\uFE0F', label: 'Provider Info',    detailKeys: [] },
@@ -54,8 +50,6 @@ const TOOL_DISPLAY: Record<string, ToolSpec> = {
 
   interrupt:        { emoji: '\u23F8\uFE0F', label: 'Interrupt',     detailKeys: [] },
   session_stats:    { emoji: '\u{1F4CA}', label: 'Session Stats',    detailKeys: [] },
-  trigger_training: { emoji: '\u{1F393}', label: 'Trigger Training', detailKeys: [] },
-  cancel_training:  { emoji: '\u274C', label: 'Cancel Training',     detailKeys: [] },
 
   allow_tool:      { emoji: '\u2705', label: 'Allow Tool',      detailKeys: ['tool'] },
   disallow_tool:   { emoji: '\u274C', label: 'Disallow Tool',   detailKeys: ['tool'] },
@@ -65,6 +59,9 @@ const TOOL_DISPLAY: Record<string, ToolSpec> = {
   remove_task:     { emoji: '\u2796', label: 'Remove Task',     detailKeys: ['name'] },
   list_tasks:      { emoji: '\u{1F4CB}', label: 'List Tasks',   detailKeys: [] },
   toggle_task:     { emoji: '\u{1F527}', label: 'Toggle Task',  detailKeys: ['name'] },
+
+  companion_mode:             { emoji: '\u{1F48C}', label: 'Companion Mode', detailKeys: ['action'] },
+  reset_companion_session:    { emoji: '\u{1F4AD}', label: 'Reset Memory',   detailKeys: [] },
 };
 
 const FALLBACK_EMOJI = '\u{1F9E9}';

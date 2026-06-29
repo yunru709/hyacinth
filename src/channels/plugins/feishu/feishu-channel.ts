@@ -41,6 +41,7 @@ import {
 import { sendText, sendCard, getSenderInfo } from './feishu-send.js';
 import { ChannelSessionPool, createCollectHandler } from './feishu-session.js';
 import { FeishuMessageQueue } from './feishu-message-queue.js';
+import { generateSessionId } from '../../../memory/session.js';
 
 // ── 日志 ──
 
@@ -81,9 +82,15 @@ export class FeishuChannel implements ChannelHandler {
     isGroup: boolean;
   }>();
 
+  // conversationKey → sessionId，同一对话复用同一 session 目录
+  private conversationToSession = new Map<string, string>();
+
   // TUI/Server 模式共享
   private sessionPool = new ChannelSessionPool();
   private agentFactory: AgentFactory | null = null;
+  // 最近使用的 loop 引用（用于定时任务主动推送时获取 loop）
+  private lastUsedLoop: ChannelSessionRunner | null = null;
+  private lastUsedSessionId: string | null = null;
 
   // tuiSync 回调（由 start() 的 config 注入）
   private onUserMessage: ((label: string, content: string) => void) | null = null;
@@ -95,6 +102,12 @@ export class FeishuChannel implements ChannelHandler {
   private loopCache = new Map<string, ChannelSessionRunner>();
   private loopAccessOrder: string[] = [];
   private static MAX_LOOP_CACHE = 50;
+  // sessionId → loop 直接映射（供 handleTaskNotification 查找正确的 loop）
+  private sessionLoopMap = new Map<string, ChannelSessionRunner>();
+
+  // tenant access token 缓存（避免每次下载图片都请求新 token）
+  private cachedToken: string | null = null;
+  private tokenExpiresAt = 0;
 
   async start(config: ChannelConfig): Promise<void> {
     this.status = 'starting';
@@ -112,6 +125,23 @@ export class FeishuChannel implements ChannelHandler {
     if (validationError) {
       this.status = 'error';
       throw new Error(validationError);
+    }
+
+    // 注册到全局 channelLoop 注册表（供定时任务路由到飞书渠道）
+    const registry = (globalThis as any).__channelLoopRegistry as Map<string, {
+      notifyTaskFired(name: string, sessionId?: string): Promise<void>;
+      sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+    }> | undefined;
+    if (registry) {
+      registry.set('feishu', {
+        notifyTaskFired: async (name: string, sessionId?: string) => {
+          await this.handleTaskNotification(name, sessionId);
+        },
+        sendProactiveMessage: async (sessionId: string, text: string) => {
+          await this.sendProactiveMessage(sessionId, text);
+        },
+      });
+      this.logger.info('registered in channelLoop registry for scheduled task routing');
     }
 
     this.logger.info(`starting with appId=${this.config.appId.slice(0, 8)}...`);
@@ -152,9 +182,11 @@ export class FeishuChannel implements ChannelHandler {
       this.transport = null;
     }
     this.sessionMap.clear();
+    this.conversationToSession.clear();
     this.sessionPool.clear();
     this.messageQueue.clear();
     this.loopCache.clear();
+    this.sessionLoopMap.clear();
     this.loopAccessOrder = [];
     this.status = 'stopped';
     this.logger.info('channel stopped');
@@ -202,6 +234,124 @@ export class FeishuChannel implements ChannelHandler {
     return this.status;
   }
 
+  /** 获取 tenant access token（缓存，提前 60s 刷新，token 有效期 2h） */
+  private async getTenantAccessToken(): Promise<string | null> {
+    if (this.cachedToken && Date.now() < this.tokenExpiresAt - 60_000) {
+      return this.cachedToken;
+    }
+    try {
+      const domain = this.config?.domain ?? 'https://open.feishu.cn';
+      const resp = await fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: this.config.appId, app_secret: this.config.appSecret }),
+      });
+      const json = await resp.json() as { tenant_access_token?: string; expire?: number };
+      if (json.tenant_access_token) {
+        this.cachedToken = json.tenant_access_token;
+        this.tokenExpiresAt = Date.now() + (json.expire ?? 7200) * 1000;
+        return this.cachedToken;
+      }
+    } catch { /* 获取失败不阻塞 */ }
+    return null;
+  }
+
+  /**
+   * 主动推送消息到飞书（非回复模式）。
+   * 用于定时任务等场景，此时没有 incoming message，需要根据 sessionId 查找 chatId 再发送。
+   */
+  async sendProactiveMessage(sessionId: string, text: string): Promise<void> {
+    const session = this.sessionMap.get(sessionId);
+    if (!session) {
+      this.logger.error(`sendProactiveMessage: session ${sessionId} not found in sessionMap — has a message been received from this chat yet?`);
+      return;
+    }
+    const to = session.isGroup ? `chat:${session.chatId}` : `user:${session.chatId}`;
+    try {
+      await sendText(this.config, { to, text });
+      this.logger.info(`proactive message sent to ${sessionId.slice(0, 20)}...`);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const ctx = (err as any)?.feishuContext as Record<string, unknown> | undefined;
+      const resp = (err as any)?.feishuResponse as unknown;
+      const parts = [`sendProactiveMessage failed: ${detail}`];
+      if (ctx) parts.push(`context: ${JSON.stringify(ctx)}`);
+      if (resp) parts.push(`response: ${JSON.stringify(resp)}`);
+      this.logger.error(parts.join(' | '));
+    }
+  }
+
+  /**
+   * 处理定时任务通知：运行 Agent 并将结果主动推送到飞书。
+   * @param taskName 定时任务名称
+   * @param sessionId 创建任务时的 session，用于确定回复目标
+   */
+  async handleTaskNotification(taskName: string, sessionId?: string): Promise<void> {
+    const effectiveSessionId = sessionId ?? this.lastUsedSessionId;
+    if (!effectiveSessionId) {
+      this.logger.error('handleTaskNotification: no sessionId available — cannot send proactive message');
+      return;
+    }
+
+    // 按 sessionId 查找正确的 loop（多会话场景下不能用 lastUsedLoop）
+    let loop: ChannelSessionRunner | null = this.sessionLoopMap.get(effectiveSessionId) ?? null;
+
+    // fallback: 尝试 loopCache（server 模式 LRU）
+    if (!loop) {
+      loop = this.loopCache.get(effectiveSessionId) ?? null;
+    }
+
+    // 最后兜底：使用 lastUsedLoop（可能是新 session 尚未有消息往来）
+    if (!loop) {
+      loop = this.lastUsedLoop;
+      if (loop) {
+        this.logger.info(`handleTaskNotification: using lastUsedLoop as fallback for session ${effectiveSessionId.slice(0, 20)}...`);
+      }
+    }
+
+    if (!loop) {
+      this.logger.error('handleTaskNotification: no loop available — no message has been processed yet');
+      return;
+    }
+
+    const prompt = `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered via Feishu. Execute it now and respond naturally. If this was a one-shot task, it has completed — no need to reschedule.`;
+
+    // 临时收集输出
+    const texts: string[] = [];
+    const collectHandler: ChannelOutputHandler = {
+      onTurnStart: () => { texts.length = 0; },
+      onText: (text) => { texts.push(text); },
+      onStatus: (msg, level) => { this.logger.info(`[feishu-task] ${level}: ${msg}`); },
+    };
+
+    loop.setOutputHandler(collectHandler);
+    try {
+      await loop.run(prompt);
+      const response = texts.join('').trim();
+      if (response) {
+        // 修正发送目标：创建任务时的 sessionId 可能来自其他渠道（如 TUI），
+        // 不在飞书的 sessionMap 中。此时降级使用 lastUsedSessionId。
+        const sendSessionId = this.sessionMap.has(effectiveSessionId)
+          ? effectiveSessionId
+          : (this.lastUsedSessionId ?? effectiveSessionId);
+        if (sendSessionId !== effectiveSessionId) {
+          this.logger.info(
+            `handleTaskNotification: session ${effectiveSessionId.slice(0, 20)}... not in sessionMap, ` +
+            `fallback send to ${sendSessionId.slice(0, 20)}...`
+          );
+        }
+        await this.sendProactiveMessage(sendSessionId, response);
+      } else {
+        this.logger.info(`handleTaskNotification: task "${taskName}" produced no text output`);
+      }
+    } catch (err) {
+      this.logger.error(`handleTaskNotification error: ${String(err instanceof Error ? err.message : err)}`);
+    } finally {
+      // 恢复空操作 outputHandler
+      loop.setOutputHandler({ onText: () => {}, onStatus: () => {} });
+    }
+  }
+
   // ── ChannelHandler: handleMessage ──
 
   async handleMessage(
@@ -210,6 +360,9 @@ export class FeishuChannel implements ChannelHandler {
     agentFactory: AgentFactory,
   ): Promise<void> {
     if (!this.config) return;
+
+    // 存储 agentFactory 引用（供 handleTaskNotification 使用）
+    this.agentFactory = agentFactory;
 
     const chatId = (event.metadata?.chatId as string) ?? '';
     const senderOpenId = (event.metadata?.senderOpenId as string) ?? event.userId;
@@ -275,6 +428,7 @@ export class FeishuChannel implements ChannelHandler {
         const { loop } = await agentFactory.createAgent({
           outputHandler: handler,
           sessionId: event.sessionId,
+          channel: 'feishu',
         });
         return { loop, collectHandler: handler };
       },
@@ -282,6 +436,13 @@ export class FeishuChannel implements ChannelHandler {
 
     entry.collectHandler.reset();
     if (event.images?.length) (entry.loop as any).channelImages = event.images;
+
+    // 存储引用供定时任务主动推送使用
+    const sessionLoop = entry.loop as unknown as ChannelSessionRunner;
+    this.lastUsedLoop = sessionLoop;
+    this.lastUsedSessionId = event.sessionId;
+    this.sessionLoopMap.set(event.sessionId, sessionLoop);
+
     await entry.loop.run(event.content);
     const response = entry.collectHandler.getResponse();
 
@@ -327,11 +488,18 @@ export class FeishuChannel implements ChannelHandler {
     }
 
     const outputHandler: ChannelOutputHandler = {
+      // 每个新 turn 清空之前累积的文本，只保留最后一轮的输出
+      onTurnStart: () => { streaming.resetBuffer(); },
       onText: (text) => { streaming.append(text); },
       onStatus: (msg, level) => { this.logger.info(`[feishu-agent] ${level}: ${msg}`); },
     };
 
     loop.setOutputHandler(outputHandler);
+
+    // 存储引用供定时任务主动推送使用
+    this.lastUsedLoop = loop;
+    this.lastUsedSessionId = event.sessionId;
+    this.sessionLoopMap.set(event.sessionId, loop);
 
     try {
       if (event.images?.length) (loop as any).channelImages = event.images;
@@ -362,6 +530,7 @@ export class FeishuChannel implements ChannelHandler {
     const { loop } = await agentFactory.createAgent({
       sessionId,
       outputHandler: { onText: () => {}, onStatus: () => {} },
+      channel: 'feishu',
     });
 
     // LRU eviction
@@ -419,24 +588,16 @@ export class FeishuChannel implements ChannelHandler {
       }
     }
 
-    // ── 解析发送者名称（可选） ──
-
-    if (this.config.resolveSenderNames && ctx.senderOpenId) {
-      try {
-        const info = await getSenderInfo(this.config, ctx.senderOpenId);
-        if (info?.name) {
-          ctx.senderName = info.name;
-        }
-      } catch {
-        // 忽略获取名称失败
-      }
-    }
-
-    // ── 构造 sessionId（使用 _ 而非 :，: 在 Windows 上不可用于文件夹名） ──
-
-    const sessionId = ctx.isGroup
+    // ── 构造 sessionId（纯同步，不依赖网络）──
+    const conversationKey = ctx.isGroup
       ? `feishu_group_${ctx.chatId}${ctx.threadId ? `_thread_${ctx.threadId}` : ''}`
       : `feishu_dm_${ctx.senderOpenId}`;
+
+    let sessionId = this.conversationToSession.get(conversationKey);
+    if (!sessionId) {
+      sessionId = generateSessionId('feishu');
+      this.conversationToSession.set(conversationKey, sessionId);
+    }
 
     // 记录会话信息
     this.sessionMap.set(sessionId, {
@@ -447,24 +608,24 @@ export class FeishuChannel implements ChannelHandler {
       isGroup: ctx.isGroup,
     });
 
-    // ── 下载图片（message_type: 'image'） ──
+    // ── 发送者名称 + 图片下载（互不依赖）──
+
+    // 发送者名称：fire-and-forget，不阻塞消息入队（仅用于 TUI 显示标签）
+    if (this.config.resolveSenderNames && ctx.senderOpenId) {
+      getSenderInfo(this.config, ctx.senderOpenId)
+        .then(info => { if (info?.name) ctx.senderName = info.name; })
+        .catch(() => {});
+    }
+
+    // 图片下载
     let images: ChannelMessageEvent['images'];
     if (ctx.imageKey && ctx.messageId && this.config?.appId && this.config?.appSecret) {
       try {
-        // 获取 tenant access token
-        const tokenResp = await fetch(
-          'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ app_id: this.config.appId, app_secret: this.config.appSecret }),
-          },
-        );
-        const tokenJson = await tokenResp.json() as { tenant_access_token?: string };
-        const token = tokenJson.tenant_access_token;
+        const token = await this.getTenantAccessToken();
         if (token) {
+          const domain = this.config?.domain ?? 'https://open.feishu.cn';
           const resp = await fetch(
-            `https://open.feishu.cn/open-apis/im/v1/messages/${ctx.messageId}/resources/${ctx.imageKey}?type=image`,
+            `${domain}/open-apis/im/v1/messages/${ctx.messageId}/resources/${ctx.imageKey}?type=image`,
             { headers: { Authorization: `Bearer ${token}` } },
           );
           if (resp.ok) {

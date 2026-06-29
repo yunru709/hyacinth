@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { existsSync, statSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import type {
   ScheduledTask,
   ScheduleConfig,
@@ -21,6 +24,8 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   maxConcurrent: 10,
   taskTimeoutMs: 300_000,
   maxRecords: 1000,
+  /** 全局默认降级链：后端可脱离任何渠道独立运行，飞书作为持久消息渠道兜底 */
+  channelFallback: ['feishu'],
 };
 
 /** 任务执行处理器 */
@@ -46,6 +51,9 @@ export class HeartbeatScheduler {
   private persistence: SchedulePersistence;
   private tasks: ScheduledTask[] = [];
   private configUnsubscribers: Array<() => void> = [];
+  /** tasks.json 上次加载时的 mtime（毫秒），用于跨实例同步检测 */
+  private lastLoadMtime = 0;
+  private readonly storagePath = path.join(os.homedir(), '.agent', 'scheduler', 'tasks.json');
 
   constructor(config?: Partial<SchedulerConfig>, scheduleConfig?: SystemScheduleConfig) {
     this.config = { ...DEFAULT_CONFIG, ...(scheduleConfig ?? {}), ...config };
@@ -120,6 +128,7 @@ export class HeartbeatScheduler {
     this.startedAt = new Date();
 
     this.tasks = await this.persistence.getAllTasks();
+    this.refreshMtime();
 
     const now = new Date();
     let cleaned = 0;
@@ -222,6 +231,8 @@ export class HeartbeatScheduler {
     schedule: ScheduleConfig,
     action: TaskAction,
     tags: string[] = [],
+    channel?: string,
+    fallback?: string[],
   ): Promise<ScheduledTask> {
     const existing = this.tasks.find(t => t.name === name);
     if (existing) {
@@ -229,6 +240,8 @@ export class HeartbeatScheduler {
       existing.schedule = schedule;
       existing.action = action;
       existing.tags = tags;
+      existing.channel = channel ?? existing.channel;
+      existing.fallback = fallback ?? existing.fallback;
       existing.enabled = true;
       existing.nextRunAt = this.calculateNextRun(existing)?.toISOString() ?? null;
       await this.persistence.saveTask(existing);
@@ -248,6 +261,8 @@ export class HeartbeatScheduler {
       runCount: 0,
       errorCount: 0,
       tags,
+      channel,
+      fallback,
     };
 
     task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
@@ -282,7 +297,35 @@ export class HeartbeatScheduler {
   }
 
   /** 获取所有任务 */
+  /** 刷新 mtime 追踪（在 tasks 数据从磁盘加载后调用） */
+  private refreshMtime(): void {
+    try {
+      const stat = statSync(this.storagePath);
+      this.lastLoadMtime = stat.mtimeMs;
+    } catch { /* 文件不存在 */ }
+  }
+
+  /**
+   * 获取所有任务。
+   * 每次调用时检查 tasks.json 是否被其他实例修改（跨渠道同步），
+   * 若有变更则自动从磁盘重新加载。
+   */
   getTasks(): ScheduledTask[] {
+    try {
+      if (existsSync(this.storagePath)) {
+        const stat = statSync(this.storagePath);
+        if (stat.mtimeMs > this.lastLoadMtime) {
+          const raw = readFileSync(this.storagePath, 'utf-8');
+          const data = JSON.parse(raw);
+          if (Array.isArray(data.tasks)) {
+            this.tasks = data.tasks;
+          } else if (Array.isArray(data)) {
+            this.tasks = data;
+          }
+          this.lastLoadMtime = stat.mtimeMs;
+        }
+      }
+    } catch { /* 读取失败用内存缓存 */ }
     return [...this.tasks];
   }
 
@@ -384,14 +427,9 @@ export class HeartbeatScheduler {
       this.activeCount--;
     }
 
-    // 计算下次执行时间
-    task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
-
-    // 持久化
-    await this.persistence.saveTask(task);
-    await this.persistence.addRecord(record, this.config.maxRecords);
-
-    // random 类型：消费已执行的 slot
+    // random 类型：先消费已执行的 slot，再计算下次执行时间
+    // 注意顺序：必须 shift 在 calculateNextRun 之前，否则 calculateNextRun
+    // 会基于尚未消费的 slot 计算，导致同一 slot 被重复触发一次。
     if (task.scheduleType === 'random' && task.pendingSlots && task.pendingSlots.length > 0) {
       task.pendingSlots.shift();
       if (task.pendingSlots.length === 0) {
@@ -399,6 +437,13 @@ export class HeartbeatScheduler {
         task.pendingSlots = undefined;
       }
     }
+
+    // 计算下次执行时间
+    task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
+
+    // 持久化
+    await this.persistence.saveTask(task);
+    await this.persistence.addRecord(record, this.config.maxRecords);
   }
 
   /** 调用注册的处理器 */

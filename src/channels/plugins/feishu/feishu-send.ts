@@ -33,26 +33,31 @@ interface SendTarget {
 function resolveSendTarget(to: string): SendTarget {
   const trimmed = to.trim();
 
-  if (trimmed.startsWith('user:')) {
-    return { receiveId: trimmed.slice(5), receiveIdType: 'open_id' };
+  // 去掉前缀（user: / chat: / open_id:），只保留裸 ID
+  let id = trimmed;
+  if (trimmed.startsWith('user:')) id = trimmed.slice(5);
+  else if (trimmed.startsWith('chat:')) id = trimmed.slice(5);
+  else if (trimmed.startsWith('open_id:')) id = trimmed.slice(8);
+
+  // 根据 ID 前缀推断正确的 receive_id_type
+  // 飞书：ou_ → open_id, oc_ → chat_id
+  if (id.startsWith('oc_')) {
+    return { receiveId: id, receiveIdType: 'chat_id' };
   }
+  if (id.startsWith('ou_')) {
+    return { receiveId: id, receiveIdType: 'open_id' };
+  }
+
+  // 有显式前缀时按前缀语义处理
   if (trimmed.startsWith('chat:')) {
-    return { receiveId: trimmed.slice(5), receiveIdType: 'chat_id' };
+    return { receiveId: id, receiveIdType: 'chat_id' };
   }
-  if (trimmed.startsWith('open_id:')) {
-    return { receiveId: trimmed.slice(8), receiveIdType: 'open_id' };
-  }
-
-  // 根据 ID 前缀推断
-  if (trimmed.startsWith('ou_')) {
-    return { receiveId: trimmed, receiveIdType: 'open_id' };
-  }
-  if (trimmed.startsWith('oc_')) {
-    return { receiveId: trimmed, receiveIdType: 'chat_id' };
+  if (trimmed.startsWith('open_id:') || trimmed.startsWith('user:')) {
+    return { receiveId: id, receiveIdType: 'open_id' };
   }
 
-  // 默认按 open_id 处理
-  return { receiveId: trimmed, receiveIdType: 'open_id' };
+  // 无法推断，默认按 open_id 处理
+  return { receiveId: id, receiveIdType: 'open_id' };
 }
 
 // ── 构建 Post 消息体 ──
@@ -95,41 +100,67 @@ export async function sendText(
 
   // 如果有回复目标，使用 reply 接口
   if (params.replyToMessageId) {
-    const res = await client.im.message.reply({
-      path: { message_id: params.replyToMessageId },
+    try {
+      const res = await client.im.message.reply({
+        path: { message_id: params.replyToMessageId },
+        data: {
+          content,
+          msg_type: 'post',
+          ...(params.replyInThread ? { reply_in_thread: true } : {}),
+        },
+      });
+      if (res.code !== 0) {
+        throw new Error(`Feishu reply failed: ${res.msg || `code ${res.code}`}`);
+      }
+      return {
+        messageId: res.data?.message_id ?? '',
+        chatId: receiveId,
+      };
+    } catch (err) {
+      enrichFeishuError(err, { api: 'reply', receiveId, receiveIdType });
+      throw err;
+    }
+  }
+
+  // 直接发送
+  try {
+    const res = await client.im.message.create({
+      params: { receive_id_type: receiveIdType },
       data: {
+        receive_id: receiveId,
         content,
         msg_type: 'post',
-        ...(params.replyInThread ? { reply_in_thread: true } : {}),
       },
     });
     if (res.code !== 0) {
-      throw new Error(`Feishu reply failed: ${res.msg || `code ${res.code}`}`);
+      throw new Error(`Feishu send failed: ${res.msg || `code ${res.code}`}`);
     }
     return {
       messageId: res.data?.message_id ?? '',
       chatId: receiveId,
     };
+  } catch (err) {
+    enrichFeishuError(err, { api: 'send', receiveId, receiveIdType });
+    throw err;
   }
+}
 
-  // 直接发送
-  const res = await client.im.message.create({
-    params: { receive_id_type: receiveIdType },
-    data: {
-      receive_id: receiveId,
-      content,
-      msg_type: 'post',
-    },
-  });
-
-  if (res.code !== 0) {
-    throw new Error(`Feishu send failed: ${res.msg || `code ${res.code}`}`);
+/** 将飞书请求上下文注入到错误对象上，便于上层日志记录 */
+function enrichFeishuError(
+  err: unknown,
+  ctx: { api: string; receiveId: string; receiveIdType: string },
+): void {
+  if (err instanceof Error) {
+    const enriched = err as Error & { feishuContext?: unknown; feishuResponse?: unknown };
+    enriched.feishuContext = ctx;
+    // 尝试从 SDK 错误对象上提取响应体
+    const sdkErr = err as any;
+    if (sdkErr.response?.data) {
+      enriched.feishuResponse = sdkErr.response.data;
+    } else if (sdkErr.data) {
+      enriched.feishuResponse = sdkErr.data;
+    }
   }
-
-  return {
-    messageId: res.data?.message_id ?? '',
-    chatId: receiveId,
-  };
 }
 
 /**

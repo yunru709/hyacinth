@@ -447,16 +447,8 @@ export async function runTui(
     const currentModel = ap.getModel();
     const currentProviderType = ap.getProviderType();
     const currentProviderInfo = providerInfo ?? { providerLabel: currentProviderType, isLocal: false, mode: 'auto' };
-    // Build workflow label for header display
+    // Build mode label for header display
     let modeHeaderLabel: string | null = null;
-    if (workflowManager?.isActive()) {
-      const mn = workflowManager.getActive();
-      if (mn) {
-        const label = mn.charAt(0).toUpperCase() + mn.slice(1);
-        const completed = workflowManager.isCompleteCheck();
-        modeHeaderLabel = completed ? `${label} ✓` : `WF:${label}`;
-      }
-    }
     let statusContent = formatStatusBar(activeInfo, currentModel, currentProviderInfo, modeHeaderLabel);
 
     // Compaction message
@@ -568,7 +560,10 @@ export async function runTui(
     onTurnStart() {
       isThinking = true;
       pendingThinking = '';
-      showThinkingIndicator(theme.accent('Thinking...'));
+      const label = loop.pendingTaskName
+        ? `⏰ ${loop.pendingTaskName}`
+        : 'Thinking...';
+      showThinkingIndicator(theme.accent(label));
     },
     onToolUse(name: string, inputSummary: string, toolId?: string) {
       if (pendingThinking.trim()) {
@@ -679,6 +674,14 @@ export async function runTui(
     onFlush() {
       hideThinkingIndicator();
       isThinking = false;
+
+      // 陪伴模式 session 切换 → 清空显示并重放新 session 历史
+      if (loop._sessionSwitched) {
+        chatLog.clearAll();
+        replayEvents(chatLog, loop._sessionSwitched);
+        loop._sessionSwitched = undefined;
+      }
+
       updateHeaderText(modelName);
       const providerInfo = loop.getProviderRoutingInfo();
       if (pendingThinking.trim()) {
@@ -818,11 +821,8 @@ export async function runTui(
     notifyTaskFired: async () => {},
     subscribeConfig: () => {},
     isBootstrapPending: () => false,
-    startBootstrap: async () => {},
   };
   // 远程模式下 agent 为 undefined，这些变量仅用于本地 TUI 功能（斜杠命令等），用 any 避免 null 检查
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const workflowManager: any = agent?.workflowManager;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const backgroundRegistry: any = agent?.backgroundRegistry;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1044,7 +1044,8 @@ export async function runTui(
     chatLog.addSystem('');
 
     try {
-      await loop.startBootstrap();
+      // Flow 已在 factory.ts 中自动激活，发送空消息让模型根据 flow_injection 引导对话
+      await loop.run('');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       chatLog.addSystem(theme.errorBright('[Bootstrap Error] ') + theme.error(message));
@@ -1166,6 +1167,11 @@ export async function runTui(
   async function handleInput(text: string): Promise<void> {
     let input = text.trim();
     if (!input) {
+      // 定时任务完成后队列中有待处理消息 → 空回车触发队列消费
+      if (!isProcessing && !loop.pendingTaskName && messageQueue.size > 0) {
+        const next = messageQueue.dequeue();
+        if (next) await processBatch(next.text);
+      }
       return;
     }
 
@@ -1376,6 +1382,15 @@ export async function runTui(
             const SessionManager = (await import('../memory/session.js')).SessionManager;
             const sm = new SessionManager(process.cwd());
             const dir = sm.getSessionDir(sessionId);
+
+            // 保护当前活跃 session
+            if (dir === sessionDir) {
+              chatLog.addSystem(theme.warning(`Cannot delete the currently active session "${sessionId}". Switch to another session first.`));
+              tui.requestRender();
+              updateTokenEstimate();
+              return;
+            }
+
             try {
               const fsPromises = await import('node:fs/promises');
               await fsPromises.access(dir);
@@ -2378,7 +2393,7 @@ export async function runTui(
       const items: [string, unknown][] = [
         ['Provider', s.provider.active],
         ['Model', s.provider[s.provider.active as keyof typeof s.provider] as { model?: string } | string[] | undefined],
-        ['Active Workflow', workflowManager?.isActive() ? workflowManager?.getActive() : 'none'],
+        ['Active Workflow', 'none'],
         ['Max Context', `${s.session.maxContext.toLocaleString()} tokens`],
         ['Max Turns', s.session.maxTurns],
         ['Compress Threshold', s.context.compressThreshold.toFixed(2)],
@@ -2701,7 +2716,7 @@ if (input.startsWith('/threshold ')) {
     const mode = MessageQueue.detectMode(input);
     const cleanText = MessageQueue.stripMarkers(input);
 
-    if (isProcessing) {
+    if (isProcessing || loop.pendingTaskName) {
       messageQueue.enqueue(cleanText, mode);
       if (mode === QueueMessageMode.Insert) {
         chatLog.addSystem(theme.warning(`\u23e9 Inserting: ${truncateMsg(cleanText)}`));
