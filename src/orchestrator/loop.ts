@@ -1052,13 +1052,14 @@ export class AgentLoop {
     process.once('SIGINT', onSigInt);
 
     try {
-      // Load persisted summary if available
-      if (!this.currentSummary) {
+      // Load persisted summary from disk (always reload to pick up
+      // updates from other loop instances sharing the same session dir)
+      try {
         const persisted = await this.summaryStore.load(this.sessionDir);
         if (persisted) {
           this.currentSummary = persisted;
         }
-      }
+      } catch {}
 
       // 1. 将用户输入追加到 conversation（视觉模型自动检测图片路径或渠道预取图片）
       const activeP = this.getActiveProvider();
