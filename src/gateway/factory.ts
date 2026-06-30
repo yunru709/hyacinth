@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { SessionManager } from '../memory/session.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
-import { setCompanionModeActive } from '../context/profiles.js';
+import { setCompanionModeActive, isCompanionModeActive } from '../context/profiles.js';
 import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -704,7 +704,7 @@ export async function createAgent(
 
     // 模式隔离：跳过不属于当前模式的任务
     if (task.mode) {
-      const currentMode = (loop as any).composeStrategy?.name === 'companion' ? 'companion' : 'normal';
+      const currentMode = isCompanionModeActive() ? 'companion' : 'normal';
       if (task.mode !== currentMode) {
         logger.info(`Task "${task.name}" skipped: mode "${task.mode}" ≠ current "${currentMode}"`);
         return;

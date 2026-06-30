@@ -2,6 +2,7 @@ import { GenericRegistry, type RegistryItem } from './base.js';
 import type { Tool } from '../tools/interface.js';
 import type { ToolDefinition } from '../types.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
+import { isCompanionModeActive } from '../context/profiles.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
@@ -232,10 +233,8 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
       };
       // 自动检测当前模式（正常/陪伴），用于任务隔离
       const getMode = (): 'normal' | 'companion' | undefined => {
-        const strategy = (agentLoop as any)?.composeStrategy;
-        if (strategy?.name === 'companion') return 'companion';
-        if (strategy?.name === 'default' || strategy?.name === 'precise') return 'normal';
-        return undefined;
+        if (isCompanionModeActive()) return 'companion';
+        return 'normal';
       };
       this.register(createAddTaskTool(heartbeatScheduler, getChannel, getSessionId, getMode));
       this.register(createRemoveTaskTool(heartbeatScheduler, getMode));

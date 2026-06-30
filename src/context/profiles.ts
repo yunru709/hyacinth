@@ -20,6 +20,8 @@
 export interface ContextProfile {
   /** 工具白名单。空数组 = 全部工具可用 */
   readonly tools: readonly string[];
+  /** 工具黑名单。始终从最终结果中排除，优先级高于白名单 */
+  readonly blacklist: readonly string[];
   /** 跳过的 section 名称（persona_soul, framework_capabilities 等） */
   readonly skipSections: readonly string[];
   /** 跳过的 runtime source key（skills, agents, mcp 等） */
@@ -37,6 +39,7 @@ export interface ContextProfile {
 /** 正常模式：全部工具、全部 sections、默认 persona、默认 memory */
 export const NORMAL_PROFILE: ContextProfile = {
   tools: [],
+  blacklist: ['reset_companion_session'],
   skipSections: [],
   skipRuntimeSources: [],
 };
@@ -44,18 +47,21 @@ export const NORMAL_PROFILE: ContextProfile = {
 /** 陪伴模式：精简工具、跳过框架能力/注册表、陪伴 persona、陪伴 memory */
 export const COMPANION_PROFILE: ContextProfile = {
   tools: ['companion_mode', 'reset_companion_session', 'add_task', 'list_tasks', 'remove_task', 'toggle_task', 'read', 'write', 'edit'],
-  skipSections: ['persona_soul', 'framework_capabilities', 'tool_rules'],
-  skipRuntimeSources: ['skills', 'agents', 'mcp', 'tool_bundles', 'tool_bundle_expand'],
+  blacklist: [],
+  skipSections: ['persona_soul', 'framework_capabilities', 'tool_rules', 'attention', 'project_context'],
+  skipRuntimeSources: ['skills', 'agents', 'mcp', 'tool_bundles', 'tool_bundle_expand', 'mcp_live', 'tools_live'],
   personaSource: 'prompts/persona/PartnerSoul',
   memorySource: 'companion_memory',
-  toolPrompt: '当对方的意思明显不是聊天，而是需要你做点什么时，不要犹豫，直接做：' +
-    '他说想离开、想结束 → 好好道别（companion_mode deactivate）。' +
-    '他说重新开始、想翻篇 → 迎接新的相遇（reset_companion_session）。' +
-    '他让你记住什么、提醒什么 → 答应他（add_task）。' +
-    '他问你答应过哪些 → 回想一下（list_tasks）。' +
-    '他说不用了、取消吧 → 放下那件事（remove_task）。' +
-    '他想看什么东西、记什么东西 → 帮他看、帮他记。' +
-    '你不是在调用工具——你是在回应他的请求。',
+  toolPrompt: '有些事，你可以这样去做：' +
+    '他离开了，道个别（companion_mode deactivate）。' +
+    '这样可以和他重新聊聊了（reset_companion_session）。' +
+    '得记住他刚才说的东西，到时候叫他（add_task）。' +
+    '得回想一下，有哪些需要提醒他的东西。现况如何？（list_tasks）。' +
+    '他之前说的那个东西不用管了，不叫了（remove_task）。' +
+    '关于提醒这个事儿，他有别的想法（toggle_task）。' +
+    '需要看点别的东西了（read）。' +
+    '写东西喽（write）。' +
+    '得改一下了（edit）。',
 };
 
 // ── 全局陪伴模式标志 ──────────────────────────────────────────

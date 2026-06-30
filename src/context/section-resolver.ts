@@ -3,6 +3,8 @@ import type { SectionEntry } from './manifest-types.js';
 import type { TokenCounter } from './tokenizer.js';
 import type { ContextSource } from './interface.js';
 import type { GitManager } from '../evolution/git-manager.js';
+import type { ContextProfile } from './profiles.js';
+import { COMPANION_PROFILE, NORMAL_PROFILE } from './profiles.js';
 import { loadPrompt, renderPrompt } from '../prompts/loader.js';
 import { loadProjectContext } from './prompt-builder.js';
 import { Retriever } from './retriever.js';
@@ -22,14 +24,41 @@ export interface ResolverContext {
   fullHistory?: Message[];
   zone3Hashes?: Set<string>;
   maxContextTokens: number;
-  bootstrapStatus?: 'pending' | 'complete';
-  bootstrapContent?: string | (() => string) | (() => Promise<string>);
   sources?: Map<string, ContextSource>;
   selectedSkills?: string[];
   selectedAgents?: string[];
   gitManager?: GitManager;
   tokenCounter: TokenCounter;
   activeConditions?: Set<string>;
+  /** 当前模式 profile——替代散落的 activeConditions 检查 */
+  profile: ContextProfile;
+}
+
+// ── 陪伴模式时间注入控制 ──────────────────────────────────────────
+// 模拟人对时间的不经意感知：
+//   首条消息 / 用户问时间 → 100% 注入
+//   连续对话 → 按概率随机注入
+
+const TIMESTAMP_INJECT_PROBABILITY = 0.10;  // 连续对话中的随机概率
+const FIRST_CONTACT_THRESHOLD = 4;           // 消息数 ≤ 此值视为首次接触
+
+/** 用户输入是否在询问时间 */
+const TIME_QUERY_RE = /时间|几点|什么时候|时候|几点了|现在几点|什么时候了|几点钟|现在时间|现在什么时候|这会儿几点|多晚了/;
+
+/** 获取 history 中 user 消息的数量 */
+function countUserMessages(history?: Message[]): number {
+  if (!history) return 0;
+  return history.filter(m => m.role === 'user').length;
+}
+
+function shouldInjectTimestamp(ctx: ResolverContext): boolean {
+  const userMsgCount = countUserMessages(ctx.history);
+  // 首次接触：每轮都注入时间，帮助建立时间感
+  if (userMsgCount <= FIRST_CONTACT_THRESHOLD) return true;
+  // 用户主动问时间 → 必须注入
+  if (ctx.userInput && TIME_QUERY_RE.test(ctx.userInput)) return true;
+  // 连续对话：掷骰子
+  return Math.random() < TIMESTAMP_INJECT_PROBABILITY;
 }
 
 export async function resolveSection(
@@ -49,12 +78,31 @@ export async function resolveSection(
 // --- Static ---
 
 function resolveStatic(sec: SectionEntry, ctx?: ResolverContext): string | undefined {
+  const profile = ctx?.profile ?? NORMAL_PROFILE;
+
   if (sec.name === 'persona_soul') {
+    // precise_mode 保持原有 activeConditions 逻辑
     if (ctx?.activeConditions?.has('precise_mode')) return undefined;
-    // bootstrap 期间人设文件是空模板占位符，由 workflow-injection 提供引导
-    if (ctx?.bootstrapStatus === 'pending') return undefined;
+    // profile 定义了替代 persona 来源 → 加载替代内容，跳过默认 SOUL
+    if (profile.personaSource) {
+      try {
+        let content = loadPrompt(profile.personaSource.replace(/^prompts\//, ''));
+        if (profile.toolPrompt) {
+          content = content + '\n\n' + profile.toolPrompt;
+        }
+        return content;
+      } catch {
+        return undefined;
+      }
+    }
     return buildSoulSection() || undefined;
   }
+
+  // profile 指定跳过的 section
+  if (profile.skipSections.includes(sec.name)) {
+    return undefined;
+  }
+
   try {
     return loadPrompt(sec.source.replace(/^prompts\//, ''));
   } catch {
@@ -93,7 +141,7 @@ function resolveTemplate(
 //   Zone 2 (Manifest) — 辅助索引区（默认关闭）
 //   Zone 3 (History)  — 摘要/项目上下文/历史消息（持续增长，压缩器管理）
 //   Zone 4 (Context)  — 知识库检索（可独立开关）
-//   Zone 5 (Live)     — 工作流注入/时间戳/用户输入（每轮变化，不缓存）
+//   Zone 5 (Live)     — Flow 注入/时间戳/用户输入（每轮变化，不缓存）
 //
 // 通用回退规则：runtime:xxx → 查找 ctx.sources.get('xxx')，若存在则取其内容。
 
@@ -102,6 +150,7 @@ async function resolveRuntime(
   ctx: ResolverContext,
 ): Promise<string | undefined> {
   const src = sec.source;
+  const profile = ctx.profile ?? NORMAL_PROFILE;
 
   if (src === 'runtime:plan') {
     return ctx.currentPlan ? `[Current Plan]\n${ctx.currentPlan}` : undefined;
@@ -113,6 +162,10 @@ async function resolveRuntime(
     return ctx.historySummary ? `[Context Summary]\n${ctx.historySummary}` : undefined;
   }
   if (src === 'runtime:timestamp') {
+    // 陪伴模式下随机注入时间，模拟人对时间的不经意感知
+    if (profile === COMPANION_PROFILE && !shouldInjectTimestamp(ctx)) {
+      return undefined;
+    }
     // # currentDate 是系统元数据标记（非用户输入），模型训练数据中识别为背景信息
     const [datePart, timePart] = ctx.timestamp.split(' ');
     const dateSlash = datePart.replace(/-/g, '/');
@@ -128,6 +181,12 @@ async function resolveRuntime(
       const content = await envSource.getContent();
       return content || undefined;
     }
+    return undefined;
+  }
+
+  // profile 指定跳过的 runtime source
+  const runtimeKey = src.startsWith('runtime:') ? src.slice('runtime:'.length) : '';
+  if (profile.skipRuntimeSources.includes(runtimeKey)) {
     return undefined;
   }
 
@@ -157,13 +216,23 @@ async function resolveRuntime(
   }
 
   // 模式注入（Zone 5）：plan/spec 激活时注入提示词
-  // ── 工作流注入已迁移至 Zone 5（workflow-persistent / workflow-step）──
+  // ── Flow 注入在 Zone 5（flow_injection），由 ContextSource 驱动 ──
 
   // runtime:history 由 composer.ts assembleZone() 专门处理（展开为 Message[]）。
   // 此处的 handler 仅作为防护：如果未来 manifest 将 history section 从 Zone 3 移走，
   // 或 composer 的硬编码拦截被移除，此处显式返回 undefined 而非静默丢失。
   // 架构说明见 §0.5 原则③：所有 runtime source 应在 section-resolver 中有显式路由。
   if (src === 'runtime:history') {
+    return undefined;
+  }
+
+  // profile 指定了替代 memory 来源 → 路由到对应 ContextSource
+  if (src === 'runtime:memory' && profile.memorySource) {
+    const altSource = ctx.sources?.get(profile.memorySource);
+    if (altSource?.getContent) {
+      const content = await altSource.getContent();
+      return content || undefined;
+    }
     return undefined;
   }
 
@@ -185,6 +254,11 @@ async function resolveRetrieval(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): Promise<string | undefined> {
+  const profile = ctx.profile ?? NORMAL_PROFILE;
+  if (profile.skipSections.includes(sec.name)) {
+    return undefined;
+  }
+
   const src = sec.source;
 
   if (src === 'runtime:projectContext') {
@@ -240,31 +314,6 @@ function resolveConditional(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): string | undefined {
-  if (sec.condition === 'bootstrap_incomplete') {
-    if (ctx.bootstrapStatus === 'complete') return undefined;
-    return resolveStatic(sec, ctx);
-  }
-
-  if (sec.condition === 'bootstrap_pending') {
-    if (sec.name === 'persona_bootstrap') return undefined;
-    if (ctx.bootstrapStatus !== 'pending') return undefined;
-
-    if (ctx.bootstrapContent) {
-      if (typeof ctx.bootstrapContent === 'function') {
-        const result = ctx.bootstrapContent();
-        return typeof result === 'string' ? result : undefined;
-      }
-      return ctx.bootstrapContent;
-    }
-
-    const promptPath = sec.source.replace(/^prompts\//, '');
-    try {
-      return loadPrompt(promptPath);
-    } catch {
-      return undefined;
-    }
-  }
-
   if (sec.condition === 'precise_mode') {
     if (!ctx.activeConditions?.has('precise_mode')) return undefined;
     return resolveStatic(sec, ctx);

@@ -42,6 +42,8 @@ import { scavengeToolCalls } from '../repair/scavenge.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
+import { CompanionStrategy } from '../context/precision/companion.js';
+import { DefaultStrategy } from '../context/precision/default.js';
 import { COMPANION_PROFILE, getActiveProfile, isCompanionModeActive } from '../context/profiles.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -571,6 +573,95 @@ export class AgentLoop {
     } catch { /* 文件操作失败不阻塞 */ }
   }
 
+  /**
+   * 陪伴模式：如果本轮调用了工具，从 JSONL 中移除整个 loop——
+   * 包括触发它的 user 消息和所有后续回复。
+   * 模型感知不到自己调用过工具，对话连续性不受破坏。
+   */
+  private async cleanCompanionJsonl(): Promise<void> {
+    try {
+      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
+      const fsSync = await import('node:fs');
+      if (!fsSync.existsSync(jsonlPath)) return;
+
+      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
+      const lines = content.split('\n').filter(l => l.trim());
+      if (lines.length === 0) return;
+
+      // 从末尾往前找最后一条 user 文本消息（触发本轮 loop 的输入）
+      let cutIndex = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          if (msg.role !== 'user') continue;
+          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+          if (blocks.every((b: any) => b.type === 'tool_result')) continue;
+          cutIndex = i;
+          break;
+        } catch { /* skip */ }
+      }
+
+      if (cutIndex === -1) return;
+
+      const kept = lines.slice(0, cutIndex);
+      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
+      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
+    } catch { /* 文件操作失败不阻塞 */ }
+  }
+
+  /**
+   * 陪伴模式定时任务专用：只移除触发提示词和工具链，保留模型自然回复。
+   * 效果：模型看起来像是"主动"搭话，而非响应系统指令。
+   */
+  private async removeTriggerFromJsonl(): Promise<void> {
+    try {
+      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
+      const fsSync = await import('node:fs');
+      if (!fsSync.existsSync(jsonlPath)) return;
+
+      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
+      const lines = content.split('\n').filter(l => l.trim());
+      if (lines.length === 0) return;
+
+      // 从末尾找最后一条 user 文本消息（触发提示词）
+      let triggerIdx = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          if (msg.role !== 'user') continue;
+          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+          if (blocks.every((b: any) => b.type === 'tool_result')) continue;
+          triggerIdx = i;
+          break;
+        } catch { /* skip */ }
+      }
+
+      if (triggerIdx === -1) return;
+
+      // 收集要移除的索引：触发词 + 之后所有的 tool_use / tool_result
+      const removeIndices = new Set<number>();
+      removeIndices.add(triggerIdx);
+
+      for (let i = triggerIdx + 1; i < lines.length; i++) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+
+          if (msg.role === 'assistant' && blocks.some((b: any) => b.type === 'tool_use')) {
+            removeIndices.add(i);
+          }
+          if (msg.role === 'user' && blocks.every((b: any) => b.type === 'tool_result')) {
+            removeIndices.add(i);
+          }
+        } catch { /* skip */ }
+      }
+
+      const kept = lines.filter((_, i) => !removeIndices.has(i));
+      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
+      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
+    } catch { /* 文件操作失败不阻塞 */ }
+  }
+
   /** 跟踪本地 loop 是否已同步到全局陪伴模式（避免重复切换） */
   private _syncedCompanionMode = false;
 
@@ -589,12 +680,18 @@ export class AgentLoop {
       }
       const companionDir = CompanionSessionManager.getInstance().getOrCreate();
       await this.switchSession(companionDir);
+      // 切换到陪伴模式的过滤策略（跨渠道同步时此 loop 可能还是 DefaultStrategy）
+      if (!(this.composeStrategy instanceof CompanionStrategy)) {
+        this.composeStrategy = new CompanionStrategy();
+      }
     } else {
       const normalDir = (this as any)._normalSessionDir as string | undefined;
       if (normalDir) {
         await this.switchSession(normalDir);
         (this as any)._normalSessionDir = undefined;
       }
+      // 恢复默认策略
+      this.composeStrategy = new DefaultStrategy();
     }
 
     this._syncedCompanionMode = globalActive;
@@ -995,7 +1092,11 @@ export class AgentLoop {
   async notifyTaskFired(taskName: string): Promise<void> {
     this.pendingTaskNotifications.push({ name: taskName, firedAt: new Date().toISOString() });
     this.pendingTaskName = taskName;
-    const prompt = `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered. Execute it now. If this was a one-shot task, it has completed — no need to reschedule.`;
+    // 陪伴模式下用自然提示，不暴露"定时任务"概念；正常模式保留系统提示词
+    const isCompanion = isCompanionModeActive();
+    const prompt = isCompanion
+      ? `（你忽然想和他说句话...）`
+      : `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered. Execute it now. If this was a one-shot task, it has completed — no need to reschedule.`;
     await this.run(prompt);
     this.pendingTaskName = null;
   }
@@ -1091,6 +1192,7 @@ export class AgentLoop {
       // 不设总轮次上限 — 超长开发任务可能需要数百轮。
       // LoopGuard 跟踪连续触发次数，超过上限后强制停止以防止死循环。
       let turnCount = 0;
+      let toolWasCalled = false;
       while (true) {
         if (this.interrupted) {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
@@ -1099,6 +1201,7 @@ export class AgentLoop {
 
         const result = await this.runTurn();
         turnCount++;
+        if (result.toolCalled) toolWasCalled = true;
 
         // 更新 stats
         await this.statsManager.increment(this.sessionDir, 'turn_count', 1);
@@ -1114,6 +1217,18 @@ export class AgentLoop {
             'warn',
           );
           break;
+        }
+      }
+
+      // ── 陪伴模式 cleanup ──────────────────────────────────────────
+      // 定时任务触发：只删触发词+工具链，保留模型自然回复（看起来像主动搭话）
+      // 普通工具调用：整轮抹除（用户消息+工具调用+回复全丢，模型不感知）
+      const isScheduledTask = this.pendingTaskName !== null;
+      if (isCompanionModeActive()) {
+        if (isScheduledTask) {
+          await this.removeTriggerFromJsonl();
+        } else if (toolWasCalled) {
+          await this.cleanCompanionJsonl();
         }
       }
 
@@ -1138,7 +1253,7 @@ export class AgentLoop {
   /**
    * 内部方法：执行一轮 LLM 调用
    */
-  private async runTurn(): Promise<{ stop: boolean; stopReason?: string }> {
+  private async runTurn(): Promise<{ stop: boolean; stopReason?: string; toolCalled?: boolean }> {
     this.currentTurn++;
     // ── 回合回滚：记录回合开始前状态 ──
     if (this.turnRecorder) {
@@ -1170,6 +1285,12 @@ export class AgentLoop {
         const allowedSet = new Set(allowed);
         toolDefinitions = toolDefinitions.filter(t => allowedSet.has(t.name));
       }
+    }
+
+    // 黑名单过滤：始终生效，优先级高于白名单
+    if (profile.blacklist.length > 0) {
+      const blocked = new Set(profile.blacklist);
+      toolDefinitions = toolDefinitions.filter(t => !blocked.has(t.name));
     }
 
     // 获取最后一条 user 消息作为 userInput
@@ -1256,13 +1377,16 @@ export class AgentLoop {
       this.pendingFallbackInfo = null;
     }
 
-    // 精确模式：应用策略
+    // 精确模式/陪伴模式：应用策略
     let effectiveHistory = historyWithoutLastUser;
     let effectivePersonaDir = this.personaDir;
     if (this.composeStrategy) {
       const opts = this.composeStrategy.prepareCompose(this.personaDir);
       effectivePersonaDir = opts.personaDir;
-      effectiveHistory = this.composeStrategy.filterHistory(historyWithoutLastUser);
+      // 工具链续轮时保留完整历史（模型需要看到工具结果才能继续）
+      effectiveHistory = hasPendingToolCalls
+        ? historyWithoutLastUser
+        : this.composeStrategy.filterHistory(historyWithoutLastUser);
       if (opts.preciseMode) {
         this.contextComposer.activeConditions.add('precise_mode');
       } else {
@@ -1843,8 +1967,6 @@ export class AgentLoop {
         this.activePlan = updatedPlan;
       }
 
-      // 工具执行前保存陪伴模式状态（工具可能改变全局标志，如 deactivate）
-      const wasCompanion = isCompanionModeActive();
 
       if (this.inlineToolExecuted) {
         // Tools were executed inline during the stream — flush results to conversation
@@ -1861,11 +1983,6 @@ export class AgentLoop {
         await this.flowRegistry.onStepComplete();
       }
 
-      // ── 陪伴模式：工具调用整轮不入历史 ──
-      if (wasCompanion && toolCalls.length > 0) {
-        await this.removeLastRoundFromJsonl();
-      }
-
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
       // ── 回合回滚：回合结束记录 ──
@@ -1874,7 +1991,7 @@ export class AgentLoop {
           this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
         });
       }
-      return { stop: false };
+      return { stop: false, toolCalled: true };
     }
 
     // 没有 tool_calls，说明 Agent 正常结束
