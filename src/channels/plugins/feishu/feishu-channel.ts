@@ -42,6 +42,8 @@ import { sendText, sendCard, getSenderInfo } from './feishu-send.js';
 import { ChannelSessionPool, createCollectHandler } from './feishu-session.js';
 import { FeishuMessageQueue } from './feishu-message-queue.js';
 import { generateSessionId } from '../../../memory/session.js';
+import path from 'node:path';
+import fs from 'node:fs/promises';
 
 // ── 日志 ──
 
@@ -91,6 +93,9 @@ export class FeishuChannel implements ChannelHandler {
   // 最近使用的 loop 引用（用于定时任务主动推送时获取 loop）
   private lastUsedLoop: ChannelSessionRunner | null = null;
   private lastUsedSessionId: string | null = null;
+
+  // chatId 持久化（重启后无需等待用户先发消息即可主动推送）
+  private persistChatIdFile = path.join(process.cwd(), '.agent', 'feishu_chat.json');
 
   // tuiSync 回调（由 start() 的 config 注入）
   private onUserMessage: ((label: string, content: string) => void) | null = null;
@@ -168,6 +173,9 @@ export class FeishuChannel implements ChannelHandler {
       await this.transport.start();
       this.status = 'active';
       this.logger.info('channel started, WebSocket connected');
+
+      // 恢复持久化的 chatId（重启后无需等待用户先发消息即可主动推送）
+      await this.restoreLastChatId();
     } catch (err) {
       this.status = 'error';
       this.logger.error(`transport start failed: ${String(err instanceof Error ? err.message : err)}`);
@@ -286,6 +294,37 @@ export class FeishuChannel implements ChannelHandler {
       if (resp) parts.push(`response: ${JSON.stringify(resp)}`);
       this.logger.error(parts.join(' | '));
     }
+  }
+
+  // ── chatId 持久化 ──────────────────────────────────────────────
+  // 个人助手场景：默认只服务一个用户，chatId 一般不会变。
+  // 有新消息时自动更新，确保更换账号后也能无缝切换。
+
+  private async persistLastChatId(sessionId: string): Promise<void> {
+    const session = this.sessionMap.get(sessionId);
+    if (!session) return;
+    try {
+      const data = { chatId: session.chatId, isGroup: session.isGroup };
+      await fs.mkdir(path.dirname(this.persistChatIdFile), { recursive: true });
+      await fs.writeFile(this.persistChatIdFile, JSON.stringify(data), 'utf-8');
+    } catch { /* 写入失败不阻塞 */ }
+  }
+
+  private async restoreLastChatId(): Promise<void> {
+    try {
+      const raw = await fs.readFile(this.persistChatIdFile, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data.chatId) {
+        this.sessionMap.set('feishu_default', {
+          chatId: data.chatId,
+          messageId: '',
+          chatType: data.isGroup ? 'group' : 'dm',
+          isGroup: !!data.isGroup,
+        });
+        this.lastUsedSessionId = 'feishu_default';
+        this.logger.info(`restored chatId from persistence: ${data.chatId}`);
+      }
+    } catch { /* 文件不存在或格式错误，首次启动正常 */ }
   }
 
   /**
@@ -614,6 +653,9 @@ export class FeishuChannel implements ChannelHandler {
       chatType: ctx.chatType,
       isGroup: ctx.isGroup,
     });
+
+    // 持久化 chatId（重启后无需等待新消息即可主动推送）
+    this.persistLastChatId(sessionId);
 
     // ── 发送者名称 + 图片下载（互不依赖）──
 
