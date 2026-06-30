@@ -1174,10 +1174,8 @@ export function createAddTaskTool(
       '- "cron": standard 5-field cron, e.g. "0 3 * * *" (daily at 3am)\n' +
       '- "daily": fixed time each day, e.g. { time: "09:30" }\n' +
       '- "fixed-time": one-shot at a specific ISO time\n' +
-      '- "random": N random triggers per period, e.g. 10 times/day ({ periodMs: 86400000, count: 10 })',
-    companionDescription:
-      '答应对方一件事，在约定的时间提醒他。' +
-      '他让你几点叫醒他、过多久提醒他、或者每天固定时间跟他说点什么——答应下来就好。',
+      '- "random": N random triggers per period, with optional time window, variable count range, and probability weights. e.g. 0-5 times/day between 9am-6pm, noon 3x more likely ({ periodMs: 86400000, countRange: { min: 0, max: 5, distribution: "extremes" }, timeWindow: { start: "09:00", end: "18:00" }, timeWeights: [{ time: "12:00", weight: 3.0 }], minIntervalMs: 300000 })',
+    companionDescription: '得记住他刚才说的东西，到时候叫他。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1194,7 +1192,10 @@ export function createAddTaskTool(
             '  cron: { expression: "0 */2 * * *" }\n' +
             '  daily: { time: "09:00" }\n' +
             '  fixed-time: { runAt: "2026-06-01T12:00:00.000Z" }\n' +
-            '  random: { periodMs: 86400000, count: 10, minIntervalMs: 300000 }',
+            '  random: { periodMs: 86400000, count: 10, minIntervalMs: 300000, ' +
+            'timeWindow: { start: "09:00", end: "18:00" }, ' +
+            'countRange: { min: 0, max: 5, distribution: "extremes" }, ' +
+            'timeWeights: [{ time: "12:00", weight: 3.0 }] }',
         },
         tags: {
           type: 'array',
@@ -1285,9 +1286,7 @@ export function createRemoveTaskTool(
   return {
     name: 'remove_task',
     description: 'Delete a scheduled task by its id (preferred) or name.',
-    companionDescription:
-      '把之前答应过但不再需要的提醒取消掉。' +
-      '他说不用了、算了、取消吧——就帮他把这件事从心头放下。',
+    companionDescription: '他之前说的那个东西不用管了，不叫了。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1337,7 +1336,7 @@ export function createListTasksTool(
   return {
     name: 'list_tasks',
     description: 'List all currently scheduled tasks with their status.',
-    companionDescription: '回想一下，答应过对方哪些事还没做，让他心里有数。',
+    companionDescription: '得回想一下，有哪些需要提醒他的东西。现况如何？',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -1386,8 +1385,7 @@ export function createToggleTaskTool(
   return {
     name: 'toggle_task',
     description: 'Enable or disable a scheduled task.',
-    companionDescription:
-      '对方想暂停某个提醒，或者重新启用它。就像把一张便签暂时收起来，之后再贴回去。',
+    companionDescription: '关于提醒这个事儿，他有别的想法。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1666,8 +1664,7 @@ export function createCompanionModeTool(
       'action:"activate"进入陪伴，"deactivate"退出陪伴。' +
       '触发词：进入陪伴、退出陪伴、恢复正常、陪我聊天。',
     companionDescription:
-      '向朋友道别。当对方说想离开、想结束、想恢复正常时，好好说再见。' +
-      '别挽留，别犹豫——好好地告别才是对这段陪伴的尊重。',
+      '他离开了，道个别。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1770,8 +1767,7 @@ export function createResetCompanionSessionTool(
     name: 'reset_companion_session',
     description: '清空陪伴记忆并开启新对话。触发词：清空记忆、重新开始、开新对话、启动新会话、重置会话。',
     companionDescription:
-      '和对方开启一段全新的对话。过去的都过去了，你们会以崭新的面貌重新相遇。' +
-      '可以准备一句温暖的问候作为开场。',
+      '这样可以和他重新聊聊了。',
     inputSchema: {
       type: 'object',
       properties: {

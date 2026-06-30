@@ -550,35 +550,161 @@ export class HeartbeatScheduler {
  *  - 相邻 slot 间隔 >= minIntervalMs
  *  - 总数不超过 count
  */
+/** 解析 "HH:mm" → 一天内的毫秒偏移 */
+function parseTimeOfDay(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h * 60 + m) * 60 * 1000;
+}
+
+/** 按分布从 [min, max] 中随机选一个整数 */
+function pickCountFromRange(range: import('./types.js').CountRange): number {
+  const { min, max, distribution = 'uniform' } = range;
+  if (min >= max) return min;
+
+  if (distribution === 'extremes') {
+    // U 形：40% 概率选 min，40% 选 max，20% 均匀分布在中间
+    const r = Math.random();
+    if (r < 0.4) return min;
+    if (r < 0.8) return max;
+    return min + 1 + Math.floor(Math.random() * (max - min - 1));
+  }
+
+  // uniform
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/**
+ * 构建时间权重插值函数。
+ * 给定控制点数组 [{time, weight}]，返回 (msOffset) → weight 的线性插值函数。
+ * msOffset = 从 effectiveStart 起的毫秒数。
+ */
+function buildWeightInterpolator(
+  weights: import('./types.js').TimeWeight[],
+  effectiveStart: number,
+  windowMs: number,
+): (msOffset: number) => number {
+  // 按权重值排序控制点，转为 (offset, weight) 对
+  const points = weights
+    .map(w => ({ offset: parseTimeOfDay(w.time), weight: w.weight }))
+    .sort((a, b) => a.offset - b.offset);
+
+  // 把控制点映射到窗口内的偏移
+  const windowStartOfDay = effectiveStart % 86400000;
+  const mapped = points.map(p => ({
+    offset: ((p.offset - windowStartOfDay + 86400000) % 86400000),
+    weight: p.weight,
+  }));
+
+  return (msOffset: number): number => {
+    // 找到 msOffset 落在哪两个控制点之间
+    const t = msOffset % 86400000;
+    // 找左右控制点
+    let left = mapped[mapped.length - 1];  // wrap: last point
+    let right = mapped[0];
+    for (let i = 0; i < mapped.length; i++) {
+      if (mapped[i].offset <= t) {
+        left = mapped[i];
+        right = mapped[(i + 1) % mapped.length];
+      }
+    }
+
+    let rightOffset = right.offset;
+    if (rightOffset <= left.offset) rightOffset += 86400000;
+    let tAdjusted = t;
+    if (tAdjusted < left.offset) tAdjusted += 86400000;
+
+    const fraction = (tAdjusted - left.offset) / (rightOffset - left.offset);
+    return left.weight + fraction * (right.weight - left.weight);
+  };
+}
+
 function generateRandomSlots(
   cfg: import('./types.js').RandomConfig,
   periodStart: Date,
   minInterval: number,
 ): string[] {
-  const startMs = periodStart.getTime();
-  const endMs = startMs + cfg.periodMs;
-  const windowMs = endMs - startMs;
+  const periodStartMs = periodStart.getTime();
+  const periodEndMs = periodStartMs + cfg.periodMs;
 
-  // 若窗口太小放不下 count 个 slot（每个需 minInterval），降级为均匀分布
-  if (cfg.count * minInterval > windowMs) {
-    const step = windowMs / (cfg.count + 1);
+  // ── 确定触发次数 ──
+  const count = cfg.countRange
+    ? pickCountFromRange(cfg.countRange)
+    : cfg.count;
+  if (count <= 0) return []; // 本周期不触发
+
+  // ── 时间窗口计算 ──
+  let effectiveStart = periodStartMs;
+  let effectiveEnd = periodEndMs;
+
+  if (cfg.timeWindow) {
+    const twStart = parseTimeOfDay(cfg.timeWindow.start);
+    const twEnd = parseTimeOfDay(cfg.timeWindow.end);
+
+    if (twEnd > twStart) {
+      const dayStart = new Date(periodStartMs);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayStartMs = dayStart.getTime();
+
+      let candidateStart = dayStartMs + twStart;
+      while (candidateStart < periodStartMs) {
+        candidateStart += 86400000;
+      }
+      const candidateEnd = candidateStart + (twEnd - twStart);
+
+      effectiveStart = Math.max(periodStartMs, candidateStart);
+      effectiveEnd = Math.min(periodEndMs, candidateEnd);
+    } else {
+      const dayStart = new Date(periodStartMs);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayStartMs = dayStart.getTime();
+
+      let windowStart = dayStartMs - 86400000 + twStart;
+      let windowEnd = dayStartMs + twEnd;
+      while (windowEnd <= periodStartMs) {
+        windowStart += 86400000;
+        windowEnd += 86400000;
+      }
+
+      effectiveStart = Math.max(periodStartMs, windowStart);
+      effectiveEnd = Math.min(periodEndMs, windowEnd);
+    }
+  }
+
+  const windowMs = effectiveEnd - effectiveStart;
+  if (windowMs <= 0) return [];
+
+  // ── 时间权重插值器 ──
+  const weightFn = cfg.timeWeights && cfg.timeWeights.length > 0
+    ? buildWeightInterpolator(cfg.timeWeights, effectiveStart, windowMs)
+    : null;
+  const maxWeight = weightFn
+    ? Math.max(...cfg.timeWeights!.map(w => w.weight))
+    : 1;
+
+  // 若窗口太小放不下 count 个 slot，降级为均匀分布
+  if (count * minInterval > windowMs) {
+    const step = windowMs / (count + 1);
     const slots: string[] = [];
-    for (let i = 1; i <= cfg.count; i++) {
-      slots.push(new Date(startMs + Math.round(step * i)).toISOString());
+    for (let i = 1; i <= count; i++) {
+      slots.push(new Date(effectiveStart + Math.round(step * i)).toISOString());
     }
     return slots;
   }
 
-  // Fisher-Yates 思想生成随机偏移
+  // ── 带权重拒绝采样的随机偏移生成 ──
   const offsets: number[] = [];
-  const attempts = cfg.count * 20; // 最多尝试 count*20 次
-  for (let i = 0; i < attempts && offsets.length < cfg.count; i++) {
-    const offset = startMs + Math.random() * windowMs;
-    // 检查与已有 slot 的距离
+  const attempts = count * 40; // 带权重需要更多尝试
+  for (let i = 0; i < attempts && offsets.length < count; i++) {
+    const offset = effectiveStart + Math.random() * windowMs;
+    // 检查间隔
     const tooClose = offsets.some(o => Math.abs(offset - o) < minInterval);
-    if (!tooClose) {
-      offsets.push(offset);
+    if (tooClose) continue;
+    // 权重拒绝采样
+    if (weightFn) {
+      const w = weightFn(offset - effectiveStart);
+      if (Math.random() > w / maxWeight) continue; // 拒绝
     }
+    offsets.push(offset);
   }
 
   // 排序后转 ISO 字符串
