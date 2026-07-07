@@ -100,6 +100,12 @@ export interface FullConfig {
   local: {
     baseUrl: string;
     defaultModel: string;
+    /** 本地服务端口（默认 ollama=11434, llamacpp=8080） */
+    port: number;
+    /** 最大输出 token 数 */
+    maxTokens: number;
+    /** 后端类型：ollama | llamacpp。未配置时从 baseUrl 端口自动推断 */
+    backend?: 'ollama' | 'llamacpp';
   };
 
   logging: {

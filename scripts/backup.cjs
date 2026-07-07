@@ -1,8 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+
 const d = new Date();
 const ts = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
-const dest = `C:/Users/74689/Desktop/deepthink-src-backup-${ts}`;
+const dest = path.join(os.homedir(), 'Desktop', `deepthink-src-backup-${ts}`);
+const src = path.resolve(__dirname, '..');
+
 const skip = new Set(['node_modules', 'dist', '.git', '.claude', '.trae']);
 
 function cp(src, dest) {
@@ -14,5 +18,5 @@ function cp(src, dest) {
   }
 }
 
-cp('C:/Users/74689/Desktop/Agent/agent', dest);
+cp(src, dest);
 console.log('Backup:', dest);

@@ -2,7 +2,7 @@ export type SectionType = 'static' | 'template' | 'runtime' | 'retrieval' | 'con
 
 export type ContextSourceStrategy = 'always_inline' | 'index_only' | 'lazy_expand' | 'phase_bound';
 
-export type ConditionName = 'bootstrap_pending' | 'bootstrap_incomplete' | 'precise_mode';
+export type ConditionName = 'precise_mode';
 
 export interface SectionEntry {
   name: string;

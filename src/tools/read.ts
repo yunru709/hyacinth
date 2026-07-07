@@ -221,7 +221,7 @@ export class ReadTool implements Tool {
   readonly name = 'read';
   readonly description =
     'Read a file from disk. Supports offset/limit for chunked reading. Images return dimensions, PDFs return page count. Max 2000 lines per read — use offset+limit for large files.';
-  readonly companionDescription = '看看对方之前记下来的东西，或者他提到过的某个文件。像是帮他翻翻笔记本。';
+  readonly companionDescription = '需要看点别的东西了。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

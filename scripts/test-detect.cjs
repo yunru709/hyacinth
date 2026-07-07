@@ -1,8 +1,8 @@
 const { detectImagePaths, IMAGE_MIME_MAP } = require('../dist/multimodal/index.js');
 
 const testInputs = [
-  '看看 C:\\Users\\74689\\Desktop\\photo.png 里有什么',
-  'C:/Users/74689/Pictures/cat.jpg analyze this',
+  '看看 C:\\Users\\testuser\\Desktop\\photo.png 里有什么',
+  'C:/Users/testuser/Pictures/cat.jpg analyze this',
   'D:\\images\\dog.webp 识别一下',
   '普通文本没有图片路径',
 ];

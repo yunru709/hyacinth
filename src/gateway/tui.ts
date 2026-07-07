@@ -675,8 +675,9 @@ export async function runTui(
       hideThinkingIndicator();
       isThinking = false;
 
-      // 陪伴模式 session 切换 → 清空显示并重放新 session 历史
+      // 陪伴模式 session 切换 → 清空显示并重放新 session 历史，同步 sessionDir
       if (loop._sessionSwitched) {
+        sessionDir = loop._sessionSwitched;
         chatLog.clearAll();
         replayEvents(chatLog, loop._sessionSwitched);
         loop._sessionSwitched = undefined;
@@ -821,6 +822,7 @@ export async function runTui(
     notifyTaskFired: async () => {},
     subscribeConfig: () => {},
     isBootstrapPending: () => false,
+    shutdown: async () => {},
   };
   // 远程模式下 agent 为 undefined，这些变量仅用于本地 TUI 功能（斜杠命令等），用 any 避免 null 检查
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1189,6 +1191,7 @@ export async function runTui(
       chatLog.addSystem(theme.dim('Goodbye.'));
       tui.requestRender();
       await channelManager.stopAll();
+      await loop.shutdown();
       // 清理插件钩子
       for (const cleanup of cleanupFns) cleanup();
       await supervisor.shutdownAll();
@@ -1498,12 +1501,12 @@ export async function runTui(
           if (restArgs === 'local') {
             const lmList = localModel.list();
 
-            // 无已注册模型 → 检查 local-provider.json 或直接切
+            // 无已注册模型 → 检查本地模型配置或直接切
             if (lmList.length === 0) {
               const { getLocalProviderConfigLoader } = await import('../provider/local-config.js');
               const localCfg = getLocalProviderConfigLoader();
               if (localCfg?.defaultModel) {
-                // local-provider.json 已配置 → 直接切换
+                // 本地模型已配置 → 直接切换
                 try {
                   await loop.switchProvider('local');
                   // 显式持久化 provider 选择（switchProvider 不再负责持久化）
@@ -1518,8 +1521,8 @@ export async function runTui(
                   chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
                 }
               } else {
-                chatLog.addSystem(theme.warning('No local models registered and no local-provider.json configured.'));
-                chatLog.addSystem(theme.dim('Configure ~/.agent/local-provider.json or register models via /model local/register.'));
+                chatLog.addSystem(theme.warning('No local models configured.'));
+                chatLog.addSystem(theme.dim('Set a local model in config or register models via /model local/register.'));
               }
               tui.requestRender();
               return;
@@ -2381,6 +2384,7 @@ export async function runTui(
       chatLog.addSystem(theme.dim('Goodbye.'));
       tui.requestRender();
       await channelManager.stopAll();
+      await loop.shutdown();
       await supervisor.shutdownAll();
       tui.stop();
       process.exit(0);
@@ -3124,6 +3128,7 @@ if (input.startsWith('/threshold ')) {
   // ── Cleanup ──
   tui.stop();
   await channelManager.stopAll();
+  await loop.shutdown();
   // 清理插件钩子
   for (const cleanup of cleanupFns) cleanup();
   await supervisor.shutdownAll();

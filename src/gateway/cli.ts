@@ -239,12 +239,8 @@ export async function runCli(): Promise<void> {
   // serve 子命令
   program
     .command('serve')
-    .description('启动 HTTP API + WebUI 服务器 (Start HTTP API + WebUI server)')
+    .description('启动 HTTP API 服务器 (Start HTTP API server)')
     .option('-p, --port <port>', 'API 服务器端口', '3000')
-    .option('-w, --webui', '同时启动 WebUI（自动构建前端并打开浏览器）')
-    .option('-W, --webui-only', '仅启动 WebUI（不启动 HTTP API）')
-    .option('--webui-port <port>', 'WebUI 端口', '3100')
-    .option('--no-open', '不自动打开浏览器')
     .option('--api-key <key>', 'API 认证密钥（或设置 DEEPTHINK_API_KEY 环境变量）')
     .option('--cors-origin <origin>', 'CORS 允许的域名（默认 *）')
     .option('--provider <type>', 'Provider 类型')
@@ -254,13 +250,6 @@ export async function runCli(): Promise<void> {
     .action(async (options: Record<string, string>) => {
       const { startServer } = await import('./server.js');
       const port = parseInt(options.port, 10);
-      const enableWebui = !!(options.webui || options.webuiOnly);
-      const webuiPort = parseInt(options.webuiPort || '3100', 10);
-
-      // 自动构建前端
-      if (enableWebui) {
-        await ensureWebuiBuilt();
-      }
 
       const { manager } = await startServer({
         port,
@@ -271,26 +260,7 @@ export async function runCli(): Promise<void> {
         maxContext: parseInt(options.maxContext, 10),
         apiKey: options.apiKey,
         corsOrigin: options.corsOrigin,
-        enableWebui,
-        webuiPort,
-        webuiOnly: !!options.webuiOnly,
       });
-
-      // 自动打开浏览器
-      if (enableWebui && (options.open as unknown) !== false) {
-        const url = `http://localhost:${webuiPort}`;
-        try {
-          const { exec } = await import('node:child_process');
-          const cmd = process.platform === 'win32'
-            ? `start "" "${url}"`
-            : process.platform === 'darwin'
-            ? `open "${url}"`
-            : `xdg-open "${url}"`;
-          exec(cmd);
-        } catch {
-          logger.info(`WebUI ready at ${url}`);
-        }
-      }
 
       const shutdown = async () => {
         console.log('\nShutting down...');
@@ -795,6 +765,8 @@ async function executeAction(
   // 初始化生命周期管理器
   const supervisor = new LifecycleSupervisor();
   const removeHandlers = supervisor.installSignalHandlers();
+  let loop: any;
+  let sessionDir: string;
 
   try {
     // 如果指定了 --provider local, 自动启动本地模型
@@ -909,7 +881,7 @@ async function executeAction(
     }
 
     // Session + 模块初始化（由工厂统一处理）
-    const { loop, sessionDir } = await createAgent(
+    const agentResult = await createAgent(
       {
         cwd: process.cwd(),
         provider,
@@ -924,11 +896,15 @@ async function executeAction(
       supervisor,
     );
 
+    loop = agentResult.loop;
+    sessionDir = agentResult.sessionDir;
+
     // 注入 LifecycleSupervisor，实现运行时 provider 切换时自动管理本地模型进程
     loop.setLifecycleSupervisor(supervisor);
 
-    if (loop.isBootstrapPending()) {
-      await loop.startBootstrap();
+    // Bootstrap Flow 已在 factory 中自动激活，发送空消息启动引导对话
+    if (loop.bootstrapActive) {
+      await loop.run('');
     }
 
     // 检测重启续工指令
@@ -949,6 +925,7 @@ async function executeAction(
     await runInteractive(loop);
   }
   } finally {
+    await loop?.shutdown?.();
     await supervisor.shutdownAll();
     removeHandlers();
   }
@@ -1148,56 +1125,3 @@ async function runInteractive(loop: AgentLoop): Promise<void> {
   });
 }
 
-/**
- * 确保 WebUI 前端已构建。
- * 检测源码目录和 dist 目录的时间戳，按需自动构建。
- */
-async function ensureWebuiBuilt(): Promise<void> {
-  const os = await import('node:os');
-  const distDir = path.join(os.homedir(), '.agent', 'webui', 'dist');
-  const srcDir = path.resolve(process.argv[1], '..', '..', 'webui');
-
-  // 检查是否需要构建
-  let needsBuild = false;
-  try {
-    const distStat = fsSync.statSync(path.join(distDir, 'index.html'));
-    const distTime = distStat.mtimeMs;
-
-    // 检查源码是否比 dist 新
-    if (fsSync.existsSync(srcDir)) {
-      const checkNewer = (dir: string): boolean => {
-        const entries = fsSync.readdirSync(dir, { withFileTypes: true });
-        for (const e of entries) {
-          const full = path.join(dir, e.name);
-          if (e.isDirectory() && e.name !== 'node_modules' && e.name !== 'dist') {
-            if (checkNewer(full)) return true;
-          } else if (e.isFile() && fsSync.statSync(full).mtimeMs > distTime) {
-            return true;
-          }
-        }
-        return false;
-      };
-      if (checkNewer(srcDir)) {
-        needsBuild = true;
-      }
-    }
-  } catch {
-    needsBuild = true; // dist 不存在
-  }
-
-  if (!needsBuild) {
-    logger.info('WebUI frontend is up to date');
-    return;
-  }
-
-  logger.info('Building WebUI frontend...');
-  const { execSync } = await import('node:child_process');
-
-  try {
-    execSync('npm run build', { cwd: srcDir, stdio: 'inherit' });
-    logger.info('WebUI build complete');
-  } catch {
-    logger.warn('WebUI build failed — running without frontend');
-    logger.warn('Run "cd webui && npm install && npm run build" manually');
-  }
-}

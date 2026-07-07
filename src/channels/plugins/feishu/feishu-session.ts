@@ -77,10 +77,10 @@ export class ChannelSessionPool {
       case 'shared':
         return '__shared__';
       case 'per_chat':
-        return `feishu:${chatId}`;
+        return `feishu_chat_${chatId}`;
       case 'per_user':
       default:
-        return `feishu:${senderOpenId}`;
+        return `feishu_${senderOpenId}`;
     }
   }
 
@@ -115,7 +115,8 @@ export function createCollectHandler(): CollectHandler {
     // 飞书端只展示最终文本回复，工具调用和状态消息不发送给用户
     onToolUse(_name: string, _inputSummary: string) {},
     onStatus(_message: string) {},
-    onTurnStart() {},
+    // 每个新 turn 清空之前累积的文本，只保留最后一轮的输出
+    onTurnStart() { texts.length = 0; },
     onFlush() {},
     onInterrupt() {},
     getResponse() { return texts.join(''); },

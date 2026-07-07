@@ -150,12 +150,13 @@ tools: tool1,tool2
 | 工具包 | `.agent/tool-bundles.json` | 优先用 `list_bundles` / `activate_bundle` / `create_bundle` 等工具 | **热加载**：即时生效 |
 | Provider 元数据 | `.agent/providers.json` | 修改 provider 的 baseUrl、defaultModel、envKey、maxTokens | **热加载**：即时生效 |
 | 本地模型 | `.agent/models.json` 或 `.agent/local-models.json` | 配置本地模型启动项 | **需重启**：模型进程管理在启动时进行 |
-| 本地 Provider 默认值 | `.agent/local-provider.json` | 配置 baseUrl、port、defaultModel、maxTokens | **热加载**：即时生效 |
+| 本地 Provider 默认值 | `config.json` 的 `local` 和 `provider.local` 段 | 配置 baseUrl、port、defaultModel、maxTokens | **热加载**：即时生效 |
 | 子 Agent 定义 | `.agent/agents.json` | 添加或更新 Agent 定义 | **热加载**：即时生效 |
 | 跨会话记忆 | `~/.agent/prompts/persona/memory.md`（可在 config.json 的 `memoryFile` 中配置） | 用户要求记下时，编辑此文件写入或整理。 | **热加载**：即时生效 |
 
 > **生效规则**：只有 `channels` 和本地模型需要重启，其余配置（MCP、工具、Skill、子 Agent、Provider）均为热加载，修改后即时生效，不需要调 `restart`。
 | 身份提示词 | `~/.agent/prompts/persona/*.md` | 修改全局身份文件；有项目覆写时按项目要求处理 |
+| 陪伴模式提示词 | `~/.agent/prompts/persona/PartnerSoul.md` | 陪伴模式提示词位置，通过工具切换模式 |
 
 ### 渠道配置
 
@@ -201,7 +202,7 @@ tools: tool1,tool2
 | `.agent/providers.json` | Provider API 配置 |
 | `.agent/model-channels.json` | 多通道模型路由（角色→通道→Provider） |
 | `.agent/tool-bundles.json` | 工具包配置 |
-| `.agent/local-provider.json` | 本地 Provider 默认配置 |
+| `config.json` (`local` / `provider.local`) | 本地 Provider 默认配置 |
 | `.agent/models.json` | 本地模型配置 |
 | `.agent/skills/*.md` | Skill 提示词 |
 | `.agent/tools/*.js` | 动态工具（JavaScript） |

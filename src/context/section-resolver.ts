@@ -4,7 +4,7 @@ import type { TokenCounter } from './tokenizer.js';
 import type { ContextSource } from './interface.js';
 import type { GitManager } from '../evolution/git-manager.js';
 import type { ContextProfile } from './profiles.js';
-import { COMPANION_PROFILE, NORMAL_PROFILE } from './profiles.js';
+import type { IContextRouter } from './router.js';
 import { loadPrompt, renderPrompt } from '../prompts/loader.js';
 import { loadProjectContext } from './prompt-builder.js';
 import { Retriever } from './retriever.js';
@@ -30,41 +30,24 @@ export interface ResolverContext {
   gitManager?: GitManager;
   tokenCounter: TokenCounter;
   activeConditions?: Set<string>;
-  /** 当前模式 profile——替代散落的 activeConditions 检查 */
+  /** 当前模式 profile——保留向后兼容，新代码使用 router */
   profile: ContextProfile;
-}
-
-// ── 陪伴模式时间注入控制 ──────────────────────────────────────────
-// 模拟人对时间的不经意感知：
-//   首条消息 / 用户问时间 → 100% 注入
-//   连续对话 → 按概率随机注入
-
-const TIMESTAMP_INJECT_PROBABILITY = 0.10;  // 连续对话中的随机概率
-const FIRST_CONTACT_THRESHOLD = 4;           // 消息数 ≤ 此值视为首次接触
-
-/** 用户输入是否在询问时间 */
-const TIME_QUERY_RE = /时间|几点|什么时候|时候|几点了|现在几点|什么时候了|几点钟|现在时间|现在什么时候|这会儿几点|多晚了/;
-
-/** 获取 history 中 user 消息的数量 */
-function countUserMessages(history?: Message[]): number {
-  if (!history) return 0;
-  return history.filter(m => m.role === 'user').length;
-}
-
-function shouldInjectTimestamp(ctx: ResolverContext): boolean {
-  const userMsgCount = countUserMessages(ctx.history);
-  // 首次接触：每轮都注入时间，帮助建立时间感
-  if (userMsgCount <= FIRST_CONTACT_THRESHOLD) return true;
-  // 用户主动问时间 → 必须注入
-  if (ctx.userInput && TIME_QUERY_RE.test(ctx.userInput)) return true;
-  // 连续对话：掷骰子
-  return Math.random() < TIMESTAMP_INJECT_PROBABILITY;
+  /** 当前模式 router——统一上下文路由入口 */
+  router: IContextRouter;
 }
 
 export async function resolveSection(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): Promise<string | undefined> {
+  // Router 的 beforeSection 钩子：在正常解析前介入
+  if (ctx.router.beforeSection) {
+    const preempted = await ctx.router.beforeSection(sec, ctx);
+    if (preempted !== undefined) {
+      return preempted || undefined; // null → undefined（跳过此 section）
+    }
+  }
+
   switch (sec.type) {
     case 'static':   return resolveStatic(sec, ctx);
     case 'template': return resolveTemplate(sec, ctx);
@@ -78,17 +61,21 @@ export async function resolveSection(
 // --- Static ---
 
 function resolveStatic(sec: SectionEntry, ctx?: ResolverContext): string | undefined {
-  const profile = ctx?.profile ?? NORMAL_PROFILE;
+  const router = ctx?.router;
 
   if (sec.name === 'persona_soul') {
     // precise_mode 保持原有 activeConditions 逻辑
     if (ctx?.activeConditions?.has('precise_mode')) return undefined;
-    // profile 定义了替代 persona 来源 → 加载替代内容，跳过默认 SOUL
-    if (profile.personaSource) {
+    // Router 定义了替代 persona 来源 → 加载替代内容，跳过默认 SOUL
+    // 注：resolve 字段用于 runtime section（异步），static section 只用 source + append。
+    // 如需完全异步接管 persona，应使用 beforeSection 钩子。
+    const personaOverride = router?.sourceOverrides['persona_soul'];
+    if (personaOverride) {
       try {
-        let content = loadPrompt(profile.personaSource.replace(/^prompts\//, ''));
-        if (profile.toolPrompt) {
-          content = content + '\n\n' + profile.toolPrompt;
+        const effectiveSource = personaOverride.source ?? sec.source;
+        let content = loadPrompt(effectiveSource.replace(/^prompts\//, ''));
+        if (personaOverride.append) {
+          content = content + '\n\n' + personaOverride.append;
         }
         return content;
       } catch {
@@ -98,8 +85,8 @@ function resolveStatic(sec: SectionEntry, ctx?: ResolverContext): string | undef
     return buildSoulSection() || undefined;
   }
 
-  // profile 指定跳过的 section
-  if (profile.skipSections.includes(sec.name)) {
+  // Router 指定跳过的 section
+  if (router?.skipSections.includes(sec.name)) {
     return undefined;
   }
 
@@ -150,7 +137,6 @@ async function resolveRuntime(
   ctx: ResolverContext,
 ): Promise<string | undefined> {
   const src = sec.source;
-  const profile = ctx.profile ?? NORMAL_PROFILE;
 
   if (src === 'runtime:plan') {
     return ctx.currentPlan ? `[Current Plan]\n${ctx.currentPlan}` : undefined;
@@ -162,10 +148,8 @@ async function resolveRuntime(
     return ctx.historySummary ? `[Context Summary]\n${ctx.historySummary}` : undefined;
   }
   if (src === 'runtime:timestamp') {
-    // 陪伴模式下随机注入时间，模拟人对时间的不经意感知
-    if (profile === COMPANION_PROFILE && !shouldInjectTimestamp(ctx)) {
-      return undefined;
-    }
+    // 时间戳的条件注入由 Router.beforeSection 控制（如 CompanionRouter 的概率注入）。
+    // 此处无条件生成时间戳文本——如果 beforeSection 返回了 null，此代码不会执行。
     // # currentDate 是系统元数据标记（非用户输入），模型训练数据中识别为背景信息
     const [datePart, timePart] = ctx.timestamp.split(' ');
     const dateSlash = datePart.replace(/-/g, '/');
@@ -184,9 +168,10 @@ async function resolveRuntime(
     return undefined;
   }
 
-  // profile 指定跳过的 runtime source
+  // Router（或 profile）指定跳过的 runtime source
   const runtimeKey = src.startsWith('runtime:') ? src.slice('runtime:'.length) : '';
-  if (profile.skipRuntimeSources.includes(runtimeKey)) {
+  const skipSources = ctx.router?.skipRuntimeSources ?? ctx.profile.skipRuntimeSources;
+  if (skipSources.includes(runtimeKey)) {
     return undefined;
   }
 
@@ -226,14 +211,18 @@ async function resolveRuntime(
     return undefined;
   }
 
-  // profile 指定了替代 memory 来源 → 路由到对应 ContextSource
-  if (src === 'runtime:memory' && profile.memorySource) {
-    const altSource = ctx.sources?.get(profile.memorySource);
-    if (altSource?.getContent) {
-      const content = await altSource.getContent();
-      return content || undefined;
+  // Router（或 profile）指定了替代 memory 来源 → 路由到对应 ContextSource
+  if (src === 'runtime:memory') {
+    const memoryOverride = ctx.router?.sourceOverrides['memory'];
+    const altSourceName = memoryOverride?.source ?? ctx.profile.memorySource;
+    if (altSourceName) {
+      const altSource = ctx.sources?.get(altSourceName);
+      if (altSource?.getContent) {
+        const content = await altSource.getContent();
+        return content || undefined;
+      }
+      return undefined;
     }
-    return undefined;
   }
 
   if (src.startsWith('runtime:')) {
@@ -254,8 +243,8 @@ async function resolveRetrieval(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): Promise<string | undefined> {
-  const profile = ctx.profile ?? NORMAL_PROFILE;
-  if (profile.skipSections.includes(sec.name)) {
+  const routerSkipSections = ctx.router?.skipSections ?? ctx.profile.skipSections;
+  if (routerSkipSections.includes(sec.name)) {
     return undefined;
   }
 

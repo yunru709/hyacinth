@@ -83,6 +83,9 @@ export function getDefaultConfig(): FullConfig {
     local: {
       baseUrl: localCfg.baseUrl,
       defaultModel: localCfg.defaultModel,
+      port: localCfg.port,
+      maxTokens: localCfg.maxTokens,
+      backend: localCfg.backend,
     },
     logging: { level: 'info', logCacheHits: false },
     repair: {

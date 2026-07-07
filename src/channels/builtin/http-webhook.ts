@@ -271,7 +271,7 @@ export class HttpWebhookChannel implements ChannelHandler {
     });
 
     tuiWss.on('connection', (ws) => {
-      const sessionId = `tui-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+      const sessionId = `tui_${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
       const session = new TuiWsSession(ws, sessionId);
       logger.info('TUI WS client connected', { sessionId });
 

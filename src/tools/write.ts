@@ -17,7 +17,7 @@ export class WriteTool implements Tool {
   readonly name = 'write';
   readonly description =
     'Create or overwrite a file. Creates parent directories automatically.';
-  readonly companionDescription = '帮对方把想法写下来、记下来。他说想写个什么、记个什么，照做就行。';
+  readonly companionDescription = '写东西喽。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

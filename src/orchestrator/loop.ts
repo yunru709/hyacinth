@@ -42,10 +42,9 @@ import { scavengeToolCalls } from '../repair/scavenge.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { ComposeStrategy } from '../context/precision/index.js';
-import { CompanionStrategy } from '../context/precision/companion.js';
-import { DefaultStrategy } from '../context/precision/default.js';
-import { COMPANION_PROFILE, getActiveProfile, isCompanionModeActive } from '../context/profiles.js';
-import { CompanionSessionManager } from '../memory/companion-session.js';
+import { getActiveProfile, getActiveRouter, type ContextProfile } from '../context/profiles.js';
+import type { IContextRouter } from '../context/router.js';
+import { NormalRouter } from '../context/router.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
 import { extractTextContent } from '../utils/misc.js';
@@ -258,8 +257,10 @@ export class AgentLoop {
   channelImages: Array<{ data: string; media_type: string }> | null = null;
   /** Fallback 通知（onFallback 回调写入，runTurn 一次性消费后清空） */
   pendingFallbackInfo: string | null = null;
-  /** 上下文组装策略（精确模式切换用） */
+  /** 上下文组装策略（精确模式切换用，deprecated：新代码使用 activeRouter） */
   composeStrategy: ComposeStrategy | null = null;
+  /** 当前激活的上下文路由器，初始化为 NormalRouter，首次 syncRouter() 时同步到全局状态 */
+  activeRouter: IContextRouter = new NormalRouter();
   /** Whether any tools were executed inline during the current stream */
   private inlineToolExecuted = false;
   /** Stores results from inline tool execution, keyed by tool_use_id */
@@ -574,9 +575,10 @@ export class AgentLoop {
   }
 
   /**
-   * 陪伴模式：如果本轮调用了工具，从 JSONL 中移除整个 loop——
-   * 包括触发它的 user 消息和所有后续回复。
-   * 模型感知不到自己调用过工具，对话连续性不受破坏。
+   * 陪伴模式工具调用清理：
+   * - companion_mode 切换 → 剥离工具痕迹，保留 LLM 文本
+   * - 其他工具 → 整轮砍掉（原有行为）
+   * - 找不到触发消息（跨 session） → 处理整个文件
    */
   private async cleanCompanionJsonl(): Promise<void> {
     try {
@@ -588,24 +590,72 @@ export class AgentLoop {
       const lines = content.split('\n').filter(l => l.trim());
       if (lines.length === 0) return;
 
-      // 从末尾往前找最后一条 user 文本消息（触发本轮 loop 的输入）
-      let cutIndex = -1;
+      // 从末尾往前找最后一条纯文本 user 消息
+      let triggerIdx = -1;
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
           const msg = JSON.parse(lines[i]);
           if (msg.role !== 'user') continue;
           const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
           if (blocks.every((b: any) => b.type === 'tool_result')) continue;
-          cutIndex = i;
+          triggerIdx = i;
           break;
         } catch { /* skip */ }
       }
 
-      if (cutIndex === -1) return;
+      // 检查是否有 companion_mode 工具（跨 session 时从 0 开始扫描）
+      let hasCompanionModeTool = false;
+      const scanFrom = triggerIdx === -1 ? 0 : triggerIdx;
+      for (let i = scanFrom; i < lines.length; i++) {
+        try {
+          const msg = JSON.parse(lines[i]);
+          if (msg.role !== 'assistant') continue;
+          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+          if (blocks.some((b: any) => b.type === 'tool_use' && b.name === 'companion_mode')) {
+            hasCompanionModeTool = true;
+            break;
+          }
+        } catch { /* skip */ }
+      }
 
-      const kept = lines.slice(0, cutIndex);
-      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
-      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
+      // companion_mode 切换：剥离 tool 痕迹，保留 LLM 文本
+      if (hasCompanionModeTool) {
+        const processFrom = triggerIdx === -1 ? 0 : triggerIdx + 1;
+        const kept: string[] = [];
+        for (let i = 0; i < processFrom; i++) kept.push(lines[i]);
+        for (let i = processFrom; i < lines.length; i++) {
+          try {
+            const msg = JSON.parse(lines[i]);
+            if (msg.role === 'user') {
+              const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+              if (blocks.some((b: any) => b.type === 'tool_result')) continue;
+              kept.push(lines[i]);
+              continue;
+            }
+            if (msg.role === 'assistant') {
+              const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
+              // 跳过包含 companion_mode tool_use 的消息（确认语如 "好的，进入陪伴模式。"）
+              if (blocks.some((b: any) => b.type === 'tool_use' && b.name === 'companion_mode')) continue;
+              const textBlocks = blocks.filter((b: any) => b.type === 'text');
+              if (textBlocks.length === 0) continue;
+              kept.push(JSON.stringify({
+                role: 'assistant',
+                content: textBlocks.length === 1 ? textBlocks[0] : textBlocks,
+              }));
+              continue;
+            }
+            kept.push(lines[i]);
+          } catch { /* skip */ }
+        }
+        fsSync.writeFileSync(jsonlPath, kept.join('\n') + (kept.length ? '\n' : ''), 'utf-8');
+        return;
+      }
+
+      // 普通工具：整轮砍掉
+      if (triggerIdx !== -1) {
+        const kept = lines.slice(0, triggerIdx);
+        fsSync.writeFileSync(jsonlPath, kept.length ? kept.join('\n') + '\n' : '', 'utf-8');
+      }
     } catch { /* 文件操作失败不阻塞 */ }
   }
 
@@ -662,39 +712,22 @@ export class AgentLoop {
     } catch { /* 文件操作失败不阻塞 */ }
   }
 
-  /** 跟踪本地 loop 是否已同步到全局陪伴模式（避免重复切换） */
-  private _syncedCompanionMode = false;
-
   /**
-   * 同步全局陪伴模式标志到当前 loop。
-   * 每轮 runTurn 开头调用，所有渠道的 loop 自动切换会话。
+   * 同步全局 Router 到当前 loop。
+   * 每轮 runTurn 开头调用，所有渠道的 loop 自动切换会话和上下文行为。
    */
-  private async syncCompanionMode(): Promise<void> {
-    const globalActive = isCompanionModeActive();
-    if (globalActive === this._syncedCompanionMode) return;
+  async syncRouter(): Promise<void> {
+    const globalRouter = getActiveRouter();
+    if (this.activeRouter?.name === globalRouter.name) return;
 
-    if (globalActive) {
-      // 保存正常 session 路径（仅首次，避免覆盖工具已保存的值）
-      if (!(this as any)._normalSessionDir) {
-        (this as any)._normalSessionDir = this.sessionDir;
-      }
-      const companionDir = CompanionSessionManager.getInstance().getOrCreate();
-      await this.switchSession(companionDir);
-      // 切换到陪伴模式的过滤策略（跨渠道同步时此 loop 可能还是 DefaultStrategy）
-      if (!(this.composeStrategy instanceof CompanionStrategy)) {
-        this.composeStrategy = new CompanionStrategy();
-      }
-    } else {
-      const normalDir = (this as any)._normalSessionDir as string | undefined;
-      if (normalDir) {
-        await this.switchSession(normalDir);
-        (this as any)._normalSessionDir = undefined;
-      }
-      // 恢复默认策略
-      this.composeStrategy = new DefaultStrategy();
+    // 切出旧 Router
+    if (this.activeRouter) {
+      await this.activeRouter.onDeactivate?.(this);
     }
 
-    this._syncedCompanionMode = globalActive;
+    // 切入新 Router
+    this.activeRouter = globalRouter;
+    await this.activeRouter.onActivate?.(this);
   }
 
   /** 获取调度器 */
@@ -755,7 +788,7 @@ export class AgentLoop {
         this.providerRouter.setDefault(onlineProviders[0]);
         // 从本地切走 → 停止本地模型
         if (this.lifecycleSupervisor) {
-          const modelKey = this.configCenter?.get('provider.local.modelKey') as string ?? 'qwen';
+          const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
           this.lifecycleSupervisor.stopModel(modelKey).catch(() => {});
         }
         this.previousProviderWasLocal = false;
@@ -764,7 +797,7 @@ export class AgentLoop {
         if (this.lifecycleSupervisor) {
           const existingBaseUrl = this.configCenter?.get('provider.local.baseUrl') as string;
           if (!existingBaseUrl) {
-            const modelKey = this.configCenter?.get('provider.local.modelKey') as string ?? 'qwen';
+            const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
             this.lifecycleSupervisor.startModelOnDemand(process.cwd(), modelKey)
               .then((modelInfo) => {
                 if (modelInfo) {
@@ -830,10 +863,37 @@ export class AgentLoop {
           );
         }
 
-        // 检测到的优先，否则 fallback 到 local-provider.json
+        // 检测到的优先，否则 fallback 到默认配置
         const baseUrl = detected?.baseUrl || localCfg?.baseUrl || 'http://127.0.0.1:11434/v1';
         const backend = detected?.backend || localCfg?.backend;
-        const model = localCfg?.defaultModel || 'llama3.2';
+
+        // 模型名解析优先级：
+        //   1. Ollama 后端 → 查询 /api/tags 获取真实模型列表，匹配配置或取第一个
+        //   2. RuntimeConfigCenter 中已有的 provider.local.model（TUI /model 命令写入）
+        //   3. 硬编码兜底 llama3.2
+        let model: string;
+        if (backend === 'ollama') {
+          const { fetchOllamaModels, pickBestOllamaModel } = await import('../provider/local-config.js');
+          const ollamaModels = await fetchOllamaModels();
+          // 优先匹配运行时配置中的 model（TUI 切换时写入）或 localCfg 的 defaultModel
+          const preferred = (this.configCenter?.get('provider.local.model') as string)
+            || localCfg?.defaultModel
+            || null;
+          const best = pickBestOllamaModel(ollamaModels, preferred);
+          if (best) {
+            model = best;
+          } else {
+            // Ollama 在运行但没有任何模型 → 给出明确错误
+            throw new Error(
+              'Ollama is running but no models found. ' +
+              'Run "ollama pull <model>" to download a model first.',
+            );
+          }
+        } else {
+          model = (this.configCenter?.get('provider.local.model') as string)
+            || localCfg?.defaultModel
+            || 'llama3.2';
+        }
 
         try {
           newProvider = new LocalProvider({ baseUrl, model, backend });
@@ -874,7 +934,7 @@ export class AgentLoop {
         if (existingBaseUrl) {
           // 模型已通过外部（如 tui 面板 /model/local_*）启动并写入配置
         } else {
-          const modelKey = this.configCenter?.get('provider.local.modelKey') as string ?? 'qwen';
+          const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
           try {
             const modelInfo = await this.lifecycleSupervisor?.startModelOnDemand(
               process.cwd(), modelKey,
@@ -888,7 +948,7 @@ export class AgentLoop {
           }
         }
       } else if (!isLocal && prevWasLocal) {
-        const modelKey = this.configCenter?.get('provider.local.modelKey') as string ?? 'qwen';
+        const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
         this.lifecycleSupervisor.stopModel(modelKey).catch(() => {});
       }
 
@@ -1092,11 +1152,9 @@ export class AgentLoop {
   async notifyTaskFired(taskName: string): Promise<void> {
     this.pendingTaskNotifications.push({ name: taskName, firedAt: new Date().toISOString() });
     this.pendingTaskName = taskName;
-    // 陪伴模式下用自然提示，不暴露"定时任务"概念；正常模式保留系统提示词
-    const isCompanion = isCompanionModeActive();
-    const prompt = isCompanion
-      ? `（你忽然想和他说句话...）`
-      : `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered. Execute it now. If this was a one-shot task, it has completed — no need to reschedule.`;
+    // Router 提供模式对应的提示词风格（陪伴→自然，正常→系统提示）
+    await this.syncRouter();
+    const prompt = this.activeRouter.getTaskPrompt(taskName);
     await this.run(prompt);
     this.pendingTaskName = null;
   }
@@ -1162,6 +1220,16 @@ export class AgentLoop {
         }
       } catch {}
 
+      // 0. 确保 Router 已同步——写用户消息前切换 session，避免跨 session 碎片
+      await this.syncRouter();
+
+      // 0.5 输入预处理：陪伴模式下剥离 [[旁白]] 并交给旁路（正常模式无此钩子，原样返回）
+      if (this.activeRouter.transformUserInput) {
+        try {
+          userInput = await this.activeRouter.transformUserInput(userInput, this);
+        } catch { /* 旁白处理失败则按原输入继续 */ }
+      }
+
       // 1. 将用户输入追加到 conversation（视觉模型自动检测图片路径或渠道预取图片）
       const activeP = this.getActiveProvider();
       const hasVision = activeP.getCapabilities?.()?.vision ?? false;
@@ -1179,14 +1247,19 @@ export class AgentLoop {
         role: 'user',
         content: userContent,
       };
-      await this.conversationStore.append(this.sessionDir, userMessage);
+      // 纯旁白轮：旁路产出仅作瞬态触发，不落盘（不污染档案、不被误当用户消息）
+      if (!this.activeRouter.ephemeralInput) {
+        await this.conversationStore.append(this.sessionDir, userMessage);
+      }
 
-      // 记录用户输入事件
-      await this.eventStore.append(this.sessionDir, {
-        type: 'user_input',
-        content: userInput,
-        timestamp: formatTimestamp(),
-      });
+      // 记录用户输入事件（瞬态旁白触发不记录，避免与真实用户输入混淆）
+      if (!this.activeRouter.ephemeralInput) {
+        await this.eventStore.append(this.sessionDir, {
+          type: 'user_input',
+          content: userInput,
+          timestamp: formatTimestamp(),
+        });
+      }
 
       // 2. 主循环：compose -> LLM -> parse -> tool -> compose
       // 不设总轮次上限 — 超长开发任务可能需要数百轮。
@@ -1220,16 +1293,9 @@ export class AgentLoop {
         }
       }
 
-      // ── 陪伴模式 cleanup ──────────────────────────────────────────
-      // 定时任务触发：只删触发词+工具链，保留模型自然回复（看起来像主动搭话）
-      // 普通工具调用：整轮抹除（用户消息+工具调用+回复全丢，模型不感知）
-      const isScheduledTask = this.pendingTaskName !== null;
-      if (isCompanionModeActive()) {
-        if (isScheduledTask) {
-          await this.removeTriggerFromJsonl();
-        } else if (toolWasCalled) {
-          await this.cleanCompanionJsonl();
-        }
+      // ── Post-turn cleanup（由 Router 控制）────────────────────
+      if (this.activeRouter.onPostTurn) {
+        await this.activeRouter.onPostTurn(this, this.pendingTaskName, toolWasCalled);
       }
 
       // 每轮结束后回收已处理图片：旧 base64 → 占位符 + 模型描述
@@ -1262,21 +1328,21 @@ export class AgentLoop {
       });
     }
     // ── 全局陪伴模式同步 ──────────────────────────────────────────
-    // 所有渠道共享同一份陪伴 session。检测全局标志变化，
-    // 自动切换当前 loop 的 sessionDir 和 composeStrategy。
-    await this.syncCompanionMode();
+    // 所有渠道共享同一份上下文路由。检测全局 Router 变化，
+    // 自动切换当前 loop 的 sessionDir 和上下文行为。
+    await this.syncRouter();
 
     // 从 conversation 读取历史
     const history = await this.conversationStore.readAll(this.sessionDir);
 
-    // 组装上下文 — 按当前模式 profile 过滤工具定义
-    const profile = getActiveProfile();
-    const isCompanion = profile === COMPANION_PROFILE;
-    let toolDefinitions = this.toolRegistry.getToolDefinitions(isCompanion);
+    // 组装上下文 — 按当前 Router 过滤工具定义
+    const ctxRouter = this.activeRouter;
+    const profile = getActiveProfile();  // 保留向后兼容
+    let toolDefinitions = this.toolRegistry.getToolDefinitions(ctxRouter.name === 'companion');
 
-    // profile 指定工具白名单时，使用 profile 过滤（不走 bundle 机制）
-    if (profile.tools.length > 0) {
-      const allowed = new Set(profile.tools);
+    // Router 指定工具白名单时，使用 Router 过滤
+    if (ctxRouter.toolAllowlist.length > 0) {
+      const allowed = new Set(ctxRouter.toolAllowlist);
       toolDefinitions = toolDefinitions.filter(t => allowed.has(t.name));
     } else if (this.bundleRegistry) {
       // 工具包展开：激活时触发激进压缩 + pendingBundleSummary，下轮注入 summary 段（Zone 3）
@@ -1288,8 +1354,8 @@ export class AgentLoop {
     }
 
     // 黑名单过滤：始终生效，优先级高于白名单
-    if (profile.blacklist.length > 0) {
-      const blocked = new Set(profile.blacklist);
+    if (ctxRouter.toolBlacklist.length > 0) {
+      const blocked = new Set(ctxRouter.toolBlacklist);
       toolDefinitions = toolDefinitions.filter(t => !blocked.has(t.name));
     }
 
@@ -1301,6 +1367,9 @@ export class AgentLoop {
     let userInputText = lastUserTextMsg
       ? extractTextContent(lastUserTextMsg.content)
       : '';
+
+    // 陪伴模式纯旁白轮：本轮 input 来自旁路 LLM 的瞬态产出（未落盘、不在 history 中），仅本轮注入
+    const ephemeralUserInput = this.activeRouter.ephemeralInput ?? null;
 
     // 判断是否是工具执行后的续轮（history 中有 tool_use）
     const hasPendingToolCalls = history.some(
@@ -1346,7 +1415,8 @@ export class AgentLoop {
 
     // 从 history 中排除最后一条 user 文本消息（compose 会重新添加）
     // 工具执行续轮时保留在历史中供上下文参考，但不清除 userInput 以避免重复注入
-    const historyWithoutLastUser = hasPendingToolCalls
+    // 瞬态旁白轮：当前 input 不在 history 中，不剥离任何历史 user 消息
+    const historyWithoutLastUser = hasPendingToolCalls || ephemeralUserInput
       ? history
       : lastUserTextMsg
         ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
@@ -1359,6 +1429,12 @@ export class AgentLoop {
     const hasFreshUserInput = lastMsg?.role === 'user' && hasTextContent(lastMsg.content);
     if (!hasFreshUserInput) {
       userInputText = '';
+    }
+
+    // 纯旁白轮：用旁路瞬态产出覆盖本轮 userInput，并消费一次（续轮/下一轮不再注入）
+    if (ephemeralUserInput) {
+      userInputText = ephemeralUserInput;
+      this.activeRouter.ephemeralInput = null;
     }
 
     // 确定本轮实际使用的 Provider（路由决策前置，确保 compose 看到正确的 providerType）
@@ -1380,13 +1456,17 @@ export class AgentLoop {
     // 精确模式/陪伴模式：应用策略
     let effectiveHistory = historyWithoutLastUser;
     let effectivePersonaDir = this.personaDir;
+    // Router 处理历史过滤（陪伴模式的 tool 轮次剥离等）
+    effectiveHistory = hasPendingToolCalls
+      ? historyWithoutLastUser
+      : this.activeRouter.filterHistory(historyWithoutLastUser);
+    // 精确模式（ComposeStrategy）：叠加关键词过滤 + analyzeTurn
     if (this.composeStrategy) {
       const opts = this.composeStrategy.prepareCompose(this.personaDir);
       effectivePersonaDir = opts.personaDir;
-      // 工具链续轮时保留完整历史（模型需要看到工具结果才能继续）
-      effectiveHistory = hasPendingToolCalls
-        ? historyWithoutLastUser
-        : this.composeStrategy.filterHistory(historyWithoutLastUser);
+      if (this.composeStrategy.name === 'precise') {
+        effectiveHistory = this.composeStrategy.filterHistory(effectiveHistory);
+      }
       if (opts.preciseMode) {
         this.contextComposer.activeConditions.add('precise_mode');
       } else {
@@ -2505,8 +2585,9 @@ export class AgentLoop {
     }
   }
 
-  /** 释放资源，停止调度器 */
-  async dispose(): Promise<void> {
+  /** 释放资源：停路由器（含 WorldEngine）+ 停调度器 */
+  async shutdown(): Promise<void> {
+    await this.activeRouter.onDeactivate?.(this).catch(() => {});
     await this.scheduler?.stop();
   }
 }

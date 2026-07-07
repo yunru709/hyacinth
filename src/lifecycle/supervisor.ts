@@ -254,14 +254,27 @@ export class LifecycleSupervisor {
       if (this._shuttingDown) {
         process.exit(0);
       }
+      this._shuttingDown = true;
       process.stderr.write('\nShutting down managed processes...\n');
+      // 10 秒兜底：防止 shutdownAll() 卡住导致僵尸进程
+      const forceExit = setTimeout(() => {
+        process.stderr.write('\nShutdown timeout, forcing exit...\n');
+        process.exit(1);
+      }, 10_000);
       await this.shutdownAll();
+      clearTimeout(forceExit);
       process.exit(0);
     };
 
     const onSigTerm = async () => {
+      this._shuttingDown = true;
       process.stderr.write('\nReceived SIGTERM, shutting down...\n');
+      const forceExit = setTimeout(() => {
+        process.stderr.write('\nShutdown timeout, forcing exit...\n');
+        process.exit(1);
+      }, 10_000);
       await this.shutdownAll();
+      clearTimeout(forceExit);
       process.exit(0);
     };
 

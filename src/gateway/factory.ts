@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { SessionManager } from '../memory/session.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
-import { setCompanionModeActive, isCompanionModeActive } from '../context/profiles.js';
+import { isCompanionModeActive, getActiveRouter, switchRouter } from '../context/profiles.js';
 import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -28,7 +28,7 @@ import {
   createKbUpdateTool,
   createKbToggleTool,
 } from '../knowledge/index.js';
-import { DefaultStrategy, PreciseStrategy, CompanionStrategy, type ComposeStrategy } from '../context/precision/index.js';
+import { DefaultStrategy, PreciseStrategy, type ComposeStrategy } from '../context/precision/index.js';
 import { CompressorOrchestrator, StructuredSummarizer } from '../context/compressor.js';
 import { TokenCounter } from '../context/tokenizer.js';
 import { LLMOrchestrator } from '../orchestrator/planner.js';
@@ -60,6 +60,7 @@ import type { ScheduledTask } from '../schedule/types.js';
 import { HotReloadManager } from '../hot-reload/index.js';
 import { ProviderConfigLoader, getProviderConfigLoader } from '../provider/config.js';
 import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
+import { injectConfigCenter } from '../provider/local-config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
@@ -215,6 +216,9 @@ export async function createAgent(
   configCenter.initialize(getDefaultConfig(), configManager);
   configCenter.merge(config as unknown as Partial<FullConfig>);
 
+  // 注入 configCenter 到 local-config 模块，此后所有本地模型配置读取统一走 configCenter
+  injectConfigCenter(configCenter);
+
   // 统一从 configCenter 读取 maxTurns（合并了 defaults + config.json 覆盖）
   const effectiveMaxTurns = configCenter.get<number>('session.maxTurns') ?? maxTurns;
 
@@ -317,18 +321,27 @@ export async function createAgent(
   });
 
   // ── 陪伴模式 Memory ──────────────────────────────────────────────────
-  const companionMemoryPath = path.join(os.homedir(), '.agent', 'prompts', 'persona', 'PartnerMemory.md');
-  if (!fs.existsSync(path.dirname(companionMemoryPath))) {
-    fs.mkdirSync(path.dirname(companionMemoryPath), { recursive: true });
-  }
-  const companionMemoryStore = new MemoryStore(companionMemoryPath);
-  companionMemoryStore.initializeIfNeeded();
+  // 从角色目录动态读取（~/.agent/companion/<name>/memory.md），
+  // 不同角色各自独立的记忆文件。
   contextComposer.registerSource({
     name: 'companion_memory',
     strategy: 'always_inline',
     cacheability: 'manifest',
-    description: '陪伴模式专属记忆',
-    getContent: () => companionMemoryStore.formatForContext(),
+    description: '陪伴模式专属记忆（按角色隔离）',
+    getContent: () => {
+      const router = getActiveRouter();
+      const name = (router as unknown as Record<string, unknown>)?.activeCompanionName;
+      if (typeof name !== 'string' || !name) return '';
+      const file = path.join(os.homedir(), '.agent', 'companion', name, 'memory.md');
+      try {
+        const content = fs.readFileSync(file, 'utf-8');
+        return content.trim()
+          ? `<!-- 陪伴角色记忆（${name}）-->\n\n${content}`
+          : '';
+      } catch {
+        return ''; // 文件不存在，无记忆
+      }
+    },
   });
 
   // ── 会话临时工具 ContextSource ──────────────────────────────────────
@@ -588,14 +601,18 @@ export async function createAgent(
   // 注入精确模式策略（默认普通模式）
   const composeStrategy = sessionType === 'precise'
     ? new PreciseStrategy(sessionDir)
-    : sessionType === 'companion'
-      ? new CompanionStrategy()
-      : new DefaultStrategy();
+    : new DefaultStrategy();
   loop.composeStrategy = composeStrategy;
 
-  // 启动时恢复陪伴模式全局标志
+  // 启动时恢复陪伴模式 Router + 上次角色名（session 切换由 syncRouter 首次调用触发）
   if (sessionType === 'companion') {
-    setCompanionModeActive(true);
+    const companionRouter = switchRouter('companion');
+    try {
+      const last = fs.readFileSync(
+        path.join(os.homedir(), '.agent', 'companion', '.last-character'), 'utf-8'
+      ).trim();
+      if (last) (companionRouter as unknown as Record<string, unknown>).activeCompanionName = last;
+    } catch {}
   }
 
   // ── Read 工具的图片处理器 — 将读到的图片注入 ImageStore ──

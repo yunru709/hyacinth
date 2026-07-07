@@ -7,9 +7,8 @@
 // ============================================================
 
 import type { AgentFactory } from '../interface.js';
-import { WebUIOutputHandler } from './webui-output-handler.js';
+import { WebUIOutputHandler, type WsLike } from './webui-output-handler.js';
 import type { OutputHandler } from '../../orchestrator/loop.js';
-import type { WsLike } from './webui-ws-session.js';
 import { createLogger } from '../../logging/logger.js';
 
 const logger = createLogger('tui-ws-session');

@@ -33,7 +33,7 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
         // ── 核心身份 ──
         { name: 'persona_precise',         source: 'prompts/precise/persona',       priority: 0,  type: 'conditional', condition: 'precise_mode', description: '精确模式约束（替代 persona）' },
         { name: 'persona_soul',            source: 'prompts/persona',               priority: 1,  type: 'static',     description: '用户 persona（SOUL/IDENTITY/USER）' },
-        { name: 'environment',             source: 'runtime:env',                   priority: 10, type: 'runtime',    description: '运行环境信息' },
+        // { name: 'environment',             source: 'runtime:env',                   priority: 10, type: 'runtime',    description: '运行环境信息 → 已迁移为 system_info / channel_info 工具' },
         { name: 'framework_capabilities',  source: 'prompts/framework-capabilities', priority: 15, type: 'static' },
         // ── 工具 / Skill / Agent / MCP 注册表 ──
         { name: 'tool_rules',    source: 'prompts/tool-rules',   priority: 20, type: 'static',  description: '工具使用规则' },
@@ -66,9 +66,7 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       sections: [
         { name: 'project_context', source: 'runtime:projectContext', priority: 0, type: 'retrieval', description: '项目上下文文件 (.agent.md / AGENTS.md / CLAUDE.md)' },
         { name: 'history_summary',  source: 'runtime:summary',        priority: 1, type: 'runtime',  description: '上下文压缩摘要' },
-        { name: 'history_boundary_before', source: 'runtime:history_boundary_before', priority: 2, type: 'runtime', role: 'system', description: '历史对话开始标记' },
-        { name: 'history',          source: 'runtime:history',        priority: 3, type: 'runtime',  description: '对话历史消息' },
-        { name: 'history_boundary_after',  source: 'runtime:history_boundary_after',  priority: 4, type: 'runtime', role: 'system', description: '历史对话结束标记' },
+        { name: 'history',          source: 'runtime:history',        priority: 3, type: 'runtime',  description: '对话历史消息（含边界标记）' },
       ],
     },
 
@@ -93,9 +91,9 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       order: 5,
       enabled: true,
       sections: [
-        { name: 'workflow_persistent', source: 'runtime:workflow-persistent', priority: 0, type: 'runtime', description: '当前工作流持久上下文（分析/引导，阶段切换时变化）' },
-        { name: 'workflow_step',       source: 'runtime:workflow-step',       priority: 1, type: 'runtime', description: '当前工作流步骤指令（每步变化）' },
-        { name: 'session_mcp',        source: 'runtime:mcp_live',           priority: 2, type: 'runtime', description: '会话中热插拔的 MCP 工具索引' },
+        { name: 'flow_injection',     source: 'runtime:flow',               priority: 1, type: 'runtime', description: 'Flow 步骤注入（bootstrap/TODO/plan 等）' },
+        { name: 'channel_context',    source: 'runtime:channel_context',    priority: 2, type: 'runtime', description: '当前渠道和会话上下文' },
+        { name: 'session_mcp',        source: 'runtime:mcp_live',           priority: 3, type: 'runtime', description: '会话中热插拔的 MCP 工具索引' },
         { name: 'session_tools',      source: 'runtime:tools_live',         priority: 4, type: 'runtime', description: '会话中热插拔的工具' },
         { name: 'timestamp',          source: 'runtime:timestamp',          priority: 5, type: 'runtime', description: '当前时间戳' },
         { name: 'user_input',         source: 'runtime:userInput',          priority: 6, type: 'runtime', description: '用户当前输入（每轮变化）' },

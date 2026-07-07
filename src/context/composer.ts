@@ -13,6 +13,8 @@ import type { ComposeOptions, ContextComposer, ContextSource } from './interface
 import { createHash } from 'node:crypto';
 import type { GitManager } from '../evolution/git-manager.js';
 import { getManifestLoader } from '../hot-reload/manifest-watcher.js';
+import type { ContextProfile } from './profiles.js';
+import { NORMAL_PROFILE, getActiveRouter } from './profiles.js';
 import { resolveSection } from './section-resolver.js';
 import type { ResolverContext } from './section-resolver.js';
 import { getCacheStrategy } from './cache-strategy.js';
@@ -29,25 +31,17 @@ function formatTimestamp(date: Date = new Date()): string {
   return `${y}-${m}-${d} ${h}:${min}`;
 }
 
-/** 给历史消息的首个 text 块加 [此前] 前缀，区分当前对话 */
-function tagHistoryMessage(msg: import('../types.js').Message): import('../types.js').Message {
-  // 仅标记 user 消息——assistant 消息是模型自己的输出，模型看到会模仿
-  if (msg.role !== 'user') return msg;
-  const prefix = '[此前] ';
-  const content = msg.content;
-  if (Array.isArray(content)) {
-    const tagged = content.map((block, i) => {
-      if (i === 0 && block.type === 'text') {
-        return { ...block, text: prefix + block.text };
-      }
-      return block;
-    });
-    return { ...msg, content: tagged };
+/** 判断是否应跳过该历史消息 */
+function shouldSkipHistoryMessage(msg: import('../types.js').Message): boolean {
+  if (msg.role === 'system') return true;
+  const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
+  if (blocks.every(b => b.type === 'thinking')) return true;
+  // 跳过纯系统注入文本
+  if (blocks.every(b => b.type === 'text')) {
+    const text = blocks.map(b => (b as import('../types.js').TextContent).text).join('\n');
+    if (text.startsWith('[Scheduled Task]') || text.startsWith('[System]')) return true;
   }
-  if (content.type === 'text') {
-    return { ...msg, content: { ...content, text: prefix + content.text } };
-  }
-  return msg;
+  return false;
 }
 
 export interface LayeredComposeOptions {
@@ -68,8 +62,9 @@ export interface LayeredComposeOptions {
   fullHistory?: Message[];
   zone3Hashes?: Set<string>;
   personaDir?: string;
-  bootstrapStatus?: 'pending' | 'complete';
   gitManager?: GitManager;
+  /** 当前模式 profile — 控制 section 过滤、persona 来源、memory 来源 */
+  profile?: ContextProfile;
 }
 
 export type ZoneBreakdown = Record<string, number> & { total: number };
@@ -162,27 +157,20 @@ export class LayeredContextComposer implements ContextComposer {
       fullHistory: options.fullHistory,
       zone3Hashes: options.zone3Hashes,
       maxContextTokens: options.maxContextTokens,
-      bootstrapStatus: options.bootstrapStatus,
       sources: this.sources,
       selectedSkills: options.selectedSkills,
       selectedAgents: options.selectedAgents,
       gitManager: options.gitManager,
       tokenCounter: this.tokenCounter,
       activeConditions: this.activeConditions,
+      profile: options.profile ?? NORMAL_PROFILE,
+      router: getActiveRouter(),
     };
   }
 
   private async composeCore(options: LayeredComposeOptions): Promise<LayeredContext> {
     const manifestLoader = getManifestLoader(this.cwd);
     const enabledZones = manifestLoader.getEnabledZones();
-
-    if (options.bootstrapStatus === 'pending') {
-      const zone4 = manifestLoader.getZone('zone4');
-      if (zone4 && !enabledZones.some(([k]) => k === 'zone4')) {
-        enabledZones.push(['zone4', zone4]);
-        enabledZones.sort(([, a], [, b]) => a.order - b.order);
-      }
-    }
 
     const allMessages: Message[] = [];
     const breakdown: Record<string, number> = {};
@@ -237,7 +225,19 @@ export class LayeredContextComposer implements ContextComposer {
     if (zoneRole === 'system') {
       const sections = manifestLoader.getSections(zoneKey);
       for (const sec of sections) {
-        if (sec.type === 'conditional' || this.promptBuilder.getSection(sec.name)) continue;
+        if (this.promptBuilder.getSection(sec.name)) continue;
+        // conditional section 也需要解析——由 resolveConditional 根据 activeConditions 决定是否注入
+        if (sec.type === 'conditional') {
+          const content = await resolveSection(sec, ctx);
+          if (content) {
+            this.promptBuilder.registerSection({
+              name: sec.name,
+              priority: sec.priority,
+              content,
+            });
+          }
+          continue;
+        }
         const content = await resolveSection(sec, ctx);
         if (content) {
           this.promptBuilder.registerSection({
@@ -278,20 +278,31 @@ export class LayeredContextComposer implements ContextComposer {
     };
 
     for (const sec of sections) {
-      // runtime:history 需要展开为 Message[]（非单个 string），无法通过 resolveSection() 处理。
+      // runtime:history — 保持消息独立性（保留 role），跳过系统注入和 thinking
       if (sec.source === 'runtime:history' && options.history && options.history.length > 0) {
         flushSystemParts();
         flushTextParts();
-        // 为历史消息加 [历史] 前缀，区分当前对话，对抗长上下文注意力漂移
-        const taggedHistory = options.history.map(msg => tagHistoryMessage(msg));
-        messages.push(...taggedHistory);
+        const boundaryBefore = this.activeConditions.has('precise_mode')
+          ? '── 以下为检索有关信息 ──'
+          : '── 以下为此前对话 ──';
+        const boundaryAfter = this.activeConditions.has('precise_mode')
+          ? '── 以上为检索有关信息 ──'
+          : '── 以上为此前对话 ──';
+        messages.push({ role: zoneRole, content: { type: 'text', text: boundaryBefore } });
+        for (const msg of options.history) {
+          if (shouldSkipHistoryMessage(msg)) continue;
+          messages.push(msg);
+        }
+        messages.push({ role: zoneRole, content: { type: 'text', text: boundaryAfter } });
         continue;
       }
 
       const content = await resolveSection(sec, ctx);
       if (!content) continue;
 
-      const sectionRole = (sec.role ?? zoneRole) as 'system' | 'user' | 'assistant';
+      // Router 可按"本轮该 section 的实际来源"覆写 role（如陪伴模式世界旁白 → assistant 内心独白）
+      const roleOverride = ctx.router.roleForSection?.(sec.name);
+      const sectionRole = (roleOverride ?? sec.role ?? zoneRole) as 'system' | 'user' | 'assistant';
       const zr: string = zoneRole; // widen to avoid TS narrowing
 
       if (sectionRole === 'system' && zr !== 'system') {

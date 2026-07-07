@@ -1,7 +1,5 @@
 import type { ToolCall, ToolResult } from '../types.js';
 import type { ToolRegistry } from './registry.js';
-import type { SandboxConfig } from './bash.js';
-import { BashTool } from './bash.js';
 
 /**
  * ToolExecutor — 调度工具执行
@@ -14,17 +12,14 @@ import { BashTool } from './bash.js';
 export class ToolExecutor {
   private registry: ToolRegistry;
   private defaultTimeout: number;
-  private sandboxConfig?: SandboxConfig;
 
   /**
    * @param registry  工具注册表
    * @param defaultTimeout  默认超时时间（毫秒），默认 300000 (5 分钟)
-   * @param sandboxConfig  可选沙箱配置，会在执行 BashTool 时自动注入
    */
-  constructor(registry: ToolRegistry, defaultTimeout?: number, sandboxConfig?: SandboxConfig) {
+  constructor(registry: ToolRegistry, defaultTimeout?: number) {
     this.registry = registry;
     this.defaultTimeout = defaultTimeout ?? 300_000;
-    this.sandboxConfig = sandboxConfig;
   }
 
   /**
@@ -39,11 +34,6 @@ export class ToolExecutor {
         content: `Unknown tool: ${toolCall.name}`,
         is_error: true,
       };
-    }
-
-    // 如果是 BashTool 且有沙箱配置，注入配置
-    if (tool instanceof BashTool && this.sandboxConfig) {
-      tool.setSandboxConfig(this.sandboxConfig);
     }
 
     try {

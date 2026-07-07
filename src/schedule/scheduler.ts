@@ -527,13 +527,35 @@ export class HeartbeatScheduler {
           task.pendingSlots = generateRandomSlots(cfg, periodStart, minInterval);
         }
 
-        // 取第一个 slot 作为下次执行时间
-        const nextSlot = new Date(task.pendingSlots[0]);
-        if (nextSlot <= now && task.pendingSlots.length > 1) {
-          // 当前 slot 已到期且后续还有 → 立即执行当前 slot
-          // 不移除 slot（在 executeTask 完成后由调用方处理）
+        // 本周期没有有效 slot（count=0 或时间窗口为空），跳到下一周期
+        if (task.pendingSlots.length === 0) {
+          const nextPeriod = new Date(periodStart.getTime() + cfg.periodMs);
+          task.periodStartAt = nextPeriod.toISOString();
+          task.pendingSlots = undefined;
+          return nextPeriod;
         }
-        return nextSlot <= now ? new Date(now.getTime() + 100) : nextSlot;
+
+        // 找到第一个未过期的 slot
+        let nextSlot: Date | null = null;
+        while (task.pendingSlots.length > 0) {
+          const candidate = new Date(task.pendingSlots[0]);
+          if (candidate > now) {
+            nextSlot = candidate;
+            break;
+          }
+          // slot 已过期，丢弃
+          task.pendingSlots.shift();
+        }
+
+        // 所有 slot 都过期了 → 跳到下一周期
+        if (!nextSlot) {
+          const nextPeriod = new Date(periodStart.getTime() + cfg.periodMs);
+          task.periodStartAt = nextPeriod.toISOString();
+          task.pendingSlots = undefined;
+          return nextPeriod;
+        }
+
+        return nextSlot;
       }
 
       default:

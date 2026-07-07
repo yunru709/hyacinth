@@ -7,8 +7,8 @@ import type { BackgroundProcessRegistry } from './background-registry.js';
 
 /** 沙箱配置接口 — 限制 BashTool 可执行的命令 */
 export interface SandboxConfig {
-  /** 允许访问的目录白名单（默认: [cwd]） */
-  allowedPaths: string[];
+  /** @deprecated 路径白名单已废弃，不再限制工作目录 */
+  allowedPaths?: string[];
   /** 危险命令黑名单（大小写不敏感子串匹配） */
   blockedCommands: string[];
   /** 最大输出字节数，默认 1MB */
@@ -164,7 +164,6 @@ export class BashTool implements Tool {
   constructor(cwd?: string, sandboxConfig?: SandboxConfig) {
     this.cwd = cwd ?? process.cwd();
     this.sandboxConfig = sandboxConfig ?? {
-      allowedPaths: [this.cwd],
       blockedCommands: DEFAULT_BLOCKED_COMMANDS,
     };
     this.persistentEnv = {};
@@ -243,31 +242,30 @@ export class BashTool implements Tool {
       }
     }
 
-    // 沙箱拦截：检查 cd 命令的目标路径
-    if (this.sandboxConfig.allowedPaths.length > 0) {
-      const cdMatch = commandLower.match(/(?:^|\s|&&|\|{1,2}|;)\s*cd\s+([^\s;&|]+)/);
-      if (cdMatch) {
-        const targetPath = path.resolve(this.cwd, cdMatch[1]);
-        const isAllowed = this.sandboxConfig.allowedPaths.some(
-          (allowed) => targetPath.startsWith(path.resolve(allowed)),
-        );
-        if (!isAllowed) {
-          return `Error: Directory "${cdMatch[1]}" is outside allowed paths. Blocked by sandbox.`;
-        }
-      }
-    }
-
-    // 沙箱拦截：检查工作目录在白名单内
-    if (this.sandboxConfig.allowedPaths.length > 0) {
-      const cwdAllowed = this.sandboxConfig.allowedPaths.some(
-        (p) => this.cwd === p || this.cwd.startsWith(p + (os.platform() === 'win32' ? '\\' : '/')),
-      );
-      if (!cwdAllowed) {
-        throw new Error(
-          `Command blocked by sandbox: working directory "${this.cwd}" is not in allowed paths`,
-        );
-      }
-    }
+    // 沙箱路径白名单已废弃 — 不再限制 cd 目标和工作目录，由 LLM 自行约束
+    // （保留注释以供将来可能需要恢复时参考）
+    // if (this.sandboxConfig.allowedPaths?.length) {
+    //   const cdMatch = commandLower.match(/(?:^|\s|&&|\|{1,2}|;)\s*cd\s+([^\s;&|]+)/);
+    //   if (cdMatch) {
+    //     const targetPath = path.resolve(this.cwd, cdMatch[1]);
+    //     const isAllowed = this.sandboxConfig.allowedPaths.some(
+    //       (allowed) => targetPath.startsWith(path.resolve(allowed)),
+    //     );
+    //     if (!isAllowed) {
+    //       return `Error: Directory "${cdMatch[1]}" is outside allowed paths. Blocked by sandbox.`;
+    //     }
+    //   }
+    // }
+    // if (this.sandboxConfig.allowedPaths?.length) {
+    //   const cwdAllowed = this.sandboxConfig.allowedPaths.some(
+    //     (p) => this.cwd === p || this.cwd.startsWith(p + (os.platform() === 'win32' ? '\\' : '/')),
+    //   );
+    //   if (!cwdAllowed) {
+    //     throw new Error(
+    //       `Command blocked by sandbox: working directory "${this.cwd}" is not in allowed paths`,
+    //     );
+    //   }
+    // }
 
     const isWin = process.platform === 'win32';
 

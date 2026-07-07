@@ -79,7 +79,7 @@ export interface Session {
   projectKey: string;
   createdAt: string;
   updatedAt: string;
-  type?: 'normal' | 'precise';
+  type?: 'normal' | 'precise' | 'companion';
   /** 创建此 session 的渠道：'webui' | 'tui' | 'feishu' 等 */
   channel?: string;
 }

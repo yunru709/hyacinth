@@ -133,7 +133,7 @@ export class ProviderManager {
   private buildFallbackProviders(types: ProviderType[]): Provider[] {
     const result: Provider[] = [];
     for (const type of types) {
-      // 本地模型：从 local-provider.json 读取配置
+      // 本地模型：读取配置
       if (type === 'local' || type === 'llamacpp' || type === 'ollama') {
         try {
           const localCfg = getLocalProviderConfigLoader();
@@ -326,7 +326,7 @@ export class ProviderManager {
       return createMiMoProvider();
     }
 
-    // 本地模型：检查 local-provider.json 是否已配置
+    // 本地模型：检查是否已配置
     try {
       const localCfg = getLocalProviderConfigLoader();
       if (localCfg?.defaultModel) {
@@ -355,7 +355,7 @@ export class ProviderManager {
     if (process.env.ZHIPU_API_KEY) available.push('zhipu');
     if (process.env.MINIMAX_API_KEY) available.push('minimax');
     if (process.env.MIMO_API_KEY) available.push('mimo');
-    // 本地模型兜底：检测是否已配置（.agent/local-provider.json 或 models/ 目录）
+    // 本地模型兜底：检测是否已配置
     try {
       const localCfg = getLocalProviderConfigLoader();
       if (localCfg?.defaultModel) {

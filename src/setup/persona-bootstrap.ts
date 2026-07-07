@@ -19,6 +19,8 @@ const PERSONA_FILE_NAMES = [
   'SOUL.md',
   'IDENTITY.md',
   'USER.md',
+  'PartnerSoul.md',
+  'PartnerMemory.md',
 ] as const;
 
 export type PersonaFileName = (typeof PERSONA_FILE_NAMES)[number];
@@ -136,10 +138,31 @@ export async function ensurePersonaFiles(
   await fsp.mkdir(personaDir, { recursive: true });
 
   let state = await readState(personaDir);
+  const now = new Date().toISOString();
+
+  // 自动补检测：如果 persona 文件已被填写（内容 ≠ 模板）但 state 文件未反映
+  //（例如 markBootstrapComplete 因格式验证过严而失败），
+  // 在重建 BOOTSTRAP.md 之前标记为完成。这是修复"每次启动都重新引导"的 bug。
+  if (!state.setupCompletedAt) {
+    try {
+      const identityPath = path.join(personaDir, 'IDENTITY.md');
+      const userPath = path.join(personaDir, 'USER.md');
+      const identityTemplate = loadTemplateContent('IDENTITY.md');
+      const userTemplate = loadTemplateContent('USER.md');
+      const identityChanged = await fileContentDiffersFromTemplate(identityPath, identityTemplate);
+      const userChanged = await fileContentDiffersFromTemplate(userPath, userTemplate);
+      if (identityChanged || userChanged) {
+        state = { ...state, setupCompletedAt: now };
+        logger.info('Persona setup auto-detected as complete (files already filled)');
+      }
+    } catch {
+      // 文件可能尚未创建 — 正常继续
+    }
+  }
+
   const alreadyComplete = !!state.setupCompletedAt;
 
   const filesCreated: string[] = [];
-  const now = new Date().toISOString();
 
   for (const fileName of PERSONA_FILE_NAMES) {
     if (alreadyComplete && fileName === 'BOOTSTRAP.md') continue;
@@ -223,17 +246,8 @@ export async function validatePersonaFiles(personaDir: string): Promise<PersonaV
       templateFiles.push(fileName);
       continue;
     }
-
-    if (fileName === 'IDENTITY.md') {
-      const hasName = /名字:\s*\S/.test(content);
-      const hasType = /类型:\s*\S/.test(content);
-      if (!hasName || !hasType) templateFiles.push(fileName);
-    }
-
-    if (fileName === 'USER.md') {
-      const hasName = /名字:\s*\S/.test(content) || /怎么称呼:\s*\S/.test(content);
-      if (!hasName) templateFiles.push(fileName);
-    }
+    // 内容 ≠ 模板 → 视为已填写。不要求特定字段格式（如"名字:"等），
+    // 因为 bootstrap 对话中模型可能用不同格式书写，不应因此阻塞完成标记。
   }
 
   return {
@@ -265,17 +279,6 @@ export function validatePersonaFilesSync(personaDir: string): PersonaValidationR
     if (content === template) {
       templateFiles.push(fileName);
       continue;
-    }
-
-    if (fileName === 'IDENTITY.md') {
-      const hasName = /名字:\s*\S/.test(content);
-      const hasType = /类型:\s*\S/.test(content);
-      if (!hasName || !hasType) templateFiles.push(fileName);
-    }
-
-    if (fileName === 'USER.md') {
-      const hasName = /名字:\s*\S/.test(content) || /怎么称呼:\s*\S/.test(content);
-      if (!hasName) templateFiles.push(fileName);
     }
   }
 

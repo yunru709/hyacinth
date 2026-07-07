@@ -139,9 +139,11 @@ function parseJsonLike(text: string): Record<string, unknown> {
 }
 
 function convertToJsonLines(lines: string[]): string {
-  const result: string[] = [];
+  const parts: string[] = [];
   let i = 0;
   const indentStack: number[] = [];
+  // 标记：下一个 item 是否需要前导逗号
+  let needsComma = false;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -152,8 +154,9 @@ function convertToJsonLines(lines: string[]): string {
 
     // 关闭更深的块
     while (indentStack.length > 0 && indent <= indentStack[indentStack.length - 1]) {
-      result.push('}');
+      parts.push('}');
       indentStack.pop();
+      needsComma = true; // 块关闭后，下一个同层 item 需要逗号
     }
 
     const colonIdx = trimmed.indexOf(':');
@@ -168,39 +171,84 @@ function convertToJsonLines(lines: string[]): string {
     if (val === '{') {
       // 开始一个新的嵌套对象
       const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
-      result.push(`${keyQuoted}: {`);
+      parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: {`);
       indentStack.push(indent);
+      needsComma = false; // 刚打开的块内部不需要逗号
+    } else if (!val || (val.startsWith('{') && !val.endsWith('}'))) {
+      // 空值或残缺的内联对象 → 检查下一行是否有更深缩进
+      const hasDeeperBlock =
+        i + 1 < lines.length &&
+        (lines[i + 1].match(/^(\s*)/)?.[1].length ?? 0) > indent;
+      if (hasDeeperBlock) {
+        const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+        parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: {`);
+        indentStack.push(indent);
+        needsComma = false;
+      } else {
+        const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
+        parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: ${formatJsonValue(val)}`);
+        needsComma = true;
+      }
     } else if (val.startsWith('{') && val.endsWith('}')) {
       // 单行对象: key: { ... }
       const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
-      result.push(`${keyQuoted}: ${formatJsonValue(val)}`);
+      parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: ${formatJsonValue(val)}`);
+      needsComma = true;
     } else if (val.startsWith('[') && val.endsWith(']')) {
       // 数组值
       const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
       const arrItems = val.slice(1, -1).split(',').map(s => s.trim()).map(s => /^\w+$/.test(s) ? `"${s}"` : s).join(', ');
-      result.push(`${keyQuoted}: [${arrItems}]`);
+      parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: [${arrItems}]`);
+      needsComma = true;
     } else {
       // 普通键值对
       const keyQuoted = /^\w+$/.test(key) ? `"${key}"` : key;
-      result.push(`${keyQuoted}: ${formatJsonValue(val)}`);
+      parts.push(`${needsComma ? ', ' : ''}${keyQuoted}: ${formatJsonValue(val)}`);
+      needsComma = true;
     }
     i++;
   }
 
   // 关闭所有未闭合的块
   while (indentStack.length > 0) {
-    result.push('}');
+    parts.push('}');
     indentStack.pop();
   }
 
-  return `{${result.join(', ')}}`;
+  return `{${parts.join('')}}`;
 }
 
 function formatJsonValue(val: string): string {
   if (val === 'true' || val === 'false') return val;
   if (val === 'null') return 'null';
   if (/^-?\d+(\.\d+)?$/.test(val)) return val;
+  // 内联 YAML-like 对象: {key: val, key2: val2}
+  if (val.startsWith('{') && val.endsWith('}')) {
+    const obj = parseInlineYamlObject(val);
+    if (obj) return JSON.stringify(obj);
+  }
   // 字符串：引号包裹，转义内部引号
   const escaped = val.replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/** 将内联 YAML-like 对象 {key: val, key: val} 解析为真正的 JS 对象 */
+function parseInlineYamlObject(text: string): Record<string, unknown> | null {
+  try {
+    const inner = text.slice(1, -1).trim();
+    if (!inner) return {};
+    const result: Record<string, unknown> = {};
+    // 按逗号分割，但只在逗号后紧跟 "单词:" 模式时才算真正的分隔
+    const segments = inner.split(/,\s*(?=\w+\s*:)/);
+    for (const seg of segments) {
+      const colonIdx = seg.indexOf(':');
+      if (colonIdx === -1) continue;
+      const key = seg.slice(0, colonIdx).trim();
+      const val = seg.slice(colonIdx + 1).trim();
+      result[key] = val;
+    }
+    return result;
+  } catch {
+    return null;
+  }
 }

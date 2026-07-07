@@ -108,6 +108,21 @@ export class FeishuStreamingCard {
   }
 
   /**
+   * 重置缓冲区（不清除已发送的卡片，仅清空内存中的累积文本）。
+   * 在 Agent 循环的每个新 turn 开始时调用，确保只保留最后一轮输出。
+   */
+  resetBuffer(): void {
+    // 取消待处理的定时更新
+    if (this.updateTimer) {
+      clearTimeout(this.updateTimer);
+      this.updateTimer = null;
+    }
+    this.pendingUpdate = false;
+    this.buffer = '';
+    this.lastSentText = '';
+  }
+
+  /**
    * 完成流式输出：发送最终内容
    */
   async finish(finalText?: string): Promise<void> {

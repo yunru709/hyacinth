@@ -1,20 +1,56 @@
 // ============================================================
-// ContextProfile — 模式路由层
+// ContextProfile — 模式路由层（兼容保留）
 // ============================================================
 //
-// 在 compose 入口处根据当前模式（composeStrategy.name）选择 profile。
-// Profile 统一定义该模式下的一切上下文组装行为：
-//   - tools: 工具白名单（[] = 全部）
-//   - skipSections: 跳过的 manifest section 名称
-//   - skipRuntimeSources: 跳过的 runtime source key
-//   - personaSource: 替代 persona_soul 的 loadPrompt 路径
-//   - memorySource: 替代 runtime:memory 的 ContextSource name
+// 从 v2 开始，上下文路由统一由 IContextRouter（router.ts）管理。
+// ContextProfile 和 ComposeStrategy 保留作为向后兼容的 deprecated 别名。
 //
 // 新增模式只需：
-//   1. 定义一个 ContextProfile 常量
-//   2. 在 getActiveProfile() 中加一个 case
-//   3. 在 ComposeStrategy 中标记正确的 name
+//   1. 实现 IContextRouter 接口
+//   2. 调用 registerRouter(router) 注册
+//   3. 调用 switchRouter(name) 切换
 // ============================================================
+
+import type { IContextRouter } from './router.js';
+import { NormalRouter, CompanionRouter } from './router.js';
+
+// ── Router Registry ─────────────────────────────────────────
+
+const routerRegistry = new Map<string, IContextRouter>();
+
+/** 当前全局激活的 Router 名称 */
+let _activeRouterName = 'normal';
+
+/** 注册一个 Router（通常在启动时调用） */
+export function registerRouter(router: IContextRouter): void {
+  routerRegistry.set(router.name, router);
+}
+
+/** 切换全局激活的 Router（由模式切换工具或生命周期调用） */
+export function switchRouter(name: string): IContextRouter {
+  const router = routerRegistry.get(name);
+  if (!router) {
+    throw new Error(`Unknown router: ${name}. Available: ${[...routerRegistry.keys()].join(', ')}`);
+  }
+  _activeRouterName = name;
+  return router;
+}
+
+/** 获取当前全局激活的 Router */
+export function getActiveRouter(): IContextRouter {
+  return routerRegistry.get(_activeRouterName) ?? new NormalRouter();
+}
+
+/** 查询当前激活的 Router 名称 */
+export function getActiveRouterName(): string {
+  return _activeRouterName;
+}
+
+// ── 启动时注册内置 Router ──────────────────────────────────
+registerRouter(new NormalRouter());
+registerRouter(new CompanionRouter());
+
+// ── 向后兼容 API（deprecated） ──────────────────────────────
 
 /** 定义一种模式下的上下文组装策略 */
 export interface ContextProfile {
@@ -49,7 +85,7 @@ export const COMPANION_PROFILE: ContextProfile = {
   tools: ['companion_mode', 'reset_companion_session', 'add_task', 'list_tasks', 'remove_task', 'toggle_task', 'read', 'write', 'edit'],
   blacklist: [],
   skipSections: ['persona_soul', 'framework_capabilities', 'tool_rules', 'attention', 'project_context'],
-  skipRuntimeSources: ['skills', 'agents', 'mcp', 'tool_bundles', 'tool_bundle_expand', 'mcp_live', 'tools_live'],
+  skipRuntimeSources: ['skills', 'agents', 'mcp', 'tool_bundles', 'tool_bundle_expand', 'mcp_live', 'tools_live', 'flow', 'channel_context'],
   personaSource: 'prompts/persona/PartnerSoul',
   memorySource: 'companion_memory',
   toolPrompt: '有些事，你可以这样去做：' +
@@ -64,26 +100,30 @@ export const COMPANION_PROFILE: ContextProfile = {
     '得改一下了（edit）。',
 };
 
-// ── 全局陪伴模式标志 ──────────────────────────────────────────
-// 跨 loop、跨渠道生效。设置后所有 AgentLoop 的 getActiveProfile()
-// 都返回 COMPANION_PROFILE。
+// ── 全局陪伴模式标志（deprecated） ──────────────────────────
+// 保留以支持旧代码。新代码应通过 getActiveRouter().name 判断。
+
 let _companionModeActive = false;
 
-/** 查询陪伴模式是否全局激活 */
+/**
+ * @deprecated 使用 getActiveRouter().name === 'companion' 替代
+ */
 export function isCompanionModeActive(): boolean {
-  return _companionModeActive;
-}
-
-/** 设置全局陪伴模式标志（由 companion_mode 工具调用） */
-export function setCompanionModeActive(active: boolean): void {
-  _companionModeActive = active;
+  return _activeRouterName === 'companion';
 }
 
 /**
- * 根据全局标志返回对应的 ContextProfile。
- * 所有 loop 共享——切换后其他渠道（飞书等）同步生效。
+ * @deprecated 使用 switchRouter('companion') / switchRouter('normal') 替代
+ */
+export function setCompanionModeActive(active: boolean): void {
+  _companionModeActive = active;
+  _activeRouterName = active ? 'companion' : 'normal';
+}
+
+/**
+ * @deprecated 使用 getActiveRouter() 替代
  */
 export function getActiveProfile(_strategyName?: string): ContextProfile {
-  if (_companionModeActive) return COMPANION_PROFILE;
+  if (_activeRouterName === 'companion') return COMPANION_PROFILE;
   return NORMAL_PROFILE;
 }

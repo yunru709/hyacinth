@@ -1,16 +1,15 @@
 // ============================================================
-// WebUIOutputHandler — OutputHandler → WebSocket 适配器
+// WsOutputHandler — OutputHandler → WebSocket 适配器
 // ============================================================
 //
 // 将 AgentLoop 的 OutputHandler 回调转换为 WebSocket JSON 消息。
-// 与 TUI 的 tuiHandler 等价——但输出目标是浏览器而非终端。
+// 供 TUI-over-WS 等渠道使用。
 // ============================================================
 
 import type { OutputHandler, TurnInfo } from '../../orchestrator/loop.js';
-import type { WebUIServerMessage } from './webui-types.js';
 
-/** WebSocket 发送接口（适配 ws.WebSocket） */
-export interface WebUISocket {
+/** WebSocket 最小接口（避免静态依赖 ws 库） */
+export interface WsLike {
   send(data: string): void;
   readyState: number;
 }
@@ -18,12 +17,15 @@ export interface WebUISocket {
 // ws 库的 OPEN 常量
 const WS_OPEN = 1;
 
+/** WS 消息（JSON 对象，至少包含 type 字段） */
+type WsMessage = Record<string, unknown> & { type: string };
+
 export class WebUIOutputHandler implements OutputHandler {
   private permissionResolve:
     | ((result: 'yes' | 'no' | 'always') => void)
     | null = null;
 
-  constructor(private ws: WebUISocket) {}
+  constructor(private ws: WsLike) {}
 
   // ── OutputHandler 实现 ─────────────────────────────────────
 
@@ -87,9 +89,9 @@ export class WebUIOutputHandler implements OutputHandler {
     });
   }
 
-  // ── WebUI 专属方法 ────────────────────────────────────────
+  // ── 扩展方法 ───────────────────────────────────────────────
 
-  /** 发送回合状态更新（每次 turn 结束后调用） */
+  /** 发送回合状态更新 */
   sendTurnInfo(info: TurnInfo): void {
     this.send({
       type: 'turn_info',
@@ -98,8 +100,6 @@ export class WebUIOutputHandler implements OutputHandler {
       tokensUsed: info.tokensUsed,
       maxTokens: info.maxContextTokens ?? 200000,
       cacheHitRate: info.cacheHitRate ?? null,
-      workflowName: null,
-      workflowStep: null,
       compressCount: 0,
     });
   }
@@ -115,7 +115,7 @@ export class WebUIOutputHandler implements OutputHandler {
 
   // ── 内部方法 ──────────────────────────────────────────────
 
-  private send(msg: WebUIServerMessage): void {
+  private send(msg: WsMessage): void {
     if (this.ws.readyState === WS_OPEN) {
       try {
         this.ws.send(JSON.stringify(msg));
