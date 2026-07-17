@@ -235,7 +235,7 @@ export class StructuredStore {
           score += Math.round(3 * weight);
         }
       }
-      if (score > 0) {
+      if (matchedTags.length > 0) {
         results.push({ entry, score, matchedTags });
       }
     }
@@ -313,7 +313,7 @@ export class StructuredStore {
 
     for (const r of main) {
       const tags = r.matchedTags.length > 0 ? `匹配标签: ${r.matchedTags.join(', ')}` : 'FTS5 匹配';
-      lines.push(`━━ ${r.entry.id} ── [${r.entry.category}] ── ${tags}`);
+      lines.push(`(知识库提供) ━━ ${r.entry.id} ── [${r.entry.category}] ── ${tags}`);
       lines.push(r.entry.content);
       if (r.entry.ctx_before) lines.push(`前置: ${r.entry.ctx_before}`);
       if (r.entry.ctx_after) lines.push(`后续: ${r.entry.ctx_after}`);

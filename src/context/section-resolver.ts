@@ -180,7 +180,7 @@ async function resolveRuntime(
     // # currentDate 是系统元数据标记（非用户输入），模型训练数据中识别为背景信息
     const [datePart, timePart] = ctx.timestamp.split(' ');
     const dateSlash = datePart.replace(/-/g, '/');
-    return `# currentDate\nToday is ${dateSlash}, ${timePart}.`;
+    return `# currentDate\n(系统提供) Today is ${dateSlash}, ${timePart}.`;
   }
   if (src === 'runtime:userInput') {
     return ctx.userInput || undefined;
