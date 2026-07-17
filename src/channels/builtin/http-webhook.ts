@@ -259,11 +259,16 @@ export class HttpWebhookChannel implements ChannelHandler {
     const { TuiWsSession } = await import('./tui-ws-session.js');
     const { randomBytes } = await import('node:crypto');
     const tuiWss = new WebSocketServer({ noServer: true });
+    const desktopWss = new WebSocketServer({ noServer: true });
 
     this.app.server.on('upgrade', (request, socket, head) => {
       if (request.url === '/tui') {
         tuiWss.handleUpgrade(request, socket, head, (ws) => {
           tuiWss.emit('connection', ws, request);
+        });
+      } else if (request.url === '/desktop') {
+        desktopWss.handleUpgrade(request, socket, head, (ws) => {
+          desktopWss.emit('connection', ws, request);
         });
       } else {
         socket.destroy();
@@ -294,6 +299,34 @@ export class HttpWebhookChannel implements ChannelHandler {
         logger.info('TUI WS client disconnected', { sessionId });
       });
     });
+
+    // ── Desktop GUI WebSocket 端点 ──
+    desktopWss.on('connection', (ws) => {
+      const sessionId = `webui_${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+      const session = new TuiWsSession(ws, sessionId);
+      logger.info('Desktop WS client connected', { sessionId });
+
+      if (this.wsAgentFactory) {
+        session.initialize(this.wsAgentFactory).catch((err: unknown) => {
+          logger.error('Desktop WS init failed', err instanceof Error ? err : new Error(String(err)));
+        });
+      } else {
+        logger.warn('Desktop WS agentFactory not available');
+      }
+
+      ws.on('message', (data: Buffer) => {
+        session.handleMessage(data).catch((err: unknown) => {
+          logger.error('Desktop WS msg error', err instanceof Error ? err : new Error(String(err)));
+        });
+      });
+
+      ws.on('close', () => {
+        session.close().catch(() => {});
+        logger.info('Desktop WS client disconnected', { sessionId });
+      });
+    });
+
+
 
     // ── Start ───────────────────────────────────────────────────
     await this.app.listen({ port: port as number, host: host as string });
