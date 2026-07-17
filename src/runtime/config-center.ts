@@ -203,7 +203,7 @@ function normalizeConfig(persisted: Record<string, unknown>): Record<string, unk
       local: {
         model: modelName || 'qwen2.5-7b',
         baseUrl: 'http://127.0.0.1:8080/v1',
-        maxTokens: 4096,
+        maxOutputTokens: 4096,
         healthCheck: {
           restartDelayMs: 3000,
           intervalMs: 5000,

@@ -1,5 +1,6 @@
 import { GenericRegistry } from './base.js';
 import type { SkillDefinition } from '../types.js';
+import { loadPrompt } from '../prompts/loader.js';
 
 /**
  * Skill 注册表
@@ -69,28 +70,35 @@ export class SkillRegistry extends GenericRegistry<SkillDefinition> {
   }
 }
 
-/** 创建内置 Skill 列表 */
+/** 创建内置 Skill 列表（内容从 src/prompts/skills/ 加载） */
 export function createBuiltinSkills(): SkillDefinition[] {
   return [
     {
       name: 'code-review',
       description: 'Review code for bugs, style issues, and best practices',
-      promptTemplate: 'Please review the following code for potential bugs, style issues, and best practice violations. Focus on: correctness, error handling, performance, and readability.\n\nCode to review:\n{{code}}',
+      promptTemplate: loadPrompt('skills/code-review'),
       relatedTools: ['read', 'glob'],
       source: 'builtin' as const,
     },
     {
       name: 'debug',
       description: 'Debug an issue by analyzing error messages and tracing code paths',
-      promptTemplate: 'Help me debug the following issue. Analyze the error message, trace the code path, and suggest fixes.\n\nError:\n{{error}}\n\nRelevant code:\n{{code}}',
+      promptTemplate: loadPrompt('skills/debug'),
       relatedTools: ['read', 'bash', 'glob'],
       source: 'builtin' as const,
     },
     {
       name: 'refactor',
       description: 'Refactor code to improve structure, readability, and maintainability',
-      promptTemplate: 'Refactor the following code to improve its structure, readability, and maintainability. Preserve existing behavior.\n\nCode to refactor:\n{{code}}\n\nGoals: {{goals}}',
+      promptTemplate: loadPrompt('skills/refactor'),
       relatedTools: ['read', 'edit', 'glob'],
+      source: 'builtin' as const,
+    },
+    {
+      name: 'framework-reference',
+      description: 'Agent 框架配置指南 — 配置项、旁路Agent、模型通道等框架能力说明',
+      promptTemplate: loadPrompt('skills/framework-reference'),
+      relatedTools: ['get_config', 'update_config', 'list_model_channels', 'channel_info', 'config_schema'],
       source: 'builtin' as const,
     },
   ];

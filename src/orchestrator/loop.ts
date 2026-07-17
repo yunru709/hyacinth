@@ -3,13 +3,14 @@ import type { ProviderRouter } from '../provider/router.js';
 import type { ModelRouter } from '../provider/model-router.js';
 import type { ModelRole } from '../provider/model-router.js';
 import { ProviderManager } from '../provider/manager.js';
+import { getModelInfo } from '../provider/catalog.js';
 import { LocalProvider } from '../provider/local.js';
 import { LayeredContextComposer } from '../context/composer.js';
 import { CompressorOrchestrator, type CompressionResult } from '../context/compressor.js';
 import type { ToolExecutor } from '../tools/executor.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ConversationStore } from '../memory/conversation.js';
-import { readCompressionBoundary, writeCompressionBoundary } from '../memory/compression-boundary.js';
+
 import type { EventStore } from '../memory/events.js';
 import { appendEvent } from '../event-store.js';
 import type { StatsManager } from '../memory/stats.js';
@@ -29,11 +30,12 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { ImageStore, buildUserContentWithImages, buildUserContentWithInlineImages, createViewImageTool } from '../multimodal/index.js';
 import { createLogger } from '../logging/logger.js';
-import type { FlowRegistry } from '../flow/flow-registry.js';
-import { isFlowTool } from '../flow/flow-tools.js';
+import type { MachineRegistry } from '../machine/registry.js';
+import { isFlowTool } from '../tools/flow.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from '../setup/config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
+import { mainUserId } from '../provider/user-id.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import type { SafetyConfig } from '../setup/config.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
@@ -119,8 +121,20 @@ export interface OutputHandler {
   onFlush?(): void;
   /** 用户中断：清理动画和临时状态 */
   onInterrupt?(): void;
-  /** Request user permission for dangerous tool execution. Returns 'yes' (once), 'no' (deny), or 'always' (add to allowlist). */
-  onPermissionRequest?(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'>;
+  /** Request user permission for dangerous tool execution. Returns 'yes' (once), 'no' (deny), 'always' (add to allowlist), or 'aor' (unrestricted — skip all future checks). */
+  onPermissionRequest?(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always' | 'aor'>;
+  /** Ask the user structured questions with options. Each question supports multi-select and custom input.
+   *  Returns a JSON string mapping question index → selected answers. */
+  onAskUser?(questions: AskUserQuestion[]): Promise<string>;
+}
+
+/** A single question for ask_user */
+export interface AskUserQuestion {
+  question: string;
+  header?: string;
+  options?: string[];
+  multiSelect?: boolean;
+  customInput?: boolean;
 }
 
 /** Per-turn cache hit statistics */
@@ -239,7 +253,11 @@ export class AgentLoop {
   private pendingImpactInfo: string | null = null;
   private requestId: string;
   private logger: ReturnType<typeof createLogger>;
-  private flowRegistry: FlowRegistry;
+  private flowRegistry: MachineRegistry;
+  /** 旁路Agent 管理器（factory 注入） */
+  bypassManager?: import('../bypass/manager.js').BypassManager;
+  /** 本轮用户消息的旁路注入缓存（preTurn 首轮产出，后续迭代复用） */
+  private _bypassInjections?: import('../bypass/types.js').Injection[];
   private activeProvider?: Provider;
   private scheduler: HeartbeatScheduler | null = null;
   private schedulerInitialized = false;
@@ -269,6 +287,8 @@ export class AgentLoop {
   private dangerousTools: Set<string>;
   /** Tools whitelisted by user (skip confirmation — session-level, from 'always' response) */
   private allowlistTools: Set<string>;
+  /** AOR (Absence of Restriction): skip all future permission checks for this session */
+  private unrestrictedTools = false;
   /** Allowed bash commands (glob pattern matched, from config) */
   private allowedCommands: Set<string> = new Set();
   private configCenter?: RuntimeConfigCenter;
@@ -278,11 +298,11 @@ export class AgentLoop {
   private bundleRegistry?: ToolBundleRegistry;
   private gitManager: GitManager;
   private switchingProvider = false;
+  private bypassProvider?: Provider;
   private lastContextTokens = 0;
   private needsCompression = false;
   private pendingCompression: Promise<CompressionResult | null> | null = null;
-  /** 工具触发的临时策略覆盖，仅在下一轮压缩时生效，用后即清 */
-  pendingCompressionStrategy: string | null = null;
+
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
   /** 当前 AgentLoop 的 thinking 状态（per-session 隔离） */
@@ -309,7 +329,7 @@ export class AgentLoop {
     private dependencyAnalyzer?: DependencyAnalyzer,
     agentRegistry?: AgentRegistry,
     private personaDir?: string,
-    flowRegistry?: FlowRegistry,
+    flowRegistry?: MachineRegistry,
     private providerRouter?: ProviderRouter,
     dangerousTools?: Set<string>,
     allowlistTools?: Set<string>,
@@ -320,7 +340,7 @@ export class AgentLoop {
     this.orchestrator = orchestrator;
     this.outputHandler = outputHandler ?? null;
     this.agentRegistry = agentRegistry;
-    // FlowRegistry 由 factory.ts 注入，不创建默认实例（空注册表无实际作用）
+    // MachineRegistry 由 factory.ts 注入，不创建默认实例（空注册表无实际作用）
     this.flowRegistry = flowRegistry!;
     this.dangerousTools = dangerousTools ?? new Set(['write', 'bash']);
     this.allowlistTools = allowlistTools ?? new Set();
@@ -392,11 +412,14 @@ export class AgentLoop {
         this.dangerousTools = new Set(persistedDangerousTools);
       }
 
-      // Restore thinking mode
-      const persistedThinking = this.configCenter.get('provider.enableThinking') as boolean | undefined;
-      if (typeof persistedThinking === 'boolean') {
-        this.thinkingEnabled = persistedThinking;
-        this.provider.setThinking?.(persistedThinking);
+      // 用户未显式关闭时才从模型目录自动开启思考
+      const thinkingCfg = this.configCenter?.get('provider.enableThinking');
+      if (thinkingCfg !== false) {
+        const info = getModelInfo(this.provider.getProviderType(), this.provider.getModel());
+        if (info?.reasoningEffort) {
+          this.thinkingEnabled = true;
+          this.provider.setThinking?.(true, info.reasoningEffort);
+        }
       }
     }
 
@@ -427,15 +450,8 @@ export class AgentLoop {
         this.contextDirty = true;
       });
 
-      // Subscribe to thinking mode changes
-      this.configCenter.watch('provider.enableThinking', (event) => {
-        const enabled = event.newValue as boolean;
-        this.thinkingEnabled = enabled;
-        this.outputHandler?.onStatus?.(
-          `Thinking mode ${enabled ? 'enabled' : 'disabled'}`,
-          'info',
-        );
-      });
+      // 思考模式由 models-catalog.json 的 reasoningEffort 控制，启动时自动应用
+      // 运行时通过 /model thinking <on|off|high|max> 临时覆盖
     }
 
     // ── 注册 view_image 工具（依赖 ImageStore） ──
@@ -767,6 +783,22 @@ export class AgentLoop {
     return this.activeProvider ?? this.provider;
   }
 
+  /** 运行时切换 KVCache 隔离 ID（模式切换用：普通↔陪伴） */
+  setActiveUserId(userId: string): void {
+    const provider = this.activeProvider ?? this.provider;
+    provider.setUserId?.(userId);
+  }
+
+  /** 由 factory 注入：旁路Agent 共享的 Provider 实例 */
+  setBypassProvider(provider: Provider): void {
+    this.bypassProvider = provider;
+  }
+
+  /** 运行时切换旁路Agent 的 KVCache 隔离 ID（与主Agent 同步切换） */
+  setBypassUserId(userId: string): void {
+    this.bypassProvider?.setUserId?.(userId);
+  }
+
   /** 切换 Provider 路由模式 */
   toggleProvider(): void {
     if (!this.providerRouter) return;
@@ -1027,6 +1059,7 @@ export class AgentLoop {
         apiKey: apiKey ?? '',
         model: model ?? '',
         baseUrl,
+        userId: this.sessionDir ? mainUserId(path.basename(this.sessionDir)) : undefined,
       });
     } catch {
       return undefined;
@@ -1279,6 +1312,29 @@ export class AgentLoop {
         // 更新 stats
         await this.statsManager.increment(this.sessionDir, 'turn_count', 1);
 
+        // ── 旁路Agent 迭代审查（每次 LLM 回复后） ──────────
+        if (this.bypassManager) {
+          try {
+            const fullHistory: Message[] = await this.conversationStore.readAll(this.sessionDir);
+            let iterAssistant = '';
+            let iterUser = userInput;
+            for (let i = fullHistory.length - 1; i >= 0; i--) {
+              const m = fullHistory[i];
+              const text = extractTextContent(m.content as any);
+              if (m.role === 'assistant' && !iterAssistant && text) iterAssistant = text;
+              if (m.role === 'user' && text) { iterUser = text; break; }
+            }
+            const iterCtx: import('../bypass/types.js').PostTurnContext = {
+              userInput: iterUser,
+              assistantOutput: iterAssistant,
+              history: [],
+              toolCallsThisTurn: this.recentToolNames ?? [],
+              isLastIteration: false, // 仍在 loop 中
+            };
+            this.bypassManager.postTurn(iterCtx);
+          } catch { /* ignore */ }
+        }
+
         if (result.stop) {
           break;
         }
@@ -1296,6 +1352,39 @@ export class AgentLoop {
       // ── Post-turn cleanup（由 Router 控制）────────────────────
       if (this.activeRouter.onPostTurn) {
         await this.activeRouter.onPostTurn(this, this.pendingTaskName, toolWasCalled);
+      }
+
+      // ── 旁路Agent postTurn：后台观察，不阻塞 ────────────────
+      if (this.bypassManager) {
+        // 从 jsonl 读取本轮对话（与原来 CompanionRouter.onPostTurn 一致）
+        let postUserInput = userInput;
+        let postAssistantOutput = '';
+        try {
+          const fullHistory: Message[] = await this.conversationStore.readAll(this.sessionDir);
+          // 取最后一条用户消息和助手消息
+          for (let i = fullHistory.length - 1; i >= 0; i--) {
+            const m = fullHistory[i];
+            const text = extractTextContent(m.content as any);
+            if (m.role === 'assistant' && !postAssistantOutput && text) {
+              postAssistantOutput = text;
+            }
+            if (m.role === 'user' && text) {
+              postUserInput = text;
+              break; // 只取最后一轮的用户消息
+            }
+          }
+        } catch { /* ignore */ }
+
+        const postCtx: import('../bypass/types.js').PostTurnContext = {
+          userInput: postUserInput,
+          assistantOutput: postAssistantOutput,
+          history: [],
+          toolCallsThisTurn: this.recentToolNames ?? [],
+          isLastIteration: true, // while 循环已退出，这是本轮用户消息的最后一次
+        };
+        this.bypassManager.postTurn(postCtx);
+        // 清除本轮的旁路注入缓存，下一轮用户消息重新 preTurn
+        this._bypassInjections = undefined;
       }
 
       // 每轮结束后回收已处理图片：旧 base64 → 占位符 + 模型描述
@@ -1389,27 +1478,15 @@ export class AgentLoop {
       this.contextDirty = false;
     }
 
-    // ── 增量压缩：通过 compression-boundary 追踪已压缩消息数，只压缩新消息 ──
-    const sessionId = path.basename(this.sessionDir);
-
     // 切换到大窗口→小窗口模型后，强制全量重压缩
     if (this.needsCompression) {
-      this.needsCompression = false;
-      // 重置压缩边界，让所有消息参与压缩
-      await writeCompressionBoundary(sessionId, {
-        compressedCount: 0,
-        lastCompactTurn: this.currentTurn,
-      });
       this.outputHandler?.onStatus?.(
         `Forcing full context recompression to fit new model limit (${this.maxContextTokens.toLocaleString()})`,
         'warn',
       );
     }
 
-    const boundary = await readCompressionBoundary(sessionId, history.length);
-
-    // 分离已压缩/未压缩消息
-    let uncompressedMsgs = history.slice(boundary.compressedCount);
+    let uncompressedMsgs = history;
 
     let historySummary = this.currentSummary;
 
@@ -1495,6 +1572,31 @@ export class AgentLoop {
       this.kbState.lastQuery = userInputText;
     }
 
+    // ── 旁路Agent preTurn：仅在首轮迭代运行，后续复用缓存 ───
+    if (this._bypassInjections === undefined && this.bypassManager) {
+      const preTurnCtx: import('../bypass/types.js').PreTurnContext = {
+        userInput: userInputText,
+        recentHistory: (history ?? []).slice(-20),
+        contextBudget: { used: this.lastContextTokens, total: this.maxContextTokens },
+        recentToolCalls: this.recentToolNames ?? [],
+      };
+      const preTurnResult = await this.bypassManager.preTurn(preTurnCtx);
+      if (preTurnResult.transformedInput !== undefined) {
+        userInputText = preTurnResult.transformedInput;
+      }
+      this._bypassInjections = preTurnResult.injections;
+    }
+    // 合并 preTurn 产出 + postTurn 运行时注入（如纠正）
+    const runtimeInjections = this.bypassManager?.consumeInjections() ?? [];
+    const bypassInjections = [
+      ...(this._bypassInjections ?? []),
+      ...runtimeInjections,
+    ];
+    // 运行时注入消费后即清空，不带到下一轮
+    if (runtimeInjections.length > 0) {
+      // 不修改 _bypassInjections，只在本轮使用合并结果
+    }
+
     // Compose with layered options
     const layeredResult = await this.contextComposer.compose({
       sessionDir: this.sessionDir,
@@ -1513,6 +1615,7 @@ export class AgentLoop {
       personaDir: effectivePersonaDir,
       gitManager: this.gitManager,
       profile,
+      bypassInjections,
     });
     this.pendingImpactInfo = null; // 清除已使用的影响面信息
     const messages = layeredResult.messages;
@@ -1539,14 +1642,6 @@ export class AgentLoop {
         const compressedHistory = compressionResult.messages;
         historySummary = compressionResult.summary || this.currentSummary;
 
-        // 先更新 boundary，再替换文件（防御性顺序）
-        // 如果 boundary 写成功但 replace 失败 → 下一轮用旧数据重新压缩（安全）
-        // 如果先 replace 再 boundary，replace 成功但 boundary 失败 → 下一轮可能重复压缩（也安全但浪费）
-        // 两者都安全，但先 boundary 的后果更轻
-        await writeCompressionBoundary(sessionId, {
-          compressedCount: 0,
-          lastCompactTurn: this.currentTurn,
-        });
         await this.conversationStore.replace(this.sessionDir, compressedHistory);
 
         // 更新 uncompressedMsgs 为压缩后的消息，避免 Step 2 用旧数据再次压缩
@@ -1563,16 +1658,6 @@ export class AgentLoop {
         if (compressionResult.phasesUsed.length > 0) {
           this.compressCount++;
           await this.statsManager.increment(this.sessionDir, 'compact_count', 1);
-        }
-
-        const llmCompressedCount = compressionResult.phasesUsed.some(p => p === 2 || p === 3)
-          ? uncompressedMsgs.length
-          : 0;
-        if (llmCompressedCount > 0) {
-          await writeCompressionBoundary(sessionId, {
-            compressedCount: boundary.compressedCount + llmCompressedCount,
-            lastCompactTurn: this.currentTurn,
-          });
         }
 
         // 重新 compose（用压缩后的 history）
@@ -1599,6 +1684,7 @@ export class AgentLoop {
           personaDir: this.personaDir,
           gitManager: this.gitManager,
           profile,
+          bypassInjections,
         });
 
         layeredResult.messages.length = 0;
@@ -1644,25 +1730,9 @@ export class AgentLoop {
     // Step 2: 当前轮次超标 → 异步或同步压缩
     const currentTokens = layeredResult.zoneBreakdown.total;
 
-    // LLM 摘要模式：工具临时覆盖优先 → 否则从 config 读取
-    // 提前消费：手动触发（trigger_compression）不受阈值门限制
-    // _default sentinel 表示使用 config 默认策略，但仍触发压缩
-    const toolOverrideRaw = this.pendingCompressionStrategy;
-    this.pendingCompressionStrategy = null; // 用后即清
-    const toolOverride = (toolOverrideRaw && toolOverrideRaw !== '_default') ? toolOverrideRaw : null;
-    const strategySource = toolOverride
-      ?? (this.configCenter
-        ? (this.configCenter.get('context.compressionStrategy') as string) ?? 'C'
-        : 'C');
-
-    // 压缩条件：token 超阈值，或模型通过 trigger_compression 主动要求
-    if (currentTokens > this.maxContextTokens * compressThreshold || toolOverrideRaw !== null) {
-      const llmMode: 'prompt' | 'clone' = strategySource === 'C' ? 'clone' : 'prompt';
-      const compressOptions = {
-        llmMode,
-        composedMessages: llmMode === 'clone' ? layeredResult.messages : undefined,
-      };
-
+    // 压缩条件：token 超阈值，或 trigger_compression 主动要求
+    if (currentTokens > this.maxContextTokens * compressThreshold || this.needsCompression) {
+      this.needsCompression = false;
       const zone5TailBudget = Math.floor(this.maxContextTokens * 0.15);
       const protectCount = this.needsAggressiveCompress
         ? 0
@@ -1683,7 +1753,7 @@ export class AgentLoop {
               this.currentSummary,
               0, // 不保护最近消息
               this.maxContextTokens,
-              compressOptions,
+              undefined,
             );
 
             if (emergencyResult) {
@@ -1729,6 +1799,7 @@ export class AgentLoop {
                 personaDir: this.personaDir,
                 gitManager: this.gitManager,
                 profile,
+                bypassInjections,
               });
 
               layeredResult.messages.length = 0;
@@ -1762,7 +1833,7 @@ export class AgentLoop {
             this.currentSummary,
             protectCount,
             this.maxContextTokens,
-            compressOptions,
+            undefined,
           ).catch((err) => {
             this.logger.warn('Background compression failed', err);
             return null;
@@ -1778,8 +1849,12 @@ export class AgentLoop {
     });
 
     // 调用 provider 流式请求 LLM
-    // 应用当前 AgentLoop 的 thinking 状态到共享 provider（per-session 隔离）
-    this.getActiveProvider().setThinking?.(this.thinkingEnabled, this.thinkingEffort);
+    // 动态读取 thinking 配置（TUI /think 命令可运行时切换）
+    const thinkingEnabled = (this.configCenter?.get('provider.enableThinking') as boolean) ?? false;
+    const thinkingEffort = thinkingEnabled
+      ? getModelInfo(this.provider.getProviderType(), this.provider.getModel())?.reasoningEffort
+      : undefined;
+    this.getActiveProvider().setThinking?.(thinkingEnabled, thinkingEffort);
     const stream = activeProvider.createStream(messages, toolDefinitions, this.abortController?.signal);
 
     // 使用 OutputRouter 解析流式输出
@@ -2059,8 +2134,13 @@ export class AgentLoop {
       }
 
       // ── Flow 步骤完成检测 ──
-      if (toolCalls.some(tc => isFlowTool(tc.name))) {
-        await this.flowRegistry.onStepComplete();
+      // flow_complete 工具内部已执行 advance() + guard 检查，
+      // 此处仅做 post-advance 清理（terminal → deactivate 已在工具内处理）
+      if (toolCalls.some(tc => tc.name === 'flow_complete')) {
+        const active = this.flowRegistry.getActive();
+        if (!active) {
+          // Flow 已在工具内完成并清理，无需额外处理
+        }
       }
 
       // 工具执行完毕后，不停止，继续下一轮
@@ -2137,6 +2217,11 @@ export class AgentLoop {
 
     for (const tc of toolCalls) {
       if (this.dangerousTools.has(tc.name) && this.outputHandler?.onPermissionRequest) {
+        // Step 0: AOR — unrestricted mode, skip all permissions
+        if (this.unrestrictedTools) {
+          permittedCalls.push(tc);
+          continue;
+        }
         // Step 1: check session allowlist
         if (this.allowlistTools.has(tc.name)) {
           permittedCalls.push(tc);
@@ -2164,7 +2249,11 @@ export class AgentLoop {
           this.outputHandler?.onToolResult?.('Permission denied by user', true, tc.id);
           continue;
         }
-        // 'yes' or 'always' — allow this call
+        if (result === 'aor') {
+          this.unrestrictedTools = true;
+          this.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
+        }
+        // 'yes', 'always', or 'aor' — allow this call
         if (result === 'always') {
           this.allowlistTools.add(tc.name);
           sessionAllowlist.addTool(this.sessionDir, tc.name).catch(() => {});
@@ -2294,6 +2383,7 @@ export class AgentLoop {
       const diffData = popD2(result.tool_use_id);
       if (diffData) this.outputHandler?.onDiff?.(result.tool_use_id, diffData.filePath, diffData.lines);
     }
+
   }
 
   /**
@@ -2322,35 +2412,42 @@ export class AgentLoop {
 
     // Permission check for dangerous tools
     if (this.dangerousTools.has(name) && this.outputHandler?.onPermissionRequest) {
-      // Step 1: check session allowlist
-      if (this.allowlistTools.has(name)) {
-        // allowed, proceed
-      } else if (name === 'bash' && this.isCommandAllowed(input?.command as string)) {
-        // Step 2: check allowedCommands glob
-        // allowed, proceed
-      } else {
-        // Step 3: pop permission
-        const result = await this.outputHandler.onPermissionRequest(name, input);
-        if (result === 'no') {
-        const deniedMsg = 'Permission denied by user';
-        this.outputHandler?.onToolResult?.(deniedMsg, true, id);
-        this.inlineToolResults.set(id, { content: deniedMsg, isError: true });
-        appendEvent(this.sessionDir, {
-          type: 'tool_result',
-          tool_use_id: id,
-          name,
-          content: deniedMsg,
-          timestamp: new Date().toISOString(),
-        }).catch(() => {});
-        return;
-      }
-      if (result === 'always') {
-        this.allowlistTools.add(name);
-        sessionAllowlist.addTool(this.sessionDir, name).catch(() => {});
-        if (name === 'bash' && input?.command) {
-          sessionAllowlist.addCommand(this.sessionDir, input.command as string).catch(() => {});
+      // Step 0: AOR — unrestricted mode, skip all permissions
+      if (!this.unrestrictedTools) {
+        // Step 1: check session allowlist
+        if (this.allowlistTools.has(name)) {
+          // allowed, proceed
+        } else if (name === 'bash' && this.isCommandAllowed(input?.command as string)) {
+          // Step 2: check allowedCommands glob
+          // allowed, proceed
+        } else {
+          // Step 3: pop permission
+          const result = await this.outputHandler.onPermissionRequest(name, input);
+          if (result === 'no') {
+          const deniedMsg = 'Permission denied by user';
+          this.outputHandler?.onToolResult?.(deniedMsg, true, id);
+          this.inlineToolResults.set(id, { content: deniedMsg, isError: true });
+          appendEvent(this.sessionDir, {
+            type: 'tool_result',
+            tool_use_id: id,
+            name,
+            content: deniedMsg,
+            timestamp: new Date().toISOString(),
+          }).catch(() => {});
+          return;
         }
-      }
+        if (result === 'aor') {
+          this.unrestrictedTools = true;
+          this.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
+        }
+        if (result === 'always') {
+          this.allowlistTools.add(name);
+          sessionAllowlist.addTool(this.sessionDir, name).catch(() => {});
+          if (name === 'bash' && input?.command) {
+            sessionAllowlist.addCommand(this.sessionDir, input.command as string).catch(() => {});
+          }
+        }
+        }
       }
     }
 
@@ -2475,6 +2572,7 @@ export class AgentLoop {
       };
       await this.conversationStore.append(this.sessionDir, toolResultMessage);
     }
+
   }
 
   /**

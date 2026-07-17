@@ -10,7 +10,7 @@ import { chromium } from 'playwright-core';
   
   // 获取当前 session ID
   const sessionId1 = await page.evaluate(() => {
-    return window.__DEEPTHINK_STORE__?.getState?.()?.sessionId;
+    return window.__HYACINTH_STORE__?.getState?.()?.sessionId;
   });
   console.log('初始 session ID:', sessionId1);
   
@@ -24,7 +24,7 @@ import { chromium } from 'playwright-core';
   await page.waitForTimeout(2000);
   
   const sessionId2 = await page.evaluate(() => {
-    return window.__DEEPTHINK_STORE__?.getState?.()?.sessionId;
+    return window.__HYACINTH_STORE__?.getState?.()?.sessionId;
   });
   console.log('新 session ID:', sessionId2);
   
@@ -35,7 +35,7 @@ import { chromium } from 'playwright-core';
   
   // 切换回第一个 session
   const sessions = await page.evaluate(() => {
-    return window.__DEEPTHINK_STORE__?.getState?.()?.sessions || [];
+    return window.__HYACINTH_STORE__?.getState?.()?.sessions || [];
   });
   console.log('所有 sessions:', sessions.map(s => s.id));
   
@@ -45,13 +45,13 @@ import { chromium } from 'playwright-core';
     await page.waitForTimeout(2000);
     
     const currentSessionId = await page.evaluate(() => {
-      return window.__DEEPTHINK_STORE__?.getState?.()?.sessionId;
+      return window.__HYACINTH_STORE__?.getState?.()?.sessionId;
     });
     console.log('切换后的 session ID:', currentSessionId);
     
     // 检查消息历史是否加载
     const messages = await page.evaluate(() => {
-      const state = window.__DEEPTHINK_STORE__?.getState?.();
+      const state = window.__HYACINTH_STORE__?.getState?.();
       return state?.messages || [];
     });
     console.log('加载的消息数量:', messages.length);

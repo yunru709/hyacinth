@@ -39,8 +39,6 @@ export interface ContextConfig {
   emergencyThreshold: number;
   /** 压缩激进程度 (0~1) */
   compressDepth: number;
-  /** 压缩策略: 'A'=独立提示词, 'C'=克隆对话(缓存友好) */
-  compressionStrategy: 'A' | 'C';
 }
 
 /** 调度器配置 */
@@ -109,9 +107,35 @@ export interface FeishuChannelConfigEntry {
   sessionMode?: 'shared' | 'per_chat' | 'per_user';
 }
 
+/** ClawBot 渠道配置 */
+export interface ClawbotChannelConfigEntry {
+  enabled?: boolean;
+  /** bot_token（留空则首次自动走扫码授权流程，7 天有效） */
+  botToken?: string;
+  /** bot 用户 ID（授权后自动填充，格式 xxx@im.bot） */
+  botId?: string;
+  /** 用户 ID（授权后自动填充，格式 xxx@im.wechat） */
+  userId?: string;
+  /** iLink API 根域名（默认 https://ilinkai.weixin.qq.com） */
+  baseUrl?: string;
+  /** 是否同步到 TUI 界面（默认 false） */
+  tuiSync?: boolean;
+  /** 发送文本消息的最大长度（默认 2000） */
+  textChunkLimit?: number;
+  /** 是否自动刷新 token（默认 true） */
+  autoRefreshToken?: boolean;
+  /** HTTP 请求超时（毫秒，默认 30000） */
+  httpTimeoutMs?: number;
+  /** 长轮询等待时长（秒，默认 28） */
+  pollTimeoutSec?: number;
+  /** 轮询失败重试间隔（毫秒，默认 3000） */
+  pollRetryIntervalMs?: number;
+}
+
 /** 渠道配置集合 */
 export interface ChannelsConfig {
   feishu?: FeishuChannelConfigEntry;
+  clawbot?: ClawbotChannelConfigEntry;
 }
 
 /** Agent 配置（非敏感） */
@@ -167,7 +191,6 @@ const DEFAULT_CONFIG: AgentConfig = {
     compressThreshold: 0.75,
     emergencyThreshold: 0.92,
     compressDepth: 0.5,
-    compressionStrategy: 'C',
   },
   schedule: {
     heartbeatMs: 5000,
@@ -192,6 +215,19 @@ const DEFAULT_CONFIG: AgentConfig = {
       requireMention: true,
       tuiSync: false,
       sessionMode: 'per_user',
+    },
+    clawbot: {
+      enabled: false,
+      botToken: '',
+      botId: '',
+      userId: '',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      tuiSync: false,
+      textChunkLimit: 2000,
+      autoRefreshToken: true,
+      httpTimeoutMs: 30_000,
+      pollTimeoutSec: 28,
+      pollRetryIntervalMs: 3000,
     },
   },
   memoryFile: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),

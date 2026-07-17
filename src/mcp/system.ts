@@ -301,7 +301,7 @@ export class MCPSystem {
       name: `mcp-${name}`,
       strategy: 'index_only',
       cacheability: isHotPlug ? 'live' : 'manifest',
-      description: `${name}: ${client.getTools().map(t => t.name).join(', ')}`,
+      description: name,
       getContent: () => client.getToolIndex(),
     });
   }

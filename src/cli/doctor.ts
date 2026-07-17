@@ -1,5 +1,5 @@
 /**
- * deepthink doctor — 系统诊断 + 自动修复
+ * hyacinth doctor — 系统诊断 + 自动修复
  *
  * 检查项：
  *   1. 运行环境（Node 版本、OS、编码）
@@ -88,9 +88,9 @@ function checkPersona(): CheckResult {
         ? `缺失: ${missing.join(', ')}`
         : `完整 (${existing.length}/4 文件，bootstrap 已完成)`,
     fix: missing.length > 0
-      ? '运行 deepthink setup 完成初始化'
+      ? '运行 hyacinth setup 完成初始化'
       : hasBootstrap
-        ? '启动 TUI 并完成身份对话，或运行 deepthink setup'
+        ? '启动 TUI 并完成身份对话，或运行 hyacinth setup'
         : undefined,
   };
 }
@@ -139,7 +139,7 @@ function checkConfig(): CheckResult {
       label: '配置文件',
       ok: false,
       detail: '~/.agent/config.json 不存在',
-      fix: '运行 deepthink setup 完成配置',
+      fix: '运行 hyacinth setup 完成配置',
     };
   }
   try {
@@ -237,7 +237,7 @@ function checkApiKeys(): CheckResult {
     label: 'API Keys',
     ok: false,
     detail: '未检测到任何 API Key',
-    fix: '运行 deepthink setup 配置 Provider 和 API Key',
+    fix: '运行 hyacinth setup 配置 Provider 和 API Key',
   };
 }
 
@@ -249,7 +249,7 @@ export interface DoctorOptions {
 }
 
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
-  console.log('🔧 deepthink doctor\n');
+  console.log('🔧 hyacinth doctor\n');
 
   // ── 显示原始提示词 ────────────────────────────────────────────
   if (opts.showPrompts) {
@@ -352,6 +352,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
 
   // 显示原始提示词的位置
   console.log('\n── 提示 ──');
-  console.log('  查看原始 Persona 提示词: deepthink doctor --prompts');
-  console.log('  重新运行设置向导: deepthink setup');
+  console.log('  查看原始 Persona 提示词: hyacinth doctor --prompts');
+  console.log('  重新运行设置向导: hyacinth setup');
 }
+

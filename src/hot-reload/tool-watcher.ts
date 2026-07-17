@@ -29,8 +29,9 @@ export function watchTools(deps: ToolWatcherDeps): fs.FSWatcher {
   try { fs.mkdirSync(toolsDir, { recursive: true }); } catch { /* ignore */ }
 
   const fileMap = new Map<string, string>();
+  const mtimeMap = new Map<string, number>();
   // 初始扫描不标记 hotAdded — 工具应进入 Zone 2 tool_rules
-  scanAndSync(toolsDir, toolRegistry, fileMap, true);
+  scanAndSync(toolsDir, toolRegistry, fileMap, mtimeMap, true);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -41,7 +42,7 @@ export function watchTools(deps: ToolWatcherDeps): fs.FSWatcher {
     if (!filename.endsWith('.js') && !filename.endsWith('.py')) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     // 文件变更触发的重新扫描 — 此时才标记 hotAdded，工具进 Zone 5 session-tools
-    debounceTimer = setTimeout(() => scanAndSync(toolsDir, toolRegistry, fileMap, false), debounceMs);
+    debounceTimer = setTimeout(() => scanAndSync(toolsDir, toolRegistry, fileMap, mtimeMap, false), debounceMs);
   });
 
   watcher.on('error', (err) => {
@@ -65,6 +66,7 @@ async function scanAndSync(
   dir: string,
   registry: ToolRegistry,
   fileMap: Map<string, string>,
+  mtimeMap: Map<string, number>,
   isInitialScan: boolean,
 ): Promise<void> {
   const resolved = resolveToolEntries(dir);
@@ -74,7 +76,16 @@ async function scanAndSync(
     const knownToolName = fileMap.get(entry.trackingKey);
 
     if (knownToolName !== undefined) {
-      // 已跟踪 → 重新加载（文件变更触发的热重载）
+      // 已跟踪 → 检查文件是否真的变了，避免 fs.watch 误触发导致全部标记为 hot-added
+      let mtime: number | undefined;
+      try { mtime = fs.statSync(entry.filePath).mtimeMs; } catch { /* stat 失败则走重载 */ }
+      if (mtime !== undefined) {
+        const prevMtime = mtimeMap.get(entry.trackingKey);
+        if (prevMtime === mtime) continue; // 文件没变，跳过
+        mtimeMap.set(entry.trackingKey, mtime);
+      }
+
+      // 重新加载（文件变更触发的热重载）
       if (entry.factory) {
         // Python 工具：不再解析
         const tool = entry.factory();
@@ -103,7 +114,7 @@ async function scanAndSync(
         }
       }
     } else {
-      await loadAndRegister(entry, registry, fileMap, isInitialScan);
+      await loadAndRegister(entry, registry, fileMap, mtimeMap, isInitialScan);
     }
   }
 
@@ -111,6 +122,7 @@ async function scanAndSync(
     if (!currentKeys.has(key)) {
       registry.unregister(toolName);
       fileMap.delete(key);
+      mtimeMap.delete(key);
       logger.info(`Tool unregistered: ${toolName} (${key})`);
     }
   }
@@ -161,6 +173,7 @@ async function loadAndRegister(
   entry: ResolvedEntry,
   registry: ToolRegistry,
   fileMap: Map<string, string>,
+  mtimeMap: Map<string, number>,
   isInitialScan: boolean,
 ): Promise<void> {
   try {
@@ -183,6 +196,7 @@ async function loadAndRegister(
     // 文件变更触发的扫描才标记 → 工具进入 Zone 5 session-tools
     if (!isInitialScan) registry.markHotAdded(tool.name);
     fileMap.set(entry.trackingKey, tool.name);
+    try { mtimeMap.set(entry.trackingKey, fs.statSync(entry.filePath).mtimeMs); } catch {}
     logger.info(`Tool registered: ${tool.name} (${entry.label})`);
   } catch (err) {
     logger.warn(`Failed to load tool ${entry.label}: ${(err as Error).message}`);

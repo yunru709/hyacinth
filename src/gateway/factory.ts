@@ -17,15 +17,8 @@ import { LayeredContextComposer } from '../context/composer.js';
 import {
   KnowledgeBase,
   KnowledgeWatcher,
-  createKbAddTool,
-  createKbListTool,
-  createKbDeleteTool,
   StructuredStore,
-  createAddStructuredTool,
-  createUpdateStructuredTool,
-  createDeleteStructuredTool,
-  createListStructuredTool,
-  createKbUpdateTool,
+  createStructuredTool,
   createKbToggleTool,
 } from '../knowledge/index.js';
 import { DefaultStrategy, PreciseStrategy, type ComposeStrategy } from '../context/precision/index.js';
@@ -45,7 +38,7 @@ import type { Provider } from '../provider/interface.js';
 import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { BootstrapStatus } from '../setup/persona-bootstrap.js';
-import { ensureGlobalPersonaFiles, getBootstrapStatus } from '../setup/persona-bootstrap.js';
+import { ensureGlobalPersonaFiles, ensureGlobalPromptDir, getBootstrapStatus } from '../setup/persona-bootstrap.js';
 import { ConfigManager } from '../setup/config.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { FullConfig } from '../runtime/config-schema.js';
@@ -59,12 +52,16 @@ import { HeartbeatScheduler } from '../schedule/scheduler.js';
 import type { ScheduledTask } from '../schedule/types.js';
 import { HotReloadManager } from '../hot-reload/index.js';
 import { ProviderConfigLoader, getProviderConfigLoader } from '../provider/config.js';
+import { ProviderManager } from '../provider/manager.js';
+import { compressorUserId, orchestratorUserId, setUserIdPrefix, DEFAULT_USER_ID } from '../provider/user-id.js';
 import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { injectConfigCenter } from '../provider/local-config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
-import { FlowRegistry, BootstrapFlow, TodoFlow, createCompleteFlowStepTool, createActivateTodoTool, createAddTodoStepTool } from '../flow/index.js';
+import { MachineRegistry, BootstrapFlow, TodoFlow, SpecFlow } from '../machine/index.js';
+import { createAskUserTool } from '../tools/ask-user.js';
+import { createFlowStartTool, createFlowAddTool, createFlowCompleteTool } from '../tools/flow.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
 import { BackgroundProcessRegistry } from '../tools/background-registry.js';
 import { createProcessListTool, createProcessKillTool, createProcessOutputTool } from '../tools/process-tools.js';
@@ -158,6 +155,13 @@ export async function createAgent(
 ): Promise<AgentComponents> {
   const { cwd, provider, maxTurns, maxContext, outputHandler, sessionId, shouldContinue, maxMessages = 10000, personaDir, bootstrapStatus, localModelProvider, channelsInfo } = options;
 
+  // ── 配置预加载（需在 session 创建前读取 startup.defaultMode）──────
+  const configManager = new ConfigManager(cwd);
+  const config = await configManager.load();
+  const startupMode = (config as unknown as Record<string, unknown>).startup as Record<string, unknown> | undefined;
+  const defaultMode: 'normal' | 'companion' =
+    startupMode?.defaultMode === 'companion' ? 'companion' : 'normal';
+
   // ── Session ──────────────────────────────────────────────────────
   const sessionManager = options.sessionManager ?? new SessionManager(cwd);
   let sessionDir: string;
@@ -177,10 +181,13 @@ export async function createAgent(
     sessionType = session.type ?? 'normal';
     logger.info('Continued session', { sessionId: session.id, type: sessionType });
   } else {
+    // 新 session：根据 startup.defaultMode 决定初始 Router 模式
+    // 注意：陪伴模式也创建 normal session，实际 session 切换由 CompanionRouter.onActivate 负责
     const session = await sessionManager.create('normal', options.channel);
     sessionDir = sessionManager.getSessionDir(session.id);
     currentSessionId = session.id;
-    logger.info('New session', { sessionId: session.id, channel: options.channel });
+    sessionType = defaultMode;
+    logger.info('New session', { sessionId: session.id, channel: options.channel, defaultMode: sessionType });
   }
 
   // ── Git 基础设施 ──────────────────────────────────────────────────
@@ -191,21 +198,30 @@ export async function createAgent(
   const turnStore = new TurnStore(rollbackDir);
   const turnRecorder = new TurnRecorder(gitManager, turnStore, cwd);
 
-  // ── Flow 注册表（Flow 在 persona 初始化后注册） ────────────────────
-  const flowRegistry = new FlowRegistry();
-
-  // ── 配置加载 ──────────────────────────────────────────────────────
-  const configManager = new ConfigManager(cwd);
-  const config = await configManager.load();
+  // ── 状态机注册表（机器在 persona 初始化后注册） ────────────────
+  const flowRegistry = new MachineRegistry();
 
   // ── Global Persona Bootstrap ──────────────────────────────────────
   const personaSetup = await ensureGlobalPersonaFiles();
   const effectivePersonaDir = personaDir ?? personaSetup.personaDir;
   const effectiveBootstrapStatus = bootstrapStatus ?? (await getBootstrapStatus(effectivePersonaDir));
 
-  // ── 注册 Flow（Bootstrap + TODO）────────────────────────────────────
+  // ── 内置 Prompt 同步 ─────────────────────────────────────────────
+  // 将所有内置 prompt 同步到 ~/.agent/prompts/ 下，
+  // 使得 loadPrompt() 的查找优先级正确：外部覆盖 > 内置兜底。
+  await ensureGlobalPromptDir('attention');
+  await ensureGlobalPromptDir('tools');
+  await ensureGlobalPromptDir('agents');
+  await ensureGlobalPromptDir('flows');
+  await ensureGlobalPromptDir('skills');
+  await ensureGlobalPromptDir('precise');
+  await ensureGlobalPromptDir('environment');
+  // root 级文件 summary.md 由 loadPrompt 递归搜索找到，暂不单独同步
+
+  // ── 注册 Flow（Bootstrap + TODO + Spec）──────────────────────────
   flowRegistry.register(new BootstrapFlow(effectivePersonaDir));
   flowRegistry.register(new TodoFlow());
+  flowRegistry.register(new SpecFlow());
 
   // ── Provider Config Loader（必须在 getDefaultConfig 之前，确保 providerDefault 读到 JSON） ──
   const providerConfigLoader = getProviderConfigLoader(cwd);
@@ -215,6 +231,9 @@ export async function createAgent(
   const configCenter = RuntimeConfigCenter.getInstance();
   configCenter.initialize(getDefaultConfig(), configManager);
   configCenter.merge(config as unknown as Partial<FullConfig>);
+
+  // 同步 userId 前缀到 user-id 模块（后续所有 userId 生成使用此前缀）
+  setUserIdPrefix(configCenter.get<string>('provider.userId') ?? DEFAULT_USER_ID);
 
   // 注入 configCenter 到 local-config 模块，此后所有本地模型配置读取统一走 configCenter
   injectConfigCenter(configCenter);
@@ -354,7 +373,7 @@ export async function createAgent(
     description: '会话临时工具',
     getContent: () => {
       const names = toolRegistry.getHotAddedNames();
-      return names.length > 0 ? `[Session-only tools]\n${names.join(', ')}` : '';
+      return names.length > 0 ? `[Hot-added tools (session-scoped, additional to standard tools)]\n${names.join(', ')}` : '';
     },
   });
   const channelRegistry = new ModelChannelRegistry(cwd);
@@ -366,6 +385,52 @@ export async function createAgent(
   // 将 ProviderManager 构建的带弹性层（重试+熔断+降级链）的主 Provider 注入 registry，
   // 替换 initializeChannels 中创建的裸 Provider
   channelRegistry.setMainProvider(provider, providerActive);
+  // ── 创建各角色专用通道（独立 userId 实现 KVCache 隔离） ────────────
+  // 每个角色有独立的 KVCache 池，避免压缩/旁路/旁白等场景污染主对话缓存
+  // 同时为子Agent 工厂提取必要的配置
+  let subProviderApiKey: string | undefined;
+  let subProviderBaseType: string | undefined;
+  let subProviderModel: string | undefined;
+  let bypassProvider: Provider | undefined;
+  try {
+    if (providerActive) {
+      const provLoader = getProviderConfigLoader(cwd);
+      const envKey = provLoader.getProvider(providerActive as import('../types.js').ProviderType)?.envKey;
+      const apiKey = envKey ? process.env[envKey] : undefined;
+      if (apiKey) {
+        const model = provider.getModel();
+        const baseType = providerActive as import('../types.js').ProviderType;
+
+        // 保存供子Agent 工厂使用
+        subProviderApiKey = apiKey;
+        subProviderBaseType = baseType;
+        subProviderModel = model;
+
+        // 压缩器：独立 Provider（可能与主Agent/旁路并发运行）
+        const compressorProvider = ProviderManager.createProviderFromConfig({
+          type: baseType, apiKey, model, userId: compressorUserId(),
+        });
+        compressorProvider.setThinking?.(false);
+        channelRegistry.upsertChannel('compression', { provider: providerActive, model });
+        channelRegistry.setChannelProvider('compression', compressorProvider);
+        channelRegistry.setRoleMapping('compression', 'compression');
+
+        // 旁路Agent（narration + orchestrator）：共享一个 Provider，模式切换时 setUserId
+        bypassProvider = ProviderManager.createProviderFromConfig({
+          type: baseType, apiKey, model,
+          userId: orchestratorUserId(),  // 默认普通模式
+        });
+        bypassProvider.setThinking?.(false);
+        for (const channel of ['narration', 'orchestrator']) {
+          channelRegistry.upsertChannel(channel, { provider: providerActive, model });
+          channelRegistry.setChannelProvider(channel, bypassProvider);
+          channelRegistry.setRoleMapping(channel, channel);
+        }
+      }
+    }
+  } catch {
+    // 通道创建失败不影响主流程
+  }
   const modelRouter = new ModelRouter(provider, config.models, config.local, channelRegistry);
   const summarizer = new StructuredSummarizer(modelRouter);
   const compressor = new CompressorOrchestrator(tokenCounter, summarizer, effectiveMaxContext, {
@@ -462,10 +527,20 @@ export async function createAgent(
     providerRouter.register('local', localModelProvider);
   }
 
-  // ── CodeGraphTool（依赖图谱查询，需 DependencyAnalyzer 实例） ──────
-  if (dependencyAnalyzer) {
-    const { CodeGraphTool } = await import('../tools/code-graph.js');
-    toolRegistry.register(new CodeGraphTool(dependencyAnalyzer));
+  // ── Xref 交叉引用工具（AST 解析 + SQLite 索引） ─────────────────────
+  // 注册链：
+  //   XrefManager.init(rootDir) → ~/.agent/cache/xref-<projectKey>.sqlite
+  //   → XrefBuildTool/XrefQueryTool/XrefGraphTool → toolRegistry
+  //   解析器: TypeScript Compiler API (ts.createSourceFile) + 正则回退
+  try {
+    const { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool } = await import('../tools/xref/index.js');
+    const xrefManager = new XrefManager();
+    await xrefManager.init(cwd);
+    toolRegistry.register(new XrefBuildTool(xrefManager));
+    toolRegistry.register(new XrefQueryTool(xrefManager));
+    toolRegistry.register(new XrefGraphTool(xrefManager));
+  } catch {
+    // xref 工具注册失败不影响核心功能（如 better-sqlite3 不可用等）
   }
 
   // ── 子 Agent 系统 ─────────────────────────────────────────────────
@@ -480,6 +555,17 @@ export async function createAgent(
     sessionDir,
     maxContextTokens: maxContext,
     dependencyAnalyzer,
+    createSubProvider: (userId: string) => {
+      if (!subProviderApiKey || !subProviderBaseType) {
+        throw new Error('Cannot create sub-agent provider: main provider not configured.');
+      }
+      return ProviderManager.createProviderFromConfig({
+        type: subProviderBaseType as import('../types.js').ProviderType,
+        apiKey: subProviderApiKey,
+        model: subProviderModel ?? '',
+        userId,
+      });
+    },
   });
   toolRegistry.register(delegateTool);
 
@@ -507,6 +593,15 @@ export async function createAgent(
   const knowledgeBase = new KnowledgeBase(kbStorePath);
   const kbState = { lastQuery: '' };
 
+  // 从 config 恢复 KB/Zone4 状态（持久化）
+  if (configCenter.get<boolean>('kb.enabled')) {
+    knowledgeBase.enable();
+  }
+  if (configCenter.get<boolean>('kb.zone4')) {
+    knowledgeBase.setZone4Enabled(true);
+    contextComposer.activeConditions.add('zone4_enabled');
+  }
+
   // Zone 4 ContextSource（结构化 tag 匹配 + FTS5 兜底）
   contextComposer.registerSource({
     name: 'kb_context',
@@ -527,18 +622,9 @@ export async function createAgent(
       );
     },
   });
-  // 旧工具（保留兼容）
-  const kbAddTool = createKbAddTool(knowledgeBase, kbFilesDir);
-  toolRegistry.register(kbAddTool);
-  toolRegistry.register(createKbListTool(knowledgeBase));
-  toolRegistry.register(createKbDeleteTool(knowledgeBase, kbFilesDir));
-  toolRegistry.register(createKbUpdateTool(knowledgeBase, kbFilesDir));
   toolRegistry.register(createKbToggleTool(knowledgeBase, contextComposer));
-  // 新结构化工具
-  toolRegistry.register(createAddStructuredTool(structuredStore, () => knowledgeBase.enabled));
-  toolRegistry.register(createUpdateStructuredTool(structuredStore, () => knowledgeBase.enabled));
-  toolRegistry.register(createDeleteStructuredTool(structuredStore, () => knowledgeBase.enabled));
-  toolRegistry.register(createListStructuredTool(structuredStore, () => knowledgeBase.enabled));
+  // 结构化知识库工具（4合1：add/update/delete/list）
+  toolRegistry.register(createStructuredTool(structuredStore, () => knowledgeBase.enabled));
 
   // ── 知识库文件监控（后台自动索引 files/ 目录变更）─────────────────
   const kbWatcher = new KnowledgeWatcher({
@@ -585,6 +671,9 @@ export async function createAgent(
   loop.kbState = kbState;
   loopRef = loop; // wire fallback notification
 
+  // 注入旁路 Provider 引用（供模式切换时 setBypassUserId 使用）
+  if (bypassProvider) loop.setBypassProvider(bypassProvider);
+
   // ── Bootstrap Flow 自动激活（首次安装后自动运行） ──
   if (effectiveBootstrapStatus === 'pending') {
     flowRegistry.activate('bootstrap');
@@ -614,6 +703,37 @@ export async function createAgent(
       if (last) (companionRouter as unknown as Record<string, unknown>).activeCompanionName = last;
     } catch {}
   }
+
+  // ── 旁路Agent 管理器 ──────────────────────────────────────────
+  const bypassManager = new (await import('../bypass/manager.js')).BypassManager();
+  bypassManager.setModelRouter(modelRouter);
+  // 注册 WorldEngine（陪伴模式旁路Agent）
+  const companionCharName = (() => {
+    try {
+      const last = fs.readFileSync(
+        path.join(os.homedir(), '.agent', 'companion', '.last-character'), 'utf-8'
+      ).trim();
+      return last || '';
+    } catch { return ''; }
+  })();
+  bypassManager.register(new (await import('../bypass/agents/companion/index.js')).WorldEngine(companionCharName));
+  // 注册 Orchestrator（普通模式旁路Agent）— 已暂停（2026-07-10）
+  // 待分层过滤策略成熟后重新启用，设计方案见：桌面/旁路Agent重构构想.md
+  // bypassManager.register(new (await import('../bypass/agents/orchestrator/index.js')).ContextOrchestrator(memoryFilePath));
+  loop.bypassManager = bypassManager;
+
+  // 陪伴模式启动时自动激活 world-engine
+  if (sessionType === 'companion' && companionCharName) {
+    bypassManager.activateForMode('companion').catch(() => {});
+  }
+
+  // 普通模式：orchestrator 已暂停，不再激活
+  // if (sessionType === 'normal') {
+  //   const orchestratorEnabled = configCenter.get<boolean>('bypass.orchestratorEnabled') ?? true;
+  //   if (orchestratorEnabled) {
+  //     bypassManager.activateAgent('orchestrator').catch(() => {});
+  //   }
+  // }
 
   // ── Read 工具的图片处理器 — 将读到的图片注入 ImageStore ──
   const readTool = toolRegistry.get('read');
@@ -665,9 +785,12 @@ export async function createAgent(
   toolRegistry.register(createRollbackTool(turnStore, gitManager, () => loop.turnNumber));
 
   // ── Flow 控制工具 ──
-  toolRegistry.register(createCompleteFlowStepTool(flowRegistry));
-  toolRegistry.register(createActivateTodoTool(flowRegistry));
-  toolRegistry.register(createAddTodoStepTool(flowRegistry));
+  toolRegistry.register(createFlowStartTool(flowRegistry));
+  toolRegistry.register(createFlowAddTool(flowRegistry));
+  toolRegistry.register(createFlowCompleteTool(flowRegistry));
+
+  // ── 用户交互工具 ──
+  toolRegistry.register(createAskUserTool());
 
   // 注册 MCP 状态变更回调 — 消息通过 ContextSource (runtime:mcp_status) 自动注入 Zone 5，
   // 此处仅保留日志记录（未来可扩展为 TUI 状态栏更新）
@@ -839,10 +962,16 @@ export async function createAgent(
   }
 
   // ── Tool Bundle Registry ────────────────────────────────────────────
+  // 上下文注册链路：
+  //   manifest-defaults.ts Zone 1 → tool_bundles section (runtime:tool_bundles)
+  //     → section-resolver.ts resolveRuntime() → ctx.sources.get('tool-bundles')
+  //       → 本文件（ContextSource 注册，getContent 闭包）
+  //         → src/tools/bundle-registry.ts (ToolBundleRegistry，持久化到 ~/.agent/tool-bundles.json)
+  // 工具过滤链路：
+  //   loop.ts runTurn() → bundleRegistry.getActiveToolNames() → 过滤 toolDefinitions
   const bundleRegistry = new ToolBundleRegistry(cwd);
   registerBundleTools(toolRegistry, bundleRegistry);
 
-  // 注册为 ContextSource：Zone 2 展示 bundle 索引，Zone 5 展开当前包的工具体
   contextComposer.registerSource({
     name: 'tool-bundles',
     strategy: 'always_inline',
@@ -862,7 +991,10 @@ export async function createAgent(
         const toolCount = b.tools.length > 0 ? ` (${b.tools.length} tools)` : ' (全量)';
         return `- ${b.name}: ${b.description}${toolCount}${marker}`;
       });
-      return `工具包 (使用 activate_bundle <name> 激活，可同时激活多个):\n${lines.join('\n')}`;
+      const statusLine = bundleRegistry.isAllMode()
+        ? '当前状态: 全量模式 — 所有工具均可用'
+        : `当前激活: ${[...activeNames].join(', ')}`;
+      return `${statusLine}\n\n${lines.join('\n')}`;
     },
   });
   loop.setBundleRegistry(bundleRegistry);

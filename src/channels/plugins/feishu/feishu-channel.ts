@@ -175,7 +175,7 @@ export class FeishuChannel implements ChannelHandler {
       this.logger.info('channel started, WebSocket connected');
 
       // 恢复持久化的 chatId（重启后无需等待用户先发消息即可主动推送）
-      await this.restoreLastChatId();
+      await this.restoreFeishuState();
     } catch (err) {
       this.status = 'error';
       this.logger.error(`transport start failed: ${String(err instanceof Error ? err.message : err)}`);
@@ -299,18 +299,27 @@ export class FeishuChannel implements ChannelHandler {
   // ── chatId 持久化 ──────────────────────────────────────────────
   // 个人助手场景：默认只服务一个用户，chatId 一般不会变。
   // 有新消息时自动更新，确保更换账号后也能无缝切换。
+  // 同时持久化 conversation→session 映射，确保重启后复用同一 session 目录。
 
-  private async persistLastChatId(sessionId: string): Promise<void> {
+  private async persistFeishuState(sessionId: string): Promise<void> {
     const session = this.sessionMap.get(sessionId);
     if (!session) return;
     try {
-      const data = { chatId: session.chatId, isGroup: session.isGroup };
+      const sessions: Record<string, string> = {};
+      for (const [key, sid] of this.conversationToSession) {
+        sessions[key] = sid;
+      }
+      const data = {
+        chatId: session.chatId,
+        isGroup: session.isGroup,
+        sessions,
+      };
       await fs.mkdir(path.dirname(this.persistChatIdFile), { recursive: true });
       await fs.writeFile(this.persistChatIdFile, JSON.stringify(data), 'utf-8');
     } catch { /* 写入失败不阻塞 */ }
   }
 
-  private async restoreLastChatId(): Promise<void> {
+  private async restoreFeishuState(): Promise<void> {
     try {
       const raw = await fs.readFile(this.persistChatIdFile, 'utf-8');
       const data = JSON.parse(raw);
@@ -323,6 +332,15 @@ export class FeishuChannel implements ChannelHandler {
         });
         this.lastUsedSessionId = 'feishu_default';
         this.logger.info(`restored chatId from persistence: ${data.chatId}`);
+      }
+      // 恢复 conversation→session 映射，确保同一对话重启后复用同一 session 目录
+      if (data.sessions && typeof data.sessions === 'object') {
+        for (const [key, sid] of Object.entries(data.sessions)) {
+          if (typeof sid === 'string') {
+            this.conversationToSession.set(key, sid);
+          }
+        }
+        this.logger.info(`restored ${this.conversationToSession.size} session mapping(s)`);
       }
     } catch { /* 文件不存在或格式错误，首次启动正常 */ }
   }
@@ -655,7 +673,7 @@ export class FeishuChannel implements ChannelHandler {
     });
 
     // 持久化 chatId（重启后无需等待新消息即可主动推送）
-    this.persistLastChatId(sessionId);
+    this.persistFeishuState(sessionId);
 
     // ── 发送者名称 + 图片下载（互不依赖）──
 

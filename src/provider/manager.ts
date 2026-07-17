@@ -216,6 +216,7 @@ export class ProviderManager {
           apiKey: config.apiKey,
           baseUrl: config.baseUrl,
           model: config.model,
+          userId: config.userId,
         });
 
       case 'deepseek':
@@ -230,22 +231,22 @@ export class ProviderManager {
         });
 
       case 'groq':
-        return createGroqProvider({ apiKey: config.apiKey, model: config.model });
+        return createGroqProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
 
       case 'xai':
-        return createXAIProvider({ apiKey: config.apiKey, model: config.model });
+        return createXAIProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
 
       case 'mistral':
-        return createMistralProvider({ apiKey: config.apiKey, model: config.model });
+        return createMistralProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
 
       case 'openrouter':
-        return createOpenRouterProvider({ apiKey: config.apiKey, model: config.model });
+        return createOpenRouterProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
 
       case 'gemini':
         return new GeminiProvider({ apiKey: config.apiKey, model: config.model });
 
       case 'moonshot':
-        return createMoonshotProvider({ apiKey: config.apiKey, model: config.model });
+        return createMoonshotProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
 
       case 'qwen':
         return createQwenFromConfig(config);
@@ -395,6 +396,13 @@ export class ProviderManager {
     const providerModel = typeof providerSection?.model === 'string' ? providerSection.model : undefined;
     const model = overrides?.model ?? providerModel ?? agentConfig.model;
 
+    // userId：优先从配置读取（provider.<type>.userId > provider.userId），用于 KVCache 隔离
+    const providerUserId = typeof providerSection?.userId === 'string' ? providerSection.userId : undefined;
+    const fallbackUserId = typeof rawProvider === 'object' && rawProvider !== null
+      ? ((rawProvider as Record<string, unknown>).userId as string | undefined)
+      : undefined;
+    const userId = overrides?.userId ?? providerUserId ?? fallbackUserId;
+
     // 获取 API Key
     const apiKey = overrides?.apiKey ?? process.env[configManager.getApiKeyEnvName(providerType) ?? ''] ?? '';
 
@@ -403,6 +411,7 @@ export class ProviderManager {
       apiKey,
       model,
       baseUrl: overrides?.baseUrl,
+      userId,
     };
 
     return new ProviderManager(config, {

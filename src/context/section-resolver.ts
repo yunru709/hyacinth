@@ -5,6 +5,7 @@ import type { ContextSource } from './interface.js';
 import type { GitManager } from '../evolution/git-manager.js';
 import type { ContextProfile } from './profiles.js';
 import type { IContextRouter } from './router.js';
+import type { Injection } from '../bypass/types.js';
 import { loadPrompt, renderPrompt } from '../prompts/loader.js';
 import { loadProjectContext } from './prompt-builder.js';
 import { Retriever } from './retriever.js';
@@ -34,6 +35,17 @@ export interface ResolverContext {
   profile: ContextProfile;
   /** 当前模式 router——统一上下文路由入口 */
   router: IContextRouter;
+  /** 旁路Agent注入列表（由 BypassManager.preTurn 产出） */
+  bypassInjections?: Injection[];
+}
+
+/** 查找旁路Agent对指定 section 的注入 */
+function findBypassInjection(
+  sectionName: string,
+  injections?: Injection[],
+): Injection | undefined {
+  if (!injections?.length) return undefined;
+  return injections.find(ij => ij.section === sectionName);
 }
 
 export async function resolveSection(
@@ -48,14 +60,29 @@ export async function resolveSection(
     }
   }
 
-  switch (sec.type) {
-    case 'static':   return resolveStatic(sec, ctx);
-    case 'template': return resolveTemplate(sec, ctx);
-    case 'runtime':  return await resolveRuntime(sec, ctx);
-    case 'retrieval': return resolveRetrieval(sec, ctx);
-    case 'conditional': return resolveConditional(sec, ctx);
-    default: return undefined;
+  // 旁路Agent 注入：replace 模式时替换整个 section 内容
+  const bypassInj = findBypassInjection(sec.name, ctx.bypassInjections);
+  if (bypassInj?.mode === 'replace') {
+    return bypassInj.content;
   }
+
+  // 正常解析
+  let resolved: string | undefined;
+  switch (sec.type) {
+    case 'static':   resolved = resolveStatic(sec, ctx); break;
+    case 'template': resolved = resolveTemplate(sec, ctx); break;
+    case 'runtime':  resolved = await resolveRuntime(sec, ctx); break;
+    case 'retrieval': resolved = await resolveRetrieval(sec, ctx); break;
+    case 'conditional': resolved = resolveConditional(sec, ctx); break;
+    default: resolved = undefined;
+  }
+
+  // 旁路Agent 注入：append 模式时追加到正常解析结果末尾
+  if (bypassInj?.mode === 'append' && bypassInj.content) {
+    resolved = resolved ? `${resolved}\n\n${bypassInj.content}` : bypassInj.content;
+  }
+
+  return resolved;
 }
 
 // --- Static ---

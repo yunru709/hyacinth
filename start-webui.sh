@@ -3,7 +3,7 @@ set -e
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
-echo "║       DeepThink WebUI — One-Click Start     ║"
+echo "║       Hyacinth WebUI — One-Click Start      ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 
@@ -19,7 +19,9 @@ else
 fi
 
 # Step 2: Build and start
-echo "[2/2] Starting DeepThink WebUI..."
+echo "[2/2] Starting Hyacinth WebUI..."
 echo ""
 
-npx deepthink serve --webui --webui-port 3100
+npx hyacinth serve --webui --webui-port 3100
+
+

@@ -84,6 +84,12 @@ export class FallbackProviderChain implements Provider {
     }
   }
 
+  setUserId(userId: string): void {
+    for (const p of this.providers) {
+      p.setUserId?.(userId);
+    }
+  }
+
   /** Return the underlying providers (for inspection) */
   getChainProviders(): ResilientProvider[] {
     return this.providers;

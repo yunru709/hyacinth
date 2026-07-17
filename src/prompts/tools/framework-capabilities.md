@@ -52,22 +52,21 @@
 
 **接口复用：** 多个角色可共享一个通道，只需在 `roles` 中指向同一个 channel 名。
 
-**压缩策略选择：**
-- 配置 `context.compressionStrategy`：`'A'`=独立提示词（传统），`'C'`=克隆对话（缓存友好，默认）。同模型下策略 C 大幅降低 API 成本。
-- `trigger_compression` 工具支持 `strategy` 参数（`'A'` 或 `'C'`），可临时覆盖默认策略，仅本次生效。
-- 压缩通过 compression 通道执行，与主对话通道缓存隔离。
+**压缩：**
+- 压缩通过独立 compression 通道（独立 userId）执行，不影响主对话的 KV 缓存。
+- `trigger_compression` 工具可在对话过长时主动触发压缩。
 
 ## 知识库
 
-当 Zone 4 已开启时，知识库自动检索并注入上下文，你无需手动搜索。你有以下结构化工具可管理知识库内容：
+当 Zone 4 已开启时，知识库自动检索并注入上下文，你无需手动搜索。使用 `kb_structured` 工具管理知识库（通过 action 参数区分操作）：
 
-- `kb_add_structured` — 结构化写入。分析原始内容后提炼为条目（id、title、tags、category、content ≤200字、refs）
-- `kb_update_structured` — 按 id 更新现有条目
-- `kb_delete_structured` — 删除条目
-- `kb_list_structured` — 列出已有条目
+- `kb_structured` action=add — 结构化写入条目（id、title、tags、category、content ≤200字、refs），一次可写 1-10 条
+- `kb_structured` action=update — 按 id 更新条目
+- `kb_structured` action=delete — 删除条目
+- `kb_structured` action=list — 列出已有条目
 
 **使用时机：**
-- 用户让你"记住"、"存下来"、"加入知识库" → 用 `kb_add_structured`
+- 用户让你"记住"、"存下来"、"加入知识库" → 用 `kb_structured` action=add
 - 读到有价值的资料（API 文档、配置说明、技术笔记）→ 主动提炼为结构化条目写入
 - 发现知识库缺漏 → 补充新条目
 - 用户问的问题知识库有答案但不够精确 → 优化已有条目的 tags/content
@@ -126,7 +125,7 @@ tools: tool1,tool2
 | 工具/Skill 禁用 | `tools.disabled` / `skills.disabled` |
 | 工具结果缓冲 | `tools.resultBuffer.*` |
 | 上下文压缩阈值 | `context.compressThreshold` |
-| 压缩策略 | `context.compressionStrategy` (`A`=独立提示词, `C`=克隆对话(默认)) |
+
 | 紧急压缩阈值 | `context.emergencyThreshold` |
 | 压缩激进程度 | `context.compressDepth` |
 | 子 Agent 模型路由 | `models.assessment` / `models.planning` / `models.compression` |

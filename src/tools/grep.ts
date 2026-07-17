@@ -20,7 +20,7 @@ export class GrepTool implements Tool {
       },
       path: {
         type: 'string',
-        description: 'File or directory to search in. If a file, searches only that file. If a directory, searches recursively. Defaults to current working directory.',
+        description: 'Directory or file to search in. REQUIRED — always pass the project root directory (where package.json/tsconfig.json/etc. lives). Searches recursively.',
       },
       glob: {
         type: 'string',
@@ -60,13 +60,13 @@ export class GrepTool implements Tool {
         description: 'Enable multiline mode where . matches newlines and patterns can span lines. Default: false.',
       },
     },
-    required: ['pattern'],
+    required: ['pattern', 'path'],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const pattern = args.pattern as string;
     if (!pattern) return '错误：缺少 pattern 参数。请提供正则表达式搜索模式。';
-    const searchPath = (args.path as string | undefined) ?? process.cwd();
+    const searchPath = args.path as string;
     const glob = args.glob as string | undefined;
     const outputMode: GrepOutputMode = (args.output_mode as GrepOutputMode | undefined) ?? 'files_with_matches';
     const caseInsensitive = (args['-i'] as boolean | undefined) ?? false;

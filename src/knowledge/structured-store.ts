@@ -188,26 +188,51 @@ export class StructuredStore {
   // ── 检索 ────────────────────────────────────────────────────────
 
   /**
-   * Tag 子串匹配：在用户输入中查找每个 entry 的 tag 子串。
+   * Tag 子串匹配（IDF 加权 + 多 tag 累加）。
+   * - 每个 tag 命中按 IDF 加权（稀有 tag 权重高，常见 tag 权重低）
+   * - 多个 tag 命中则分数累加
+   * - title 匹配额外加分（权重为查询命中的 30%）
    * 返回按 score 降序排列的结果。
    */
   matchByTags(query: string): TagMatchResult[] {
     const entries = this.list();
-    const results: TagMatchResult[] = [];
+    if (entries.length === 0) return [];
 
+    // 1. 计算每个 tag 的文档频率（DF）和逆文档频率（IDF）
+    const df = new Map<string, number>();
+    for (const entry of entries) {
+      const seen = new Set<string>();
+      for (const tag of entry.tags) {
+        if (!seen.has(tag)) {
+          df.set(tag, (df.get(tag) ?? 0) + 1);
+          seen.add(tag);
+        }
+      }
+    }
+    const N = entries.length;
+    const idf = new Map<string, number>();
+    for (const [tag, freq] of df) {
+      // IDF 平滑：加一平滑避免 N=freq 时归零，设下限 0.5 保证最小权重
+      idf.set(tag, Math.max(Math.log((N + 1) / (freq + 0.5)), 0.5));
+    }
+
+    // 2. 打分：IDF 加权 × 基数 10，多 tag 命中累加
+    const results: TagMatchResult[] = [];
     for (const entry of entries) {
       let score = 0;
       const matchedTags: string[] = [];
       for (const tag of entry.tags) {
         if (query.includes(tag)) {
-          score += 10;
+          const weight = idf.get(tag) ?? 1;
+          score += Math.round(10 * weight);
           matchedTags.push(tag);
         }
       }
-      // title 中有匹配关键词 → 额外加分
+      // title 匹配 → 额外加分（权重为查询命中的 30%）
       for (const tag of entry.tags) {
         if (entry.title.includes(tag) && !matchedTags.includes(tag)) {
-          score += 3;
+          const weight = idf.get(tag) ?? 1;
+          score += Math.round(3 * weight);
         }
       }
       if (score > 0) {
@@ -259,7 +284,8 @@ export class StructuredStore {
   /** 组合检索：tag 匹配 → FTS5 兜底 → refs 扩展 */
   search(query: string, maxTotal = 5): TagMatchResult[] {
     const tagResults = this.matchByTags(query);
-    const main = tagResults.filter(r => r.score >= 10);
+    // score > 0 即可纳入主结果，靠 IDF 排序 + maxTotal 截断保证精度
+    const main = tagResults.filter(r => r.score > 0);
 
     if (main.length < 2) {
       const ftsEntries = this.searchFts(query, maxTotal);

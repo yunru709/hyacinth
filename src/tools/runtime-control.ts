@@ -34,9 +34,10 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        name:    { type: 'string', description: 'Provider type: anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | groq | xai | mistral | openrouter | moonshot | local' },
-        api_key: { type: 'string', description: 'Optional: API key for this provider. If not set, uses environment variable.' },
-        model:   { type: 'string', description: 'Optional: model name. If not set, uses the provider\'s default model.' },
+        name:       { type: 'string', description: 'Provider type: anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | groq | xai | mistral | openrouter | moonshot | local' },
+        api_key:    { type: 'string', description: 'Optional: API key. If not set, uses environment variable.' },
+        model:      { type: 'string', description: 'Optional: model name. If not set, uses the provider\'s default model.' },
+        max_tokens: { type: 'number', description: 'Optional: max output tokens for this provider. If not set, auto-detected from model catalog or provider config.' },
       },
       required: ['name'],
     },
@@ -54,11 +55,13 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
           const { ProviderManager } = await import('../provider/manager.js');
           const { getProviderConfigLoader } = await import('../provider/config.js');
           const provCfg = getProviderConfigLoader().getProvider(name);
-          const config = {
+          const maxTokens = (args.max_tokens as number) || undefined;
+          const config: import('../types.js').ProviderConfig = {
             type: name as import('../types.js').ProviderType,
             apiKey,
             model: model ?? provCfg?.defaultModel ?? 'unknown',
             baseUrl: provCfg?.baseUrl,
+            maxOutputTokens: maxTokens,
           };
           const manager = new ProviderManager(config);
           const provider = manager.getProvider();
@@ -934,6 +937,15 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
 
 /**
  * switch_session — load and switch to an existing session.
+ *
+ * 注册链路：
+ *   src/tools/runtime-control.ts（本文件）→ 工具实现
+ *   → 注册到 ToolRegistry（factory.ts 中通过 registerSessionTools 调用）
+ *   → tool_result 写入 conversation.jsonl（loop.ts append 阶段）
+ *   → 出现在 Zone 3 (History) 的对话历史中
+ *
+ * ⚠️ tool_result 的文案会影响模型对当前会话状态的认知。
+ *    如需修改返回文案，注意与 new_session、current_session 保持一致。
  */
 export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
   return {
@@ -970,7 +982,7 @@ export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool
         }
 
         await agentLoop.switchSession(sessionDir);
-        return `Switched to session "${sessionId}".`;
+        return `当前会话为 ${sessionId}`;
       } catch (err) {
         return `Error switching session: ${err instanceof Error ? err.message : String(err)}`;
       }

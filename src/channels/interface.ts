@@ -166,6 +166,17 @@ export interface ChannelHandler {
   updateConfig?(newConfig: Record<string, unknown>): Promise<void>;
 
   /**
+   * 处理 TUI 子命令（可选）。
+   * 当用户在 TUI 中输入 /<channelId>/<subCmd> 时，框架将 cmdPath
+   * 路由到此方法。渠道根据 cmdPath 自行分发。
+   *
+   * @param cmdPath 完整命令路径，如 "clawbot/login"
+   * @param args 命令后的剩余参数
+   * @returns 要渲染到 TUI 的文本，或 null 表示不处理此命令
+   */
+  handleTuiCommand?(cmdPath: string, args: string): Promise<string | null>;
+
+  /**
    * 获取渠道状态
    */
   getStatus(): ChannelStatus;

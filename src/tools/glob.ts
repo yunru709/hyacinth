@@ -24,16 +24,16 @@ export class GlobTool implements Tool {
       },
       path: {
         type: 'string',
-        description: 'The directory to search in. Defaults to current working directory.',
+        description: 'The directory to search in. REQUIRED — always pass the project root directory (where package.json/tsconfig.json/etc. lives).',
       },
     },
-    required: ['pattern'],
+    required: ['pattern', 'path'],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const pattern = args.pattern as string;
     if (!pattern) return '错误：缺少 pattern 参数。请提供文件名匹配模式，例如 "**/*.ts"。';
-    const searchPath = (args.path as string | undefined) ?? process.cwd();
+    const searchPath = args.path as string;
 
     // 验证搜索路径
     try {

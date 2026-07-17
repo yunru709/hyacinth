@@ -130,6 +130,63 @@ async function fileContentDiffersFromTemplate(
   }
 }
 
+// ─── Generic Prompt Sync ──────────────────────────────────────────────
+
+/**
+ * 确保内置 prompt 目录同步到 ~/.agent/prompts/{name}/。
+ * 
+ * 和 persona 不同（有 bootstrap 状态机），这只是一个简单的文件复制：
+ * 首次安装时复制，已存在则跳过。
+ * 
+ * 用于 attention.md 等非 persona 的内置 prompt 文件。
+ */
+export async function ensureGlobalPromptDir(
+  name: string,
+  configHome: string = path.join(os.homedir(), '.agent'),
+): Promise<string[]> {
+  const targetDir = path.join(configHome, 'prompts', name);
+  await fsp.mkdir(targetDir, { recursive: true });
+
+  // 搜索源目录（与 loadTemplateContent 的搜索策略一致）
+  const sourceDirs = [
+    path.join(__dirname, '..', 'prompts', name),
+    path.join(process.cwd(), 'src', 'prompts', name),
+    path.join(process.cwd(), 'dist', 'prompts', name),
+  ];
+
+  let sourceDir: string | undefined;
+  for (const dir of sourceDirs) {
+    try {
+      const stat = await fsp.stat(dir);
+      if (stat.isDirectory()) { sourceDir = dir; break; }
+    } catch { continue; }
+  }
+
+  if (!sourceDir) {
+    logger.warn(`Source prompt directory not found: prompts/${name}. Searched: ${sourceDirs.join(', ')}`);
+    return [];
+  }
+
+  const filesCreated: string[] = [];
+  const entries = await fsp.readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    const created = await writeFileIfMissing(targetPath, await fsp.readFile(sourcePath, 'utf-8'));
+    if (created) {
+      filesCreated.push(`${name}/${entry.name}`);
+    }
+  }
+
+  if (filesCreated.length > 0) {
+    logger.info('Synced built-in prompt files', { dir: name, files: filesCreated });
+  }
+
+  return filesCreated;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 export async function ensurePersonaFiles(

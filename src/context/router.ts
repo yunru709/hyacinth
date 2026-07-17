@@ -20,7 +20,8 @@ import type { SectionEntry } from './manifest-types.js';
 import type { ResolverContext } from './section-resolver.js';
 import { filterToolRounds } from './precision/companion.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
-import { WorldEngine, parseNarration } from '../world-engine/index.js';
+import { parseNarration, WorldEngine } from '../bypass/agents/companion/index.js';
+import { companionUserId, mainUserId, narrationUserId, orchestratorUserId } from '../provider/user-id.js';
 
 // ── SourceOverride ──────────────────────────────────────────
 
@@ -230,8 +231,12 @@ export class CompanionRouter implements IContextRouter {
     },
   };
 
-  /** 世界引擎实例（仅陪伴模式激活期间存在；enabled 由 world-engine.json 决定，默认关） */
-  private worldEngine: WorldEngine | null = null;
+  /** 世界引擎旁路Agent 引用（通过 BypassManager 获取） */
+  private worldEngineAgent: WorldEngine | null = null;
+
+  private get worldEngineEnabled(): boolean {
+    return this.worldEngineAgent?.enabled ?? false;
+  }
 
   /** 当前活跃的陪伴角色名（如"柔柔"），决定世界数据与对话的存储路径 */
   activeCompanionName: string = '';
@@ -259,10 +264,11 @@ export class CompanionRouter implements IContextRouter {
   async transformUserInput(userInput: string): Promise<string> {
     this._pureNarrationTurn = false; // 每轮先复位
     this.ephemeralInput = null;      // 每轮先清除
-    if (!this.worldEngine?.enabled) return userInput;
+    if (!this.worldEngineEnabled) return userInput;
+    const agent = this.worldEngineAgent!;
     const { narration, dialogue } = parseNarration(userInput);
     // 总是刷新本轮旁白（无 [[]] 则设空，避免上一轮旁白泄漏到这一轮）
-    this.worldEngine.setPendingNarration(narration);
+    agent.setPendingNarration(narration);
     if (!narration) return userInput; // 没有旁白，对话原样
     if (dialogue) return dialogue; // 混合输入：只把对话部分交给主 LLM，旁白已并入 narrate
     // 纯旁白（用户只发 [[环境]]、无对话）：
@@ -270,7 +276,9 @@ export class CompanionRouter implements IContextRouter {
     //   它触发主 LLM 回应，但绝不落盘到 conversation.jsonl，
     //   下一轮发送自然消失，不会被当成用户消息。
     this._pureNarrationTurn = true;
-    const enriched = await this.worldEngine.narrate();
+    // 纯旁白轮不走 bypassManager.preTurn（那里等着也拿不到 pendingNarration），
+    // 直接调 engine.narrate() 后立即返回
+    const enriched = await agent.narrate();
     const trigger = enriched || narration;
     this.ephemeralInput = trigger; // loop 用它注入 compose，但不 append
     return trigger;
@@ -290,20 +298,23 @@ export class CompanionRouter implements IContextRouter {
         return '';
       }
     }
-    // 时间戳 section：世界引擎开启时用旁白化环境替换时间戳槽位
+    // 时间戳 section：
+    // 世界引擎旁白已由 BypassManager.preTurn → bypassInjections 处理，
+    // 此处只处理时间戳概率注入（世界引擎未启用/世界为空时的回落逻辑）。
     if (sec.name === 'timestamp') {
-      this._timestampIsNarration = false; // 每轮先复位
-      // 纯旁白轮：环境信息已作为本轮 user 输入注入，勿在 timestamp 槽重复注入（同时避免二次调用旁路）
-      if (!this._pureNarrationTurn && this.worldEngine?.enabled) {
-        const narration = await this.worldEngine.narrate();
-        if (narration) {
-          this._timestampIsNarration = true; // 本轮是世界旁白 → 以 assistant（内心独白）注入
-          return narration; // 世界旁白替换时间戳
-        }
-        // 世界尚空 → 回落正常时间戳概率逻辑
+      this._timestampIsNarration = false;
+      // 纯旁白轮跳过
+      if (this._pureNarrationTurn) {
+        return null;
       }
+      // 世界引擎启用 → 旁白由 bypassInjections 处理，此处跳过正常时间戳
+      if (this.worldEngineEnabled) {
+        this._timestampIsNarration = true;
+        return null; // 让 bypassInjections 的 replace 模式接管
+      }
+      // 无世界引擎 → 正常时间戳概率注入
       if (!shouldInjectTimestamp(ctx)) {
-        return null; // 此轮跳过时间戳
+        return null;
       }
     }
     return undefined; // 其他 section：继续正常解析
@@ -340,21 +351,33 @@ export class CompanionRouter implements IContextRouter {
     // 通知 TUI session 已切换，触发界面刷新
     (loop as any)._sessionSwitched = companionDir;
 
-    // 启动世界引擎（以角色名构造，world.json 落在 ~/.agent/companion/<name>/ 下）
-    try {
-      this.worldEngine = new WorldEngine(name, (loop as any).modelRouter ?? null);
-      await this.worldEngine.start();
-    } catch {
-      this.worldEngine = null; // 世界引擎启动失败绝不影响陪伴模式
+    // 切换到陪伴模式的 KVCache 隔离 ID（主Agent + 旁路）
+    loop.setActiveUserId(companionUserId(name));
+    loop.setBypassUserId(narrationUserId());
+
+    // 通过 BypassManager 激活世界引擎旁路Agent
+    const bypassMgr = loop.bypassManager;
+    if (bypassMgr) {
+      // 确保 WorldEngine 使用正确的角色名
+      const existing = bypassMgr.getAgent('world-engine') as WorldEngine | undefined;
+      if (existing) {
+        // 更新角色名并重新注册
+        const { WorldEngine } = await import('../bypass/agents/companion/index.js');
+        bypassMgr.register(new WorldEngine(name));
+      }
+      // 激活陪伴模式的旁路Agent
+      await bypassMgr.activateForMode('companion');
+      // 获取激活后的 WorldEngine 引用
+      this.worldEngineAgent = bypassMgr.getAgent('world-engine') as WorldEngine | null;
     }
   }
 
   async onDeactivate(loop: any): Promise<void> {
-    // 停世界引擎：停定时器 + 落盘 + 释放，退出后零占用
+    // 通过 BypassManager 停用旁路Agent
     try {
-      await this.worldEngine?.stop();
+      await loop.bypassManager?.deactivateAll();
     } catch { /* 忽略 */ }
-    this.worldEngine = null;
+    this.worldEngineAgent = null;
 
     let normalDir = (loop as any)._normalSessionDir as string | undefined;
     // Fallback：从存档恢复的陪伴会话没有保存 _normalSessionDir，需要创建新 normal session
@@ -366,6 +389,11 @@ export class CompanionRouter implements IContextRouter {
     }
     await loop.switchSession(normalDir);
     (loop as any)._normalSessionDir = undefined;
+
+    // 恢复到普通模式的 KVCache 隔离 ID（主Agent + 旁路）
+    loop.setActiveUserId(mainUserId(path.basename(normalDir)));
+    loop.setBypassUserId(orchestratorUserId());
+
     // 通知 TUI session 已切换，触发界面刷新
     (loop as any)._sessionSwitched = normalDir;
   }
@@ -375,15 +403,7 @@ export class CompanionRouter implements IContextRouter {
   }
 
   async onPostTurn(loop: any, taskName: string | null, toolWasCalled: boolean): Promise<void> {
-    // 世界引擎后置：观察这一轮对话，后台生长世界（写串行、不阻塞、不影响主流程）
-    if (this.worldEngine?.enabled) {
-      try {
-        const history: Message[] = await loop.conversationStore.readAll(loop.sessionDir);
-        const userInput = lastTextByRole(history, 'user');
-        const mainOutput = lastTextByRole(history, 'assistant');
-        if (userInput || mainOutput) this.worldEngine.observe(userInput, mainOutput);
-      } catch { /* 忽略 */ }
-    }
+    // 世界引擎 postTurn 已由 BypassManager.postTurn 统一调度，此处只处理陪伴模式特有的 JSONL 清理
 
     if (taskName !== null) {
       // 定时任务触发：删触发词+工具链，保留模型自然回复（看起来像主动搭话）

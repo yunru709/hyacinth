@@ -10,7 +10,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
-import { getProviderConfigLoader } from './config.js';
+import { DEFAULT_USER_ID } from './user-id.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** OpenAIProvider 构造选项 */
@@ -21,9 +21,11 @@ export interface OpenAIProviderOptions {
   baseUrl?: string;
   /** 模型名称，默认 gpt-4o */
   model?: string;
-  /** 最大输出 token 数，默认 4096 */
+  /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
+  maxOutputTokens?: number;
+  /** @deprecated 使用 maxOutputTokens */
   maxTokens?: number;
-  /** 缓存隔离 ID，区分不同产品的缓存池。默认 "deepthink"。 */
+  /** 缓存隔离 ID，区分不同产品的缓存池。默认 "hyacinth"。 */
   userId?: string;
 }
 
@@ -56,12 +58,11 @@ export class OpenAIProvider implements Provider {
     });
 
     this.model = opts.model ?? 'gpt-4o';
-    const provConfig = getProviderConfigLoader().getProvider('openai');
-    this.maxTokens = opts.maxTokens
-      ?? getModelInfo('openai', this.model)?.maxTokens
-      ?? provConfig?.maxTokens
-      ?? 16384;
-    this.userId = opts.userId ?? 'deepthink';
+    this.maxTokens = opts.maxOutputTokens                          // ① 临时覆盖
+      ?? opts.maxTokens                                            // 向后兼容
+      ?? getModelInfo('openai', this.model)?.maxOutputTokens       // ② 本机模型目录
+      ?? 8192;                                                      // ③ 兜底
+    this.userId = opts.userId ?? DEFAULT_USER_ID;
   }
 
   getProviderType(): ProviderType {
@@ -88,6 +89,10 @@ export class OpenAIProvider implements Provider {
     this.thinkingEnabled = enabled;
   }
 
+  setUserId(userId: string): void {
+    this.userId = userId;
+  }
+
   async *createStream(
     messages: Message[],
     tools?: ToolDefinition[],
@@ -108,10 +113,10 @@ export class OpenAIProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    // 始终发送 thinking 参数：避免 provider 默认开启推理
-    (params as unknown as Record<string, unknown>).thinking = this.thinkingEnabled
-      ? { type: 'enabled' }
-      : { type: 'disabled' };
+    // thinking 默认 enabled，必须显式发送 disabled 才能关闭
+    (params as any).extra_body = {
+      thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
+    };
     // 缓存隔离：同一 key 下不同 user_id 各自维护缓存池
     (params as unknown as Record<string, unknown>).user_id = this.userId;
 
@@ -326,5 +331,6 @@ export function createOpenAIProvider(config: ProviderConfig): OpenAIProvider {
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
+    userId: config.userId,
   });
 }

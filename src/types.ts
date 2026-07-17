@@ -126,6 +126,10 @@ export interface ProviderConfig {
   apiKey: string;
   baseUrl?: string;
   model: string;
+  /** 单次请求最大输出 token 数。不传则从模型目录/Provider 配置中自动获取。 */
+  maxOutputTokens?: number;
+  /** DeepSeek KVCache 隔离 ID。不同角色应使用不同的 userId 避免缓存互相污染。 */
+  userId?: string;
 }
 
 // === 依赖图谱 STUB ===

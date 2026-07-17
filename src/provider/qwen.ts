@@ -17,13 +17,14 @@ export function createQwenProvider(config?: {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  maxOutputTokens?: number;
 }): AnthropicProvider {
   const provCfg = getProviderConfigLoader().getProvider('qwen');
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.DASHSCOPE_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://dashscope.aliyuncs.com/apps/anthropic',
     model: config?.model ?? provCfg?.defaultModel ?? 'qwen3-vl-plus',
-    maxTokens: provCfg?.maxTokens ?? 8192,
+    maxOutputTokens: config?.maxOutputTokens,
     providerType: 'qwen',
   } satisfies AnthropicProviderOptions);
 }
@@ -33,5 +34,6 @@ export function createQwenFromConfig(config: ProviderConfig): AnthropicProvider 
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
+    maxOutputTokens: config.maxOutputTokens,
   });
 }

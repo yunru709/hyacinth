@@ -60,4 +60,12 @@ export interface Provider {
    * @param effort  思考强度（DeepSeek: 'high' | 'max'；Anthropic: budget tokens）
    */
   setThinking?(enabled: boolean, effort?: string | number): void;
+
+  /**
+   * 运行时切换 KVCache 隔离 ID。
+   * 仅对 DeepSeek/OpenAI 等将 user_id 发送到 API 的 Provider 有效。
+   * 用于主Agent 模式切换（普通↔陪伴）等场景。
+   * @param userId 新的隔离标识
+   */
+  setUserId?(userId: string): void;
 }

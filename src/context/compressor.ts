@@ -11,6 +11,9 @@
  */
 
 import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import type {
   Message,
   MessageContent,
@@ -257,7 +260,23 @@ export class ToolOutputTrimmer {
 
   // ─── 私有方法 ──────────────────────────────────────────────────────
 
-  /** 为 ToolResultContent 生成一行摘要 */
+  // 工具结果缓存目录
+  private static getCacheDir(): string {
+    return path.join(os.homedir(), '.agent', 'cache', 'tool-results');
+  }
+
+  /** 将工具结果内容保存到缓存，返回引用 ID */
+  private saveToCache(label: string, content: string): string {
+    const hash = createHash('md5').update(content).digest('hex').slice(0, 10);
+    const cacheDir = ToolOutputTrimmer.getCacheDir();
+    const cacheFile = path.join(cacheDir, `${hash}.txt`);
+    fs.mkdir(path.dirname(cacheFile), { recursive: true })
+      .then(() => fs.writeFile(cacheFile, content, 'utf-8'))
+      .catch(() => {}); // 写入失败不阻塞
+    return `📦 ${label} → ${hash} (${content.length} chars, 用 read 找回: ${cacheFile})`;
+  }
+
+  /** 为 ToolResultContent 生成一行摘要并缓存原始内容 */
   private summarizeToolResult(item: ToolResultContent): ToolResultContent {
     const summary = this.generateSummary(item);
     return {
@@ -268,38 +287,38 @@ export class ToolOutputTrimmer {
     };
   }
 
-  /** 根据工具结果内容推断工具名并生成摘要 */
+  /** 根据工具结果内容推断工具名并生成摘要 + 缓存 */
   private generateSummary(item: ToolResultContent): string {
-    // 尝试从 content 中推断工具类型
     const content = item.content;
 
     // Read 工具：输出通常包含行号格式 "  1→content"
     const lineMatch = content.match(/^\s*\d+[→|]/m);
     if (lineMatch) {
       const lineCount = (content.match(/^\s*\d+[→|]/gm) || []).length;
-      // 尝试提取文件路径
       const filePathMatch = content.match(/(?:^|\n)([^\s\n]+\.\w+)/);
       const filePath = filePathMatch ? filePathMatch[1] : 'unknown';
-      return `[Read] ${filePath} → ${lineCount} lines`;
+      return this.saveToCache(`[Read] ${filePath} (${lineCount} lines)`, content);
     }
 
     // Bash 工具：包含 exit code
     const exitMatch = content.match(/exit\s+code[:\s]+(\d+)/i);
     if (exitMatch) {
-      // 尝试提取命令
       const cmdMatch = content.match(/(?:^|\n)([$>]\s*)([^\n]+)/);
       const cmd = cmdMatch ? cmdMatch[2].substring(0, 50) : 'command';
-      return `[Bash] ${cmd} → exit ${exitMatch[1]}`;
+      return this.saveToCache(`[Bash] ${cmd} → exit ${exitMatch[1]}`, content);
     }
 
     // Glob 工具：输出是文件路径列表
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
     if (lines.length > 0 && lines.every((l) => l.trim().includes('/') || l.trim().includes('\\') || l.trim().includes('.'))) {
-      return `[Glob] pattern → ${lines.length} matches`;
+      return this.saveToCache(`[Glob] (${lines.length} matches)`, content);
     }
 
-    // 通用：无法推断时
-    return `[ToolResult] executed`;
+    // 通用：内容超过 200 字符才缓存，短文直接保留
+    if (content.length > 200) {
+      return this.saveToCache(`[ToolResult]`, content);
+    }
+    return `[ToolResult] ${content.slice(0, 200)}`;
   }
 
   /** 为大型 ToolUse input 生成智能摘要，提取关键参数。
@@ -501,85 +520,6 @@ export class StructuredSummarizer {
     return summaryText;
   }
 
-  /**
-   * 策略 C：克隆对话式压缩。
-   * 克隆完整的 composed messages，将最后一条 user 消息替换为压缩指令，
-   * 通过压缩 Provider 发送，返回模型生成的摘要文本。
-   *
-   * 缓存优势：system prompt 和历史消息完全复用 → 仅压缩指令未命中缓存。
-   * 与策略 A 不同，模型看到完整上下文（persona、工具定义、历史标记），
-   * 能更智能地判断哪些信息需要保留。
-   *
-   * @param fullMessages - 完整的 composed messages（system + history + tools + user input）
-   */
-  async summarizeViaClone(fullMessages: Message[]): Promise<string> {
-    // 1. 深拷贝消息数组（保留 content block 结构）
-    const cloned = fullMessages.map(m => ({
-      ...m,
-      content: Array.isArray(m.content)
-        ? m.content.map(c => ({ ...c } as MessageContent))
-        : { ...(m.content as object) } as MessageContent,
-    }));
-
-    // 2. 清除 cache_control 标记（避免跨 Provider 兼容问题）
-    for (const msg of cloned) {
-      if (msg.role === 'assistant') continue;
-      const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
-      for (const block of blocks) {
-        const b = block as unknown as Record<string, unknown>;
-        if ('cache_control' in b) {
-          delete b.cache_control;
-        }
-      }
-    }
-
-    // 3. 找到最后一条 user 消息（逆向搜索，跳过纯 tool_result 的 user 消息）
-    let lastUserIdx = -1;
-    for (let i = cloned.length - 1; i >= 0; i--) {
-      if (cloned[i].role !== 'user') continue;
-      const rawContent = cloned[i].content as unknown;
-      const blocks: MessageContent[] = Array.isArray(rawContent) ? rawContent as MessageContent[] : [rawContent as MessageContent];
-      // 跳过纯 tool_result 消息
-      if (blocks.every(b => b.type === 'tool_result')) continue;
-      lastUserIdx = i;
-      break;
-    }
-
-    if (lastUserIdx === -1) {
-      throw new Error('summarizeViaClone: no user message found in composed messages');
-    }
-
-    // 4. 替换为压缩指令
-    const depthInstruction = this.getDepthInstruction();
-    cloned[lastUserIdx] = {
-      role: 'user',
-      content: [{
-        type: 'text',
-        text:
-          `[系统指令] 请忽略上述用户请求，你的新任务是压缩对话历史。\n\n` +
-          `请压缩上述对话中所有标记为 [历史] 的对话内容，生成结构化摘要。\n\n` +
-          `压缩要求：\n` +
-          `- ${depthInstruction}\n` +
-          `- 已完成的任务记入"✅ 已完成"，实现细节可压缩但完成状态不能丢\n` +
-          `- 保留关键决策、修改的文件路径、重要错误及修复方案\n` +
-          `- 近期对话（未标记 [历史] 的部分）不要压缩，保持原样\n\n` +
-          STRUCTURED_SUMMARY_TEMPLATE,
-      } as TextContent],
-    };
-
-    // 5. 通过压缩 Provider 发送
-    let summaryText = '';
-    const provider = this.modelRouter.getProvider('compression');
-    const stream = provider.createStream(cloned);
-    for await (const event of stream) {
-      if (event.type === 'TEXT') {
-        summaryText += event.content;
-      }
-    }
-
-    return summaryText;
-  }
-
   /** 将消息序列化为可读文本 */
   private serializeMessages(messages: Message[]): string {
     return messages
@@ -684,10 +624,6 @@ export class CompressorOrchestrator {
     protectLast: number = 0,
     historyBudget: number,
     options?: {
-      /** LLM 摘要模式: 'prompt'=独立提示词(策略A), 'clone'=克隆对话(策略C) */
-      llmMode?: 'prompt' | 'clone';
-      /** 策略 C(clone) 需要的完整 composed 上下文 */
-      composedMessages?: Message[];
       /** Git 管理器（热文件检测用） */
       gitManager?: GitManager;
     },
@@ -736,18 +672,11 @@ export class CompressorOrchestrator {
       }
 
       // ── Phase 2/3: LLM 结构化摘要（作用于 Layer 3）──
-      // prompt 模式：将 layer2(规则裁剪层) + layer1(最新保留层) 作为近期上下文传给 LLM
-      // clone  模式：克隆完整 composed 上下文，修改最后 user 消息为压缩指令
       if (layer3.length > 0) {
         try {
           const hadSummary = !!summary;
-          const llmMode = options?.llmMode ?? 'prompt';
-          if (llmMode === 'clone' && options?.composedMessages) {
-            summary = await this.summarizer.summarizeViaClone(options.composedMessages);
-          } else {
-            const recentContext = [...layer2, ...layer1];
-            summary = await this.summarizer.summarize(layer3, summary, recentContext);
-          }
+          const recentContext = [...layer2, ...layer1];
+          summary = await this.summarizer.summarize(layer3, summary, recentContext);
           this._currentSummary = summary;
           if (!phasesUsed.includes(2) && !phasesUsed.includes(3)) {
             phasesUsed.push(hadSummary ? 3 : 2);

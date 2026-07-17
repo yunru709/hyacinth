@@ -2,6 +2,9 @@ import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
+import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { runDiagnostics } from './diagnostics.js';
+import { autoReferenceCheck } from './symbol-references.js';
 
 /**
  * EditTool — 在文件中精确替换匹配的字符串 或 按行号替换
@@ -103,11 +106,46 @@ export class EditTool implements Tool {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    // ── Read-before-write 门控 ──
+    const lastRead = getLastReadTime(filePath);
+    if (lastRead === null) {
+      return 'Error: You must read the file before editing it. Use the read tool first.';
+    }
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.mtimeMs > lastRead) {
+        return 'Error: File has been modified on disk since it was last read. Please re-read it first.';
+      }
+    } catch {}
+
+    let result: string;
     if (lineStart !== undefined) {
-      return this.executeLineReplace(filePath, content, newString, lineStart, args);
+      result = await this.executeLineReplace(filePath, content, newString, lineStart, args);
+    } else {
+      result = await this.executeStringReplace(filePath, content, oldString!, newString, args);
     }
 
-    return this.executeStringReplace(filePath, content, oldString!, newString, args);
+    // 记录写入
+    recordFileWrite(filePath);
+
+    // ── 自动诊断：修改后运行类型检查/编译检查 ──
+    try {
+      const diag = await runDiagnostics(process.cwd(), 15000);
+      if (diag) result += '\n\n' + diag;
+    } catch { /* 诊断失败不影响工具返回值 */ }
+
+    // ── 自动引用搜索：提取变更符号 → 项目内搜索引用 ──
+    try {
+      const effectiveOld = oldString ?? (() => {
+        const ls = (args.line_start as number) ?? 1;
+        const lc = (args.line_count as number) ?? 1;
+        return content.split('\n').slice(ls - 1, ls - 1 + lc).join('\n');
+      })();
+      const ref = autoReferenceCheck(filePath, content, effectiveOld, newString);
+      if (ref.text) result += '\n\n' + ref.text;
+    } catch { /* 引用搜索失败不影响工具返回值 */ }
+
+    return result;
   }
 
   private async executeLineReplace(

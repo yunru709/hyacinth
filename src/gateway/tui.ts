@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TUI Gateway — pi-tui component-based terminal UI for the Agent framework.
  *
  * Powered by @earendil-works/pi-tui.
@@ -56,6 +56,7 @@ import { theme, editorTheme } from '../ui/theme.js';
 import { readRecentEvents, type ConversationEvent } from '../event-store.js';
 import { LocalModelModule } from '../local-model/index.js';
 import type { BackgroundProcessInfo } from '../tools/background-registry.js';
+import { setAskUserHandler } from '../tools/ask-user.js';
 import { DownloadManager } from '../local-model/download-manager.js';
 
 const logger = createLogger('tui');
@@ -119,7 +120,7 @@ function formatStatusBar(
     : '';
 
   const parts = [
-    theme.fg(' DeepThink'),
+    theme.fg(' Hyacinth'),
     theme.dim(' \u00b7 '),
     theme.accent(modelDisplay),
     theme.dim(' | '),
@@ -339,12 +340,25 @@ export async function runTui(
   // Permission selection bar — shown between chat and editor during tool permission prompts
   const permissionBar = new Text('', 0, 0);
   interface PermissionRequest {
-    resolve: (result: 'yes' | 'no' | 'always') => void;
+    resolve: (result: 'yes' | 'no' | 'always' | 'aor') => void;
     toolName: string;
     inputStr: string;
   }
   const permissionQueue: PermissionRequest[] = [];
-  let permissionSelection = 0; // 0=Yes, 1=Always, 2=No
+  let permissionSelection = 0; // 0=Yes, 1=AOR, 2=Always, 3=No
+
+  // ── Ask User 状态 ───────────────────────────────────────────
+  interface AskUserFormState {
+    questions: Array<{ question: string; header?: string; options?: string[]; multiSelect?: boolean; customInput?: boolean }>;
+    selectedOptions: Map<number, Set<number>>;  // question index → selected option indices
+    customTexts: Map<number, string>;           // question index → custom text
+    activeQuestion: number;  // 0..questions.length (questions.length = "补充" tab)
+    activeOption: number;    // within current question's options
+    resolve: (result: string) => void;
+  }
+  let askUserState: AskUserFormState | null = null;
+  const askUserBar = new Text('', 0, 0);
+  const askUserContent = new Text('', 0, 0);
 
   root.addChild(headerContainer);
   root.addChild(chatLog);
@@ -357,6 +371,8 @@ export async function runTui(
 
   root.addChild(footerText);
   root.addChild(permissionBar);
+  root.addChild(askUserContent);
+  root.addChild(askUserBar);
   root.addChild(editor);
 
   tui.addChild(root);
@@ -514,13 +530,14 @@ export async function runTui(
     tui.requestRender();
   }
 
-  function resolvePermission(result: 'yes' | 'no' | 'always') {
+  function resolvePermission(result: 'yes' | 'no' | 'always' | 'aor') {
     const req = permissionQueue.shift();
     if (!req) return;
 
     permissionBar.setText('');
     chatLog.addSystem(
       result === 'no' ? theme.error('  \u25c6 Denied')
+        : result === 'aor' ? theme.warning('  \u25c6 AOR \u2014 all restrictions lifted')
         : result === 'always' ? theme.success('  \u25c6 Always allowed')
         : theme.success('  \u25c6 Approved'),
     );
@@ -534,8 +551,8 @@ export async function runTui(
   }
 
   function updatePermissionBar() {
-    const labels = ['Yes', 'Always', 'No'];
-    const shortcuts = ['Y', 'A', 'N'];
+    const labels = ['Yes', 'AOR', 'Always', 'No'];
+    const shortcuts = ['Y', 'O', 'A', 'N'];
     const parts = labels.map((l, i) => {
       const prefix = i === permissionSelection ? '\u25b6 ' : '  ';
       if (i === permissionSelection) {
@@ -548,6 +565,119 @@ export async function runTui(
       parts.join(theme.dim(' \u2502 ')) +
       theme.warning(' \u2500\u2500 Use \u2190\u2192 to select, Enter to confirm')
     );
+  }
+
+  // \u2500\u2500 Ask User \u6e32\u67d3 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+  function renderAskUserForm() {
+    if (!askUserState) {
+      askUserContent.setText('');
+      askUserBar.setText('');
+      return;
+    }
+    const { questions, selectedOptions, customTexts, activeQuestion } = askUserState;
+    const supplementIdx = questions.length;
+    const totalTabs = supplementIdx + 1;
+
+    // \u6784\u5efa\u6807\u7b7e\u884c
+    let tabLine = '';
+    for (let i = 0; i < questions.length; i++) {
+      const isActive = i === activeQuestion;
+      const header = questions[i].header || `\u95ee\u9898${i + 1}`;
+      tabLine += isActive ? ` ${theme.fg(`[${header}]`)} ` : ` ${theme.dim(header)}  `;
+    }
+    tabLine += activeQuestion === supplementIdx
+      ? ` ${theme.fg('[\u8865\u5145]')} `
+      : ` ${theme.dim('\u8865\u5145')}  `;
+
+    // \u6784\u5efa\u5185\u5bb9
+    let content = theme.warning('\u250c Ask User \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500') + '\n';
+    content += tabLine + '\n';
+    content += theme.warning('\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500') + '\n';
+
+    if (activeQuestion < supplementIdx) {
+      // \u666e\u901a\u95ee\u9898
+      const q = questions[activeQuestion];
+      content += `${q.question}\n\n`;
+      const opts = q.options ?? [];
+      const sel = selectedOptions.get(activeQuestion) ?? new Set<number>();
+      const isMulti = q.multiSelect ?? false;
+      for (let i = 0; i < opts.length; i++) {
+        const selected = sel.has(i);
+        const bullet = isMulti
+          ? (selected ? theme.fg('\u25c9') : '\u25cb')
+          : (selected ? theme.fg('\u25cf') : '\u25cb');
+        const highlight = i === askUserState.activeOption;
+        content += (highlight ? theme.fg(` ${bullet} ${opts[i]}`) : theme.dim(` ${bullet} ${opts[i]}`)) + '\n';
+      }
+      // \u81ea\u5b9a\u4e49\u8f93\u5165
+      if (q.customInput ?? false) {
+        const custom = customTexts.get(activeQuestion) ?? '';
+        content += `\n${theme.dim('\u81ea\u5b9a\u4e49:')} ${custom}${theme.dim('\u258c')}\n`;
+      }
+    } else {
+      // "\u8865\u5145" tab
+      const custom = customTexts.get(supplementIdx) ?? '';
+      content += `${theme.fg('\u8865\u5145\u8bf4\u660e\uff08\u81ea\u7531\u8f93\u5165\uff0c\u6309 Enter \u63d0\u4ea4\u5168\u90e8\uff09')}\n\n`;
+      content += `${custom}${theme.dim('\u258c')}\n`;
+    }
+
+    content += theme.warning('\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+    askUserContent.setText(content);
+
+    // \u5bfc\u822a\u680f
+    const currentLabel = activeQuestion < supplementIdx
+      ? (questions[activeQuestion].header || `\u95ee\u9898${activeQuestion + 1}`)
+      : '\u8865\u5145';
+    const nav = activeQuestion < supplementIdx
+      ? theme.warning(`\u2190\u2192 \u5207\u6362  \u2191\u2193 \u9009\u9879  \u7a7a\u683c \u9009\u4e2d  \u21b5 ${currentLabel === '\u8865\u5145' ? '\u63d0\u4ea4' : '\u786e\u8ba4'}`)
+      : theme.warning(`\u2190\u2192 \u5207\u6362  \u21b5 \u63d0\u4ea4\u5168\u90e8\u7b54\u6848`);
+    askUserBar.setText(nav);
+  }
+
+  function resolveAskUser() {
+    if (!askUserState) return;
+    const { questions, selectedOptions, customTexts, resolve } = askUserState;
+    const suppIdx = questions.length;
+
+    const result: Record<string, string[]> = {};
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const answers: string[] = [];
+
+      // \u9009\u4e2d\u7684\u9009\u9879
+      const sel = selectedOptions.get(i) ?? new Set<number>();
+      for (const idx of sel) {
+        if (q.options && q.options[idx]) {
+          answers.push(q.options[idx]);
+        }
+      }
+
+      // \u81ea\u5b9a\u4e49\u8f93\u5165
+      const custom = customTexts.get(i) ?? '';
+      if (custom.trim()) {
+        answers.push(custom.trim());
+      }
+
+      // \u7528\u95ee\u9898\u539f\u6587\u4f5c\u4e3a key\uff08\u957f\u4e0a\u4e0b\u6587\u91cc\u6bd4 "0" "1" \u66f4\u6709\u8bed\u4e49\uff09
+      if (answers.length > 0) {
+        result[q.question] = answers;
+      }
+    }
+
+    // "\u8865\u5145" \u8f93\u5165
+    const suppText = customTexts.get(suppIdx) ?? '';
+    if (suppText.trim()) {
+      result['\u8865\u5145\u8bf4\u660e'] = [suppText.trim()];
+    }
+
+    askUserContent.setText('');
+    askUserBar.setText('');
+    const answeredCount = Object.keys(result).length;
+    chatLog.addSystem(theme.success(`\u25c6 Answered ${answeredCount} question(s)`));
+    askUserState = null;
+    resolve(JSON.stringify(result, null, 2));
+    tui.requestRender();
   }
 
   const tuiHandler: OutputHandler = {
@@ -702,12 +832,12 @@ export async function runTui(
 
       tui.requestRender();
     },
-    onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'> {
+    onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always' | 'aor'> {
       const inputStr = Object.entries(input)
         .map(([k, v]) => `${k}=${String(v).substring(0, 60)}`)
         .join(', ');
 
-      return new Promise<'yes' | 'no' | 'always'>((resolve) => {
+      return new Promise<'yes' | 'no' | 'always' | 'aor'>((resolve) => {
         const isFirst = permissionQueue.length === 0;
         permissionQueue.push({ resolve, toolName, inputStr });
 
@@ -721,6 +851,29 @@ export async function runTui(
       isThinking = false;
       pendingThinking = '';
       currentTextLine = '';
+    },
+    onAskUser(questions): Promise<string> {
+      return new Promise<string>((resolve) => {
+        const selectedOptions = new Map<number, Set<number>>();
+        const customTexts = new Map<number, string>();
+        for (let i = 0; i < questions.length; i++) {
+          selectedOptions.set(i, new Set());
+          customTexts.set(i, '');
+        }
+        // "补充" tab custom text
+        customTexts.set(questions.length, '');
+
+        askUserState = {
+          questions,
+          selectedOptions,
+          customTexts,
+          activeQuestion: 0,
+          activeOption: 0,
+          resolve,
+        };
+        renderAskUserForm();
+        tui.requestRender();
+      });
     },
   };
 
@@ -803,6 +956,10 @@ export async function runTui(
       channel: 'tui',
     });
     sessionDir = agent.sessionDir;
+    // Wire ask_user tool to TUI handler
+    if (tuiHandler.onAskUser) {
+      setAskUserHandler((questions) => tuiHandler.onAskUser!(questions));
+    }
   } else {
     agent = undefined as any;
     sessionDir = '';
@@ -879,17 +1036,17 @@ export async function runTui(
     }
   }
 
-  // 为飞书渠道注入 tuiSync 回调（如果已注册）
-  const feishuState = channelManager.get('feishu');
-  if (feishuState) {
-    feishuState.config = {
-      ...feishuState.config,
+  // 为所有渠道注入 TUI 同步回调（渠道自行决定是否启用 tuiSync）
+  for (const state of channelManager.getAll()) {
+    if (state.handler.id === 'tui') continue;
+    state.config = {
+      ...state.config,
       onUserMessage: (label: string, content: string) => {
-        chatLog.addUser(`📨 [飞书:${label}] ${content}`);
+        chatLog.addSystem(`💬 [${state.handler.name}:${label}] ${content}`);
         tui.requestRender();
       },
       onAgentReply: (content: string) => {
-        chatLog.addSystem(`📤 [飞书回复] ${content}`);
+        chatLog.addSystem(`📤 [${state.handler.name}回复] ${content}`);
         tui.requestRender();
       },
     };
@@ -1022,9 +1179,9 @@ export async function runTui(
       boxLines.push(theme.fg('\u2502 ') + line + ' '.repeat(pad) + theme.fg(' \u2502'));
     }
   }
-  // DeepThink \u6807\u9898\u884c
-  const titleLine = theme.fg(' DeepThink');
-  const titlePad = Math.max(0, 56 - 10); // ' DeepThink' = 10 chars visible
+  // Hyacinth \u6807\u9898\u884c
+  const titleLine = theme.fg(' Hyacinth');
+  const titlePad = Math.max(0, 56 - 9); // ' Hyacinth' = 9 chars visible
   boxLines.push(theme.fg('\u2502 ') + titleLine + ' '.repeat(titlePad) + theme.fg(' \u2502'));
   // CWD \u884c
   const cwdPad = Math.max(0, 56 - [...cwdDisplay].length);
@@ -1279,6 +1436,68 @@ export async function runTui(
     }
 
     // ===== Sub-Command Handler =====
+    /** 持久化单个配置字段到 JSON 文件（不展开默认值） */
+    async function persistConfigField(key: string, value: unknown): Promise<void> {
+      const configPath = path.join(os.homedir(), '.agent', 'config.json');
+      try {
+        const raw = await fs.promises.readFile(configPath, 'utf-8');
+        const obj = JSON.parse(raw);
+        const parts = key.split('.');
+        let cur: Record<string, unknown> = obj;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') {
+            cur[parts[i]] = {};
+          }
+          cur = cur[parts[i]] as Record<string, unknown>;
+        }
+        cur[parts[parts.length - 1]] = value;
+        await fs.promises.writeFile(configPath, JSON.stringify(obj, null, 2), 'utf-8');
+      } catch { /* 文件不存在或解析失败，跳过持久化 */ }
+    }
+
+    /** /model thinking 公共逻辑 */
+    function applyThinking(action: string): void {
+      const cfg = RuntimeConfigCenter.getInstance();
+      const activeP = loop.getActiveProvider();
+      const providerType = activeP.getProviderType();
+
+      const effortOptions: Record<string, { label: string; effort: string | number }> = {};
+      if (providerType === 'deepseek') {
+        effortOptions.high = { label: 'high', effort: 'high' };
+        effortOptions.max = { label: 'max', effort: 'max' };
+      } else if (providerType === 'anthropic') {
+        effortOptions['4k'] = { label: '4K', effort: 4000 };
+        effortOptions['8k'] = { label: '8K', effort: 8000 };
+        effortOptions['16k'] = { label: '16K', effort: 16000 };
+        effortOptions['32k'] = { label: '32K', effort: 32000 };
+      }
+
+      if (action === 'on') {
+        cfg.set('provider.enableThinking', true);
+        activeP.setThinking?.(true);
+        persistConfigField('provider.enableThinking', true);
+        chatLog.addSystem(theme.success('Thinking enabled'));
+      } else if (action === 'off') {
+        cfg.set('provider.enableThinking', false);
+        activeP.setThinking?.(false);
+        persistConfigField('provider.enableThinking', false);
+        chatLog.addSystem(theme.success('Thinking disabled'));
+      } else if (effortOptions[action]) {
+        const opt = effortOptions[action];
+        cfg.set('provider.enableThinking', true);
+        activeP.setThinking?.(true, opt.effort);
+        persistConfigField('provider.enableThinking', true);
+        chatLog.addSystem(theme.success(`Thinking enabled (${opt.label})`));
+      } else {
+        const optsStr = Object.entries(effortOptions)
+          .map(([k, v]) => `  ${k}  → ${v.label}`)
+          .join('\n');
+        chatLog.addSystem(theme.warning(`Usage: /model thinking <on|off${optsStr ? '|' + Object.keys(effortOptions).join('|') : ''}>` + (optsStr ? '\n' + optsStr : '')));
+      }
+      tui.requestRender();
+      updateTokenEstimate();
+    }
+
     /**
      * 通用 handler 路由：根据 "module.method" 格式的 handler 字符串，
      * 动态查找并调用对应模块的方法。
@@ -1377,6 +1596,10 @@ export async function runTui(
             // 就地切换，不重启
             await loop.switchSession(dir);
             sessionDir = dir;
+            lastTurnCount = 0;
+            lastTokensUsed = 0;
+            const newStats = await statsManager.get(dir);
+            refreshStatus(loop.getTurnInfo(newStats.turn_count ?? 0, newStats.current_context_tokens ?? 0));
             chatLog.clearAll();
             replayEvents(chatLog, dir);
             chatLog.addSystem(theme.success(`已切换到 session ${sessionId}`));
@@ -1431,13 +1654,13 @@ export async function runTui(
             chatLog.addSystem(theme.dim('加载会话: /session <完整ID>/load   例如: /session ' + (filtered[0]?.id ?? '') + '/load'));
           }
         } else if (sub === 'new') {
-          chatLog.addSystem(theme.warning('请使用 deepthink start 启动新会话（当前会话需要退出）'));
+          chatLog.addSystem(theme.warning('请使用 hyacinth start 启动新会话（当前会话需要退出）'));
         } else if (sub === 'load') {
           const id = restArgs?.trim();
           if (!id) {
             chatLog.addSystem(theme.warning('用法: /session load <sessionId>'));
           } else {
-            chatLog.addSystem(theme.warning(`请使用 deepthink start --session ${id} 加载会话`));
+            chatLog.addSystem(theme.warning(`请使用 hyacinth start --session ${id} 加载会话`));
           }
         } else if (sub === 'delete') {
           const id = restArgs?.trim();
@@ -1633,65 +1856,27 @@ export async function runTui(
 
         case 'model/settings/thinking':
         case 'model/thinking': {
-          if (restArgs !== 'on' && restArgs !== 'off') {
-            chatLog.addSystem(theme.warning('Usage: /model thinking <on|off>'));
-            tui.requestRender();
-            return;
-          }
-          const enabled = restArgs === 'on';
-          cfg.set('provider.enableThinking', enabled);
-          cfg.save().catch(() => {});
-          loop.getActiveProvider().setThinking?.(enabled);
-          chatLog.addSystem(
-            theme.success('Thinking ') + theme.fg(String(enabled ? 'enabled' : 'disabled')) + theme.dim(' (persisted)'),
-          );
-          tui.requestRender();
-          updateTokenEstimate();
+          applyThinking(restArgs);
           return;
         }
 
-        case 'model/settings/thinking-effort':
-        case 'model/thinking-effort': {
-          const activeP = loop.getActiveProvider();
-          const providerType = activeP.getProviderType();
-
-          // 根据厂商提供不同选项
-          const options: Record<string, { label: string; effort: string | number }> = {};
-          if (providerType === 'deepseek') {
-            options.high = { label: 'high (深度思考)', effort: 'high' };
-            options.max = { label: 'max (最强推理)', effort: 'max' };
-          } else if (providerType === 'anthropic') {
-            options['4000'] = { label: '4K tokens', effort: 4000 };
-            options['8000'] = { label: '8K tokens', effort: 8000 };
-            options['16000'] = { label: '16K tokens (默认)', effort: 16000 };
-            options['32000'] = { label: '32K tokens (Claude Opus 4)', effort: 32000 };
-          } else {
-            chatLog.addSystem(theme.dim(`Thinking effort not configurable for ${providerType}`));
-            tui.requestRender();
-            return;
-          }
-
-          if (!restArgs || !options[restArgs]) {
-            const optsStr = Object.entries(options)
-              .map(([k, v]) => `  ${k}: ${v.label}`)
-              .join('\n');
-            chatLog.addSystem(`Usage: /model thinking-effort <option>\n${optsStr}`);
-            tui.requestRender();
-            return;
-          }
-
-          const selected = options[restArgs];
-          // 确保 thinking 已启用
-          cfg.set('provider.enableThinking', true);
-          cfg.set('provider.thinkingEffort', selected.effort);
-          cfg.save().catch(() => {});
-          activeP.setThinking?.(true, selected.effort);
-          chatLog.addSystem(
-            theme.success(`Thinking effort set to ${selected.label}`) + theme.dim(` (${providerType})`),
-          );
-          tui.requestRender();
-          return;
-        }
+        // 四级菜单：/model thinking on|off|high|max 通过子面板选择
+        case 'model/settings/thinking/on':
+        case 'model/thinking/on':     applyThinking('on'); return;
+        case 'model/settings/thinking/off':
+        case 'model/thinking/off':    applyThinking('off'); return;
+        case 'model/settings/thinking/high':
+        case 'model/thinking/high':   applyThinking('high'); return;
+        case 'model/settings/thinking/max':
+        case 'model/thinking/max':    applyThinking('max'); return;
+        case 'model/settings/thinking/4k':
+        case 'model/thinking/4k':     applyThinking('4k'); return;
+        case 'model/settings/thinking/8k':
+        case 'model/thinking/8k':     applyThinking('8k'); return;
+        case 'model/settings/thinking/16k':
+        case 'model/thinking/16k':    applyThinking('16k'); return;
+        case 'model/settings/thinking/32k':
+        case 'model/thinking/32k':    applyThinking('32k'); return;
 
         case 'model/settings/show-thinking':
         case 'model/show-thinking': {
@@ -2035,21 +2220,6 @@ export async function runTui(
           }
           
           // ── 压缩器控制: compress/* ──
-          if (cmdPath === 'compress/strategy' || cmdPath.startsWith('compress/strategy ')) {
-            const val = (restArgs || '').trim().toUpperCase();
-            if (val !== 'A' && val !== 'C') {
-              chatLog.addSystem(theme.warning('Usage: /compress strategy <A|C>'));
-              tui.requestRender();
-              return;
-            }
-            cfg.set('context.compressionStrategy', val);
-            cfg.save().catch(() => {});
-            const desc = val === 'C' ? '克隆对话（缓存友好，默认）' : '独立提示词';
-            chatLog.addSystem(theme.success('Compression strategy: ') + theme.fg(desc));
-            tui.requestRender();
-            return;
-          }
-
           if (cmdPath === 'compress/threshold' || cmdPath.startsWith('compress/threshold ')) {
             const val = parseFloat((restArgs || '').trim());
             if (isNaN(val) || val < 0 || val > 1) {
@@ -2246,6 +2416,23 @@ export async function runTui(
             }
           }
 
+          // 通用渠道 TUI 命令分发：cmdPath 如 "clawbot/login" → clawbot 渠道
+          {
+            const slashIdx = cmdPath.indexOf('/');
+            if (slashIdx > 0) {
+              const chId = cmdPath.slice(0, slashIdx);
+              const chState = channelManager.get(chId);
+              if (chState?.handler.handleTuiCommand) {
+                const result = await chState.handler.handleTuiCommand(cmdPath, restArgs);
+                if (result !== null) {
+                  chatLog.addSystem(result);
+                  tui.requestRender();
+                  return;
+                }
+              }
+            }
+          }
+
           // 通用 handler 路由：查找命令定义的 handler 字段
           const cmdDef = CommandRegistry.getInstance().find(cmdPath);
           if (cmdDef?.handler) {
@@ -2307,9 +2494,55 @@ export async function runTui(
       return;
     }
 
+    if (input === '/orchestrator on') {
+      if (loop.bypassManager) {
+        await loop.bypassManager.activateAgent('orchestrator');
+        const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+        RuntimeConfigCenter.getInstance().set('bypass.orchestratorEnabled', true);
+        chatLog.addSystem(theme.success('上下文编排旁路Agent 已开启'));
+      } else {
+        chatLog.addSystem(theme.warning('旁路Agent 管理器未初始化'));
+      }
+      tui.requestRender();
+      return;
+    }
+    if (input === '/orchestrator off') {
+      if (loop.bypassManager) {
+        await loop.bypassManager.deactivateAgent('orchestrator');
+        const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+        RuntimeConfigCenter.getInstance().set('bypass.orchestratorEnabled', false);
+        chatLog.addSystem(theme.dim('上下文编排旁路Agent 已关闭'));
+      } else {
+        chatLog.addSystem(theme.warning('旁路Agent 管理器未初始化'));
+      }
+      tui.requestRender();
+      return;
+    }
+
+    if (input === '/default-mode companion') {
+      const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+      const configCenter = RuntimeConfigCenter.getInstance();
+      configCenter.set('startup.defaultMode', 'companion');
+      await configCenter.save();
+      chatLog.addSystem(theme.success('启动默认模式已设为 陪伴模式 💫（下次启动生效）'));
+      tui.requestRender();
+      return;
+    }
+    if (input === '/default-mode normal') {
+      const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+      const configCenter = RuntimeConfigCenter.getInstance();
+      configCenter.set('startup.defaultMode', 'normal');
+      await configCenter.save();
+      chatLog.addSystem(theme.dim('启动默认模式已设为 普通模式 💻（下次启动生效）'));
+      tui.requestRender();
+      return;
+    }
+
     if (input === '/zone4 on') {
       knowledgeBase.setZone4Enabled(true);
       contextComposer.activeConditions.add('zone4_enabled');
+      const { RuntimeConfigCenter: RCC } = await import('../runtime/config-center.js');
+      RCC.getInstance().set('kb.zone4', true);
       chatLog.addSystem(theme.success('Zone 4 已开启'));
       tui.requestRender();
       return;
@@ -2317,6 +2550,8 @@ export async function runTui(
     if (input === '/zone4 off') {
       knowledgeBase.setZone4Enabled(false);
       contextComposer.activeConditions.delete('zone4_enabled');
+      const { RuntimeConfigCenter: RCC1 } = await import('../runtime/config-center.js');
+      RCC1.getInstance().set('kb.zone4', false);
       chatLog.addSystem(theme.dim('Zone 4 已关闭（知识库同步停用）'));
       tui.requestRender();
       return;
@@ -2326,15 +2561,21 @@ export async function runTui(
       if (!knowledgeBase.zone4Enabled) {
         knowledgeBase.setZone4Enabled(true);
         contextComposer.activeConditions.add('zone4_enabled');
+        const { RuntimeConfigCenter: RCC2 } = await import('../runtime/config-center.js');
+        RCC2.getInstance().set('kb.zone4', true);
         chatLog.addSystem(theme.dim('Zone 4 已同步开启'));
       }
       knowledgeBase.enable();
+      const { RuntimeConfigCenter: RCC3 } = await import('../runtime/config-center.js');
+      RCC3.getInstance().set('kb.enabled', true);
       chatLog.addSystem(theme.success('知识库已开启 — Zone 4 将注入检索结果'));
       tui.requestRender();
       return;
     }
     if (input === '/kb off') {
       knowledgeBase.disable();
+      const { RuntimeConfigCenter: RCC4 } = await import('../runtime/config-center.js');
+      RCC4.getInstance().set('kb.enabled', false);
       chatLog.addSystem(theme.dim('知识库已关闭'));
       tui.requestRender();
       return;
@@ -2353,6 +2594,10 @@ export async function runTui(
       await loop.switchSession(newSessionDir);
       sessionDir = newSessionDir;
       preciseModeActive = true;
+      lastTurnCount = 0;
+      lastTokensUsed = 0;
+      const psStats = await statsManager.get(newSessionDir);
+      refreshStatus(loop.getTurnInfo(psStats.turn_count ?? 0, psStats.current_context_tokens ?? 0));
       const label = existingPrecise ? '恢复已有' : '新建';
       chatLog.addSystem(theme.success(`精确模式已开启 — ${label} session: ${newSession.id}`));
       chatLog.clearAll();
@@ -2371,6 +2616,10 @@ export async function runTui(
         await loop.switchSession(originalSessionDir);
         sessionDir = originalSessionDir;
         originalSessionDir = null;
+        lastTurnCount = 0;
+        lastTokensUsed = 0;
+        const origStats = await statsManager.get(sessionDir);
+        refreshStatus(loop.getTurnInfo(origStats.turn_count ?? 0, origStats.current_context_tokens ?? 0));
         chatLog.clearAll();
         replayEvents(chatLog, sessionDir);
       }
@@ -2699,7 +2948,7 @@ if (input.startsWith('/threshold ')) {
       const fsSync = (await import('node:fs')).default;
       const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
       fsSync.mkdirSync(path.dirname(restartFile), { recursive: true });
-      fsSync.writeFileSync(restartFile, 'true', 'utf-8');
+      fsSync.writeFileSync(restartFile, path.basename(sessionDir), 'utf-8');
       setTimeout(() => process.exit(42), 200);
       return;
     }
@@ -2831,22 +3080,132 @@ if (input.startsWith('/threshold ')) {
       }
     }
 
+    // ── Ask User form: full keyboard navigation ──
+    if (askUserState) {
+      const st = askUserState;
+      const suppIdx = st.questions.length;
+      const totalTabs = suppIdx + 1;
+      const currentQ = st.activeQuestion < suppIdx ? st.questions[st.activeQuestion] : null;
+      const opts = currentQ?.options ?? [];
+      const isMulti = currentQ?.multiSelect ?? false;
+
+      // Enter: submit (on "补充" tab or when focused on custom input)
+      if (matchesKey(data, Key.enter)) {
+        // 收集当前活动的自定义输入
+        const editIdx = st.activeQuestion;
+        const currentCustom = st.customTexts.get(editIdx) ?? '';
+        if (currentCustom.trim()) {
+          st.customTexts.set(editIdx, currentCustom.trim());
+        }
+        resolveAskUser();
+        return { consume: true };
+      }
+
+      // Escape: cancel (discard form)
+      if (matchesKey(data, Key.escape)) {
+        askUserContent.setText('');
+        askUserBar.setText('');
+        askUserState = null;
+        st.resolve('{}');
+        tui.requestRender();
+        return { consume: true };
+      }
+
+      // Left/Right: switch tabs
+      if (matchesKey(data, Key.left)) {
+        st.activeQuestion = (st.activeQuestion + totalTabs - 1) % totalTabs;
+        st.activeOption = 0;
+        renderAskUserForm();
+        tui.requestRender();
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.right)) {
+        st.activeQuestion = (st.activeQuestion + 1) % totalTabs;
+        st.activeOption = 0;
+        renderAskUserForm();
+        tui.requestRender();
+        return { consume: true };
+      }
+
+      // Up/Down: navigate options (only on question tabs)
+      if (st.activeQuestion < suppIdx && opts.length > 0) {
+        if (matchesKey(data, Key.up)) {
+          st.activeOption = (st.activeOption + opts.length - 1) % opts.length;
+          renderAskUserForm();
+          tui.requestRender();
+          return { consume: true };
+        }
+        if (matchesKey(data, Key.down)) {
+          st.activeOption = (st.activeOption + 1) % opts.length;
+          renderAskUserForm();
+          tui.requestRender();
+          return { consume: true };
+        }
+      }
+
+      // Space: toggle checkbox (works for both multiSelect and single-select)
+      if (matchesKey(data, Key.space)) {
+        if (st.activeQuestion < suppIdx && opts.length > 0) {
+          const sel = st.selectedOptions.get(st.activeQuestion) ?? new Set<number>();
+          if (sel.has(st.activeOption)) {
+            sel.delete(st.activeOption);  // 取消选中
+          } else {
+            if (isMulti) {
+              sel.add(st.activeOption);
+            } else {
+              // 单选：清除其它，只选中当前
+              sel.clear();
+              sel.add(st.activeOption);
+            }
+          }
+          st.selectedOptions.set(st.activeQuestion, sel);
+        }
+        renderAskUserForm();
+        tui.requestRender();
+        return { consume: true };
+      }
+
+      // Backspace: delete last char in custom text
+      if (matchesKey(data, Key.backspace)) {
+        const editIdx = st.activeQuestion;
+        const current = st.customTexts.get(editIdx) ?? '';
+        st.customTexts.set(editIdx, current.slice(0, -1));
+        renderAskUserForm();
+        tui.requestRender();
+        return { consume: true };
+      }
+
+      // Typing characters → add to current tab's custom text buffer
+      // data is a string; printable chars have length 1 and are not control chars
+      if (typeof data === 'string' && data.length === 1 && data.charCodeAt(0) >= 32) {
+        const editIdx = st.activeQuestion;
+        const current = st.customTexts.get(editIdx) ?? '';
+        st.customTexts.set(editIdx, current + data);
+        renderAskUserForm();
+        tui.requestRender();
+        return { consume: true };
+      }
+
+      // Consume all other keys during ask_user
+      return { consume: true };
+    }
+
     // ── Permission bar: Left/Right arrows + Enter ──
     if (permissionQueue.length > 0) {
       if (matchesKey(data, Key.left)) {
-        permissionSelection = (permissionSelection + 2) % 3;
+        permissionSelection = (permissionSelection + 3) % 4;
         updatePermissionBar();
         tui.requestRender();
         return { consume: true };
       }
       if (matchesKey(data, Key.right)) {
-        permissionSelection = (permissionSelection + 1) % 3;
+        permissionSelection = (permissionSelection + 1) % 4;
         updatePermissionBar();
         tui.requestRender();
         return { consume: true };
       }
       if (matchesKey(data, Key.enter)) {
-        const options: Array<'yes' | 'always' | 'no'> = ['yes', 'always', 'no'];
+        const options: Array<'yes' | 'aor' | 'always' | 'no'> = ['yes', 'aor', 'always', 'no'];
         resolvePermission(options[permissionSelection]);
         return { consume: true };
       }

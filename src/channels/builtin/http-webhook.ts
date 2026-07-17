@@ -3,7 +3,7 @@
 // ============================================================
 //
 // 端点：/api/health, /api/chat, /api/sessions, /api/tools, /api/skills
-// 认证：Bearer Token（DEEPTHINK_API_KEY 环境变量或 --api-key 参数）
+// 认证：Bearer Token（HYACINTH_API_KEY 环境变量或 --api-key 参数）
 // Chat 为同步 request-response 模式。
 // ============================================================
 
@@ -30,7 +30,7 @@ const logger = createLogger('http-webhook');
 
 function getApiKey(config: ChannelConfig): string | null {
   return (config.apiKey as string)
-    || process.env.DEEPTHINK_API_KEY
+    || process.env.HYACINTH_API_KEY
     || process.env.AGENT_API_KEY
     || null;
 }
@@ -42,7 +42,7 @@ function authHook(apiKey: string | null) {
 
     if (!apiKey) {
       return reply.status(401).send({
-        error: 'API key not configured. Set DEEPTHINK_API_KEY environment variable or pass --api-key.',
+        error: 'API key not configured. Set HYACINTH_API_KEY environment variable or pass --api-key.',
       });
     }
 
@@ -117,7 +117,7 @@ export class HttpWebhookChannel implements ChannelHandler {
 
     const apiKey = getApiKey(config);
     if (!apiKey) {
-      logger.warn('No DEEPTHINK_API_KEY set — HTTP API will reject all requests except /api/health. Set the environment variable or use --api-key.');
+      logger.warn('No HYACINTH_API_KEY set — HTTP API will reject all requests except /api/health. Set the environment variable or use --api-key.');
     }
 
     const fastify = (await import('fastify')).default;

@@ -177,13 +177,3 @@ Agent Core 消费事件
 
 ---
 
-## 四、当前架构的问题（个人观察）
-
-1. **ProviderRouter 和 ModelRouter 功能重叠** — 两个路由系统，职责边界模糊
-2. **ProviderManager 承担太多** — 既是工厂又是管理器又是路由发现，单例模式严重
-3. **Factory 逻辑散落** — `createProviderFromConfig` 一个 switch-case 走天下，新增 provider 要改多个地方（config.ts, manager.ts, index.ts, compatible.ts...）
-4. **弹性层耦合在 ProviderManager 构建中** — `wrapProvider` 在构造函数里默默套上 Resilient/Fallback，调用方无感知也没法定制
-5. **Provider 适配器风格不统一** — 有些是类 (class)，有些是工厂函数 (createXXXProvider)，有些两者都有
-6. **协议兼容靠硬编码** — "Qwen 兼容 Anthropic"、"MiniMax 兼容 Anthropic" 写在各自的实现里，没有统一的协议适配层
-7. **测试覆盖不足** — resilient.test.ts 和 local.test.ts 有测试，其他基本没有
-

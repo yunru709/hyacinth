@@ -20,13 +20,14 @@ export function createMiniMaxProvider(config?: {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  maxOutputTokens?: number;
 }): AnthropicProvider {
   const provCfg = getProviderConfigLoader().getProvider('minimax');
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.MINIMAX_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.minimaxi.com/anthropic',
     model: config?.model ?? provCfg?.defaultModel ?? 'MiniMax-M3',
-    maxTokens: provCfg?.maxTokens ?? 4096,
+    maxOutputTokens: config?.maxOutputTokens,
     providerType: 'minimax',
   } satisfies AnthropicProviderOptions);
 }
@@ -36,5 +37,6 @@ export function createMiniMaxFromConfig(config: ProviderConfig): AnthropicProvid
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
+    maxOutputTokens: config.maxOutputTokens,
   });
 }

@@ -2,8 +2,8 @@ export interface FullConfig {
   provider: {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
     routeMode: 'auto' | 'manual';
-    enableThinking: boolean; // 启用 thinking/reasoning 模式
-    /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "deepthink"。 */
+    enableThinking: boolean; // 启用 thinking/reasoning 模式（启动时自动从 models-catalog.json 读取 reasoningEffort）
+    /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
     anthropic: { model: string; apiKeyEnv: string };
     openai: { model: string; apiKeyEnv: string };
@@ -12,7 +12,10 @@ export interface FullConfig {
     local: {
       model: string;
       baseUrl: string;
-      maxTokens: number;
+      /** 单次请求最大输出 token 数（推荐）。兼容旧键名 maxTokens。 */
+      maxOutputTokens?: number;
+      /** @deprecated 使用 maxOutputTokens */
+      maxTokens?: number;
       modelKey?: string;
       healthCheck: {
         restartDelayMs: number; // 3000
@@ -41,7 +44,6 @@ export interface FullConfig {
     compressThreshold: number;    // 0.75 — 触发异步压缩的阈值
     emergencyThreshold: number;   // 0.92 — 触发同步紧急压缩的阈值
     compressDepth: number;        // 0.5  — 压缩激进程度 0.0~1.0
-    compressionStrategy: 'A' | 'C'; // 'A' — 独立压缩提示词（默认），'C' — 克隆对话缓存友好
   };
 
   schedule: {
@@ -102,8 +104,10 @@ export interface FullConfig {
     defaultModel: string;
     /** 本地服务端口（默认 ollama=11434, llamacpp=8080） */
     port: number;
-    /** 最大输出 token 数 */
-    maxTokens: number;
+    /** 单次请求最大输出 token 数（推荐）。兼容旧键名 maxTokens。 */
+    maxOutputTokens?: number;
+    /** @deprecated 使用 maxOutputTokens */
+    maxTokens?: number;
     /** 后端类型：ollama | llamacpp。未配置时从 baseUrl 端口自动推断 */
     backend?: 'ollama' | 'llamacpp';
   };
@@ -158,6 +162,30 @@ export interface FullConfig {
   kb?: {
     enabled: boolean;
     zone4: boolean;
+    /** 检索最大返回条数（默认 5） */
+    maxTotal?: number;
+    /** 主要结果最大条数，展示完整内容（默认 3） */
+    maxMain?: number;
+    /** 补充引用最大条数，仅展示摘要（默认 2） */
+    maxRefs?: number;
+  };
+
+  /** 启动行为 */
+  startup?: {
+    /** 启动时默认进入的模式。'normal' = 普通模式（默认），'companion' = 陪伴模式 */
+    defaultMode: 'normal' | 'companion';
+  };
+
+  bypass?: {
+    /** 普通模式下是否启用上下文编排旁路Agent（默认 true） */
+    orchestratorEnabled: boolean;
+  };
+
+  diagnostics?: {
+    /** 代码修改后是否自动运行类型检查/编译检查。默认 true */
+    enabled: boolean;
+    /** 诊断命令超时时间（毫秒）。默认 15000 */
+    timeout: number;
   };
 }
 

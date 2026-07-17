@@ -1,32 +1,38 @@
 /**
- * 结构化知识库工具 — Agent 使用的 4 个工具
+ * 结构化知识库工具 — 合并为单一 kb_structured 工具，通过 action 参数区分操作。
  *
- * kb_add_structured   — 结构化写入
- * kb_update_structured — 更新条目
- * kb_delete_structured — 删除条目
- * kb_list_structured  — 列出条目
+ *   add    — 结构化写入（1-10 条）
+ *   update — 更新条目
+ *   delete — 删除条目
+ *   list   — 列出条目
  */
 
 import type { Tool } from '../tools/interface.js';
 import type { StructuredStore, EntryCategory } from './structured-store.js';
-
-// ── 守卫 ────────────────────────────────────────────────────────────
 
 function guard(store: StructuredStore, enabled: () => boolean): string | null {
   if (!enabled()) return '知识库未开启。请执行 /kb on。';
   return null;
 }
 
-// ── kb_add_structured ──────────────────────────────────────────────
-
-export function createAddStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
+export function createStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
   return {
-    name: 'kb_add_structured',
+    name: 'kb_structured',
     description:
-      'Add structured knowledge entries (1-10 at a time). Use english_underscore ids, 2-5 tags, content ≤200 chars.',
+      'Manage structured knowledge entries. Supports 4 actions:\n' +
+      '  "add"    — add 1-10 entries at once. Use english_underscore ids, 2-5 tags, content ≤200 chars.\n' +
+      '  "update" — update an entry by id. Only pass the fields you want to change.\n' +
+      '  "delete" — delete an entry by id.\n' +
+      '  "list"   — list all entries, optionally filtered by category.',
     inputSchema: {
       type: 'object',
       properties: {
+        action: {
+          type: 'string',
+          enum: ['add', 'update', 'delete', 'list'],
+          description: '操作类型',
+        },
+        // ── add 参数 ──
         entries: {
           type: 'array',
           items: {
@@ -46,39 +52,41 @@ export function createAddStructuredTool(store: StructuredStore, enabled: () => b
           },
           minItems: 1,
           maxItems: 10,
-          description: '条目数组，1-10 条',
+          description: '条目数组，1-10 条（action=add 时必填）',
         },
+        // ── update / delete 参数 ──
+        id: { type: 'string', description: '条目 ID（action=update/delete 时必填）' },
+        title: { type: 'string', description: '新标题（action=update 时可选）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '新标签（action=update 时可选）' },
+        category: { type: 'string', enum: ['api', 'config', 'guide', 'reference', 'code'], description: '分类（可选）' },
+        content: { type: 'string', description: '新内容（action=update 时可选）' },
+        ctx_before: { type: 'string', description: '前置上下文（action=update 时可选）' },
+        ctx_after: { type: 'string', description: '后续关联（action=update 时可选）' },
+        refs: { type: 'array', items: { type: 'string' }, description: '关联条目（action=update 时可选）' },
+        source: { type: 'string', description: '来源（action=update 时可选）' },
       },
-      required: ['entries'],
+      required: ['action'],
     },
+
     async execute(args: Record<string, unknown>): Promise<string> {
       const blocked = guard(store, enabled);
       if (blocked) return blocked;
 
-      try {
-        const entries = args.entries as Array<Record<string, unknown>> | undefined;
-        if (!entries || !Array.isArray(entries) || entries.length === 0) {
-          return 'Error: entries 数组不能为空，至少提供 1 条。';
-        }
+      const action = args.action as string;
 
-        let added = 0;
-        const ids: string[] = [];
-        for (const e of entries) {
-          store.add({
-            id: e.id as string,
-            title: e.title as string,
-            tags: e.tags as string[],
-            category: e.category as EntryCategory,
-            content: e.content as string,
-            ctx_before: e.ctx_before as string,
-            ctx_after: e.ctx_after as string,
-            refs: e.refs as string[],
-            source: e.source as string,
-          });
-          added++;
-          ids.push(e.id as string);
+      try {
+        switch (action) {
+          case 'add':
+            return handleAdd(store, args);
+          case 'update':
+            return handleUpdate(store, args);
+          case 'delete':
+            return handleDelete(store, args);
+          case 'list':
+            return handleList(store, args);
+          default:
+            return `Unknown action: "${action}". Supported: add, update, delete, list.`;
         }
-        return `已写入 ${added} 条。ID: ${ids.join(', ')}。当前共 ${store.count()} 条。`;
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -86,113 +94,68 @@ export function createAddStructuredTool(store: StructuredStore, enabled: () => b
   };
 }
 
-// ── kb_update_structured ───────────────────────────────────────────
+// ── 各 action 实现 ──────────────────────────────────────────────────────
 
-export function createUpdateStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
-  return {
-    name: 'kb_update_structured',
-    description:
-      'Update a structured entry by id. Only pass the fields you want to change.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '要更新的条目 ID' },
-        title: { type: 'string', description: '新标题（可选）' },
-        tags: { type: 'array', items: { type: 'string' }, description: '新标签（可选）' },
-        category: { type: 'string', enum: ['api', 'config', 'guide', 'reference', 'code'] },
-        content: { type: 'string', description: '新内容（可选）' },
-        ctx_before: { type: 'string', description: '前置上下文（可选）' },
-        ctx_after: { type: 'string', description: '后续关联（可选）' },
-        refs: { type: 'array', items: { type: 'string' }, description: '关联条目（可选）' },
-        source: { type: 'string', description: '来源（可选）' },
-      },
-      required: ['id'],
-    },
-    async execute(args: Record<string, unknown>): Promise<string> {
-      const blocked = guard(store, enabled);
-      if (blocked) return blocked;
+function handleAdd(store: StructuredStore, args: Record<string, unknown>): string {
+  const entries = args.entries as Array<Record<string, unknown>> | undefined;
+  if (!entries || !Array.isArray(entries) || entries.length === 0) {
+    return 'Error: entries 数组不能为空，至少提供 1 条。';
+  }
 
-      try {
-        const id = args.id as string;
-        if (!id) return 'Error: id 是必填项。';
-
-        const existing = store.get(id);
-        if (!existing) return `未找到条目 "${id}"。使用 kb_list_structured 查看可用 ID。`;
-
-        const fields: Record<string, unknown> = {};
-        for (const k of ['title', 'tags', 'category', 'content', 'ctx_before', 'ctx_after', 'refs', 'source']) {
-          if (args[k] !== undefined) fields[k] = args[k];
-        }
-
-        const ok = store.update(id, fields);
-        return ok ? `已更新: ${id}` : `更新失败: ${id}`;
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
+  let added = 0;
+  const ids: string[] = [];
+  for (const e of entries) {
+    store.add({
+      id: e.id as string,
+      title: e.title as string,
+      tags: e.tags as string[],
+      category: e.category as EntryCategory,
+      content: e.content as string,
+      ctx_before: e.ctx_before as string,
+      ctx_after: e.ctx_after as string,
+      refs: e.refs as string[],
+      source: e.source as string,
+    });
+    added++;
+    ids.push(e.id as string);
+  }
+  return `已写入 ${added} 条。ID: ${ids.join(', ')}。当前共 ${store.count()} 条。`;
 }
 
-// ── kb_delete_structured ───────────────────────────────────────────
+function handleUpdate(store: StructuredStore, args: Record<string, unknown>): string {
+  const id = args.id as string;
+  if (!id) return 'Error: id 是必填项（action=update）。';
 
-export function createDeleteStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
-  return {
-    name: 'kb_delete_structured',
-    description: 'Delete a structured entry by id.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '条目 ID' },
-      },
-      required: ['id'],
-    },
-    async execute(args: Record<string, unknown>): Promise<string> {
-      const blocked = guard(store, enabled);
-      if (blocked) return blocked;
+  const existing = store.get(id);
+  if (!existing) return `未找到条目 "${id}"。使用 kb_structured action=list 查看可用 ID。`;
 
-      try {
-        const id = args.id as string;
-        const existing = store.get(id);
-        if (!existing) return `未找到条目 "${id}"。`;
+  const fields: Record<string, unknown> = {};
+  for (const k of ['title', 'tags', 'category', 'content', 'ctx_before', 'ctx_after', 'refs', 'source']) {
+    if (args[k] !== undefined) fields[k] = args[k];
+  }
 
-        store.remove(id);
-        return `已删除: "${existing.title || id}"。当前共 ${store.count()} 条。`;
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
+  const ok = store.update(id, fields);
+  return ok ? `已更新: ${id}` : `更新失败: ${id}`;
 }
 
-// ── kb_list_structured ─────────────────────────────────────────────
+function handleDelete(store: StructuredStore, args: Record<string, unknown>): string {
+  const id = args.id as string;
+  if (!id) return 'Error: id 是必填项（action=delete）。';
 
-export function createListStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
-  return {
-    name: 'kb_list_structured',
-    description: 'List all structured knowledge entries, optionally filtered by category.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', enum: ['api', 'config', 'guide', 'reference', 'code'], description: '按分类筛选（可选）' },
-      },
-      required: [],
-    },
-    async execute(args: Record<string, unknown>): Promise<string> {
-      const blocked = guard(store, enabled);
-      if (blocked) return blocked;
+  const existing = store.get(id);
+  if (!existing) return `未找到条目 "${id}"。`;
 
-      try {
-        const cat = args.category as EntryCategory | undefined;
-        const entries = store.list(cat);
-        if (entries.length === 0) return '知识库为空。使用 kb_add_structured 添加条目。';
-        const lines = entries.map(e => {
-          const tags = e.tags.join(', ');
-          return `- \`${e.id}\` [${e.category}] **${e.title}** — ${e.content.slice(0, 80)}${e.content.length > 80 ? '...' : ''} | tags: ${tags}`;
-        });
-        return `共 ${entries.length} 条：\n${lines.join('\n')}`;
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
+  store.remove(id);
+  return `已删除: "${existing.title || id}"。当前共 ${store.count()} 条。`;
+}
+
+function handleList(store: StructuredStore, args: Record<string, unknown>): string {
+  const cat = args.category as EntryCategory | undefined;
+  const entries = store.list(cat);
+  if (entries.length === 0) return '知识库为空。使用 kb_structured action=add 添加条目。';
+  const lines = entries.map(e => {
+    const tags = e.tags.join(', ');
+    return `- \`${e.id}\` [${e.category}] **${e.title}** — ${e.content.slice(0, 80)}${e.content.length > 80 ? '...' : ''} | tags: ${tags}`;
+  });
+  return `共 ${entries.length} 条：\n${lines.join('\n')}`;
 }

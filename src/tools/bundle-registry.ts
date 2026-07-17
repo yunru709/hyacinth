@@ -46,15 +46,17 @@ const BUILTIN_COMMON: ToolBundle = {
     'disk_usage', 'view_image',
     'process_list', 'process_kill', 'process_output',
     'rollback_status', 'rollback',
-    'complete_flow_step', 'activate_todo', 'add_todo_step',
+    'flow_start', 'flow_add', 'flow_complete',
+    'ask_user',
   ],
 };
 
 const BUILTIN_CODING: ToolBundle = {
   name: 'coding',
-  description: '编程工具包 — 版本控制、依赖分析、代码技能（通用工具已自动包含）',
+  description: '编程工具包 — 版本控制、交叉引用、代码技能（通用工具已自动包含）',
   builtin: true,
-  tools: ['git', 'code-graph', 'multi-edit', 'function-context', 'use_skill'],
+  tools: ['git', 'multi-edit', 'use_skill',
+          'xref_build', 'xref_query', 'xref_graph'],
 };
 
 const BUILTIN_AGENT: ToolBundle = {

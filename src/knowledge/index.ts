@@ -20,4 +20,4 @@ export { createKbAddTool, createKbListTool, createKbDeleteTool, createKbUpdateTo
 
 // 结构化知识库
 export { StructuredStore, type StructuredEntry, type TagMatchResult, type EntryCategory } from './structured-store.js';
-export { createAddStructuredTool, createUpdateStructuredTool, createDeleteStructuredTool, createListStructuredTool } from './structured-tools.js';
+export { createStructuredTool } from './structured-tools.js';

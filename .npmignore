@@ -31,6 +31,13 @@ adapters/
 # Per-user config (auto-generated)
 .agent/
 
+# Build scripts (not needed at runtime)
+scripts/
+
+# IDE / dev config
+.claude/
+.trae/
+
 # OS
 .DS_Store
 Thumbs.db

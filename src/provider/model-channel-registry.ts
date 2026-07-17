@@ -331,6 +331,11 @@ export class ModelChannelRegistry {
     }
   }
 
+  /** 直接设置某个通道的 Provider 实例（绕过自动创建逻辑，用于注入带特定 userId 的 Provider） */
+  setChannelProvider(name: string, provider: Provider): void {
+    this.channelProviders.set(name, provider);
+  }
+
   /**
    * 运行时切换通道模型（仅内存，不持久化到磁盘）。
    * 重启/新建 session 后恢复为 model-channels.json 中的持久化配置。

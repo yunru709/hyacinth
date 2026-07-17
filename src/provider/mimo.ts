@@ -17,13 +17,14 @@ export function createMiMoProvider(config?: {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  maxOutputTokens?: number;
 }): AnthropicProvider {
   const provCfg = getProviderConfigLoader().getProvider('mimo');
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.MIMO_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.xiaomimimo.com/anthropic',
     model: config?.model ?? provCfg?.defaultModel ?? 'mimo-v2.5',
-    maxTokens: provCfg?.maxTokens ?? 8192,
+    maxOutputTokens: config?.maxOutputTokens,
     providerType: 'mimo',
   } satisfies AnthropicProviderOptions);
 }
@@ -33,5 +34,6 @@ export function createMiMoFromConfig(config: ProviderConfig): AnthropicProvider 
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
+    maxOutputTokens: config.maxOutputTokens,
   });
 }

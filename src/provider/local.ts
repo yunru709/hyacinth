@@ -13,6 +13,9 @@ import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.j
 export interface LocalProviderOptions {
   baseUrl?: string;
   model?: string;
+  /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
+  maxOutputTokens?: number;
+  /** @deprecated 使用 maxOutputTokens */
   maxTokens?: number;
   /** 后端类型：ollama | llamacpp。未指定时从 baseUrl 端口自动推断 */
   backend?: 'ollama' | 'llamacpp';
@@ -40,7 +43,7 @@ export class LocalProvider implements Provider {
     const baseUrl = opts.baseUrl ?? process.env.LOCAL_BASE_URL ?? cfg.baseUrl;
     this.client = new OpenAI({ apiKey: 'local', baseURL: baseUrl });
     this.model = opts.model ?? process.env.LOCAL_MODEL ?? cfg.defaultModel;
-    this.maxTokens = opts.maxTokens ?? cfg.maxTokens;
+    this.maxTokens = opts.maxOutputTokens ?? opts.maxTokens ?? cfg.maxOutputTokens ?? cfg.maxTokens ?? 4096;
     // 推断后端类型
     const backend = opts.backend ?? (baseUrl.includes(':11434') ? 'ollama' : 'llamacpp');
     this._providerType = backend === 'ollama' ? 'ollama' as ProviderType : 'llamacpp' as ProviderType;

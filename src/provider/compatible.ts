@@ -10,6 +10,7 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { getProviderConfigLoader } from './config.js';
+import { DEFAULT_USER_ID } from './user-id.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 
 /** OpenAICompatibleProvider 构造选项 */
@@ -26,11 +27,13 @@ export interface OpenAICompatibleOptions {
   model: string;
   /** Provider 类型标识 */
   providerType: ProviderType;
-  /** 最大输出 token */
+  /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
+  maxOutputTokens?: number;
+  /** @deprecated 使用 maxOutputTokens */
   maxTokens?: number;
   /** 额外的 HTTP 头（如 OpenRouter 要求的 HTTP-Referer / X-Title） */
   headers?: Record<string, string>;
-  /** DeepSeek 缓存隔离 ID，区分不同产品的缓存池。默认 "deepthink"。 */
+  /** DeepSeek 缓存隔离 ID，区分不同产品的缓存池。默认 "hyacinth"。 */
   userId?: string;
 }
 
@@ -55,7 +58,7 @@ export class OpenAICompatibleProvider implements Provider {
   private maxTokens: number;
   private providerType: ProviderType;
   private thinkingEnabled = false;
-  private reasoningEffort: DeepSeekReasoningEffort = 'high';
+  private reasoningEffort: DeepSeekReasoningEffort;
   private userId: string;
 
   constructor(opts: OpenAICompatibleOptions) {
@@ -76,13 +79,14 @@ export class OpenAICompatibleProvider implements Provider {
       ...(opts.headers ? { defaultHeaders: opts.headers } : {}),
     });
     this.model = opts.model;
-    const provConfig = getProviderConfigLoader().getProvider(opts.providerType);
-    this.maxTokens = opts.maxTokens
-      ?? getModelInfo(opts.providerType, opts.model)?.maxTokens
-      ?? provConfig?.maxTokens
-      ?? 16384;
+    const modelInfo = getModelInfo(opts.providerType, opts.model);
+    this.maxTokens = opts.maxOutputTokens                  // ① 临时覆盖
+      ?? opts.maxTokens                                    // 向后兼容
+      ?? modelInfo?.maxOutputTokens                        // ② 本机模型目录
+      ?? 8192;                                              // ③ 兜底
+    this.reasoningEffort = modelInfo?.reasoningEffort ?? 'high';
     this.providerType = opts.providerType;
-    this.userId = opts.userId ?? 'deepthink';
+    this.userId = opts.userId ?? DEFAULT_USER_ID;
   }
 
   getProviderType(): ProviderType {
@@ -114,6 +118,10 @@ export class OpenAICompatibleProvider implements Provider {
     if (effort) this.reasoningEffort = effort;
   }
 
+  setUserId(userId: string): void {
+    this.userId = userId;
+  }
+
   async *createStream(
     messages: Message[],
     tools?: ToolDefinition[],
@@ -126,17 +134,17 @@ export class OpenAICompatibleProvider implements Provider {
       stream: true,
       stream_options: { include_usage: true },
     };
-    // DeepSeek 缓存隔离：同一 key 下不同 user_id 各自维护缓存池
+    // DeepSeek: user_id 放顶层 body 做缓存隔离
     (params as unknown as Record<string, unknown>).user_id = this.userId;
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
     }
 
-    // 始终发送 thinking 参数：DeepSeek V4 默认 thinking=enabled，不发送会被当作 enabled
-    (params as unknown as Record<string, unknown>).thinking = this.thinkingEnabled
-      ? { type: 'enabled' }
-      : { type: 'disabled' };
+    // DeepSeek thinking：默认 enabled，必须显式发送 disabled 才能关闭
+    (params as any).extra_body = {
+      thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
+    };
     if (this.thinkingEnabled) {
       (params as unknown as Record<string, unknown>).reasoning_effort = this.reasoningEffort;
     }
@@ -335,7 +343,7 @@ export class OpenAICompatibleProvider implements Provider {
 // ===== 工厂函数 =====
 
 /** Groq — 高速推理 */
-export function createGroqProvider(config?: { apiKey?: string; model?: string }) {
+export function createGroqProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
   const provCfg = getProviderConfigLoader().getProvider('groq');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -343,11 +351,12 @@ export function createGroqProvider(config?: { apiKey?: string; model?: string })
     baseUrl: provCfg?.baseUrl ?? 'https://api.groq.com/openai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'groq',
+    userId: config?.userId,
   });
 }
 
 /** xAI / Grok */
-export function createXAIProvider(config?: { apiKey?: string; model?: string }) {
+export function createXAIProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
   const provCfg = getProviderConfigLoader().getProvider('xai');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -355,11 +364,12 @@ export function createXAIProvider(config?: { apiKey?: string; model?: string }) 
     baseUrl: provCfg?.baseUrl ?? 'https://api.x.ai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'xai',
+    userId: config?.userId,
   });
 }
 
 /** Mistral AI */
-export function createMistralProvider(config?: { apiKey?: string; model?: string }) {
+export function createMistralProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
   const provCfg = getProviderConfigLoader().getProvider('mistral');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -367,11 +377,12 @@ export function createMistralProvider(config?: { apiKey?: string; model?: string
     baseUrl: provCfg?.baseUrl ?? 'https://api.mistral.ai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'mistral',
+    userId: config?.userId,
   });
 }
 
 /** OpenRouter — 聚合网关（200+ 模型） */
-export function createOpenRouterProvider(config?: { apiKey?: string; model?: string }) {
+export function createOpenRouterProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
   const provCfg = getProviderConfigLoader().getProvider('openrouter');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -379,6 +390,7 @@ export function createOpenRouterProvider(config?: { apiKey?: string; model?: str
     baseUrl: provCfg?.baseUrl ?? 'https://openrouter.ai/api/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'openrouter',
+    userId: config?.userId,
     headers: {
       'HTTP-Referer': process.env.OPENROUTER_REFERER ?? 'http://localhost:3000',
       'X-Title': process.env.OPENROUTER_TITLE ?? 'Agent',
@@ -387,7 +399,7 @@ export function createOpenRouterProvider(config?: { apiKey?: string; model?: str
 }
 
 /** Moonshot / Kimi */
-export function createMoonshotProvider(config?: { apiKey?: string; model?: string }) {
+export function createMoonshotProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
   const provCfg = getProviderConfigLoader().getProvider('moonshot');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,

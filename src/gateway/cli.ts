@@ -121,7 +121,7 @@ function createCliHandler(): OutputHandler {
     onFlush() {
       process.stdout.write('\n');
     },
-    onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always'> {
+    onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always' | 'aor'> {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
       return new Promise((resolve) => {
@@ -129,13 +129,15 @@ function createCliHandler(): OutputHandler {
           .map(([k, v]) => `${k}=${String(v).substring(0, 60)}`)
           .join(', ');
         process.stdout.write(
-          chalk.yellow(`\n[Permission] ${toolName}(${inputStr}) - [Y]es/[A]lways/[N]o? `),
+          chalk.yellow(`\n[Permission] ${toolName}(${inputStr}) - [Y]es/[O] AOR/[A]lways/[N]o? `),
         );
         rl.question('', (answer: string) => {
           rl.close();
           const lower = answer.toLowerCase();
           if (lower === 'y' || lower === 'yes') resolve('yes');
+          else if (lower === 'o' || lower === 'aor') resolve('aor');
           else if (lower === 'a' || lower === 'always') resolve('always');
+          else if (lower === 'n' || lower === 'no') resolve('no');
           else resolve('no');
         });
       });
@@ -153,7 +155,7 @@ export async function runCli(): Promise<void> {
   const program = new Command();
 
   program
-    .name('deepthink')
+    .name('hyacinth')
     .description('AI Agent with context management')
     .version((() => { try { return JSON.parse(fsSync.readFileSync(path.resolve(path.dirname(process.argv[1]), '..', 'package.json'), 'utf-8')).version; } catch { return '0.0.0'; } })())
     .option('-i, --interactive', '交互模式')
@@ -241,7 +243,7 @@ export async function runCli(): Promise<void> {
     .command('serve')
     .description('启动 HTTP API 服务器 (Start HTTP API server)')
     .option('-p, --port <port>', 'API 服务器端口', '3000')
-    .option('--api-key <key>', 'API 认证密钥（或设置 DEEPTHINK_API_KEY 环境变量）')
+    .option('--api-key <key>', 'API 认证密钥（或设置 HYACINTH_API_KEY 环境变量）')
     .option('--cors-origin <origin>', 'CORS 允许的域名（默认 *）')
     .option('--provider <type>', 'Provider 类型')
     .option('--model <name>', '模型名称')
@@ -486,7 +488,7 @@ export async function runCli(): Promise<void> {
           logger.info('Model details', {
             name: current.name,
             contextWindow: current.contextWindow,
-            maxTokens: current.maxTokens,
+            maxOutputTokens: current.maxOutputTokens,
             reasoning: current.reasoning ?? false,
           });
         }
@@ -619,8 +621,8 @@ export async function runCli(): Promise<void> {
 
   program
     .command('update')
-    .description('Update deepthink from GitHub releases or local source')
-    .option('--repo <owner/name>', 'GitHub repo, e.g. yunru709/deepthink')
+    .description('Update hyacinth from GitHub releases or local source')
+    .option('--repo <owner/name>', 'GitHub repo, e.g. user/hyacinth-ai')
     .option('--source <path>', 'Local source path (for dev builds)')
     .action(async (options: { repo?: string; source?: string }) => {
       const { execSync } = await import('node:child_process');
@@ -649,7 +651,7 @@ export async function runCli(): Promise<void> {
         }
         process.stderr.write('\n');
 
-        const tmpDir = p.join(os.tmpdir(), `deepthink-update-${Date.now()}`);
+        const tmpDir = p.join(os.tmpdir(), `hyacinth-update-${Date.now()}`);
         await downloadWithProgress(downloadUrl, tmpDir, p => {
           const bar = '█'.repeat(Math.floor(p.percent / 5)) + '░'.repeat(20 - Math.floor(p.percent / 5));
           process.stderr.write(`\r[update] 下载: ${bar} ${p.percent}% (${(p.downloaded / 1024 / 1024).toFixed(1)}MB / ${(p.total / 1024 / 1024).toFixed(1)}MB)`);
@@ -679,17 +681,17 @@ export async function runCli(): Promise<void> {
 
       } else {
         process.stderr.write('请先配置更新源:\n');
-        process.stderr.write('  deepthink update --repo <owner/name>  (远程)\n');
-        process.stderr.write('  deepthink update --source <path>       (本地)\n');
+        process.stderr.write('  hyacinth update --repo <owner/name>  (远程)\n');
+        process.stderr.write('  hyacinth update --source <path>       (本地)\n');
         process.exit(1);
       }
     });
 
   // 守护进程（默认启用）：Agent 退出(code 42)时自动重新拉起
-  // 子进程通过 DEEPTHINK_GUARDIAN_CHILD 环境变量避免递归
+  // 子进程通过 HYACINTH_GUARDIAN_CHILD 环境变量避免递归
   const noGuardian = process.argv.includes('--no-guardian');
   process.argv = process.argv.filter(a => a !== '--no-guardian');
-  if (!noGuardian && !process.env.DEEPTHINK_GUARDIAN_CHILD) {
+  if (!noGuardian && !process.env.HYACINTH_GUARDIAN_CHILD) {
     const { runGuardian } = await import('./guardian.js');
     runGuardian(process.argv.slice(2));
     return;
@@ -719,21 +721,28 @@ async function executeAction(
 
   // 指定 session 恢复（/session <id>/load 写入）
   const resumeFile = path.join(os.homedir(), '.agent', '.resume-session');
-  const resumeSessionId = fsSync.existsSync(resumeFile)
+  let resumeSessionId: string | undefined = fsSync.existsSync(resumeFile)
     ? (() => { const id = fsSync.readFileSync(resumeFile, 'utf-8').trim(); fsSync.unlinkSync(resumeFile); return id; })()
     : undefined;
 
+  // 重启恢复：检查 .restart-session（/restart 写入）
+  const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
+  let restartSessionId: string | undefined;
+  let restartContinue = false;
+  if (fsSync.existsSync(restartFile)) {
+    const content = fsSync.readFileSync(restartFile, 'utf-8').trim();
+    fsSync.unlinkSync(restartFile);
+    restartContinue = true;
+    if (content && content !== 'true') {
+      restartSessionId = content;  // /restart 写入的 session ID
+    }
+  }
+
   const shouldContinue = forceNewSession
     ? false
-    : options.continue as boolean | undefined
-      || (() => {
-        const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
-        if (fsSync.existsSync(restartFile)) {
-          fsSync.unlinkSync(restartFile);
-          return true;
-        }
-        return false;
-      })();
+    : options.continue as boolean | undefined || restartContinue;
+  // 重启恢复的 session ID 仅在 resumeSessionId 为空时使用（低于 /session load 和 CLI --session）
+  if (!resumeSessionId) resumeSessionId = restartSessionId;
   const sessionId = options.session as string | undefined || resumeSessionId;
   const interactive = options.interactive as boolean | undefined;
   let useTui = options.tui as boolean | undefined;
@@ -1124,4 +1133,5 @@ async function runInteractive(loop: AgentLoop): Promise<void> {
     });
   });
 }
+
 

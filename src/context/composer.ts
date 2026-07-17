@@ -65,6 +65,8 @@ export interface LayeredComposeOptions {
   gitManager?: GitManager;
   /** 当前模式 profile — 控制 section 过滤、persona 来源、memory 来源 */
   profile?: ContextProfile;
+  /** 旁路Agent 注入列表 */
+  bypassInjections?: import('../bypass/types.js').Injection[];
 }
 
 export type ZoneBreakdown = Record<string, number> & { total: number };
@@ -165,6 +167,7 @@ export class LayeredContextComposer implements ContextComposer {
       activeConditions: this.activeConditions,
       profile: options.profile ?? NORMAL_PROFILE,
       router: getActiveRouter(),
+      bypassInjections: options.bypassInjections,
     };
   }
 
@@ -282,18 +285,10 @@ export class LayeredContextComposer implements ContextComposer {
       if (sec.source === 'runtime:history' && options.history && options.history.length > 0) {
         flushSystemParts();
         flushTextParts();
-        const boundaryBefore = this.activeConditions.has('precise_mode')
-          ? '── 以下为检索有关信息 ──'
-          : '── 以下为此前对话 ──';
-        const boundaryAfter = this.activeConditions.has('precise_mode')
-          ? '── 以上为检索有关信息 ──'
-          : '── 以上为此前对话 ──';
-        messages.push({ role: zoneRole, content: { type: 'text', text: boundaryBefore } });
         for (const msg of options.history) {
           if (shouldSkipHistoryMessage(msg)) continue;
           messages.push(msg);
         }
-        messages.push({ role: zoneRole, content: { type: 'text', text: boundaryAfter } });
         continue;
       }
 
@@ -301,7 +296,9 @@ export class LayeredContextComposer implements ContextComposer {
       if (!content) continue;
 
       // Router 可按"本轮该 section 的实际来源"覆写 role（如陪伴模式世界旁白 → assistant 内心独白）
-      const roleOverride = ctx.router.roleForSection?.(sec.name);
+      // 旁路Agent 注入也可指定 role
+      const bypassRole = ctx.bypassInjections?.find(ij => ij.section === sec.name)?.role;
+      const roleOverride = bypassRole ?? ctx.router.roleForSection?.(sec.name);
       const sectionRole = (roleOverride ?? sec.role ?? zoneRole) as 'system' | 'user' | 'assistant';
       const zr: string = zoneRole; // widen to avoid TS narrowing
 

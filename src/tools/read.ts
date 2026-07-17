@@ -1,6 +1,7 @@
 import { createReadStream, promises as fs, type Stats } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Tool } from './interface.js';
+import { recordFileRead } from './file-tracker.js';
 
 /** 图片处理器 — 将 read 工具输出的图片注入到 ImageStore */
 export interface ImageHandler {
@@ -264,6 +265,9 @@ export class ReadTool implements Tool {
       throw new Error(`File not found: ${filePath}`);
     }
     if (!stat.isFile()) throw new Error(`Path is not a file: ${filePath}`);
+
+    // 记录文件已被读取（支撑 write/edit 的 read-before-write 门控）
+    recordFileRead(filePath);
 
     // sniff 512 bytes for type detection
     try {

@@ -4,4 +4,4 @@
 
 **Current step**: {{description}}
 
-Execute this step now. Focus only on this one task — do not work on other steps. When done, call `complete_flow_step` to advance.
+Execute this step now. If this step requires multiple independent actions (e.g., reading several files, searching for different patterns), call all those tools in one round — don't sequence them. When done, call `flow_complete` to advance to the next step.

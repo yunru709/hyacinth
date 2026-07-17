@@ -19,7 +19,9 @@ export interface AnthropicProviderOptions {
   baseUrl?: string;
   /** 模型名称，默认 claude-sonnet-4-20250514 */
   model?: string;
-  /** 最大输出 token 数，默认 16384 */
+  /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
+  maxOutputTokens?: number;
+  /** @deprecated 使用 maxOutputTokens */
   maxTokens?: number;
   /** 是否启用 extended thinking，默认 false */
   thinkingEnabled?: boolean;
@@ -64,7 +66,10 @@ export class AnthropicProvider implements Provider {
     });
 
     this.model = opts.model ?? 'claude-sonnet-4-20250514';
-    this.maxTokens = opts.maxTokens ?? getModelInfo('anthropic', this.model)?.maxTokens ?? 16384;
+    this.maxTokens = opts.maxOutputTokens                         // ① 临时覆盖
+      ?? opts.maxTokens                                           // 向后兼容
+      ?? getModelInfo('anthropic', this.model)?.maxOutputTokens   // ② 本机模型目录
+      ?? 8192;                                                     // ③ 兜底
     this.thinkingEnabled = opts.thinkingEnabled ?? false;
     this.thinkingBudget = opts.thinkingBudget ?? 10000;
   }

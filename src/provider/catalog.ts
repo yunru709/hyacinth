@@ -23,12 +23,16 @@ export interface ModelInfo {
   id: string;
   name: string;
   provider: ProviderType;
+  /** 最大输入上下文窗口（token 数） */
   contextWindow: number;
-  maxTokens: number;
+  /** 单次请求最大输出 token 数 */
+  maxOutputTokens: number;
   capabilities: ModelCapabilities;
   cost?: ModelCost;
   status: 'available' | 'preview' | 'deprecated' | 'disabled';
   replacedBy?: string;
+  /** 推理/思考强度（仅支持 reasoning 的模型有效） */
+  reasoningEffort?: 'high' | 'max';
 }
 
 function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
@@ -37,7 +41,8 @@ function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
     name: entry.name,
     provider: entry.provider as ProviderType,
     contextWindow: entry.contextWindow,
-    maxTokens: entry.maxTokens,
+    maxOutputTokens: entry.maxOutputTokens,
+    reasoningEffort: entry.reasoningEffort,
     capabilities: {
       streaming: entry.capabilities.streaming,
       toolCalling: entry.capabilities.toolCalling,

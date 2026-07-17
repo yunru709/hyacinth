@@ -13,7 +13,8 @@ export interface ModelMeta {
   id: string;
   name: string;
   contextWindow: number;
-  maxTokens: number;
+  /** 单次请求最大输出 token 数 */
+  maxOutputTokens: number;
   reasoning?: boolean;
 }
 
@@ -30,7 +31,7 @@ function buildProviderModels(): Record<string, ModelMeta[]> {
       id: e.id,
       name: e.name,
       contextWindow: e.contextWindow,
-      maxTokens: e.maxTokens,
+      maxOutputTokens: e.maxOutputTokens,
       reasoning: e.reasoning,
     });
   }
@@ -92,9 +93,9 @@ export function getModelMaxTokens(provider: string, model?: string): number {
 
   if (model) {
     const found = entries.find((m) => m.id === model);
-    if (found) return found.maxTokens;
+    if (found) return found.maxOutputTokens;
   }
 
   const firstNonDefault = entries.find((m) => m.id !== '__default__');
-  return firstNonDefault?.maxTokens ?? entries[0]?.maxTokens ?? 8192;
+  return firstNonDefault?.maxOutputTokens ?? entries[0]?.maxOutputTokens ?? 8192;
 }

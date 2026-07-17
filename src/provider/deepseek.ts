@@ -18,14 +18,19 @@ export function createDeepSeekProvider(config?: {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  maxOutputTokens?: number;
+  /** DeepSeek KVCache 隔离 ID。不同角色应使用不同的 userId。 */
+  userId?: string;
 }): OpenAICompatibleProvider {
   const provCfg = getProviderConfigLoader().getProvider('deepseek');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'DEEPSEEK_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.deepseek.com/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    model: (config?.model && config.model.trim()) ? config.model : (provCfg?.defaultModel ?? 'unknown'),
     providerType: 'deepseek',
+    maxOutputTokens: config?.maxOutputTokens,
+    userId: config?.userId,
   });
 }
 
@@ -35,5 +40,7 @@ export function createDeepSeekFromConfig(config: ProviderConfig): OpenAICompatib
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
+    maxOutputTokens: config.maxOutputTokens,
+    userId: config.userId,
   });
 }

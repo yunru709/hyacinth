@@ -19,7 +19,6 @@ const TOOL_DISPLAY: Record<string, ToolSpec> = {
   bash:             { emoji: '\u{1F6E0}\uFE0F', label: 'Bash',      detailKeys: ['command'] },
   glob:             { emoji: '\u{1F50D}', label: 'Glob',             detailKeys: ['pattern'] },
   grep:             { emoji: '\u{1F50E}', label: 'Grep',             detailKeys: ['pattern'] },
-  function_context: { emoji: '\u{1F9E9}', label: 'Func Context',     detailKeys: ['symbol', 'path'] },
   git:              { emoji: '\u{1F418}', label: 'Git',              detailKeys: ['action'] },
 
   web_search:       { emoji: '\u{1F310}', label: 'Web Search',       detailKeys: ['query'] },

@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { GlobTool } from './glob.js';
+import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { runDiagnostics } from './diagnostics.js';
 
 export class MultiEditTool implements Tool {
   readonly name = 'multi_edit';
@@ -77,6 +79,18 @@ export class MultiEditTool implements Tool {
         continue;
       }
 
+      // ── Read-before-write 门控 ──
+      const lastRead = getLastReadTime(filePath);
+      if (lastRead === null) {
+        return `Error: You must read "${filePath}" before editing it. Use the read tool first.`;
+      }
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.mtimeMs > lastRead) {
+          return `Error: "${filePath}" has been modified on disk since it was last read. Please re-read it first.`;
+        }
+      } catch {}
+
       const matchCount = this.countOccurrences(content, oldString);
 
       if (matchCount === 0) continue;
@@ -121,6 +135,7 @@ export class MultiEditTool implements Tool {
       }
 
       await fs.writeFile(plan.path, content, 'utf-8');
+      recordFileWrite(plan.path);
       totalReplacements += plan.matchCount;
     }
 
@@ -129,6 +144,12 @@ export class MultiEditTool implements Tool {
       const basename = plan.path.replace(/\\/g, '/').split('/').pop() || plan.path;
       result += `${basename}: ${plan.matchCount} replacement${plan.matchCount > 1 ? 's' : ''}\n`;
     }
+
+    // ── 自动诊断：修改后运行类型检查/编译检查 ──
+    try {
+      const diag = await runDiagnostics(process.cwd(), 15000);
+      if (diag) result += '\n\n' + diag;
+    } catch { /* 诊断失败不影响工具返回值 */ }
 
     return result;
   }

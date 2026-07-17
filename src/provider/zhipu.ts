@@ -15,6 +15,8 @@ export function createZhipuProvider(config?: {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  maxOutputTokens?: number;
+  userId?: string;
 }): OpenAICompatibleProvider {
   const provCfg = getProviderConfigLoader().getProvider('zhipu');
   return new OpenAICompatibleProvider({
@@ -23,7 +25,8 @@ export function createZhipuProvider(config?: {
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4',
     model: config?.model ?? provCfg?.defaultModel ?? 'glm-4.6v',
     providerType: 'zhipu',
-    maxTokens: provCfg?.maxTokens ?? 4096,
+    maxOutputTokens: config?.maxOutputTokens,
+    userId: config?.userId,
   });
 }
 
@@ -32,5 +35,7 @@ export function createZhipuFromConfig(config: ProviderConfig): OpenAICompatibleP
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
+    maxOutputTokens: config.maxOutputTokens,
+    userId: config.userId,
   });
 }

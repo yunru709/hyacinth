@@ -1,6 +1,6 @@
 # WebUI 渠道层架构设计
 
-> 从 Channel 抽象层出发，设计 DeepThink 的 Web 前端。
+> 从 Channel 抽象层出发，设计 Hyacinth 的 Web 前端。
 > WebUI 不是独立的应用——它只是框架的又一个 **Channel**，与 TUI、HTTP Webhook、飞书平级。
 
 ---

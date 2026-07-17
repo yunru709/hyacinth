@@ -36,7 +36,7 @@ export class GeminiProvider implements Provider {
 
     this.client = new GoogleGenAI({ apiKey });
     this.model = opts.model ?? 'gemini-2.5-flash';
-    this.maxOutputTokens = getModelInfo('gemini', this.model)?.maxTokens ?? 8192;
+    this.maxOutputTokens = getModelInfo('gemini', this.model)?.maxOutputTokens ?? 8192;
   }
 
   getProviderType(): ProviderType {

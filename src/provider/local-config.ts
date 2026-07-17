@@ -8,7 +8,10 @@ export interface LocalProviderConfig {
   baseUrl: string;
   port: number;
   defaultModel: string;
-  maxTokens: number;
+  /** 单次请求最大输出 token 数（从 config 读取，未配置时用默认值 4096）。兼容旧键名 maxTokens。 */
+  maxOutputTokens: number;
+  /** @deprecated 使用 maxOutputTokens */
+  maxTokens?: number;
   /** 后端类型：ollama | llamacpp。未配置时自动检测 */
   backend?: LocalBackend;
 }
@@ -17,7 +20,7 @@ const DEFAULT_CONFIG: LocalProviderConfig = {
   baseUrl: 'http://127.0.0.1:11434/v1',
   port: 11434,
   defaultModel: 'llama3.2',
-  maxTokens: 4096,
+  maxOutputTokens: 4096,
 };
 
 // ── 自动检测 ────────────────────────────────────────────────────────
@@ -161,10 +164,12 @@ function readFromConfigCenter(): LocalProviderConfig | null {
         _configCenter.get<string>('provider.local.model') ||
         _configCenter.get<string>('local.defaultModel') ||
         DEFAULT_CONFIG.defaultModel,
-      maxTokens:
-        (_configCenter.get<number>('provider.local.maxTokens')) ??
-        (_configCenter.get<number>('local.maxTokens')) ??
-        DEFAULT_CONFIG.maxTokens,
+      maxOutputTokens:
+        (_configCenter.get<number>('provider.local.maxOutputTokens')) ??
+        (_configCenter.get<number>('provider.local.maxTokens')) ??  // 向后兼容旧键名
+        (_configCenter.get<number>('local.maxOutputTokens')) ??
+        (_configCenter.get<number>('local.maxTokens')) ??  // 向后兼容旧键名
+        DEFAULT_CONFIG.maxOutputTokens,
       backend: (_configCenter.get<string>('local.backend') as LocalBackend | undefined),
     };
   } catch {

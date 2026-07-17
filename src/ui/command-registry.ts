@@ -301,6 +301,18 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
         ],
       },
       {
+        name: 'thinking',
+        description: '推理强度（临时覆盖，重启恢复默认）',
+        icon: '\u{1F9E0}',
+        category: 'model',
+        children: [
+          { name: 'on', description: '开启（模型默认强度）', icon: '✅', category: 'model', executeLocal: true },
+          { name: 'off', description: '关闭', icon: '❌', category: 'model', executeLocal: true },
+          { name: 'high', description: 'high — 深度思考', icon: '🔵', category: 'model', executeLocal: true },
+          { name: 'max', description: 'max — 最强推理', icon: '🔴', category: 'model', executeLocal: true },
+        ],
+      },
+      {
         name: 'local',
         description: '管理本地模型...',
         icon: '\u{1F4BB}',
@@ -321,8 +333,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
         icon: '\u2699',
         category: 'model',
         children: [
-          { name: 'thinking', description: '切换深度思考模式', icon: '\u{1F9E0}', category: 'model', args: '<on|off>', executeLocal: true },
-          { name: 'thinking-effort', description: '设置思考深度 (1-100)', icon: '\u{1F9E0}', category: 'model', args: '<1-100>', executeLocal: true },
           { name: 'show-thinking', description: '是否显示内部思考过程', icon: '\u{1F9E0}', category: 'model', executeLocal: true },
           { name: 'context', description: '调整上下文窗口', icon: '\u229E', category: 'model', args: '<tokens>', executeLocal: true },
           { name: 'source', description: '设置角色模型来源', icon: '\u25A3', category: 'model', args: '<role> <main|local>', executeLocal: true },
@@ -521,6 +531,34 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
+    name: 'orchestrator on',
+    description: '开启上下文编排旁路Agent（意图识别+记忆维护）',
+    icon: '🧠',
+    category: 'mode',
+    executeLocal: true,
+  },
+  {
+    name: 'orchestrator off',
+    description: '关闭上下文编排旁路Agent',
+    icon: '🧠',
+    category: 'mode',
+    executeLocal: true,
+  },
+  {
+    name: 'default-mode companion',
+    description: '设置启动时默认进入陪伴模式（持久化到配置，下次启动生效）',
+    icon: '💫',
+    category: 'mode',
+    executeLocal: true,
+  },
+  {
+    name: 'default-mode normal',
+    description: '设置启动时默认进入普通模式（持久化到配置，下次启动生效）',
+    icon: '💻',
+    category: 'mode',
+    executeLocal: true,
+  },
+  {
     name: 'channel',
     description: '模型通道管理（多通道模型路由）',
     icon: '🔀',
@@ -614,6 +652,29 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
         return [];
       }
     },
+  },
+  {
+    name: 'clawbot',
+    description: '微信 ClawBot 渠道管理（扫码登录/状态）',
+    icon: '💬',
+    category: 'tools',
+    executeLocal: true,
+    children: [
+      {
+        name: 'login',
+        description: '扫码授权登录微信 ClawBot',
+        icon: '🔐',
+        category: 'tools',
+        executeLocal: true,
+      },
+      {
+        name: 'status',
+        description: '查看 ClawBot 连接状态',
+        icon: 'ℹ️',
+        category: 'tools',
+        executeLocal: true,
+      },
+    ],
   },
 ];
 

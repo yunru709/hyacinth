@@ -3,6 +3,9 @@ import path from 'node:path';
 import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
+import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { runDiagnostics } from './diagnostics.js';
+import { autoReferenceCheck } from './symbol-references.js';
 
 /**
  * WriteTool — 创建或覆盖文件
@@ -48,12 +51,33 @@ export class WriteTool implements Tool {
     const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
 
+    // ── Read-before-write 门控 ──
+    let fileExists = false;
+    try { await fs.access(filePath); fileExists = true; } catch {}
+    if (fileExists) {
+      const lastRead = getLastReadTime(filePath);
+      if (lastRead === null) {
+        return 'Error: You must read the file before writing to it. Use the read tool first.';
+      }
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.mtimeMs > lastRead) {
+          return 'Error: File has been modified on disk since it was last read. Please re-read it first.';
+        }
+      } catch {}
+    }
+
     // 读旧内容（如果文件存在）
     let oldContent = '';
-    try { oldContent = await fs.readFile(filePath, 'utf-8'); } catch {}
+    if (fileExists) {
+      try { oldContent = await fs.readFile(filePath, 'utf-8'); } catch {}
+    }
 
     // 写入文件
     await fs.writeFile(filePath, content, 'utf-8');
+
+    // 记录写入（写入后自动更新 readTime = writeTime）
+    recordFileWrite(filePath);
 
     // 计算 diff
     try { pushDiff(filePath, computeDiff(oldContent, content, filePath)); } catch {}
@@ -73,6 +97,20 @@ export class WriteTool implements Tool {
       result += `\n... (${lines.length - 5} more lines)`;
     }
     result += `\n--- End preview ---`;
+
+    // ── 自动诊断：修改后运行类型检查/编译检查 ──
+    try {
+      const diag = await runDiagnostics(process.cwd(), 15000);
+      if (diag) result += '\n\n' + diag;
+    } catch { /* 诊断失败不影响工具返回值 */ }
+
+    // ── 自动引用搜索：覆盖已有文件时搜索变更符号的引用 ──
+    if (oldContent) {
+      try {
+        const ref = autoReferenceCheck(filePath, oldContent, oldContent, content);
+        if (ref.text) result += '\n\n' + ref.text;
+      } catch { /* 引用搜索失败不影响工具返回值 */ }
+    }
 
     return result;
   }

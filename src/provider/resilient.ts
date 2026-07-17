@@ -126,6 +126,10 @@ export class ResilientProvider implements Provider {
     this.inner.setThinking?.(enabled, effort);
   }
 
+  setUserId(userId: string): void {
+    this.inner.setUserId?.(userId);
+  }
+
   getCircuitState(): CircuitState {
     return this.cbState;
   }

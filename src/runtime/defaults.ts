@@ -1,6 +1,7 @@
 import type { FullConfig } from './config-schema.js';
 import { getLocalProviderConfigLoader } from '../provider/local-config.js';
 import { DEFAULT_PROVIDERS, getProviderConfigLoader } from '../provider/config.js';
+import { DEFAULT_USER_ID } from '../provider/user-id.js';
 
 function providerDefault(providerId: string): string {
   try {
@@ -18,7 +19,7 @@ export function getDefaultConfig(): FullConfig {
       active: 'anthropic',
       routeMode: 'auto',
       enableThinking: false,
-      userId: 'deepthink',
+      userId: DEFAULT_USER_ID,
       anthropic: { model: providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
       deepseek: { model: providerDefault('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },
@@ -26,7 +27,7 @@ export function getDefaultConfig(): FullConfig {
       local: {
         model: localCfg.defaultModel,
         baseUrl: localCfg.baseUrl,
-        maxTokens: localCfg.maxTokens,
+        maxOutputTokens: localCfg.maxOutputTokens,
         healthCheck: {
           restartDelayMs: 3000,
           intervalMs: 5000,
@@ -51,7 +52,7 @@ export function getDefaultConfig(): FullConfig {
       compressThreshold: 0.75,
       emergencyThreshold: 0.92,
       compressDepth: 0.5,
-      compressionStrategy: 'C' as const,
+
     },
     schedule: {
       heartbeatMs: 5000,
@@ -128,6 +129,19 @@ export function getDefaultConfig(): FullConfig {
     kb: {
       enabled: false,
       zone4: false,
+      maxTotal: 5,
+      maxMain: 3,
+      maxRefs: 2,
+    },
+    startup: {
+      defaultMode: 'normal',
+    },
+    bypass: {
+      orchestratorEnabled: true,
+    },
+    diagnostics: {
+      enabled: true,
+      timeout: 15000,
     },
   };
 }

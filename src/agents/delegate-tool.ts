@@ -17,8 +17,10 @@ import { SummaryStore } from '../memory/summary.js';
 import { LLMOrchestrator } from '../orchestrator/planner.js';
 import { PlanStore } from '../orchestrator/plan-store.js';
 import { ModelRouter } from '../provider/model-router.js';
+import type { Provider } from '../provider/interface.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { DependencyAnalyzer } from '../dependency/analyzer.js';
+import { subAgentUserId } from '../provider/user-id.js';
 
 /** 子 Agent 进度事件 */
 export interface ProgressEvent {
@@ -38,6 +40,8 @@ export interface SubAgentContext {
   onProgress?: (event: ProgressEvent) => void;
   /** 文件访问沙箱根目录（设置后子 Agent 的 read/write/edit/grep/glob 被限制在此目录下，bash 被禁用） */
   sandboxRoot?: string;
+  /** 创建带独立 userId 的 Provider（子Agent 之间 + 与主Agent 的 KVCache 隔离） */
+  createSubProvider(userId: string): Provider;
 }
 
 // ── 运行中子 Agent Loop 管理器（模块级，避免循环依赖） ──────────
@@ -172,8 +176,8 @@ export async function createSubAgentLoop(
   // 5. 创建 ToolExecutor
   const toolExecutor = new ToolExecutor(filteredRegistry);
 
-  // 6. 获取子 Agent 的 Provider（通过 ModelRouter，可配置独立通道）
-  const subProvider = parentContext.modelRouter.getProvider('sub-agent');
+  // 6. 创建子 Agent 的独立 Provider（唯一 userId，与主Agent 和其他子Agent 缓存隔离）
+  const subProvider = parentContext.createSubProvider(subAgentUserId(agentDef.name, instanceId));
 
   // 7. 创建 Compressor（复用主 Agent 的 ModelRouter 做压缩路由）
   const tokenCounter = new TokenCounter();
