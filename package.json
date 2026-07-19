@@ -39,13 +39,11 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^5.6.2",
     "chokidar": "^5.0.0",
-    "chrome-devtools-mcp": "^1.2.0",
     "commander": "^14.0.3",
     "diff": "^9.0.0",
     "fastify": "^5.8.5",
     "js-tiktoken": "^1.0.21",
     "mammoth": "^1.12.0",
-    "mcp-chrome-bridge": "^1.0.31",
     "openai": "^6.39.0",
     "picocolors": "^1.1.1",
     "sharp": "^0.35.0",
@@ -53,7 +51,9 @@
     "xlsx": "^0.18.5"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.10.0",
+    "chrome-devtools-mcp": "^1.2.0",
+    "mcp-chrome-bridge": "^1.0.31"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
