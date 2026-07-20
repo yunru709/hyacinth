@@ -720,7 +720,7 @@ export async function createAgent(
   // ── 旁路Agent 管理器 ──────────────────────────────────────────
   const bypassManager = new (await import('../bypass/manager.js')).BypassManager();
   bypassManager.setModelRouter(modelRouter);
-  // 注册 WorldEngine（陪伴模式旁路Agent）
+  // 注册 WorldEngine（陪伴模式旁路Agent）— 未设置角色时跳过
   const companionCharName = (() => {
     try {
       const last = fs.readFileSync(
@@ -729,7 +729,9 @@ export async function createAgent(
       return last || '';
     } catch { return ''; }
   })();
-  bypassManager.register(new (await import('../bypass/agents/companion/index.js')).WorldEngine(companionCharName));
+  if (companionCharName) {
+    bypassManager.register(new (await import('../bypass/agents/companion/index.js')).WorldEngine(companionCharName));
+  }
   // 注册 Orchestrator（普通模式旁路Agent）— 已暂停（2026-07-10）
   // 待分层过滤策略成熟后重新启用，设计方案见：桌面/旁路Agent重构构想.md
   // bypassManager.register(new (await import('../bypass/agents/orchestrator/index.js')).ContextOrchestrator(memoryFilePath));
