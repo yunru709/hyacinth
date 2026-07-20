@@ -12,16 +12,25 @@ import { Fts5Retriever } from './fts5-retriever.js';
 export type { KbDocument as KbDoc, KbSearchResult as KbResult } from './retriever.js';
 
 export class KnowledgeBase {
-  readonly retriever: Retriever;
+  private _retriever: Retriever | null = null;
+  private _dbPath: string | undefined;
   private _enabled = false;
   private _zone4Enabled = true; // Zone 4 默认开启
 
   constructor(dbPathOrRetriever: string | Retriever) {
     if (typeof dbPathOrRetriever === 'string') {
-      this.retriever = new Fts5Retriever(dbPathOrRetriever);
+      this._dbPath = dbPathOrRetriever;
     } else {
-      this.retriever = dbPathOrRetriever;
+      this._retriever = dbPathOrRetriever;
     }
+  }
+
+  /** 懒加载 retriever，仅在首次访问时创建 Fts5Retriever */
+  get retriever(): Retriever {
+    if (!this._retriever) {
+      this._retriever = new Fts5Retriever(this._dbPath!);
+    }
+    return this._retriever;
   }
 
   // ── 状态管理 ──────────────────────────────────────────────────────

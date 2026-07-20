@@ -116,7 +116,7 @@ export interface AgentComponents {
   providerConfigLoader: ProviderConfigLoader;
   knowledgeBase: KnowledgeBase;
   kbState: { lastQuery: string };
-  kbWatcher: KnowledgeWatcher;
+  kbWatcher: KnowledgeWatcher | null;
   /** 知识库结构化存储（懒加载，只在知识库启用时才创建） */
   structuredStore: StructuredStore | null;
   composeStrategy: ComposeStrategy;
@@ -634,12 +634,18 @@ export async function createAgent(
   toolRegistry.register(createStructuredTool(getStructuredStore, () => knowledgeBase.enabled));
 
   // ── 知识库文件监控（后台自动索引 files/ 目录变更）─────────────────
-  const kbWatcher = new KnowledgeWatcher({
-    filesDir: kbFilesDir,
-    retriever: knowledgeBase.retriever,
-  });
-  // 异步启动，不阻塞 Agent 主流程
-  kbWatcher.start().catch(() => {});
+  // 懒创建 — 只在知识库启用后才启动
+  let _kbWatcher: KnowledgeWatcher | null = null;
+  function getWatcher(): KnowledgeWatcher {
+    if (!_kbWatcher) {
+      _kbWatcher = new KnowledgeWatcher({
+        filesDir: kbFilesDir,
+        retriever: knowledgeBase.retriever,
+      });
+      _kbWatcher.start().catch(() => {});
+    }
+    return _kbWatcher;
+  }
 
   // ── Command Registry（斜杠命令外部配置化，支持模型修改 + 热重载） ──
   CommandRegistry.getInstance(cwd);
@@ -1041,7 +1047,7 @@ export async function createAgent(
     providerConfigLoader,
     knowledgeBase,
     kbState,
-    kbWatcher,
+    kbWatcher: _kbWatcher,
     structuredStore: _structuredStore,
     composeStrategy,
     companionSessionManager,
