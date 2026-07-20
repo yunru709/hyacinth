@@ -117,7 +117,8 @@ export interface AgentComponents {
   knowledgeBase: KnowledgeBase;
   kbState: { lastQuery: string };
   kbWatcher: KnowledgeWatcher;
-  structuredStore: StructuredStore;
+  /** 知识库结构化存储（懒加载，只在知识库启用时才创建） */
+  structuredStore: StructuredStore | null;
   composeStrategy: ComposeStrategy;
   companionSessionManager: CompanionSessionManager;
   backgroundRegistry: BackgroundProcessRegistry;
@@ -584,8 +585,14 @@ export async function createAgent(
   const kbDir = path.join(os.homedir(), '.agent', 'knowledge');
   const kbStorePath = path.join(kbDir, 'kb.sqlite');
 
-  // 结构化存储（主）
-  const structuredStore = new StructuredStore(kbStorePath);
+  // 结构化存储 — 懒加载（不启用知识库时不创建，避免缺少 better-sqlite3 时报错）
+  let _structuredStore: StructuredStore | null = null;
+  function getStructuredStore(): StructuredStore {
+    if (!_structuredStore) {
+      _structuredStore = new StructuredStore(kbStorePath);
+    }
+    return _structuredStore;
+  }
 
   // 旧版文件索引（保留兼容）
   const kbFilesDir = path.join(kbDir, 'files');
@@ -615,8 +622,8 @@ export async function createAgent(
       const maxTotal = configCenter.get<number>('kb.maxTotal') ?? 5;
       const maxMain = configCenter.get<number>('kb.maxMain') ?? 3;
       const maxRefs = configCenter.get<number>('kb.maxRefs') ?? 2;
-      return structuredStore.formatResults(
-        structuredStore.search(q, maxTotal),
+      return getStructuredStore().formatResults(
+        getStructuredStore().search(q, maxTotal),
         maxMain,
         maxRefs,
       );
@@ -624,7 +631,7 @@ export async function createAgent(
   });
   toolRegistry.register(createKbToggleTool(knowledgeBase, contextComposer));
   // 结构化知识库工具（4合1：add/update/delete/list）
-  toolRegistry.register(createStructuredTool(structuredStore, () => knowledgeBase.enabled));
+  toolRegistry.register(createStructuredTool(getStructuredStore, () => knowledgeBase.enabled));
 
   // ── 知识库文件监控（后台自动索引 files/ 目录变更）─────────────────
   const kbWatcher = new KnowledgeWatcher({
@@ -1035,7 +1042,7 @@ export async function createAgent(
     knowledgeBase,
     kbState,
     kbWatcher,
-    structuredStore,
+    structuredStore: _structuredStore,
     composeStrategy,
     companionSessionManager,
     backgroundRegistry,

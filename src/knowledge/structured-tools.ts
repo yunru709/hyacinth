@@ -10,12 +10,12 @@
 import type { Tool } from '../tools/interface.js';
 import type { StructuredStore, EntryCategory } from './structured-store.js';
 
-function guard(store: StructuredStore, enabled: () => boolean): string | null {
+function guard(store: () => StructuredStore, enabled: () => boolean): string | null {
   if (!enabled()) return '知识库未开启。请执行 /kb on。';
   return null;
 }
 
-export function createStructuredTool(store: StructuredStore, enabled: () => boolean): Tool {
+export function createStructuredTool(getStore: () => StructuredStore, enabled: () => boolean): Tool {
   return {
     name: 'kb_structured',
     description:
@@ -69,7 +69,7 @@ export function createStructuredTool(store: StructuredStore, enabled: () => bool
     },
 
     async execute(args: Record<string, unknown>): Promise<string> {
-      const blocked = guard(store, enabled);
+      const blocked = guard(getStore, enabled);
       if (blocked) return blocked;
 
       const action = args.action as string;
@@ -77,13 +77,13 @@ export function createStructuredTool(store: StructuredStore, enabled: () => bool
       try {
         switch (action) {
           case 'add':
-            return handleAdd(store, args);
+            return handleAdd(getStore(), args);
           case 'update':
-            return handleUpdate(store, args);
+            return handleUpdate(getStore(), args);
           case 'delete':
-            return handleDelete(store, args);
+            return handleDelete(getStore(), args);
           case 'list':
-            return handleList(store, args);
+            return handleList(getStore(), args);
           default:
             return `Unknown action: "${action}". Supported: add, update, delete, list.`;
         }
