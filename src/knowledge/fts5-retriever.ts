@@ -5,12 +5,27 @@
  * 对 CJK 文本自动追加 bigram 到索引内容中，以支持中文搜索。
  */
 
-import Database from 'better-sqlite3';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import type { Retriever, KbDocument, KbSearchResult } from './retriever.js';
 import { preprocessQuery } from './query-preprocessor.js';
+
+// ── 懒加载 better-sqlite3（可选依赖） ────────────────────────────
+
+const _require = createRequire(import.meta.url);
+
+function getDatabase(): any {
+  try {
+    return _require('better-sqlite3');
+  } catch {
+    throw new Error(
+      'better-sqlite3 未安装。FTS5 知识库功能需要此可选依赖。\n' +
+      '请运行: npm install better-sqlite3 或 pnpm add better-sqlite3'
+    );
+  }
+}
 
 // ── CJK bigram 分词 ────────────────────────────────────────────────
 
@@ -48,9 +63,10 @@ function bigramQuery(query: string): string {
 
 export class Fts5Retriever implements Retriever {
   readonly name = 'fts5';
-  private db: Database.Database;
+  private db: any;
 
   constructor(dbPath: string) {
+    const Database = getDatabase();
     const dir = path.dirname(dbPath);
     fs.mkdirSync(dir, { recursive: true });
     this.db = new Database(dbPath);
