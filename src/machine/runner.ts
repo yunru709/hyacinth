@@ -101,13 +101,21 @@ export class MachineRunner {
       return { ok: false, reason: `Machine "${this.definition.id}" is not active (status: ${this.status}).` };
     }
 
-    // 1. 找匹配的转移
-    const transition = this.definition.transitions.find((t) => {
+    // 1. 找匹配的转移（按优先级——跳过 guard 不通过的）
+    let transition: (typeof this.definition.transitions)[number] | undefined;
+    for (const t of this.definition.transitions) {
       const fromMatch = Array.isArray(t.from)
         ? t.from.includes(this.currentState)
         : t.from === this.currentState;
-      return fromMatch && t.event === event;
-    });
+      if (fromMatch && t.event === event) {
+        if (t.guard) {
+          const guardResult = t.guard(this.context);
+          if (!guardResult.ok) continue; // guard 不通过，试下一个
+        }
+        transition = t;
+        break;
+      }
+    }
 
     if (!transition) {
       return {
@@ -116,39 +124,28 @@ export class MachineRunner {
       };
     }
 
-    // 2. Guard 检查
-    if (transition.guard) {
-      const guardResult = transition.guard(this.context);
-      if (!guardResult.ok) {
-        return {
-          ok: false,
-          reason: guardResult.reason ?? `Guard rejected transition from "${this.currentState}" to "${transition.to}" via "${event}".`,
-        };
-      }
-    }
-
-    // 3. onExit 副作用（fire-and-forget）
+    // 2. onExit 副作用（fire-and-forget）
     const oldState = this.currentState;
     const oldDef = this.definition.states[oldState];
     safeFire(oldDef?.onExit, this.context);
 
-    // 4. onTransition 副作用（同步执行——可阻塞）
+    // 3. onTransition 副作用（同步执行——可阻塞）
     transition.onTransition?.(this.context);
 
-    // 5. 更新状态
+    // 4. 更新状态
     this.currentState = transition.to;
 
-    // 6. onEnter 副作用（fire-and-forget）
+    // 5. onEnter 副作用（fire-and-forget）
     const newDef = this.definition.states[this.currentState];
     safeFire(newDef?.onEnter, this.context);
 
-    // 7. 记录历史
+    // 6. 记录历史
     this.transitionHistory.push({ from: oldState, to: transition.to, event });
     if (this.transitionHistory.length > MAX_HISTORY) {
       this.transitionHistory = this.transitionHistory.slice(-MAX_HISTORY);
     }
 
-    // 8. 终端状态检查
+    // 7. 终端状态检查
     const isTerminal = this.definition.terminalStates?.includes(this.currentState) ?? false;
     if (isTerminal) {
       this.status = 'completed';
