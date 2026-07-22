@@ -23,9 +23,7 @@ export function createRollbackStatusTool(
   return {
     name: 'rollback_status',
     description:
-      'View the list of turns available for rollback. Each turn shows its ID, timestamp, ' +
-      'number of changed files, and executed commands. Use this before calling rollback to ' +
-      'decide how many turns to roll back.',
+      '查看可回滚的回合列表。每个回合显示 ID、时间戳、变更文件数和执行的命令。在调用 rollback 之前先用此工具确认回退到哪个回合。',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -90,10 +88,7 @@ export function createRollbackTool(
   return {
     name: 'rollback',
     description:
-      'Roll back file changes made in the last N turns. ' +
-      'Uses git to restore files to their state before the target turn. ' +
-      'Only file changes are reverted; configuration changes may need manual review. ' +
-      'Use rollback_status first to see available turns.',
+      '回滚最近 N 个回合的文件变更。通过 Git 将文件恢复到目标回合之前的状态。仅回滚文件变更——配置变更需手动检查。先用 rollback_status 查看可用回合列表。',
     inputSchema: {
       type: 'object' as const,
       properties: {

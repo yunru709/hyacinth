@@ -14,15 +14,13 @@ import type { XrefManager } from './manager.js';
 export class XrefBuildTool implements Tool {
   readonly name = 'xref_build';
   readonly description =
-    'Build or manage the cross-reference index for the project. ' +
-    'Scans source files with AST parsers and stores symbol definitions, references, ' +
-    'and import dependencies into a SQLite database. ' +
-    'Must be called once before xref_query or xref_graph can be used.\n\n' +
-    'Modes:\n' +
-    '  1. Full build (default): scans all source files in the project\n' +
-    '  2. directory-filtered build: pass "directories" to limit scan to specific dirs\n' +
-    '  3. Incremental update: pass "files" to re-index only changed files\n' +
-    '  4. Clean: pass clean=true to delete the index database (next query will require rebuild)';
+    '构建或管理项目的交叉引用索引。使用 AST 解析器扫描源码，将符号定义、引用和导入依赖存入 SQLite 数据库。' +
+    '使用 xref_query 或 xref_graph 之前必须先执行一次。\n\n' +
+    '四种模式：\n' +
+    '  1. 全量构建（默认）：扫描项目中所有源文件\n' +
+    '  2. 目录过滤构建：传 "directories" 限制扫描范围\n' +
+    '  3. 增量更新：传 "files" 仅重新索引变更文件\n' +
+    '  4. 清理：传 clean=true 删除索引库（下次查询需重建）';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

@@ -20,7 +20,7 @@ import type { Tool } from './interface.js';
 export class DiskUsageTool implements Tool {
   readonly name = 'disk_usage';
   readonly description =
-    'Analyze disk space and directory sizes. Mode "free" shows drive/volume free space. Mode "dirs" ranks subdirectories by total size. Mode "files" ranks individual files. Mode "all" shows both.';
+    '分析磁盘空间和目录大小。mode="free" 查看磁盘剩余空间。mode="dirs" 按大小排序子目录。mode="files" 按大小排序文件。mode="all" 同时显示目录和文件。支持 depth 参数控制递归深度。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

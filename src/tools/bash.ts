@@ -130,7 +130,7 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
 export class BashTool implements Tool {
   readonly name = 'bash';
   readonly description =
-    'Execute a shell command and return stdout/stderr. On Windows, commands natively run in PowerShell — do NOT prefix with "powershell -Command". On Linux/macOS, commands run in /bin/sh. Set async=true for background execution.';
+    '执行 Shell 命令并返回 stdout/stderr。Windows 下原生运行在 PowerShell —— 不要加 "powershell -Command" 前缀。Linux/macOS 下运行在 /bin/sh。async=true 时以后台进程方式执行，返回进程句柄，可通过 process_list / process_output / process_kill 管理。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

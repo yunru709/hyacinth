@@ -31,23 +31,21 @@ const ACTIONS: QueryAction[] = [
 export class XrefQueryTool implements Tool {
   readonly name = 'xref_query';
   readonly description =
-    'Query the cross-reference index (built by xref_build). Supports 10 actions:\n\n' +
-    'L1 — Symbol queries:\n' +
-    '  - "refs": find all references to a symbol across the project\n' +
-    '  - "defs": find where a symbol is defined (with signature)\n' +
-    '  - "callers": who calls this function?\n' +
-    '  - "callees": what does this function call? (supports depth for call chain)\n\n' +
-    'L2 — File dependency queries:\n' +
-    '  - "deps": what modules does this file import?\n' +
-    '  - "dependents": what files import this file?\n' +
-    '  - "symbol_search": which files import a given symbol? (across all imports)\n\n' +
-    'L3 — Structural queries:\n' +
-    '  - "hierarchy": class inheritance tree (parents & children)\n' +
-    '  - "impact": BFS — what files are affected if I change X? (supports depth)\n' +
-    '  - "trace": data flow for a variable within a file (declaration, assignments, reads)\n\n' +
-    'IMPORTANT: Run xref_build first before querying. ' +
-    'Use "depth" to control traversal depth (default: 1-2). ' +
-    'For callees/impact, larger depth = exponential growth — start small.';
+    '查询交叉引用索引（需先执行 xref_build）。支持 10 种查询：\n\n' +
+    'L1 — 符号查询：\n' +
+    '  - "refs": 查找项目中某符号的所有引用\n' +
+    '  - "defs": 查找符号定义位置（含签名）\n' +
+    '  - "callers": 谁调用了此函数？\n' +
+    '  - "callees": 此函数调用了什么？（支持 depth 控制调用链深度）\n\n' +
+    'L2 — 文件依赖查询：\n' +
+    '  - "deps": 此文件导入了哪些模块？\n' +
+    '  - "dependents": 哪些文件导入了此文件？\n' +
+    '  - "symbol_search": 哪些文件导入了指定符号？\n\n' +
+    'L3 — 结构查询：\n' +
+    '  - "hierarchy": 类继承树（父类和子类）\n' +
+    '  - "impact": BFS 影响面分析——修改 X 会影响哪些文件？\n' +
+    '  - "trace": 变量在文件内的数据流（声明、赋值、读取）\n\n' +
+    '重要提示：查询前必须先运行 xref_build。用 depth 控制遍历深度（默认 1-2）。callees/impact 查询深度越大结果指数增长——由浅入深。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

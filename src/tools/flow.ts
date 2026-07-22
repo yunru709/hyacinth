@@ -41,11 +41,11 @@ export function createFlowStartTool(registry: MachineRegistry): Tool {
   return {
     name: 'flow_start',
     description:
-      'Activate a guided workflow mode. Available modes:\n' +
+      '激活一个引导式工作流模式。可用模式：\n' +
       Object.entries(MODE_DESCRIPTIONS)
         .map(([k, v]) => `  - "${k}": ${v}`)
         .join('\n') +
-      '\n\nAfter activation, use flow_add to define items and flow_complete to advance.',
+      '\n\n激活后，使用 flow_add 添加步骤，flow_complete 推进流程。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -56,7 +56,7 @@ export function createFlowStartTool(registry: MachineRegistry): Tool {
         },
         task: {
           type: 'string',
-          description: 'A concise description of the overall task (for todo mode).',
+          description: '整体任务的简要描述（用于 todo 模式）。',
         },
       },
       required: ['mode'],
@@ -99,7 +99,7 @@ export function createFlowAddTool(registry: MachineRegistry): Tool {
   return {
     name: 'flow_add',
     description:
-      'Add steps to the current active flow. In todo mode, each step is an execution state. Submit ALL steps at once — do not add them one by one. Steps will be executed in order.',
+      '向当前活跃 Flow 添加执行步骤。在 todo 模式下，每个步骤是一个执行状态。请一次性提交所有步骤——不要逐个添加。步骤按顺序执行。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -164,7 +164,7 @@ export function createFlowCompleteTool(registry: MachineRegistry): Tool {
   return {
     name: 'flow_complete',
     description:
-      'Complete the current flow step or phase and advance. In definition phase (todo planning), this finishes defining and starts execution. In execution phase, this advances to the next step. On the final step, the flow ends.',
+      '完成当前 Flow 步骤或阶段并推进。在规划阶段（todo planning），完成步骤定义并进入执行。在执行阶段，推进到下一步。最后一步完成后，Flow 终止。',
     inputSchema: {
       type: 'object',
       properties: {},

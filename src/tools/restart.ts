@@ -10,10 +10,7 @@ const CONTINUATION_FILE = '.agent/.restart-continuation';
 export class RestartTool implements Tool {
   readonly name = 'restart';
   readonly description =
-    'Restart the Agent process. The current session is persisted and resumed automatically after restart. ' +
-    'Config is saved, child processes are stopped gracefully.\n' +
-    'Optional parameter "message": if provided, this message will be automatically sent after restart to continue work. ' +
-    'If omitted, the agent will wait for user input after restart.';
+    '重启 Agent 进程。当前会话自动持久化，重启后自动恢复。配置已保存，子进程优雅关闭。可选参数 message：如果提供，重启后自动发送此消息继续工作；不提供则等待用户输入。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

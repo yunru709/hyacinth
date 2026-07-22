@@ -98,7 +98,7 @@ export function createBuiltinSkills(): SkillDefinition[] {
       name: 'framework-reference',
       description: 'Agent 框架配置指南 — 配置项、旁路Agent、模型通道等框架能力说明',
       promptTemplate: loadPrompt('skills/framework-reference'),
-      relatedTools: ['get_config', 'update_config', 'list_model_channels', 'channel_info', 'config_schema'],
+      relatedTools: ['get_config', 'update_config', 'list_model_channels', 'model_channel_info', 'config_schema'],
       source: 'builtin' as const,
     },
   ];

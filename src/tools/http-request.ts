@@ -7,9 +7,7 @@ import type { Tool } from './interface.js';
 export class HttpRequestTool implements Tool {
   readonly name = 'http_request';
   readonly description =
-    'Make HTTP requests. Supports GET, POST, PUT, DELETE with custom headers, body, timeout, and cookies. ' +
-    'Default User-Agent mimics a browser. Use for light web scraping, API debugging, and data fetching. ' +
-    'Returns status code, headers, and response body (truncated at 50KB).';
+    '发起 HTTP 请求。支持 GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS，自定义 headers、body、超时和 cookies。默认 User-Agent 模拟浏览器。适用于轻量网页抓取、API 调试和数据获取。返回状态码、响应头和响应体（超过 50KB 自动截断）。json=true 时自动设置 Content-Type 为 application/json。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

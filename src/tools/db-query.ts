@@ -9,11 +9,7 @@ import type { Tool } from './interface.js';
 export class DbQueryTool implements Tool {
   readonly name = 'db_query';
   readonly description =
-    'Execute a parameterized SQL query against a SQLite database. ' +
-    'For SELECT, returns results as a formatted table (JSON array of objects). ' +
-    'For INSERT/UPDATE/DELETE, returns the number of affected rows. ' +
-    'Parameters are passed as a JSON array for safe, injection-free queries. ' +
-    'Supports read-only and read-write modes.';
+    '对 SQLite 数据库执行参数化 SQL 查询。SELECT 返回格式化表格（JSON 对象数组）。INSERT/UPDATE/DELETE 返回影响行数。参数通过 JSON 数组安全传入，杜绝注入风险。支持只读和读写模式。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

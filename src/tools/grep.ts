@@ -10,7 +10,7 @@ export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 export class GrepTool implements Tool {
   readonly name = 'grep';
   readonly description =
-    'Search file contents with regex patterns (ripgrep). Supports file type filtering, context lines, and multiline mode.';
+    '用正则表达式搜索文件内容（ripgrep）。支持文件类型过滤（glob）、上下文行（-A/-B/-C）、多行模式（multiline）。path 参数必填——始终传入项目根目录。output_mode 可选 content（匹配行）/ files_with_matches（文件路径）/ count（计数）。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

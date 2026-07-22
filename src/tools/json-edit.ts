@@ -12,11 +12,7 @@ import type { Tool } from './interface.js';
 export class JsonEditTool implements Tool {
   readonly name = 'json_edit';
   readonly description =
-    'Read or modify a key in a JSON, YAML, or TOML file by path. ' +
-    'Path uses dot notation (e.g. "compilerOptions.target"). ' +
-    'Without a value, reads the current value at the path. ' +
-    'With a value, sets the key and writes the file back preserving formatting. ' +
-    'Supports nested objects, array elements, and deep paths.';
+    '读取或修改 JSON / YAML / TOML 文件中指定路径的键值。路径使用点号分隔（如 "compilerOptions.target"）。只传路径不传 value=读取当前值；传 value=写入并保持原格式。支持嵌套对象、数组元素和深层路径。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

@@ -24,10 +24,7 @@ import { autoReferenceCheck } from './symbol-references.js';
 export class EditTool implements Tool {
   readonly name = 'edit';
   readonly description =
-    'Performs exact string replacements in a file (' +
-    'old_string must uniquely match unless replace_all=true), ' +
-    'or replaces lines by line number using line_start/line_count. ' +
-    'line_start and old_string are mutually exclusive.';
+    '精确替换文件中的字符串，或按行号替换。字符串模式：old_string 必须唯一匹配（除非 replace_all=true）。行号模式：line_start 指定起始行（1-based），line_count 指定行数。两种模式互斥。';
   readonly companionDescription = '得改一下了。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',

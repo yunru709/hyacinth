@@ -12,8 +12,7 @@ export function createProcessListTool(registry: BackgroundProcessRegistry): Tool
   return {
     name: 'process_list',
     description:
-      'List all background processes started with bash(async:true). ' +
-      'Returns handle, command, PID, status (running/stopped/crashed), start time, and output buffer size for each.',
+      '列出所有通过 bash(async:true) 启动的后台进程。返回每个进程的句柄、命令、PID、状态（运行中/已停止/崩溃）、启动时间和输出缓冲区大小。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -43,8 +42,7 @@ export function createProcessKillTool(registry: BackgroundProcessRegistry): Tool
   return {
     name: 'process_kill',
     description:
-      'Stop a background process by its handle (e.g. "bg_001"). ' +
-      'Kills the process tree. Use process_list to see available handles.',
+      '终止指定句柄的后台进程（如 "bg_001"）。杀死整个进程树。先用 process_list 查看可用句柄。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -71,8 +69,7 @@ export function createProcessOutputTool(registry: BackgroundProcessRegistry): To
   return {
     name: 'process_output',
     description:
-      'Read the captured stdout/stderr output of a background process. ' +
-      'Returns up to 1000 lines of buffered output. Use process_list to see available handles.',
+      '读取后台进程已捕获的 stdout/stderr 输出。最多返回缓冲区中 1000 行。先用 process_list 查看可用句柄。',
     inputSchema: {
       type: 'object',
       properties: {

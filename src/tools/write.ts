@@ -19,7 +19,7 @@ import { autoReferenceCheck } from './symbol-references.js';
 export class WriteTool implements Tool {
   readonly name = 'write';
   readonly description =
-    'Create or overwrite a file. Creates parent directories automatically.';
+    '创建或覆盖文件。自动创建不存在的父目录。写入后返回文件路径和行数。';
   readonly companionDescription = '写东西喽。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',

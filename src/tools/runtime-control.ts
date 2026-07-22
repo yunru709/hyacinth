@@ -29,8 +29,7 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'switch_provider',
     description:
-      'Switch the active provider. If api_key is provided, the provider is dynamically created and registered. ' +
-      'Use list_providers to see already-registered names. Model name defaults to the provider\'s default model.',
+      '切换当前使用的 LLM 提供商及模型。四种用法：只传 name=切换到已配置的提供商；传 name+api_key=动态注册新提供商；传 name+model=覆盖该提供商的默认模型；传 name+max_tokens=限制最大输出 Token。先用 list_providers 查看已注册的提供商。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -84,7 +83,7 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
 export function createListProvidersTool(providerRouter: ProviderRouter): Tool {
   return {
     name: 'list_providers',
-    description: 'List all registered provider names, their types, and current models.',
+    description: '列出所有已注册的 LLM 提供商，包含名称、类型和当前使用的模型。当前活跃的提供商前标有 *。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -118,7 +117,7 @@ export function createListProvidersTool(providerRouter: ProviderRouter): Tool {
 export function createProviderInfoTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'provider_info',
-    description: 'Get detailed information about the currently active provider (type, model, capabilities). Shows fallback status when the primary provider has failed over.',
+    description: '查看当前活跃提供商的详细信息：类型、模型名称、能力（如 thinking、图片识别）。当主提供商故障降级到备用时，会显示降级状态。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -159,7 +158,7 @@ export function createProviderInfoTool(agentLoop: AgentLoop): Tool {
 export function createSwitchToAutoRouteTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'switch_to_auto_route',
-    description: 'Switch provider routing back to automatic mode. In auto mode, the system selects the best provider based on task complexity.',
+    description: '将提供商路由切回自动模式。自动模式下系统根据任务复杂度自动选择最合适的提供商。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -182,7 +181,7 @@ export function createSwitchToAutoRouteTool(agentLoop: AgentLoop): Tool {
 export function createToggleToolTool(toolRegistry: ToolRegistry, configCenter?: RuntimeConfigCenter): Tool {
   return {
     name: 'toggle_tool',
-    description: 'Enable or disable a specific tool. Disabled tools will not be available to the LLM.',
+    description: '启用或禁用指定工具。禁用的工具对 LLM 不可见也不可调用。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -223,7 +222,7 @@ export function createToggleToolTool(toolRegistry: ToolRegistry, configCenter?: 
 export function createListToolsTool(toolRegistry: ToolRegistry): Tool {
   return {
     name: 'list_tools',
-    description: 'List all registered tools with their enabled/disabled status.',
+    description: '列出所有已注册的工具及其启用/禁用状态。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -263,7 +262,7 @@ export function createListToolsTool(toolRegistry: ToolRegistry): Tool {
 export function createToggleSkillTool(skillRegistry: SkillRegistry, configCenter?: RuntimeConfigCenter): Tool {
   return {
     name: 'toggle_skill',
-    description: 'Enable or disable a specific skill. Disabled skills will not be available to the LLM.',
+    description: '启用或禁用指定 Skill。禁用的 Skill 不再对 LLM 暴露。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -300,7 +299,7 @@ export function createToggleSkillTool(skillRegistry: SkillRegistry, configCenter
 export function createListSkillsTool(skillRegistry: SkillRegistry): Tool {
   return {
     name: 'list_skills',
-    description: 'List all registered skills with their enabled/disabled status.',
+    description: '列出所有已注册的 Skill 及其启用/禁用状态。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -340,7 +339,7 @@ export function createListSkillsTool(skillRegistry: SkillRegistry): Tool {
 export function createToggleSubAgentTool(agentRegistry: AgentRegistry, configCenter?: RuntimeConfigCenter): Tool {
   return {
     name: 'toggle_sub_agent',
-    description: 'Enable or disable a specific sub-agent. Disabled sub-agents will not be available for delegation.',
+    description: '按名称启用或禁用子 Agent。禁用后该 Agent 从 list_sub_agents 中隐藏且不可被委派——适用于临时移除行为异常或当前不需要的 Agent，保留配置不销毁。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -377,7 +376,7 @@ export function createToggleSubAgentTool(agentRegistry: AgentRegistry, configCen
 export function createListSubAgentsTool(agentRegistry: any): Tool {
   return {
     name: 'list_sub_agents',
-    description: 'List all registered sub-agents with their enabled/disabled status and instance IDs. Use instance_id to target a specific spawned copy.',
+    description: '列出所有已注册的子 Agent，按名称分组展示。包含：名称、启用状态、instance ID、描述、协作模式、最大轮次。spawn_sub_agent 克隆出的多份实例会在同一名称下分组。用列表中的 instance_id 配合 delegate_to_agent / update_sub_agent / destroy_sub_agent 精确定位目标。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       const all = [...agentRegistry.getEnabled(), ...agentRegistry.getDisabled()];
@@ -418,7 +417,7 @@ export function createListSubAgentsTool(agentRegistry: any): Tool {
 export function createSpawnSubAgentTool(agentRegistry: any): Tool {
   return {
     name: 'spawn_sub_agent',
-    description: 'Clone an existing sub-agent for parallel execution on different tasks.',
+    description: '克隆已有子 Agent，创建独立实例用于并行执行不同任务。这是实现并行分发的关键工具——当主 Agent 制定计划后，可克隆多份子 Agent 实例，各自分配到不同子任务上并发执行，显著提高效率。每个克隆拥有独立会话和上下文，互不干扰。customName 参数可为克隆指定易辨识的别名（如后端审查/前端审查），之后通过 delegate_to_agent 配合 instance_id 精确调度。用 list_sub_agents 查看所有克隆状态。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -453,7 +452,7 @@ export function createSpawnSubAgentTool(agentRegistry: any): Tool {
 export function createCreateSubAgentTool(agentRegistry: any, cwd: string): Tool {
   return {
     name: 'create_sub_agent',
-    description: 'Create a custom sub-agent at runtime. Set persist=true to save to disk.',
+    description: '创建一个新的自定义子 Agent。定义其角色（description）、行为准则（systemPrompt）、可用工具（allowedTools）和协作模式（collaborationMode）。系统提示词中使用 {{task}} 作为占位符——委派时自动替换为实际任务。persist=true 时将 Agent 定义持久化到磁盘，重启后仍可用。协作模式选择：delegate=单Agent执行，adversarial=双Agent交叉审查，parallel=多Agent并行。默认可用工具为 read/glob/grep/write，可按需扩展。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -542,7 +541,7 @@ export function createCreateSubAgentTool(agentRegistry: any, cwd: string): Tool 
 export function createUpdateSubAgentTool(agentRegistry: any): Tool {
   return {
     name: 'update_sub_agent',
-    description: 'Modify an existing sub-agent\'s configuration at runtime. Updates are applied immediately (in-memory). Use instance_id to target a specific instance. Fields left unspecified remain unchanged. Note: name cannot be changed — destroy and re-create if you need to rename.',
+    description: '运行时修改子 Agent 配置，下次委派时生效。只更新你指定的字段，其余保持不变。名称不可修改（需改名则先 destroy 再重建）。常见场景：根据实际需要增减 allowedTools、为复杂任务拉高 maxTurns、将 collaborationMode 从 delegate 切换为 adversarial 以加强审查。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -614,7 +613,7 @@ export function createDestroySubAgentTool(
 ): Tool {
   return {
     name: 'destroy_sub_agent',
-    description: 'Delete a sub-agent instance and its session data. For spawned clones, removes only that clone.',
+    description: '永久删除子 Agent 实例及其全部会话数据（对话历史、统计、元信息）。对于克隆出来的实例，仅删除指定目标——原始 Agent 和其他克隆不受影响。此操作不可撤销。先用 list_sub_agents 确认要删除的 instance_id。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -717,7 +716,7 @@ async function persistSubAgent(
 export function createInterruptTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'interrupt',
-    description: 'Interrupt the currently running agent execution. Stops the agent and any in-progress provider requests. Use instance_id to target a specific running sub-agent.',
+    description: '中断当前正在执行的 Agent 以及所有进行中的 LLM 请求。传入 instance_id 可精确中断指定子 Agent，不传则中断主 Agent。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -754,8 +753,7 @@ export function createCurrentSessionTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'current_session',
     description:
-      'Show the currently active session identity: ID, type, channel, and creation time. ' +
-      'Use this when you need to know which session you are running in before switching or listing sessions.',
+      '查看当前活跃会话信息：会话 ID、类型（normal/precise）、所属渠道和创建时间。在切换或列出会话之前，先确认自己当前在哪个会话中。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -805,7 +803,7 @@ export function createCurrentSessionTool(agentLoop: AgentLoop): Tool {
 export function createSessionStatsTool(agentLoop: AgentLoop): Tool {
   return {
     name: 'session_stats',
-    description: 'Show current session statistics including turn count, token usage, compression count, and context info.',
+    description: '查看当前会话的统计信息：轮次数、Token 使用量、压缩次数和上下文状态。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -828,7 +826,7 @@ export function createSessionStatsTool(agentLoop: AgentLoop): Tool {
 export function createListSessionsTool(agentLoop: AgentLoop, cwd: string): Tool {
   return {
     name: 'list_sessions',
-    description: 'List all existing sessions with their creation time, type, and channel. The currently active session is marked with ← current.',
+    description: '列出所有会话，包含创建时间、类型和渠道信息。当前活跃会话标有 ← current。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -876,9 +874,7 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
   return {
     name: 'new_session',
     description:
-      'Create a new session and switch to it immediately. ' +
-      'The current conversation context will be cleared. ' +
-      'Optionally specify a channel to generate a channel-prefixed session ID (e.g. "tui", "feishu", "webui").',
+      '创建新会话并立即切换。当前对话上下文将被清空。可选 channel 参数生成渠道前缀的会话 ID（如 tui / feishu / webui）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -951,9 +947,7 @@ export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool
   return {
     name: 'switch_session',
     description:
-      'Switch to an existing session by its ID. ' +
-      'The current conversation context will be replaced by the target session\'s history. ' +
-      'Use list_sessions to see available session IDs.',
+      '按会话 ID 切换到已有会话。当前对话上下文替换为目标会话的历史记录。先用 list_sessions 查看可用会话及其 ID。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -997,8 +991,7 @@ export function createDeleteSessionTool(agentLoop: AgentLoop, cwd: string): Tool
   return {
     name: 'delete_session',
     description:
-      'Permanently delete a session and all its conversation data. ' +
-      'This cannot be undone. The currently active session CANNOT be deleted — switch to another session first.',
+      '永久删除指定会话及其全部对话数据，不可撤销。不能删除当前活跃的会话——需先切换到其他会话。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1064,7 +1057,7 @@ export function createDeleteSessionTool(agentLoop: AgentLoop, cwd: string): Tool
 export function createAllowToolTool(configCenter: RuntimeConfigCenter): Tool {
   return {
     name: 'allow_tool',
-    description: 'Add a tool to the safety allowedTools whitelist so it no longer requires confirmation. Works even for tools in the dangerousTools list.',
+    description: '将工具加入安全白名单，加入后该工具不再需要用户确认即可执行。对危险工具列表中的工具同样生效。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1098,7 +1091,7 @@ export function createAllowToolTool(configCenter: RuntimeConfigCenter): Tool {
 export function createDisallowToolTool(configCenter: RuntimeConfigCenter): Tool {
   return {
     name: 'disallow_tool',
-    description: 'Remove a tool from the safety allowedTools whitelist. It will require confirmation again if in dangerousTools.',
+    description: '将工具从安全白名单中移除。若该工具在危险工具列表中，恢复需要用户确认才能执行。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1133,7 +1126,7 @@ export function createDisallowToolTool(configCenter: RuntimeConfigCenter): Tool 
 export function createListAllowlistTool(configCenter: RuntimeConfigCenter): Tool {
   return {
     name: 'list_allowlist',
-    description: 'Show the current safety whitelist: allowedTools (tools that skip confirmation) and allowedCommands (bash command patterns that skip confirmation).',
+    description: '查看当前安全白名单：allowedTools（免确认的工具列表）和 allowedCommands（免确认的 bash 命令模式列表）。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -1180,42 +1173,39 @@ export function createAddTaskTool(
   return {
     name: 'add_task',
     description:
-      'Create a new scheduled task. Supports 5 schedule types:\n' +
-      '- "interval": fixed interval, e.g. every 5min (intervalMs: 300000)\n' +
-      '- "cron": standard 5-field cron, e.g. "0 3 * * *" (daily at 3am)\n' +
-      '- "daily": fixed time each day, e.g. { time: "09:30" }\n' +
-      '- "fixed-time": one-shot at a specific ISO time\n' +
-      '- "random": N random triggers per period, with optional time window, variable count range, and probability weights. e.g. 0-5 times/day between 9am-6pm, noon 3x more likely ({ periodMs: 86400000, countRange: { min: 0, max: 5, distribution: "extremes" }, timeWindow: { start: "09:00", end: "18:00" }, timeWeights: [{ time: "12:00", weight: 3.0 }], minIntervalMs: 300000 })',
+      '创建新的定时任务。支持 5 种调度类型：\n' +
+      '- "interval": 固定间隔触发，如每 5 分钟（intervalMs: 300000）\n' +
+      '- "cron": 标准 5 字段 cron，如 "0 3 * * *"（每天凌晨 3 点）\n' +
+      '- "daily": 每日定点触发，如 { time: "09:30" }\n' +
+      '- "fixed-time": 在指定 ISO 时间单次触发\n' +
+      '- "random": 每周期 N 次随机触发，支持时间窗口、可变次数范围和概率权重。如每日 0-5 次、仅 9-18 点、午间权重 3 倍（periodMs: 86400000, countRange: { min: 0, max: 5, distribution: "extremes" }, timeWindow: { start: "09:00", end: "18:00" }, timeWeights: [{ time: "12:00", weight: 3.0 }]）',
     companionDescription: '得记住他刚才说的东西，到时候叫他。',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Human-readable task name.' },
+        name: { type: 'string', description: '任务名称。' },
         scheduleType: {
           type: 'string',
           enum: ['interval', 'cron', 'daily', 'fixed-time', 'random'],
-          description: 'Scheduling strategy.',
+          description: '调度策略。',
         },
         schedule: {
           type: 'object',
-          description: 'Schedule config matching the chosen type. Examples:\n' +
-            '  interval: { intervalMs: 300000 }\n' +
-            '  cron: { expression: "0 */2 * * *" }\n' +
-            '  daily: { time: "09:00" }\n' +
-            '  fixed-time: { runAt: "2026-06-01T12:00:00.000Z" }\n' +
-            '  random: { periodMs: 86400000, count: 10, minIntervalMs: 300000, ' +
-            'timeWindow: { start: "09:00", end: "18:00" }, ' +
-            'countRange: { min: 0, max: 5, distribution: "extremes" }, ' +
-            'timeWeights: [{ time: "12:00", weight: 3.0 }] }',
+          description: '与所选类型匹配的调度配置。' +
+            'interval 示例: { intervalMs: 300000 }。' +
+            'cron 示例: { expression: "0 */2 * * *" }。' +
+            'daily 示例: { time: "09:00" }。' +
+            'fixed-time 示例: { runAt: "2026-06-01T12:00:00.000Z" }。' +
+            'random 示例: { periodMs: 86400000, count: 10, minIntervalMs: 300000, timeWindow: { start: "09:00", end: "18:00" }, countRange: { min: 0, max: 5, distribution: "extremes" }, timeWeights: [{ time: "12:00", weight: 3.0 }] }',
         },
         tags: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional tags for grouping/filtering (default: []).',
+          description: '可选标签，用于分组和筛选（默认 []）。',
         },
         channel: {
           type: 'string',
-          description: 'Target channel for this task (e.g. "tui", "webui", "feishu"). Auto-detected from current session if omitted. "command" type tasks ignore this.',
+          description: '任务触发的目标渠道（如 "tui"、"webui"、"feishu"）。不传则自动检测当前会话渠道。',
         },
         fallback: {
           type: 'array',
@@ -1296,7 +1286,7 @@ export function createRemoveTaskTool(
 ): Tool {
   return {
     name: 'remove_task',
-    description: 'Delete a scheduled task by its id (preferred) or name.',
+    description: '删除定时任务。优先按 id 精确删除，找不到时按 name 匹配。先用 list_tasks 确认要删除的任务 ID。',
     companionDescription: '他之前说的那个东西不用管了，不叫了。',
     inputSchema: {
       type: 'object',
@@ -1346,7 +1336,7 @@ export function createListTasksTool(
 ): Tool {
   return {
     name: 'list_tasks',
-    description: 'List all currently scheduled tasks with their status.',
+    description: '列出所有当前已注册的定时任务及其状态。',
     companionDescription: '得回想一下，有哪些需要提醒他的东西。现况如何？',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
@@ -1395,7 +1385,7 @@ export function createToggleTaskTool(
 ): Tool {
   return {
     name: 'toggle_task',
-    description: 'Enable or disable a scheduled task.',
+    description: '启用或禁用指定定时任务。禁用后任务保留但不触发。',
     companionDescription: '关于提醒这个事儿，他有别的想法。',
     inputSchema: {
       type: 'object',
@@ -1440,7 +1430,7 @@ export function createToggleTaskTool(
 export function createMcpStatusTool(mcpSystem: MCPSystem): Tool {
   return {
     name: 'mcp_status',
-    description: 'Query MCP server connection states. Returns each server name and whether it is connected.',
+    description: '查询 MCP Server 连接状态。返回各 Server 名称、是否已连接。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       const status = mcpSystem.getStatus();
@@ -1458,7 +1448,7 @@ export function createMcpStatusTool(mcpSystem: MCPSystem): Tool {
 export function createListModelChannelsTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'list_model_channels',
-    description: 'List all model channels with provider, model, and role mappings.',
+    description: '列出所有模型通道，包含各通道的提供商、模型和角色映射关系。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       const registry = modelRouter.getRegistry();
@@ -1489,7 +1479,7 @@ export function createListModelChannelsTool(modelRouter: ModelRouter): Tool {
 export function createAddModelChannelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'add_model_channel',
-    description: 'Add a new model channel. Only name is required; provider defaults to main channel provider. Use set_channel_model to change provider/model later.',
+    description: '新增模型通道。只需提供 name，provider 默认使用主通道提供商。之后可用 set_channel_model 修改提供商/模型。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1527,7 +1517,7 @@ export function createAddModelChannelTool(modelRouter: ModelRouter): Tool {
 export function createRemoveModelChannelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'remove_model_channel',
-    description: 'Remove a model channel. Main channel cannot be removed. Roles pointing to it revert to main.',
+    description: '删除模型通道。主通道不可删除。原本指向该通道的角色自动回退到主通道。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1550,7 +1540,7 @@ export function createRemoveModelChannelTool(modelRouter: ModelRouter): Tool {
 export function createSetChannelModelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'set_channel_model',
-    description: 'Temporarily switch a channel provider/model (session-only, not persisted). Resets on restart.',
+    description: '临时切换通道的提供商/模型（仅当前会话有效，不持久化）。重启后恢复原配置。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1580,7 +1570,7 @@ export function createSetChannelModelTool(modelRouter: ModelRouter): Tool {
 export function createResetChannelModelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'reset_channel_model',
-    description: 'Reset a channel model to its persisted config (undo set_channel_model).',
+    description: '将通道模型恢复为持久化配置（撤销 set_channel_model 的临时修改）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1603,8 +1593,8 @@ export function createResetChannelModelTool(modelRouter: ModelRouter): Tool {
 
 export function createChannelInfoTool(modelRouter: ModelRouter): Tool {
   return {
-    name: 'channel_info',
-    description: 'Get detailed info for a channel (provider, model, roles, type).',
+    name: 'model_channel_info',
+    description: '查询指定模型通道的详细信息（提供商、模型、角色映射、类型）。先用 list_model_channels 获取可用通道名称。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1631,7 +1621,7 @@ export function createChannelInfoTool(modelRouter: ModelRouter): Tool {
 export function createSetChannelRoleTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'set_channel_role',
-    description: 'Map a role to a channel. Roles: assessment, planning, compression, sub-agent. One channel can serve multiple roles.',
+    description: '将角色映射到指定通道。角色类型：assessment（评估）、planning（规划）、compression（压缩）、sub-agent（子Agent）。一个通道可服务多个角色。',
     inputSchema: {
       type: 'object',
       properties: {

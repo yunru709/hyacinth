@@ -37,7 +37,7 @@ export function createSystemInfoTool(): Tool {
   return {
     name: 'system_info',
     description:
-      'Query current system environment: OS, CPU, memory, GPU, Python/Node.js version, shell. Use when writing cross-platform code, tuning performance, or installing dependencies.',
+      '查询当前系统环境信息：操作系统、CPU、内存、GPU、Python/Node.js 版本、Shell 类型等。适用于跨平台开发、性能调优或安装依赖时参考。',
     inputSchema: {
       type: 'object',
       properties: {

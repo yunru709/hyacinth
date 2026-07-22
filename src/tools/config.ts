@@ -143,7 +143,7 @@ function buildSchemaEntries(
 export function createGetConfigTool(configCenter: RuntimeConfigCenter): Tool {
   return {
     name: 'get_config',
-    description: 'Read current Agent configuration. Provide an optional dot-path to read a single value, or omit to get the full config.',
+    description: '读取当前 Agent 配置。传入 dot-path 读取单个配置项（如 "provider.active"），不传则返回完整配置。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -183,7 +183,7 @@ export function createUpdateConfigTool(configCenter: RuntimeConfigCenter): Tool 
   return {
     name: 'update_config',
     description:
-      'Update Agent configuration. Accepts key-value pairs. Keys can use dot-path notation (e.g. "session.maxTurns": 60) or be nested objects. Changes are persisted immediately.',
+      '更新 Agent 配置。支持 dot-path 键名（如 "session.maxTurns": 60）或嵌套对象。修改立即持久化。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -241,7 +241,7 @@ export function createConfigSchemaTool(configCenter: RuntimeConfigCenter): Tool 
   return {
     name: 'config_schema',
     description:
-      'Return the full configuration schema including path, type, description, default values, and current values for every config key.',
+      '返回完整配置 schema，包含每个配置项的路径、类型、描述、默认值和当前值。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -264,7 +264,7 @@ export function createResetConfigTool(configCenter: RuntimeConfigCenter): Tool {
   return {
     name: 'reset_config',
     description:
-      'Reset runtime configuration overrides back to default values. Provide a dot-path to reset a single key, or omit to reset everything.',
+      '将运行时配置恢复为默认值。传 dot-path 重置单项，不传则重置全部。',
     inputSchema: {
       type: 'object',
       properties: {

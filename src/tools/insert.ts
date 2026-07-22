@@ -9,9 +9,7 @@ import type { Tool } from './interface.js';
 export class InsertTool implements Tool {
   readonly name = 'insert';
   readonly description =
-    'Insert content into a file at a specific line number. ' +
-    'line_number=1 inserts at the beginning. line_number=0 or "end" appends to the end (no need to read the file first). ' +
-    'Use grep to find the target line number for mid-file insertion.';
+    '在文件的指定行号位置插入内容。line_number=1 插入到文件开头。line_number=0 或 "end" 追加到文件末尾（无需先读取文件）。行中插入时先用 grep 定位目标行号。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

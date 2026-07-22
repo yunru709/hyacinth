@@ -7,9 +7,7 @@ import { runDiagnostics } from './diagnostics.js';
 export class MultiEditTool implements Tool {
   readonly name = 'multi_edit';
   readonly description =
-    'Performs search-and-replace across multiple files matching a glob pattern. ' +
-    'Supports dry_run preview mode. Default maximum 10 files. ' +
-    'Use replace_all=true to allow multiple replacements per file.';
+    '跨多个文件执行搜索替换，通过 glob 模式匹配目标文件。支持 dry_run 预览模式（仅显示变更内容不写入）。默认最多匹配 10 个文件。replace_all=true 时允许单文件内多次替换。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

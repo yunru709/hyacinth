@@ -12,10 +12,7 @@ import type { Tool } from './interface.js';
 export class ArchiveTool implements Tool {
   readonly name = 'archive';
   readonly description =
-    'Compress or extract archives (zip, tar.gz, tar.bz2). ' +
-    'Action "extract" unpacks to a target directory. ' +
-    'Action "compress" creates an archive from a source directory or file list. ' +
-    'Uses system tools (tar, zip) for reliable operation.';
+    '压缩或解压文件（支持 zip、tar.gz、tar.bz2）。action="extract" 解压到目标目录。action="compress" 将源文件/目录打包为压缩文件。使用系统工具（tar / zip）确保可靠性。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

@@ -236,25 +236,33 @@ export async function createSubAgentLoop(
  */
 export class DelegateToAgentTool implements Tool {
   name = 'delegate_to_agent';
-  description = 'Delegate a task to a specialized sub-agent. The sub-agent will execute the task independently and return results.';
+  description =
+    '将任务委派给子 Agent 执行。子 Agent 是拥有独立上下文、工具集和 Provider 的隔离工作单元，执行完毕后返回结构化结果。' +
+    '三种协作模式：' +
+    '"delegate"（委托）：将单个任务交给一个子 Agent 独立完成；' +
+    '"adversarial"（对抗审查）：两个子 Agent 从不同角度独立审查同一任务，综合双方意见；' +
+    '"parallel"（并行分工）：同时启动多个子 Agent 并行执行，汇总结果。' +
+    '编排场景：当你有一个复杂计划时，自己负责规划和决策，将其中可并行的子任务分别委派给多个子 Agent 同步执行——spawn_sub_agent 可克隆多份实例，配合不同的 instance_id 并发调度，大幅缩短总耗时。' +
+    '会话复用：子 Agent 会话在 TTL 窗口内持久化（默认 10 分钟），相同 instance_id 再次委派时自动恢复完整对话记忆，无需重新交代背景。' +
+    '使用 list_sub_agents 查看可用 Agent 及其实例 ID，create_sub_agent 创建新 Agent，spawn_sub_agent 克隆以支持并行，destroy_sub_agent 清理不再需要的实例。';
   inputSchema = {
     type: 'object' as const,
     properties: {
       agent_name: {
         type: 'string' as const,
-        description: 'Name of the sub-agent to delegate to (e.g., "code-reviewer"). If multiple instances exist, the first available one is selected. Use instance_id for precise targeting.',
+        description: '要委派的子 Agent 名称（如 "code-reviewer"）。同一名称下有多个实例时选中第一个。用 instance_id 精确指定。',
       },
       instance_id: {
         type: 'string' as const,
-        description: 'Optional instance ID of a specific sub-agent instance (for targeting a clone/spawned copy). Takes priority over agent_name.',
+        description: '可选，指定子 Agent 实例的唯一 ID（用于定位克隆体）。优先级高于 agent_name。',
       },
       task: {
         type: 'string' as const,
-        description: 'Clear description of the task to delegate to the sub-agent',
+        description: '委派给子 Agent 的任务描述，清晰说明要做什么和期望的输出。',
       },
       context: {
         type: 'string' as const,
-        description: 'Optional additional context to provide to the sub-agent (e.g., relevant code snippets, file paths)',
+        description: '可选的附加上下文（如相关代码片段、文件路径、背景信息）。',
       },
     },
     required: ['task'],

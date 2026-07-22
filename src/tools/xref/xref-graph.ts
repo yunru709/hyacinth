@@ -21,16 +21,14 @@ const FORMATS: GraphFormat[] = ['text', 'mermaid', 'graphviz'];
 export class XrefGraphTool implements Tool {
   readonly name = 'xref_graph';
   readonly description =
-    'Visualize the cross-reference graph as a text tree, Mermaid.js diagram, or Graphviz DOT. ' +
-    'Supports two modes:\n' +
-    '  1. Symbol-centered call graph — who calls this function, and what does it call?\n' +
-    '  2. File-centered dependency graph — what files import/depend on this file?\n\n' +
-    'Output formats:\n' +
-    '  - "text": indented tree (├── └──), readable directly in terminal\n' +
-    '  - "mermaid": Mermaid graph LR/flowchart, renderable in Markdown viewers\n' +
-    '  - "graphviz": DOT digraph format for Graphviz renderers\n\n' +
-    'Use "max_depth" to limit traversal (default: 3). ' +
-    'Use "direction" to control call graph traversal: "callers" (up), "callees" (down), or "both" (default).';
+    '将交叉引用关系可视化为文本树、Mermaid.js 图或 Graphviz DOT。支持两种模式：\n' +
+    '  1. 符号调用图——谁调用了此函数？此函数调用了什么？\n' +
+    '  2. 文件依赖图——哪些文件导入/依赖此文件？\n\n' +
+    '输出格式：\n' +
+    '  - "text": 缩进树（├── └──），终端直接可读\n' +
+    '  - "mermaid": Mermaid 图，Markdown 渲染器可展示\n' +
+    '  - "graphviz": DOT 有向图格式，供 Graphviz 渲染\n\n' +
+    'max_depth 控制遍历深度（默认 3）。direction 控制调用图遍历方向：callers（上溯）、callees（下探）、both（双向，默认）。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

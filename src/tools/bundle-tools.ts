@@ -14,7 +14,7 @@ export function registerBundleTools(
   const tools: Tool[] = [
     {
       name: 'list_bundles',
-      description: 'List all available tool bundles with their tools and activation status.',
+      description: '列出所有可用工具包，包含包内工具和激活状态。',
       inputSchema: { type: 'object', properties: {} },
       async execute(): Promise<string> {
         try {
@@ -33,7 +33,7 @@ export function registerBundleTools(
     },
     {
       name: 'activate_bundle',
-      description: 'Activate one or more tool bundles (comma-separated names). Use deactivate_bundle to return to full mode.',
+      description: '激活一个或多个工具包（逗号分隔名称）。使用 deactivate_bundle 回到全量工具模式。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -59,7 +59,7 @@ export function registerBundleTools(
     },
     {
       name: 'deactivate_bundle',
-      description: 'Deactivate all bundles and return to full tool mode.',
+      description: '取消所有工具包限制，回到全量工具模式——所有已注册工具均对 LLM 可见。',
       inputSchema: { type: 'object', properties: {} },
       async execute(): Promise<string> {
         try {
@@ -72,7 +72,7 @@ export function registerBundleTools(
     },
     {
       name: 'create_bundle',
-      description: 'Create a new tool bundle.',
+      description: '创建自定义工具包。name=包名，description=描述，tools=初始工具列表（可选）。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -96,7 +96,7 @@ export function registerBundleTools(
     },
     {
       name: 'add_to_bundle',
-      description: 'Add tools to an existing bundle.',
+      description: '将工具追加到已有工具包。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -119,7 +119,7 @@ export function registerBundleTools(
     },
     {
       name: 'remove_from_bundle',
-      description: 'Remove tools from a bundle.',
+      description: '从工具包中移除指定工具。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -144,7 +144,7 @@ export function registerBundleTools(
     },
     {
       name: 'delete_bundle',
-      description: 'Delete a tool bundle (builtin and common cannot be deleted).',
+      description: '删除工具包（内置包和 common 包不可删除）。',
       inputSchema: {
         type: 'object',
         properties: { bundle: { type: 'string', description: '要删除的工具包名称' } },

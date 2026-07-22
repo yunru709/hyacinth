@@ -14,7 +14,7 @@ import type { Tool } from './interface.js';
 export class GlobTool implements Tool {
   readonly name = 'glob';
   readonly description =
-    'Find files matching a glob pattern. Returns paths sorted by modification time.';
+    '按 glob 模式匹配文件。返回按修改时间排序的文件路径列表。path 参数必填——始终传入项目根目录。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

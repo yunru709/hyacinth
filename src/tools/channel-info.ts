@@ -36,7 +36,7 @@ export function createChannelInfoTool(): Tool {
   return {
     name: 'channel_info',
     description:
-      'Query current channel configuration: which channels are connected, connection mode, DM/group policies, whether @mention is required.',
+      '查询当前外部渠道配置：已连接的渠道列表、连接模式、私聊/群聊策略、是否需要 @提及。',
     inputSchema: {
       type: 'object',
       properties: {},

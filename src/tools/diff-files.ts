@@ -15,9 +15,7 @@ import type { Tool } from './interface.js';
 export class DiffFilesTool implements Tool {
   readonly name = 'diff_files';
   readonly description =
-    'Compare two files line by line and return the diff with line numbers. ' +
-    'Returns unified diff format: lines prefixed with + (added), - (removed), or space (unchanged). ' +
-    'Supports both absolute and relative paths.';
+    '逐行比较两个文件，返回 unified diff 格式的差异。+ 表示新增行，- 表示删除行。支持绝对路径和相对路径。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

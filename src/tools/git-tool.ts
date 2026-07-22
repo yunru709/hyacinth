@@ -15,7 +15,7 @@ import { GitManager } from '../evolution/git-manager.js';
  */
 export class GitTool implements Tool {
   readonly name = 'git';
-  readonly description = 'Git version control: commit, revert, branch, diff';
+  readonly description = 'Git 版本控制。支持四种操作：commit（暂存所有变更并提交，需 message 参数）、revert（stash 当前变更后回退指定 commit，需 commit 参数）、branch（创建并切换到新分支，需 name 参数）、diff（查看未暂存的变更，stat=true 查看摘要）。不在 Git 仓库中时返回友好提示。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

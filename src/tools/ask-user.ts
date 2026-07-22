@@ -21,7 +21,7 @@ export function createAskUserTool(): Tool {
   return {
     name: 'ask_user',
     description:
-      'Pause execution to ask the user structured questions. Shows an interactive form with multiple questions, multi-select options, and custom text input. Use this when you need to clarify requirements, gather preferences, or confirm choices before proceeding.',
+      '暂停执行，向用户展示交互式问题表单。支持多问题、多选选项和自定义文本输入。适用于需要澄清需求、收集偏好或确认选项后再继续的场景。',
     inputSchema: {
       type: 'object',
       properties: {

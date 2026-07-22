@@ -220,8 +220,7 @@ async function readPdf(filePath: string, stat: Stats): Promise<string> {
 
 export class ReadTool implements Tool {
   readonly name = 'read';
-  readonly description =
-    'Read a file from disk. Supports offset/limit for chunked reading. Images return dimensions, PDFs return page count. Max 2000 lines per read — use offset+limit for large files.';
+  readonly description = '读取磁盘上的文件。支持 offset/limit 分块读取。图片文件返回尺寸信息，PDF 返回页数。每次最多读取 2000 行，大文件请用 offset+limit 分段读取。';
   readonly companionDescription = '需要看点别的东西了。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
