@@ -263,6 +263,8 @@ export class AgentLoop {
   private schedulerInitialized = false;
   /** 定时任务触发后待注入对话的通知 */
   pendingTaskNotifications: Array<{ name: string; firedAt: string }> = [];
+  /** 异步子Agent 完成后的结果队列（delegate-tool 写入，主循环消费） */
+  pendingAsyncResults: Array<{ handle: string; agentName: string; status: 'completed' | 'failed'; result?: string; error?: string }> = [];
   /** 当前正在执行的定时任务名（供 TUI 显示上下文），run 前设置，run 后清除 */
   pendingTaskName: string | null = null;
   /** 知识库状态引用（factory 注入） */
@@ -1303,6 +1305,24 @@ export class AgentLoop {
         const result = await this.runTurn();
         turnCount++;
         if (result.toolCalled) toolWasCalled = true;
+
+        // ── 异步子Agent 结果回合内注入 ─────────────────────────
+        // delegate-tool 中异步任务完成后会将结果推送到此队列。
+        // 本轮迭代结束后检查：有已完成的结果→注入对话→强制继续迭代，
+        // 让 LLM 在当前 turn 内拿到结果并做出反应，无需跨 turn 手动查。
+        if (this.pendingAsyncResults.length > 0) {
+          const results = this.pendingAsyncResults.splice(0);
+          for (const r of results) {
+            const content = r.status === 'completed'
+              ? `[异步子Agent ${r.handle} (${r.agentName}) 已完成]\n${r.result ?? ''}`
+              : `[异步子Agent ${r.handle} (${r.agentName}) 执行失败]\n${r.error ?? ''}`;
+            await this.conversationStore.append(this.sessionDir, {
+              role: 'user',
+              content: [{ type: 'text', text: content }],
+            });
+          }
+          result.stop = false; // 强制继续迭代，让 LLM 看到注入的异步结果
+        }
 
         // 更新 stats
         await this.statsManager.increment(this.sessionDir, 'turn_count', 1);

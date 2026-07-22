@@ -2,6 +2,7 @@ import { type ProcessStatus, type ProcessEventCallbacks } from './interface.js';
 import { ProcessManager } from './manager.js';
 import { LocalModelManager, type LoadedModelInfo } from './local-model.js';
 import type { BackgroundProcessRegistry } from '../tools/background-registry.js';
+import { waitForAsyncTasks } from '../agents/delegate-tool.js';
 
 export type ManagedEntityType = 'local-model' | 'mcp-server' | 'custom';
 
@@ -226,6 +227,9 @@ export class LifecycleSupervisor {
     if (this.backgroundRegistry) {
       await this.backgroundRegistry.shutdownAll().catch(() => {});
     }
+
+    // 等待异步子 Agent 任务完成（最多等 5 秒）
+    await waitForAsyncTasks(5000).catch(() => {});
 
     const results = this.entities.map((e) =>
       e.manager.stop().catch(() => {

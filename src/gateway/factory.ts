@@ -545,12 +545,16 @@ export async function createAgent(
   for (const agent of agents) {
     agentRegistry.register(agent);
   }
+  // 异步子Agent 结果队列——先创建引用，后续赋给 loop
+  const pendingAsyncResults: Array<{ handle: string; agentName: string; status: 'completed' | 'failed'; result?: string; error?: string }> = [];
+
   const delegateTool = new DelegateToAgentTool(agentRegistry, {
     modelRouter,
     toolRegistry,
     sessionDir,
     maxContextTokens: maxContext,
     dependencyAnalyzer,
+    pendingAsyncResults,
     createSubProvider: (userId: string) => {
       if (!subProviderApiKey || !subProviderBaseType) {
         throw new Error('Cannot create sub-agent provider: main provider not configured.');
@@ -677,6 +681,7 @@ export async function createAgent(
 
   // 注入知识库状态引用
   loop.kbState = kbState;
+  loop.pendingAsyncResults = pendingAsyncResults; // 异步子Agent结果队列（和 delegateTool 共享引用）
   loopRef = loop; // wire fallback notification
 
   // 注入旁路 Provider 引用（供模式切换时 setBypassUserId 使用）

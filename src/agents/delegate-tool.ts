@@ -42,6 +42,8 @@ export interface SubAgentContext {
   sandboxRoot?: string;
   /** 创建带独立 userId 的 Provider（子Agent 之间 + 与主Agent 的 KVCache 隔离） */
   createSubProvider(userId: string): Provider;
+  /** 异步子Agent 结果推送队列（主 loop 的 pendingAsyncResults，完成后自动注入对话） */
+  pendingAsyncResults?: Array<{ handle: string; agentName: string; status: 'completed' | 'failed'; result?: string; error?: string }>;
 }
 
 // ── 运行中子 Agent Loop 管理器（模块级，避免循环依赖） ──────────
@@ -125,6 +127,16 @@ export function listAsyncTasks(): AsyncSubAgentTask[] {
 /** 按 handle 获取异步任务 */
 export function getAsyncTask(handle: string): AsyncSubAgentTask | undefined {
   return asyncTasks.get(handle);
+}
+
+/** 等待所有运行中的异步子 Agent 任务完成（用于优雅关闭） */
+export async function waitForAsyncTasks(timeoutMs: number = 5000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const running = listAsyncTasks().filter(t => t.status === 'running');
+    if (running.length === 0) return;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
 }
 
 /** 销毁子 Agent session 目录（清理 conversation/events/stats/meta） */
@@ -336,7 +348,11 @@ export class DelegateToAgentTool implements Tool {
       },
       async: {
         type: 'boolean' as const,
-        description: '是否异步执行。默认 false（阻塞等待结果）。设为 true 时立即返回任务句柄（如 sub_001），子 Agent 在后台执行，主 Agent 可继续工作。之后用 list_sub_agent_tasks 查看状态，get_sub_agent_result 获取结果。',
+        description: '是否异步执行。默认 false（阻塞等待结果）。设为 true 时立即返回任务句柄（如 sub_001），子 Agent 在后台执行，主 Agent 可继续其他工具调用。',
+      },
+      across_turns: {
+        type: 'boolean' as const,
+        description: '异步结果是否允许跨 turn。默认 false——子Agent完成后结果在当前 turn 内自动注入对话，LLM 立即看到并继续处理。设为 true 时结果不自动注入，需手动用 get_sub_agent_result 获取（适用于需要跨多轮对话的后台任务）。仅在 async=true 时生效。',
       },
     },
     required: ['task'],
@@ -356,6 +372,7 @@ export class DelegateToAgentTool implements Tool {
     const task = args.task as string;
     const context = args.context as string | undefined;
     const runAsync = args.async === true;
+    const acrossTurns = args.across_turns === true;
 
     if (!agentName && !instanceId) {
       return 'Error: either agent_name or instance_id is required. Use list_sub_agents to see available agents and their instance IDs.';
@@ -383,7 +400,7 @@ export class DelegateToAgentTool implements Tool {
 
     // 异步模式下不支持 adversarial 和 parallel（这两种本身就是多Agent协同，异步应逐个个委派）
     if (runAsync && agentDef.collaborationMode !== 'delegate') {
-      return `Error: async mode only supports collaborationMode "delegate". Current mode: "${agentDef.collaborationMode}". Spawn individual agents with spawn_sub_agent and delegate to each one with async=true.`;
+      return `错误：异步模式仅支持 collaborationMode="delegate"。当前模式为 "${agentDef.collaborationMode}"。请用 spawn_sub_agent 克隆独立实例，然后对每个实例分别用 async=true 委派。`;
     }
 
     // 构造完整任务描述
@@ -391,7 +408,7 @@ export class DelegateToAgentTool implements Tool {
 
     try {
       if (runAsync) {
-        return await this.executeAsync(agentDef, fullTask);
+        return await this.executeAsync(agentDef, fullTask, acrossTurns);
       }
 
       if (agentDef.collaborationMode === 'adversarial') {
@@ -411,20 +428,27 @@ export class DelegateToAgentTool implements Tool {
    * 异步委托：在后台启动子 Agent，立即返回任务句柄。
    * 子 Agent 的 loop.run() 在后台 Promise 中执行，完成后结果写入 AsyncSubAgentTask。
    */
-  private async executeAsync(agentDef: AgentDefinition, task: string): Promise<string> {
+  private async executeAsync(agentDef: AgentDefinition, task: string, acrossTurns: boolean): Promise<string> {
     const instanceId = agentDef.instanceId!;
     const handle = registerAsyncTask(agentDef.name, instanceId, task);
 
     // 在后台启动子 Agent，不阻塞。catch 兜底防止未处理的 Promise rejection
-    this.runAsyncInBackground(handle, agentDef, task).catch((err) => {
-      failAsyncTask(handle, err instanceof Error ? err.message : String(err));
+    this.runAsyncInBackground(handle, agentDef, task, acrossTurns).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      failAsyncTask(handle, message);
+      if (!acrossTurns) {
+        this.parentContext.pendingAsyncResults?.push({ handle, agentName: agentDef.name, status: 'failed', error: message });
+      }
     });
 
-    return `异步子 Agent 任务已启动。\n句柄: ${handle}\nAgent: ${agentDef.name} (${instanceId})\n任务: ${task.slice(0, 100)}${task.length > 100 ? '...' : ''}\n\n使用 list_sub_agent_tasks 查看状态。完成后用 get_sub_agent_result ${handle} 获取结果。`;
+    const hint = acrossTurns
+      ? `跨 turn 模式——任务完成后需手动用 get_sub_agent_result ${handle} 获取结果。`
+      : '回合内模式——子Agent完成后结果将自动注入当前对话。';
+    return `异步子 Agent 任务已启动。\n句柄: ${handle}\nAgent: ${agentDef.name} (${instanceId})\n${hint}\n任务: ${task.slice(0, 100)}${task.length > 100 ? '...' : ''}`;
   }
 
   /** 后台执行子 Agent 任务 */
-  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string): Promise<void> {
+  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string, acrossTurns: boolean): Promise<void> {
     const instanceId = agentDef.instanceId!;
     try {
       const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext);
@@ -436,10 +460,17 @@ export class DelegateToAgentTool implements Tool {
       unregisterRunningLoop(instanceId);
       const result = await this.collectResult(agentDef, task);
       completeAsyncTask(handle, result);
+      if (!acrossTurns) {
+        // 回合内模式：推送到主 loop 队列，当前 turn 自动注入结果
+        this.parentContext.pendingAsyncResults?.push({ handle, agentName: agentDef.name, status: 'completed', result });
+      }
     } catch (error: unknown) {
       unregisterRunningLoop(instanceId);
       const message = error instanceof Error ? error.message : String(error);
       failAsyncTask(handle, message);
+      if (!acrossTurns) {
+        this.parentContext.pendingAsyncResults?.push({ handle, agentName: agentDef.name, status: 'failed', error: message });
+      }
     }
   }
 
