@@ -37,8 +37,7 @@ import { initDependencyAnalyzer } from '../dependency/index.js';
 import type { Provider } from '../provider/interface.js';
 import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
-import type { BootstrapStatus } from '../setup/persona-bootstrap.js';
-import { ensureGlobalPersonaFiles, ensureGlobalPromptDir, getBootstrapStatus } from '../setup/persona-bootstrap.js';
+import { ensureGlobalPersonaFiles, ensureGlobalPromptDir } from '../setup/persona-bootstrap.js';
 import { ConfigManager } from '../setup/config.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { FullConfig } from '../runtime/config-schema.js';
@@ -59,7 +58,7 @@ import { injectConfigCenter } from '../provider/local-config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { modelCatalog } from '../provider/catalog.js';
 import { TurnRecorder, TurnStore, createRollbackStatusTool, createRollbackTool } from '../rollback/index.js';
-import { MachineRegistry, BootstrapFlow, TodoFlow, SpecFlow } from '../machine/index.js';
+import { MachineRegistry, TodoFlow, SpecFlow } from '../machine/index.js';
 import { createAskUserTool } from '../tools/ask-user.js';
 import { createFlowStartTool, createFlowAddTool, createFlowCompleteTool } from '../tools/flow.js';
 import { createTriggerCompressionTool } from '../tools/compression.js';
@@ -87,10 +86,8 @@ export interface CreateAgentOptions {
   shouldContinue?: boolean;
   /** 每个 session 的最大消息数 */
   maxMessages?: number;
-  /** Bootstrap 工作区目录 */
+  /** Persona 文件目录 */
   personaDir?: string;
-  /** Bootstrap 状态 */
-  bootstrapStatus?: BootstrapStatus;
   /** 本地模型 Provider（用于压缩通道，不影响主对话） */
   localModelProvider?: Provider;
   /** 渠道信息（注入到 System Prompt 的 environment section） */
@@ -154,7 +151,7 @@ export async function createAgent(
   options: CreateAgentOptions,
   supervisor?: LifecycleSupervisor,
 ): Promise<AgentComponents> {
-  const { cwd, provider, maxTurns, maxContext, outputHandler, sessionId, shouldContinue, maxMessages = 10000, personaDir, bootstrapStatus, localModelProvider, channelsInfo } = options;
+  const { cwd, provider, maxTurns, maxContext, outputHandler, sessionId, shouldContinue, maxMessages = 10000, personaDir, localModelProvider, channelsInfo } = options;
 
   // ── 配置预加载（需在 session 创建前读取 startup.defaultMode）──────
   const configManager = new ConfigManager(cwd);
@@ -205,7 +202,6 @@ export async function createAgent(
   // ── Global Persona Bootstrap ──────────────────────────────────────
   const personaSetup = await ensureGlobalPersonaFiles();
   const effectivePersonaDir = personaDir ?? personaSetup.personaDir;
-  const effectiveBootstrapStatus = bootstrapStatus ?? (await getBootstrapStatus(effectivePersonaDir));
 
   // ── 内置 Prompt 同步 ─────────────────────────────────────────────
   // 将所有内置 prompt 同步到 ~/.agent/prompts/ 下，
@@ -219,8 +215,7 @@ export async function createAgent(
   await ensureGlobalPromptDir('environment');
   // root 级文件 summary.md 由 loadPrompt 递归搜索找到，暂不单独同步
 
-  // ── 注册 Flow（Bootstrap + TODO + Spec）──────────────────────────
-  flowRegistry.register(new BootstrapFlow(effectivePersonaDir));
+  // ── 注册 Flow（TODO + Spec）────────────────────────────────
   flowRegistry.register(new TodoFlow());
   flowRegistry.register(new SpecFlow());
 
@@ -686,11 +681,6 @@ export async function createAgent(
 
   // 注入旁路 Provider 引用（供模式切换时 setBypassUserId 使用）
   if (bypassProvider) loop.setBypassProvider(bypassProvider);
-
-  // ── Bootstrap Flow 自动激活（首次安装后自动运行） ──
-  if (effectiveBootstrapStatus === 'pending') {
-    flowRegistry.activate('bootstrap');
-  }
 
   // 注册后台进程注册表到 LifecycleSupervisor（优雅关闭时自动清理）
   if (supervisor) {

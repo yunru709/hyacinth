@@ -143,7 +143,7 @@ export class SetupWizard {
         if (ws.filesCreated.length > 0) {
           p.log.info(`已在 ${personaDir} 创建 ${ws.filesCreated.length} 个模板文件`);
         }
-        if (ws.status === 'pending') {
+        if (ws.needsSetup) {
           p.log.info(pc.cyan('首次启动时将进行个性化引导对话'));
         }
       } catch (error) {

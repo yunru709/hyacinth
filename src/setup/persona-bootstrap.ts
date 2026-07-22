@@ -15,7 +15,6 @@ const PERSONA_STATE_FILE = 'persona-state.json';
 const PERSONA_STATE_VERSION = 1;
 
 const PERSONA_FILE_NAMES = [
-  'BOOTSTRAP.md',
   'SOUL.md',
   'IDENTITY.md',
   'USER.md',
@@ -24,11 +23,8 @@ const PERSONA_FILE_NAMES = [
 ] as const;
 
 export type PersonaFileName = (typeof PERSONA_FILE_NAMES)[number];
-export type BootstrapStatus = 'pending' | 'complete';
-
 export interface PersonaState {
   version: number;
-  bootstrapSeededAt?: string;
   setupCompletedAt?: string;
 }
 
@@ -135,7 +131,7 @@ async function fileContentDiffersFromTemplate(
 /**
  * 确保内置 prompt 目录同步到 ~/.agent/prompts/{name}/。
  * 
- * 和 persona 不同（有 bootstrap 状态机），这只是一个简单的文件复制：
+ * 这只是一个简单的文件复制：
  * 首次安装时复制，已存在则跳过。
  * 
  * 用于 attention.md 等非 persona 的内置 prompt 文件。
@@ -191,15 +187,13 @@ export async function ensureGlobalPromptDir(
 
 export async function ensurePersonaFiles(
   personaDir: string,
-): Promise<{ status: BootstrapStatus; filesCreated: string[]; state: PersonaState }> {
+): Promise<{ needsSetup: boolean; filesCreated: string[]; state: PersonaState }> {
   await fsp.mkdir(personaDir, { recursive: true });
 
   let state = await readState(personaDir);
   const now = new Date().toISOString();
 
-  // 自动补检测：如果 persona 文件已被填写（内容 ≠ 模板）但 state 文件未反映
-  //（例如 markBootstrapComplete 因格式验证过严而失败），
-  // 在重建 BOOTSTRAP.md 之前标记为完成。这是修复"每次启动都重新引导"的 bug。
+  // 自动检测：如果 persona 文件已被填写（内容 ≠ 模板）但 state 文件未反映，自动标记完成
   if (!state.setupCompletedAt) {
     try {
       const identityPath = path.join(personaDir, 'IDENTITY.md');
@@ -222,8 +216,6 @@ export async function ensurePersonaFiles(
   const filesCreated: string[] = [];
 
   for (const fileName of PERSONA_FILE_NAMES) {
-    if (alreadyComplete && fileName === 'BOOTSTRAP.md') continue;
-
     const filePath = path.join(personaDir, fileName);
     const template = loadTemplateContent(fileName);
     const created = await writeFileIfMissing(filePath, template);
@@ -233,48 +225,33 @@ export async function ensurePersonaFiles(
     }
   }
 
-  const bootstrapPath = path.join(personaDir, 'BOOTSTRAP.md');
-  let bootstrapExists = true;
-  try {
-    await fsp.access(bootstrapPath);
-  } catch {
-    bootstrapExists = false;
-  }
-
-  if (bootstrapExists && !state.bootstrapSeededAt) {
-    state = { ...state, bootstrapSeededAt: now };
-  }
-
+  // 二次检查：如果文件已被修改但 state 尚未记录
   if (!state.setupCompletedAt) {
-    const identityPath = path.join(personaDir, 'IDENTITY.md');
-    const userPath = path.join(personaDir, 'USER.md');
-
-    const identityTemplate = loadTemplateContent('IDENTITY.md');
-    const userTemplate = loadTemplateContent('USER.md');
-
-    const identityChanged = await fileContentDiffersFromTemplate(identityPath, identityTemplate);
-    const userChanged = await fileContentDiffersFromTemplate(userPath, userTemplate);
-
-    if ((identityChanged || userChanged) && !bootstrapExists) {
-      state = { ...state, setupCompletedAt: now };
-      logger.info('Persona setup detected as complete (user-modified files)');
-    } else if (!bootstrapExists && state.bootstrapSeededAt && !state.setupCompletedAt) {
+    try {
+      const identityPath = path.join(personaDir, 'IDENTITY.md');
+      const userPath = path.join(personaDir, 'USER.md');
+      const identityTemplate = loadTemplateContent('IDENTITY.md');
+      const userTemplate = loadTemplateContent('USER.md');
+      const identityChanged = await fileContentDiffersFromTemplate(identityPath, identityTemplate);
+      const userChanged = await fileContentDiffersFromTemplate(userPath, userTemplate);
       if (identityChanged || userChanged) {
         state = { ...state, setupCompletedAt: now };
-        logger.info('Persona setup auto-completed (seeded + files modified + bootstrap deleted)');
+        logger.info('Persona setup detected as complete (user-modified files)');
       }
+    } catch {
+      // 文件可能尚未创建
     }
   }
 
   await writeState(personaDir, state);
 
-  const status: BootstrapStatus = state.setupCompletedAt ? 'complete' : 'pending';
-  return { status, filesCreated, state };
+  const needsSetup = !state.setupCompletedAt;
+  return { needsSetup, filesCreated, state };
 }
 
 export async function ensureGlobalPersonaFiles(
   configHome?: string,
-): Promise<{ status: BootstrapStatus; filesCreated: string[]; state: PersonaState; personaDir: string }> {
+): Promise<{ needsSetup: boolean; filesCreated: string[]; state: PersonaState; personaDir: string }> {
   const personaDir = getGlobalPersonaDir(configHome);
   const result = await ensurePersonaFiles(personaDir);
   return { ...result, personaDir };
@@ -346,103 +323,6 @@ export function validatePersonaFilesSync(personaDir: string): PersonaValidationR
   };
 }
 
-export async function isBootstrapComplete(personaDir: string): Promise<boolean> {
-  const state = await readState(personaDir);
-  if (!state.setupCompletedAt) return false;
-  const validation = await validatePersonaFiles(personaDir);
-  return validation.complete;
-}
-
-export async function getBootstrapStatus(personaDir: string): Promise<BootstrapStatus> {
-  const state = await readState(personaDir);
-  if (state.setupCompletedAt) {
-    const validation = await validatePersonaFiles(personaDir);
-    return validation.complete ? 'complete' : 'pending';
-  }
-
-  const bootstrapPath = path.join(personaDir, 'BOOTSTRAP.md');
-  try {
-    await fsp.access(bootstrapPath);
-    return 'pending';
-  } catch {
-    return 'complete';
-  }
-}
-
-export async function markBootstrapComplete(personaDir: string): Promise<void> {
-  const validation = await validatePersonaFiles(personaDir);
-  if (!validation.complete) {
-    const details = [
-      validation.missing.length > 0 ? `missing: ${validation.missing.join(', ')}` : '',
-      validation.templateFiles.length > 0 ? `templates: ${validation.templateFiles.join(', ')}` : '',
-    ].filter(Boolean).join('; ');
-    throw new Error(`Persona bootstrap is incomplete${details ? ` (${details})` : ''}.`);
-  }
-
-  const bootstrapPath = path.join(personaDir, 'BOOTSTRAP.md');
-
-  try {
-    await fsp.unlink(bootstrapPath);
-    logger.info('Deleted BOOTSTRAP.md');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw err;
-  }
-
-  const state = await readState(personaDir);
-  state.setupCompletedAt = new Date().toISOString();
-  await writeState(personaDir, state);
-
-  logger.info('Bootstrap marked as complete');
-}
-
-export function markBootstrapCompleteSync(personaDir: string): void {
-  const validation = validatePersonaFilesSync(personaDir);
-  if (!validation.complete) {
-    const details = [
-      validation.missing.length > 0 ? `missing: ${validation.missing.join(', ')}` : '',
-      validation.templateFiles.length > 0 ? `templates: ${validation.templateFiles.join(', ')}` : '',
-    ].filter(Boolean).join('; ');
-    throw new Error(`Persona bootstrap is incomplete${details ? ` (${details})` : ''}.`);
-  }
-
-  const bootstrapPath = path.join(personaDir, 'BOOTSTRAP.md');
-  try {
-    fs.unlinkSync(bootstrapPath);
-    logger.info('Deleted BOOTSTRAP.md');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw err;
-  }
-
-  const state = readStateSync(personaDir);
-  state.setupCompletedAt = new Date().toISOString();
-  writeStateSync(personaDir, state);
-  logger.info('Bootstrap marked as complete');
-}
-
-function readStateSync(personaDir: string): PersonaState {
-  const statePath = resolveStatePath(personaDir);
-  try {
-    const raw = fs.readFileSync(statePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && parsed.version === PERSONA_STATE_VERSION) {
-      return parsed as PersonaState;
-    }
-    return { version: PERSONA_STATE_VERSION };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return { version: PERSONA_STATE_VERSION };
-    throw err;
-  }
-}
-
-function writeStateSync(personaDir: string, state: PersonaState): void {
-  const stateDir = path.join(personaDir, PERSONA_STATE_DIR);
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(resolveStatePath(personaDir), JSON.stringify(state, null, 2) + '\n', 'utf-8');
-}
-
 export async function loadPersonaFiles(personaDir: string, cwdFallback?: string): Promise<PersonaFile[]> {
   const files: PersonaFile[] = [];
 
@@ -474,7 +354,6 @@ export async function loadPersonaFiles(personaDir: string, cwdFallback?: string)
   if (cwdFallback) {
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      if (f.name === 'BOOTSTRAP.md') continue;
       const template = loadTemplateContent(f.name);
       if (f.content === template || !f.content) {
         const cwdPath = path.join(cwdFallback, f.name);

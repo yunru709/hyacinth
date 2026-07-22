@@ -25,8 +25,7 @@ import { ConfigManager, API_KEY_MAP, DEFAULT_MAX_CONTEXT_TOKENS } from '../setup
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { SetupWizard } from '../setup/wizard.js';
 import { PROVIDER_MODELS } from '../setup/model-defaults.js';
-import { DEFAULT_PERSONA_DIR, ensurePersonaFiles, getBootstrapStatus } from '../setup/persona-bootstrap.js';
-import type { BootstrapStatus } from '../setup/persona-bootstrap.js';
+import { DEFAULT_PERSONA_DIR, ensurePersonaFiles } from '../setup/persona-bootstrap.js';
 import { createLogger } from '../logging/logger.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
 import type { FullConfig } from '../runtime/config-schema.js';
@@ -193,7 +192,6 @@ export async function runCli(): Promise<void> {
       // 初始化 persona 文件
       const personaDir = DEFAULT_PERSONA_DIR;
       await ensurePersonaFiles(personaDir);
-      const bootstrapStatus = await getBootstrapStatus(personaDir);
 
       // 如果用户选择进入 TUI，自动启动
       if (result.enterTui && result.config.provider) {
@@ -205,7 +203,6 @@ export async function runCli(): Promise<void> {
           maxContext: String(result.config.maxContext),
           tui: true,
           skipSetup: true,
-          bootstrapStatus,
         });
       }
     });
@@ -749,7 +746,6 @@ async function executeAction(
   const startModel = options.startModel as boolean | undefined;
   const skipSetup = options.skipSetup as boolean | undefined;
   const localModelName = options.localModel as string | undefined;
-  const bootstrapStatus = options.bootstrapStatus as BootstrapStatus | undefined;
 
   // 加载 .env 中的 API Key
   const configManager = new ConfigManager(process.cwd());
@@ -882,7 +878,6 @@ async function executeAction(
         maxMessages,
         skipSetup,
         DEFAULT_PERSONA_DIR,
-        bootstrapStatus,
         localModelProvider,
         continuationMessage,
       );
@@ -910,11 +905,6 @@ async function executeAction(
 
     // 注入 LifecycleSupervisor，实现运行时 provider 切换时自动管理本地模型进程
     loop.setLifecycleSupervisor(supervisor);
-
-    // Bootstrap Flow 已在 factory 中自动激活，发送空消息启动引导对话
-    if (loop.bootstrapActive) {
-      await loop.run('');
-    }
 
     // 检测重启续工指令
     if (!prompt) {

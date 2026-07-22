@@ -504,11 +504,6 @@ export class AgentLoop {
     return this.recentToolNames;
   }
 
-  /** Bootstrap Flow 是否活跃（供 CLI/TUI 判断是否需要发送空消息启动引导） */
-  get bootstrapActive(): boolean {
-    return this.flowRegistry.getActive()?.id === 'bootstrap';
-  }
-
   /** 就地切换到指定 session，无需重启进程 */
   async switchSession(newSessionDir: string): Promise<void> {
     this.sessionDir = newSessionDir;

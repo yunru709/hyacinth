@@ -28,7 +28,6 @@ import {
 } from '@earendil-works/pi-tui';
 import type { Provider } from '../provider/interface.js';
 import type { OutputHandler, TurnInfo } from '../orchestrator/loop.js';
-import type { BootstrapStatus } from '../setup/persona-bootstrap.js';
 import { StatsManager } from '../memory/stats.js';
 import { ConfigManager } from '../setup/config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
@@ -36,7 +35,7 @@ import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { ProviderManager } from '../provider/manager.js';
 import { LifecycleSupervisor } from '../lifecycle/index.js';
 import { createAgent } from './factory.js';
-import { getBootstrapStatus, DEFAULT_PERSONA_DIR } from '../setup/persona-bootstrap.js';
+import { DEFAULT_PERSONA_DIR } from '../setup/persona-bootstrap.js';
 import { createLogger } from '../logging/logger.js';
 import { TuiChannel } from '../channels/builtin/tui-channel.js';
 import { ChannelManager } from '../channels/manager.js';
@@ -264,7 +263,6 @@ export async function runTui(
   maxMessages: number = 10000,
   skipSetup?: boolean,
   personaDir: string = DEFAULT_PERSONA_DIR,
-  bootstrapStatus?: BootstrapStatus,
   localModelProvider?: Provider,
   continuationMessage?: string,
 ): Promise<void> {
@@ -877,9 +875,6 @@ export async function runTui(
     },
   };
 
-  // ── Bootstrap detection ──
-  const resolvedBootstrapStatus = bootstrapStatus ?? (await getBootstrapStatus(personaDir));
-
   // ── Local Model (llama.cpp) ──
   try {
     const loadedModels = await supervisor.loadAndStartModels(process.cwd());
@@ -951,7 +946,6 @@ export async function runTui(
       shouldContinue,
       maxMessages,
       personaDir,
-      bootstrapStatus: resolvedBootstrapStatus,
       localModelProvider,
       channel: 'tui',
     });
@@ -978,7 +972,6 @@ export async function runTui(
     setScheduler: () => {},
     notifyTaskFired: async () => {},
     subscribeConfig: () => {},
-    isBootstrapPending: () => false,
     shutdown: async () => {},
   };
   // 远程模式下 agent 为 undefined，这些变量仅用于本地 TUI 功能（斜杠命令等），用 any 避免 null 检查
@@ -1192,24 +1185,6 @@ export async function runTui(
   chatLog.addSystem(theme.dim('Persona: ') + theme.accent(personaDir));
   chatLog.addSystem('');
 
-  // ── Bootstrap ──
-  if (resolvedBootstrapStatus === 'pending') {
-    chatLog.addSystem(theme.warning('\u256d' + BOX_H.repeat(56) + '\u256e'));
-    chatLog.addSystem(theme.warning('\u2502  \uD83D\uDD27 Bootstrap Init'));
-    chatLog.addSystem(
-      theme.warning('\u2502  AI will ask you setup questions to configure the persona.'),
-    );
-    chatLog.addSystem(theme.warning('\u2570' + BOX_H.repeat(56) + '\u256f'));
-    chatLog.addSystem('');
-
-    try {
-      // Flow 已在 factory.ts 中自动激活，发送空消息让模型根据 flow_injection 引导对话
-      await loop.run('');
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      chatLog.addSystem(theme.errorBright('[Bootstrap Error] ') + theme.error(message));
-    }
-  }
 
   chatLog.addSystem(
     theme.dim('Type ') +

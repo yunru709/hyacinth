@@ -21,5 +21,4 @@ export { MachineRegistry } from './registry.js';
 
 export type { FlowController } from './flows/types.js';
 export { TodoFlow } from './flows/todo.js';
-export { BootstrapFlow } from './flows/bootstrap.js';
 export { SpecFlow } from './flows/spec.js';

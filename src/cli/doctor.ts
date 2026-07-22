@@ -67,7 +67,7 @@ function checkEncoding(): CheckResult {
 
 function checkPersona(): CheckResult {
   const personaDir = path.join(os.homedir(), '.agent', 'prompts', 'persona');
-  const files = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md'] as const;
+  const files = ['SOUL.md', 'IDENTITY.md', 'USER.md'] as const;
   const existing: string[] = [];
   const missing: string[] = [];
 
@@ -77,21 +77,15 @@ function checkPersona(): CheckResult {
     else missing.push(f);
   }
 
-  const hasBootstrap = existing.includes('BOOTSTRAP.md');
-
   return {
     label: 'Persona 文件',
-    ok: existing.length >= 3 && !hasBootstrap,
-    detail: hasBootstrap
-      ? `BOOTSTRAP.md 仍存在 — 需要完成身份初始化（${existing.length}/4 文件存在）`
-      : missing.length > 0
-        ? `缺失: ${missing.join(', ')}`
-        : `完整 (${existing.length}/4 文件，bootstrap 已完成)`,
+    ok: existing.length >= 3,
+    detail: missing.length > 0
+      ? `缺失: ${missing.join(', ')}`
+      : `完整 (${existing.length}/3 文件)`,
     fix: missing.length > 0
       ? '运行 hyacinth setup 完成初始化'
-      : hasBootstrap
-        ? '启动 TUI 并完成身份对话，或运行 hyacinth setup'
-        : undefined,
+      : undefined,
   };
 }
 
@@ -305,7 +299,6 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
 
     // 修复 persona 文件
     const personaDir = path.join(os.homedir(), '.agent', 'prompts', 'persona');
-    const bootstrapPath = path.join(personaDir, 'BOOTSTRAP.md');
     if (!fs.existsSync(personaDir)) {
       fs.mkdirSync(personaDir, { recursive: true });
     }
@@ -317,10 +310,6 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
         fs.writeFileSync(p, content, 'utf-8');
         personaCreated++;
       }
-    }
-    // 确保 BOOTSTRAP.md 存在（触发 bootstrap 流程）
-    if (!fs.existsSync(bootstrapPath) && personaCreated > 0) {
-      fs.writeFileSync(bootstrapPath, '# Bootstrap\n请与用户对话，了解其偏好后填写 IDENTITY.md 和 USER.md。', 'utf-8');
     }
     if (personaCreated > 0) {
       console.log(`  ✅ 创建了 ${personaCreated} 个 Persona 文件`);
