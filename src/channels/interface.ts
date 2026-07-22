@@ -70,6 +70,14 @@ export interface ChannelReply {
   metadata?: Record<string, unknown>;
 }
 
+/** 主动发送的目标（跨渠道借用能力时指定接收方） */
+export interface ChannelTarget {
+  /** 目标类型 */
+  type: 'user' | 'chat';
+  /** 用户 ID 或群聊 ID */
+  id: string;
+}
+
 // ── Agent 工厂与运行接口 ─────────────────────────────────────
 
 /** 输出处理器（渠道消息收集用） */
@@ -180,6 +188,17 @@ export interface ChannelHandler {
    * 获取渠道状态
    */
   getStatus(): ChannelStatus;
+
+  /**
+   * 主动发送消息到渠道（跨 session，不关联任何 AgentLoop、不落盘）。
+   * 用于从其他渠道借用本渠道的发送能力（如 TUI 中的 Agent 通过飞书发消息）。
+   * 未实现 = 该渠道不支持被外部借用。
+   *
+   * @param target 目标用户或群聊
+   * @param content 消息内容
+   * @returns 发送结果描述
+   */
+  send?(target: ChannelTarget, content: ChannelReply): Promise<string>;
 }
 
 // ── 渠道状态 ─────────────────────────────────────────────────

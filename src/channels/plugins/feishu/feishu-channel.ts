@@ -16,6 +16,7 @@ import type {
   ChannelHandler,
   ChannelEvent,
   ChannelReply,
+  ChannelTarget,
   ChannelConfig,
   ChannelStatus,
   ChannelMessageEvent,
@@ -38,7 +39,7 @@ import {
   type FeishuMessageEvent,
   type FeishuMessageContext,
 } from './feishu-event.js';
-import { sendText, sendCard, getSenderInfo } from './feishu-send.js';
+import { sendText, sendCard, sendImage, getSenderInfo } from './feishu-send.js';
 import { ChannelSessionPool, createCollectHandler } from './feishu-session.js';
 import { FeishuMessageQueue } from './feishu-message-queue.js';
 import { generateSessionId } from '../../../memory/session.js';
@@ -240,6 +241,63 @@ export class FeishuChannel implements ChannelHandler {
 
   getStatus(): ChannelStatus {
     return this.status;
+  }
+
+  /**
+   * 主动发送消息到飞书（跨渠道借用能力入口）。
+   * 纯借用——不创建 session、不写 conversation、不影响对话状态。
+   */
+  async send(target: ChannelTarget, content: ChannelReply): Promise<string> {
+    if (this.status !== 'active') return '飞书渠道未连接，无法发送';
+
+    const config = this.config;
+    const to = target.type === 'chat' ? `chat:${target.id}` : `user:${target.id}`;
+
+    try {
+      if (content.metadata?.card) {
+        await sendCard(config, { to, card: content.metadata.card as Record<string, unknown> });
+      } else {
+        await sendText(config, { to, text: content.content });
+      }
+
+      // 图片支持（通过飞书图片上传 API）
+      if (content.images && content.images.length > 0) {
+        const token = await this.getTenantAccessToken();
+        if (token) {
+          for (const img of content.images) {
+            try {
+              const imageKey = await this.uploadImage(token, img.data, img.media_type);
+              await sendImage(config, { to, imageKey });
+            } catch { /* 图片发送失败不影响整体 */ }
+          }
+        }
+      }
+
+      return `已通过飞书发送到 ${to}`;
+    } catch (err) {
+      return `飞书发送失败: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** 上传图片到飞书，返回 image_key */
+  private async uploadImage(token: string, base64Data: string, mediaType: string): Promise<string> {
+    const domain = this.config?.domain ?? 'https://open.feishu.cn';
+    const resp = await fetch(`${domain}/open-apis/im/v1/images`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        image_type: 'message',
+        image: base64Data,
+      }),
+    });
+    const json = await resp.json() as { code?: number; data?: { image_key?: string } };
+    if (json.code !== 0 || !json.data?.image_key) {
+      throw new Error(`飞书图片上传失败: code=${json.code}`);
+    }
+    return json.data.image_key;
   }
 
   /** 获取 tenant access token（缓存，提前 60s 刷新，token 有效期 2h） */

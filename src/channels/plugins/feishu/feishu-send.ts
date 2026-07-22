@@ -291,3 +291,33 @@ export async function getSenderInfo(
     return null;
   }
 }
+
+/**
+ * 发送图片消息（需先通过上传 API 获取 image_key）。
+ */
+export async function sendImage(
+  config: FeishuChannelConfig,
+  params: { to: string; imageKey: string },
+): Promise<FeishuSendResult> {
+  const client = await createFeishuClient(config);
+  const { receiveId, receiveIdType } = resolveSendTarget(params.to);
+  const content = JSON.stringify({ image_key: params.imageKey });
+
+  const res = await client.im.message.create({
+    params: { receive_id_type: receiveIdType },
+    data: {
+      receive_id: receiveId,
+      content,
+      msg_type: 'image',
+    },
+  });
+
+  if (res.code !== 0) {
+    throw new Error(`飞书图片发送失败: ${res.msg || `code ${res.code}`}`);
+  }
+
+  return {
+    messageId: res.data?.message_id ?? '',
+    chatId: receiveId,
+  };
+}

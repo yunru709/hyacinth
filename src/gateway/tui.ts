@@ -1117,6 +1117,13 @@ export async function runTui(
   // 启动所有渠道（每个渠道自行处理消息）
   await channelManager.startAll(agentFactory);
 
+  // 注册跨渠道发送工具（TUI 模式）
+  if (agent) {
+    const { MessageDispatcher, createSendChannelMessageTool } = await import('../channels/dispatcher.js');
+    const dispatcher = new MessageDispatcher(channelManager);
+    agent.toolRegistry.register(createSendChannelMessageTool(dispatcher));
+  }
+
   // ── ASCII Art loader ──────────────────────────────────────────────
   async function loadAsciiArt(maxWidth = 54): Promise<{ text: string; width: number } | null> {
     const asciiDir = path.join(os.homedir(), '.agent', 'ascii');
