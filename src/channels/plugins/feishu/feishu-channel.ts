@@ -243,32 +243,65 @@ export class FeishuChannel implements ChannelHandler {
     return this.status;
   }
 
-  /**
-   * 主动发送消息到飞书（跨渠道借用能力入口）。
-   * 纯借用——不创建 session、不写 conversation、不影响对话状态。
-   */
+  // ================================================================
+  // send() — 跨渠道借用能力入口
+  // ================================================================
+  //
+  // 设计意图：
+  //   每个渠道有自己独特的发送能力（飞书能发卡片和图片、微信能发文件、
+  //   TUI 只能显示文本）。send() 将这些能力暴露给外部，使得其他渠道
+  //   的 Agent 可以借用本渠道的能力发送消息。
+  //
+  // 行为保证（"纯借用"语义）：
+  //   - 不创建 session —— 消息是一次性的，没有对应的 AgentLoop
+  //   - 不写 conversation.jsonl —— 不污染任何渠道的对话历史
+  //   - 不影响 ChannelHandler 内部状态 —— sessionMap、消息队列等完全不变
+  //   - 被借用方对"谁借的"完全无感 —— 不需要知道调用方是哪个渠道
+  //
+  // 调用链：
+  //   Agent → send_channel_message 工具 → MessageDispatcher
+  //        → ChannelManager.get('feishu') → FeishuChannel.send()
+  //
+  // 支持的消息类型（按优先级）：
+  //   1. 卡片消息（content.metadata.card 存在时）—— 飞书交互式卡片
+  //   2. 文本消息（默认）—— Post 格式，支持 Markdown 子集
+  //   3. 图片消息（content.images 存在时）—— 先上传获取 image_key，再发送
+  //      ↑ 图片在文本/卡片之后独立发送，失败不影响前面的消息
+  //
+  // 注意：
+  //   - 图片上传需要 tenant_access_token（通过 getTenantAccessToken 获取）
+  //   - 每条图片独立上传 + 发送，某张失败不阻塞其他图片
+  //   - 图片 base64 直接传给飞书 API，不在本地落盘
+  // ================================================================
   async send(target: ChannelTarget, content: ChannelReply): Promise<string> {
     if (this.status !== 'active') return '飞书渠道未连接，无法发送';
 
     const config = this.config;
+    // 飞书 SDK 的 receive_id_type 由 ID 前缀推断（ou_→open_id, oc_→chat_id）
+    // sendText/sendCard/sendImage 内部调用 resolveSendTarget 自动处理
     const to = target.type === 'chat' ? `chat:${target.id}` : `user:${target.id}`;
 
     try {
+      // ① 主消息：卡片优先，否则文本
       if (content.metadata?.card) {
         await sendCard(config, { to, card: content.metadata.card as Record<string, unknown> });
       } else {
         await sendText(config, { to, text: content.content });
       }
 
-      // 图片支持（通过飞书图片上传 API）
+      // ② 图片：在文本/卡片之后独立发送
+      // 飞书的图片消息和文本消息是两条独立的消息，不支持图文混排
       if (content.images && content.images.length > 0) {
         const token = await this.getTenantAccessToken();
         if (token) {
           for (const img of content.images) {
             try {
-              const imageKey = await this.uploadImage(token, img.data, img.media_type);
+              // 飞书图片发送两步：上传拿 image_key → 调用 im.message.create 发送
+              const imageKey = await this.uploadImage(token, img.data);
               await sendImage(config, { to, imageKey });
-            } catch { /* 图片发送失败不影响整体 */ }
+            } catch {
+              // 某张图片失败不阻塞其他图片和整体流程
+            }
           }
         }
       }
@@ -279,8 +312,23 @@ export class FeishuChannel implements ChannelHandler {
     }
   }
 
-  /** 上传图片到飞书，返回 image_key */
-  private async uploadImage(token: string, base64Data: string, mediaType: string): Promise<string> {
+  // ================================================================
+  // uploadImage() — 飞书图片上传
+  // ================================================================
+  //
+  // 飞书发送图片必须先上传到飞书服务器获取 image_key，
+  // 再用 image_key 调用 im.message.create（msg_type='image'）发送。
+  //
+  // API: POST https://open.feishu.cn/open-apis/im/v1/images
+  // 参数: image_type='message'（消息用图，非头像），image=base64（不含 data:xxx;base64, 前缀）
+  // 返回: { code: 0, data: { image_key: 'img_xxx' } }
+  //
+  // 注意：
+  //   - token 由调用方传入（来自 getTenantAccessToken 的缓存结果）
+  //   - mediaType 参数保留供未来扩展（如格式校验），当前仅透传 base64
+  //   - 飞书 image_key 有时效性（约 2 小时），不持久化缓存
+  // ================================================================
+  private async uploadImage(token: string, base64Data: string, _mediaType?: string): Promise<string> {
     const domain = this.config?.domain ?? 'https://open.feishu.cn';
     const resp = await fetch(`${domain}/open-apis/im/v1/images`, {
       method: 'POST',

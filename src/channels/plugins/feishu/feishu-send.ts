@@ -292,8 +292,26 @@ export async function getSenderInfo(
   }
 }
 
+// ================================================================
+// 图片消息发送
+// ================================================================
+//
+// 飞书发送图片是两步操作：
+//   1. 上传图片到飞书服务器 → 获取 image_key
+//      POST /open-apis/im/v1/images  { image_type: 'message', image: base64 }
+//   2. 用 image_key 发送图片消息
+//      POST /open-apis/im/v1/messages  { msg_type: 'image', content: '{"image_key":"img_xxx"}' }
+//
+// 注意：
+//   - 图片上传走二进制 base64，不走 multipart/form-data
+//   - image_key 有时效性（约 2 小时），不持久化
+//   - 图片消息和文本消息是两条独立的飞书消息，不支持单条图文混排
+//   - 调用方（FeishuChannel.send()）负责先上传拿到 image_key 再调用本函数
+// ================================================================
+
 /**
- * 发送图片消息（需先通过上传 API 获取 image_key）。
+ * 发送图片消息。
+ * @param imageKey 飞书上传 API 返回的 image_key
  */
 export async function sendImage(
   config: FeishuChannelConfig,
