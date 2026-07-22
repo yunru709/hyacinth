@@ -66,6 +66,67 @@ export function interruptSubAgentLoop(instanceId: string): boolean {
   return true;
 }
 
+// ── 异步子 Agent 任务注册表 ─────────────────────────────────
+
+export interface AsyncSubAgentTask {
+  handle: string;
+  agentName: string;
+  instanceId: string;
+  task: string;
+  status: 'running' | 'completed' | 'failed';
+  startTime: string;
+  endTime?: string;
+  result?: string;
+  error?: string;
+}
+
+const asyncTasks = new Map<string, AsyncSubAgentTask>();
+let asyncTaskCounter = 0;
+
+/** 注册异步子 Agent 任务，返回 handle */
+export function registerAsyncTask(agentName: string, instanceId: string, task: string): string {
+  const handle = `sub_${String(++asyncTaskCounter).padStart(3, '0')}`;
+  asyncTasks.set(handle, {
+    handle,
+    agentName,
+    instanceId,
+    task,
+    status: 'running',
+    startTime: new Date().toISOString(),
+  });
+  return handle;
+}
+
+/** 标记异步任务为已完成 */
+export function completeAsyncTask(handle: string, result: string): void {
+  const t = asyncTasks.get(handle);
+  if (t) {
+    t.status = 'completed';
+    t.endTime = new Date().toISOString();
+    t.result = result;
+  }
+}
+
+/** 标记异步任务为失败 */
+export function failAsyncTask(handle: string, error: string): void {
+  const t = asyncTasks.get(handle);
+  if (t) {
+    t.status = 'failed';
+    t.endTime = new Date().toISOString();
+    t.error = error;
+  }
+}
+
+/** 获取所有异步任务列表 */
+export function listAsyncTasks(): AsyncSubAgentTask[] {
+  return [...asyncTasks.values()];
+}
+
+/** 按 handle 获取异步任务 */
+export function getAsyncTask(handle: string): AsyncSubAgentTask | undefined {
+  return asyncTasks.get(handle);
+}
+
 /** 销毁子 Agent session 目录（清理 conversation/events/stats/meta） */
 export async function destroySubAgentSession(
   parentSessionDir: string,
@@ -104,6 +165,14 @@ export async function createSubAgentLoop(
   const instanceId = agentDef.instanceId ?? `${agentDef.name}-default`;
   const subSessionDir = path.join(parentContext.sessionDir, 'sub-agents', instanceId);
   const ttlMinutes = agentDef.sessionTtlMinutes ?? 10;
+
+  // 并发保护：同一 instanceId 已有活跃 loop 时拒绝，防止会话文件并发写入冲突
+  if (runningLoops.has(instanceId)) {
+    throw new Error(
+      `子 Agent "${agentDef.name}" (${instanceId}) 正在执行中，不能同时委派第二个任务。` +
+      '等待当前任务完成后重试，或使用 spawn_sub_agent 创建独立实例来并行执行。'
+    );
+  }
 
   // TTL 检查：过期则清理重建
   let isNew = false;
@@ -244,6 +313,7 @@ export class DelegateToAgentTool implements Tool {
     '"parallel"（并行分工）：同时启动多个子 Agent 并行执行，汇总结果。' +
     '编排场景：当你有一个复杂计划时，自己负责规划和决策，将其中可并行的子任务分别委派给多个子 Agent 同步执行——spawn_sub_agent 可克隆多份实例，配合不同的 instance_id 并发调度，大幅缩短总耗时。' +
     '会话复用：子 Agent 会话在 TTL 窗口内持久化（默认 10 分钟），相同 instance_id 再次委派时自动恢复完整对话记忆，无需重新交代背景。' +
+    '异步执行：设置 async=true 后子 Agent 在后台运行，主 Agent 立即获得任务句柄（如 sub_001）并可继续其他工作。之后用 list_sub_agent_tasks 查看所有异步任务状态，get_sub_agent_result <handle> 获取已完成任务的结果。默认 async=false（同步阻塞，等待结果返回）。' +
     '使用 list_sub_agents 查看可用 Agent 及其实例 ID，create_sub_agent 创建新 Agent，spawn_sub_agent 克隆以支持并行，destroy_sub_agent 清理不再需要的实例。';
   inputSchema = {
     type: 'object' as const,
@@ -264,6 +334,10 @@ export class DelegateToAgentTool implements Tool {
         type: 'string' as const,
         description: '可选的附加上下文（如相关代码片段、文件路径、背景信息）。',
       },
+      async: {
+        type: 'boolean' as const,
+        description: '是否异步执行。默认 false（阻塞等待结果）。设为 true 时立即返回任务句柄（如 sub_001），子 Agent 在后台执行，主 Agent 可继续工作。之后用 list_sub_agent_tasks 查看状态，get_sub_agent_result 获取结果。',
+      },
     },
     required: ['task'],
   };
@@ -281,6 +355,7 @@ export class DelegateToAgentTool implements Tool {
     const agentName = args.agent_name as string | undefined;
     const task = args.task as string;
     const context = args.context as string | undefined;
+    const runAsync = args.async === true;
 
     if (!agentName && !instanceId) {
       return 'Error: either agent_name or instance_id is required. Use list_sub_agents to see available agents and their instance IDs.';
@@ -306,18 +381,24 @@ export class DelegateToAgentTool implements Tool {
       return 'Error: no sub-agent found matching the provided criteria.';
     }
 
+    // 异步模式下不支持 adversarial 和 parallel（这两种本身就是多Agent协同，异步应逐个个委派）
+    if (runAsync && agentDef.collaborationMode !== 'delegate') {
+      return `Error: async mode only supports collaborationMode "delegate". Current mode: "${agentDef.collaborationMode}". Spawn individual agents with spawn_sub_agent and delegate to each one with async=true.`;
+    }
+
     // 构造完整任务描述
     const fullTask = context ? `${task}\n\nAdditional Context:\n${context}` : task;
 
     try {
+      if (runAsync) {
+        return await this.executeAsync(agentDef, fullTask);
+      }
+
       if (agentDef.collaborationMode === 'adversarial') {
-        // 对抗审查模式：找一个不同角色的子 Agent 同时审查
         return await this.executeAdversarial(agentDef, fullTask);
       } else if (agentDef.collaborationMode === 'parallel') {
-        // 并行分工模式：所有 parallel 模式的子 Agent 并行执行
         return await this.executeParallel(agentDef, fullTask);
       } else {
-        // 委托模式：直接委托给子 Agent
         return await this.executeDelegate(agentDef, fullTask);
       }
     } catch (error: unknown) {
@@ -327,7 +408,43 @@ export class DelegateToAgentTool implements Tool {
   }
 
   /**
-   * 委托模式：单个子 Agent 执行任务
+   * 异步委托：在后台启动子 Agent，立即返回任务句柄。
+   * 子 Agent 的 loop.run() 在后台 Promise 中执行，完成后结果写入 AsyncSubAgentTask。
+   */
+  private async executeAsync(agentDef: AgentDefinition, task: string): Promise<string> {
+    const instanceId = agentDef.instanceId!;
+    const handle = registerAsyncTask(agentDef.name, instanceId, task);
+
+    // 在后台启动子 Agent，不阻塞。catch 兜底防止未处理的 Promise rejection
+    this.runAsyncInBackground(handle, agentDef, task).catch((err) => {
+      failAsyncTask(handle, err instanceof Error ? err.message : String(err));
+    });
+
+    return `异步子 Agent 任务已启动。\n句柄: ${handle}\nAgent: ${agentDef.name} (${instanceId})\n任务: ${task.slice(0, 100)}${task.length > 100 ? '...' : ''}\n\n使用 list_sub_agent_tasks 查看状态。完成后用 get_sub_agent_result ${handle} 获取结果。`;
+  }
+
+  /** 后台执行子 Agent 任务 */
+  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string): Promise<void> {
+    const instanceId = agentDef.instanceId!;
+    try {
+      const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext);
+      registerRunningLoop(instanceId, loop);
+      if (!isNew) {
+        await fs.utimes(path.join(sessionDir, 'meta.json'), new Date(), new Date()).catch(() => {});
+      }
+      await loop.run(task);
+      unregisterRunningLoop(instanceId);
+      const result = await this.collectResult(agentDef, task);
+      completeAsyncTask(handle, result);
+    } catch (error: unknown) {
+      unregisterRunningLoop(instanceId);
+      const message = error instanceof Error ? error.message : String(error);
+      failAsyncTask(handle, message);
+    }
+  }
+
+  /**
+   * 委托模式：单个子 Agent 执行任务（同步阻塞）
    */
   private async executeDelegate(agentDef: AgentDefinition, task: string): Promise<string> {
     const instanceId = agentDef.instanceId!;

@@ -12,6 +12,7 @@ import type { MCPSystem } from '../mcp/system.js';
 import type { CompanionSessionManager } from '../memory/companion-session.js';
 import { clearPromptCache } from '../prompts/loader.js';
 import { switchRouter } from '../context/profiles.js';
+import { listAsyncTasks, getAsyncTask } from '../agents/delegate-tool.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -407,6 +408,76 @@ export function createListSubAgentsTool(agentRegistry: any): Tool {
       }
 
       return lines.join('\n');
+    },
+  };
+}
+
+// ── 异步子 Agent 任务管理工具 ──
+
+/**
+ * list_sub_agent_tasks — 列出所有异步子 Agent 任务及其状态。
+ */
+export function createListSubAgentTasksTool(): Tool {
+  return {
+    name: 'list_sub_agent_tasks',
+    description: '列出所有通过 delegate_to_agent(async=true) 启动的异步子 Agent 任务。包含句柄、Agent 名称、任务描述、状态（running/completed/failed）、启动时间和结果摘要。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute(_args: Record<string, unknown>): Promise<string> {
+      const tasks = listAsyncTasks();
+      if (tasks.length === 0) {
+        return '暂无异步子 Agent 任务。使用 delegate_to_agent 并设置 async=true 来启动异步任务。';
+      }
+
+      const lines: string[] = [`异步子 Agent 任务（共 ${tasks.length} 个）：`];
+      for (const t of tasks) {
+        const statusLabel = t.status === 'running' ? '执行中' : t.status === 'completed' ? '已完成' : '失败';
+        const statusIcon = t.status === 'running' ? '🔄' : t.status === 'completed' ? '✅' : '❌';
+        lines.push(`  ${statusIcon} ${t.handle} [${statusLabel}] ${t.agentName} (instance: ${t.instanceId}): ${t.task.slice(0, 60)}${t.task.length > 60 ? '...' : ''}`);
+        if (t.status !== 'running' && t.result) {
+          const summary = t.result.split('\n').find(l => l.trim())?.slice(0, 80) ?? '';
+          lines.push(`     ↳ ${summary}${summary.length >= 80 ? '...' : ''}`);
+        }
+      }
+      lines.push('');
+      lines.push('使用 get_sub_agent_result <handle> 获取已完成任务的完整结果。');
+      return lines.join('\n');
+    },
+  };
+}
+
+/**
+ * get_sub_agent_result — 获取异步子 Agent 任务的执行结果。
+ */
+export function createGetSubAgentResultTool(): Tool {
+  return {
+    name: 'get_sub_agent_result',
+    description: '获取指定异步子 Agent 任务的执行结果。running 时返回仍在执行中，completed 时返回完整结果，failed 时返回错误信息。句柄从 list_sub_agent_tasks 获取。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: {
+          type: 'string',
+          description: '异步任务句柄（如 sub_001），从 list_sub_agent_tasks 获取。',
+        },
+      },
+      required: ['handle'],
+    },
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const handle = args.handle as string;
+      const task = getAsyncTask(handle);
+      if (!task) {
+        return `错误：未找到异步任务 "${handle}"。使用 list_sub_agent_tasks 查看所有任务及其句柄。`;
+      }
+
+      if (task.status === 'running') {
+        return `任务 ${handle}（${task.agentName}）仍在执行中。任务：${task.task.slice(0, 100)}${task.task.length > 100 ? '...' : ''}\n启动时间：${task.startTime}\n请稍后再次调用 get_sub_agent_result 查询。`;
+      }
+
+      if (task.status === 'failed') {
+        return `任务 ${handle}（${task.agentName}）执行失败。\n错误：${task.error}\n任务：${task.task}`;
+      }
+
+      return `任务 ${handle}（${task.agentName}）已完成。\n\n${task.result}`;
     },
   };
 }

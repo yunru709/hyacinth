@@ -25,6 +25,8 @@ import {
   createSpawnSubAgentTool,
   createCreateSubAgentTool,
   createUpdateSubAgentTool,
+  createListSubAgentTasksTool,
+  createGetSubAgentResultTool,
   createInterruptTool,
   createSessionStatsTool,
   createCurrentSessionTool,
@@ -180,6 +182,11 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     this.register(createSpawnSubAgentTool(agentRegistry));
     this.register(createCreateSubAgentTool(agentRegistry, cwd));
     this.register(createUpdateSubAgentTool(agentRegistry));
+
+    // ── 异步子 Agent 任务工具 (2) ─────────────────────────────────
+    this.register(createListSubAgentTasksTool());
+    this.register(createGetSubAgentResultTool());
+
     // destroy_sub_agent needs factory.ts sessionDir; register in factory.ts after loop is created
     // (handled by importing and registering createDestroySubAgentTool directly in factory.ts)
 
