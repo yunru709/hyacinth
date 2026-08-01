@@ -443,22 +443,6 @@ export class WorldEngine extends BypassAgentBase {
     this.observeQueue = this.observeQueue.then(run, run);
   }
 
-  /**
-   * TODO: Memory 维护
-   * 当前 WorldEngine 只维护结构化世界状态（地点/NPC/关系/动态物），
-   * 缺少对"我们之间发生了什么"的情感/事件记忆。
-   *
-   * 计划在 postTurn 阶段新增一个轻量旁路调用：
-   *   输入：world.json（state.recentEvents + state.characters） + conversation.jsonl（原始对话）
-   *   输出：追加写入 ~/.agent/companion/<name>/memory.md
-   *
-   * 内容侧重：情感里程碑、共同经历、内部笑话、偏好变化。
-   * 与 WorldEngine 现有职责互补——WorldEngine 管"世界是怎样的"，
-   * memory 管"我们之间发生了什么"。
-   *
-   * 实现方式：旁路 LLM 单次调用（无工具循环），prompt 驱动追加，
-   * 不新增工具、不引入 RAG。异常静默，不影响主流程。
-   */
   private async _observe(userInput: string, mainOutput: string): Promise<void> {
     try {
       const env = this.store.readEnvironment(this.mainCharacterNames());
