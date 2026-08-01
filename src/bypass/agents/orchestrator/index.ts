@@ -55,9 +55,20 @@ const PRETURN_SYSTEM = [
   '用户习惯、行为规范、环境约定。不是普通事实或项目上下文。',
   '',
   '你的任务：',
-  '1. 分析当前用户输入，判断意图（用文字输出你的分析）',
-  '2. 检查「主Agent记忆」中是否有直接适用于当前情境的约束',
-  '3. 仅当记忆中的约束与当前操作直接相关时，才调用 inject_hint 工具注入提醒',
+  '1. 分析当前用户输入，判断意图类型，用标签标注：',
+  '   [CAPABILITY: coding|chat|tool_use|reasoning|general]',
+  '   - coding: 编程、调试、代码审查、架构设计',
+  '   - chat: 闲聊、问答、讨论',
+  '   - tool_use: 文件操作、系统命令、配置管理',
+  '   - reasoning: 深度分析、方案设计、决策',
+  '   - general: 不属于以上分类',
+  '2. 估计你的判断置信度（0.0-1.0）',
+  '3. 检查「主Agent记忆」中是否有直接适用于当前情境的约束',
+  '4. 仅当记忆中的约束与当前操作直接相关时，才调用 inject_hint 工具注入提醒',
+  '',
+  '输出格式（务必严格遵守）：',
+  '[CAPABILITY: xxx] confidence: 0.X',
+  '（接下来是你的意图分析文本）',
   '',
   '什么需要注入：',
   '- 用户明确要求过"不要做X" → 当前操作可能触发X → inject_hint',
@@ -68,7 +79,7 @@ const PRETURN_SYSTEM = [
   '- 泛泛的上下文补充',
   '',
   '大多数时候不需要注入。有疑问就不调 inject_hint。',
-  '注意：你的文字输出会被保留为"意图"，即使不注入也要输出意图分析。',
+  '即使不注入也要按格式输出意图分析。',
 ].join('\n');
 
 const POSTTURN_SYSTEM = [
@@ -148,6 +159,18 @@ const ORCHESTRATOR_TOOLS: ToolDefinition[] = [
         query: { type: 'string', description: '搜索关键词' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'cluster_assign',
+    description: '将本轮对话归入意图簇。cluster_id 使用英文下划线命名，summary 为簇的一句话描述。如果归入已有簇，summary 应为更新后的描述。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cluster_id: { type: 'string', description: '簇 ID（英文下划线，如 channel_config）' },
+        summary: { type: 'string', description: '簇的一句话摘要（不超过 30 字）' },
+      },
+      required: ['cluster_id', 'summary'],
     },
   },
 ];
@@ -242,13 +265,57 @@ const REVIEW_SYSTEM = [
   '当判定偏离时，调用 inject_hint 工具注入纠正提示。不确定时输出 OK 即可。',
 ].join('\n');
 
+// ── 簇归类 ───────────────────────────────────────────────────
+
+const CLUSTER_SYSTEM = [
+  '你是主Agent的"会话归档员"。你的任务是将本轮对话归类到意图簇中。',
+  '',
+  '已有意图簇（可能为空）：',
+  '（将在调用时由代码注入）',
+  '',
+  '判断标准：',
+  '- 如果本轮对话的主题与已有簇一致 → 调用 cluster_assign 归入该簇，更新其 summary',
+  '- 如果本轮开启了新话题 → 调用 cluster_assign 创建新簇',
+  '- cluster_id 使用英文下划线命名（如 "channel_config", "env_fix", "agent_design"）',
+  '- summary 为簇的一句话描述（不超过 30 字），新簇写新描述，已有簇写更新后的描述',
+  '',
+  '重要的默认行为：',
+  '- 不确定时宁可创建新簇，也不要强行归入不相关的旧簇',
+  '- 如果已有簇的 summary 已经准确，不需要修改',
+].join('\n');
+
 // ── 介入策略 ───────────────────────────────────────────────────
+
+/** 意图簇索引条目 */
+interface ClusterIndex {
+  id: string;
+  capability: string;
+  summary: string;
+  /** conversation_full.jsonl 中的起止行号 */
+  line_start: number;
+  line_end: number;
+}
 
 interface BypassContext {
   intent: string;
+  capability: string;
+  confidence: number;
   iterationCount: number;
   consecutiveDeviations: number;
   lastInjectionIteration: number;
+  /** 当前 session 的意图簇列表（按时间顺序） */
+  clusters: ClusterIndex[];
+}
+
+/** 从 LLM 输出中解析结构化意图标签 */
+function parseIntentCapability(output: string): { capability: string; confidence: number; text: string } {
+  const capMatch = output.match(/\[CAPABILITY:\s*(coding|chat|tool_use|reasoning|general)\]/i);
+  const confMatch = output.match(/confidence:\s*(0?\.\d+|1\.?0?)/i);
+  const capability = capMatch ? capMatch[1].toLowerCase() : 'general';
+  const confidence = confMatch ? parseFloat(confMatch[1]) : 0.5;
+  // 移除标签后的纯文本作为意图描述
+  const text = output.replace(/\[CAPABILITY:.*?\]\s*/i, '').replace(/confidence:\s*[\d.]+\s*/i, '').trim();
+  return { capability, confidence: Math.max(0, Math.min(1, confidence)), text };
 }
 
 function shouldInject(ctx: BypassContext): boolean {
@@ -264,12 +331,24 @@ function shouldInject(ctx: BypassContext): boolean {
 
 export class ContextOrchestrator extends BypassAgentBase {
   private memoryPath: string;
-  private _ctx: BypassContext = {
+  /** 多 session 隔离：每个 sessionId 独立的 BypassContext */
+  private _sessions = new Map<string, BypassContext>();
+  /** 默认 context（sessionId 未提供时使用） */
+  private _defaultCtx: BypassContext = {
     intent: '',
+    capability: 'general',
+    confidence: 0,
     iterationCount: 0,
     consecutiveDeviations: 0,
     lastInjectionIteration: -999,
+    clusters: [],
   };
+  /** Map 上限（防止内存泄漏） */
+  private static readonly MAX_SESSIONS = 100;
+  /** sessionId 安全白名单 */
+  private static readonly SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+  /** 最新一次簇归类结果（loop.ts 消费后写入 events.jsonl） */
+  lastClusterAssign: { cluster_id: string; capability: string; summary: string; line_start: number; line_end: number } | null = null;
 
   constructor(memoryPath: string) {
     const memoryExec = createMemoryExecutor(memoryPath);
@@ -281,6 +360,7 @@ export class ContextOrchestrator extends BypassAgentBase {
       tools: ORCHESTRATOR_TOOLS,
       executeTool: async (name: string, input: Record<string, unknown>) => {
         if (name === 'inject_hint') return selfRef.ref!._handleInjectHint(input);
+        if (name === 'cluster_assign') return selfRef.ref!._handleClusterAssign(input);
         return memoryExec(name, input);
       },
     };
@@ -290,11 +370,39 @@ export class ContextOrchestrator extends BypassAgentBase {
   }
 
   async start(): Promise<void> {
-    this._ctx = { intent: '', iterationCount: 0, consecutiveDeviations: 0, lastInjectionIteration: -999 };
+    this._sessions.clear();
+    this._defaultCtx = { intent: '', capability: 'general', confidence: 0, iterationCount: 0, consecutiveDeviations: 0, lastInjectionIteration: -999, clusters: [] };
     log('START');
   }
   async stop(): Promise<void> {
+    this._sessions.clear();
     log('STOP');
+  }
+
+  /** 按 sessionId 获取隔离的 BypassContext（安全校验 + 上限保护） */
+  private sessionCtx(sessionId?: string): BypassContext {
+    if (!sessionId || !ContextOrchestrator.SESSION_ID_RE.test(sessionId)) {
+      return this._defaultCtx;
+    }
+    let ctx = this._sessions.get(sessionId);
+    if (!ctx) {
+      // 上限保护：超过 MAX_SESSIONS 时清理最旧的条目
+      if (this._sessions.size >= ContextOrchestrator.MAX_SESSIONS) {
+        const firstKey = this._sessions.keys().next().value;
+        if (firstKey) this._sessions.delete(firstKey);
+      }
+      ctx = {
+        intent: '',
+        capability: 'general',
+        confidence: 0,
+        iterationCount: 0,
+        consecutiveDeviations: 0,
+        lastInjectionIteration: -999,
+        clusters: [],
+      };
+      this._sessions.set(sessionId, ctx);
+    }
+    return ctx;
   }
 
   // ── preTurn：意图识别 → inject_hint 工具注入 ──────────────────
@@ -303,9 +411,10 @@ export class ContextOrchestrator extends BypassAgentBase {
     const provider = this.getProvider();
     if (!provider) return { injections: [] };
 
+    const sc = this.sessionCtx(ctx.sessionId);
     // 重置本轮迭代状态
-    this._ctx.iterationCount = 0;
-    this._ctx.consecutiveDeviations = 0;
+    sc.iterationCount = 0;
+    sc.consecutiveDeviations = 0;
 
     // 读当前记忆
     const memories = readMemory(this.memoryPath);
@@ -338,33 +447,37 @@ export class ContextOrchestrator extends BypassAgentBase {
     logDetail('preTurn USER_INPUT', ctx.userInput);
     logDetail('preTurn LLM_OUTPUT', output || '(empty)');
 
-    // 从文字输出中提取意图（供 postTurn 纠偏用）
-    this._ctx.intent = output.split('\n')[0]?.trim() || output || '';
-    log(`preTurn → intent="${this._ctx.intent}"`);
+    // 解析结构化意图
+    const parsed = parseIntentCapability(output || '');
+    sc.intent = parsed.text || output || '';
+    sc.capability = parsed.capability;
+    sc.confidence = parsed.confidence;
+    log(`preTurn → capability="${sc.capability}" conf=${sc.confidence} intent="${sc.intent}"`);
 
-    // 注入已通过 inject_hint 工具写入，不返回隐式 injections
-    return { injections: [] };
+    // 注入已通过 inject_hint 工具写入
+    return { injections: [], intent: { capability: sc.capability, confidence: sc.confidence } };
   }
 
   // ── postTurn ──────────────────────────────────────────────────
 
   async postTurn(ctx: PostTurnContext): Promise<void> {
-    this._ctx.iterationCount++;
+    const sc = this.sessionCtx(ctx.sessionId);
+    sc.iterationCount++;
 
     if (ctx.isLastIteration) {
-      await this.reviewAndRemember(ctx);
+      await this.reviewAndRemember(ctx, sc);
     } else {
-      await this.reviewOnly(ctx);
+      await this.reviewOnly(ctx, sc);
     }
   }
 
   /** 审查本轮回复（每次迭代），偏离时调 inject_hint 工具 */
-  private async reviewOnly(ctx: PostTurnContext): Promise<void> {
+  private async reviewOnly(ctx: PostTurnContext, sc: BypassContext): Promise<void> {
     const provider = this.getProvider();
-    if (!provider || !ctx.assistantOutput || !this._ctx.intent) return;
+    if (!provider || !ctx.assistantOutput || !sc.intent) return;
 
     const userPrompt = [
-      `【意图】${this._ctx.intent}`,
+      `【意图】${sc.intent}`,
       '',
       '【主Agent本轮回复】',
       ctx.assistantOutput.slice(0, 500),
@@ -375,30 +488,27 @@ export class ContextOrchestrator extends BypassAgentBase {
 
     const verdict = await this.callLLMWithTools(REVIEW_SYSTEM, userPrompt, 2);
 
-    logDetail(`review #${this._ctx.iterationCount} ASSISTANT_OUTPUT`, ctx.assistantOutput);
-    logDetail(`review #${this._ctx.iterationCount} VERDICT`, verdict || '(empty)');
+    logDetail(`review #${sc.iterationCount} ASSISTANT_OUTPUT`, ctx.assistantOutput);
+    logDetail(`review #${sc.iterationCount} VERDICT`, verdict || '(empty)');
 
     if (!verdict || verdict === 'OK') {
-      this._ctx.consecutiveDeviations = 0;
+      sc.consecutiveDeviations = 0;
       return;
     }
 
-    // LLM 判定偏离 → 它应该已经调了 inject_hint（由 REVIEW_SYSTEM 提示）
-    // 但如果 LLM 输出 DEVIATION 文字却忘了调工具，这里做兜底
-    this._ctx.consecutiveDeviations++;
-    if (shouldInject(this._ctx) && !verdict.includes('inject_hint')) {
-      // LLM 没调工具，手动注入
+    sc.consecutiveDeviations++;
+    if (shouldInject(sc) && !verdict.includes('inject_hint')) {
       const correction = verdict.replace(/^DEVIATION:\s*/, '');
       this._handleInjectHint({ text: `[纠正] ${correction}` });
-      this._ctx.lastInjectionIteration = this._ctx.iterationCount;
-      this._ctx.consecutiveDeviations = 0;
-      logDetail(`INJECT (fallback) at #${this._ctx.iterationCount}`, correction);
+      sc.lastInjectionIteration = sc.iterationCount;
+      sc.consecutiveDeviations = 0;
+      logDetail(`INJECT (fallback) at #${sc.iterationCount}`, correction);
     }
   }
 
-  /** 最后一轮：审查 + 记忆处理 */
-  private async reviewAndRemember(ctx: PostTurnContext): Promise<void> {
-    log(`FINAL iteration #${this._ctx.iterationCount} → memory processing`);
+  /** 最后一轮：审查 + 记忆处理 + 簇归类 */
+  private async reviewAndRemember(ctx: PostTurnContext, sc: BypassContext): Promise<void> {
+    log(`FINAL iteration #${sc.iterationCount} → memory processing`);
     const provider = this.getProvider();
     if (!provider) return;
 
@@ -415,13 +525,85 @@ export class ContextOrchestrator extends BypassAgentBase {
       ctx.userInput.slice(0, 500),
       '',
       '【意图】',
-      this._ctx.intent || '(未设定)',
+      sc.intent || '(未设定)',
       '',
       '本轮任务已完成。请判断是否有值得长期记住的信息。',
       '有则用工具维护记忆（先 search 去重），无则直接结束。',
     ].join('\n');
 
     await this.callLLMWithTools(POSTTURN_SYSTEM, userPrompt, 3);
+
+    // ── 簇归类（每次最后一轮都执行）──
+    if (ctx.fullArchiveLineCount && ctx.fullArchiveLineCount > 0) {
+      await this.classifyCluster(ctx, sc);
+    }
+  }
+
+  /** 簇归类：LLM 判断本轮属于已有簇还是新簇 */
+  private async classifyCluster(ctx: PostTurnContext, sc: BypassContext): Promise<void> {
+    const provider = this.getProvider();
+    if (!provider) return;
+
+    const existingClusters = sc.clusters.length > 0
+      ? sc.clusters.map(c => `- ${c.id}: ${c.summary} (行 ${c.line_start}-${c.line_end})`).join('\n')
+      : '(暂无已有簇)';
+
+    const clusterPrompt = CLUSTER_SYSTEM.replace(
+      '（将在调用时由代码注入）',
+      existingClusters,
+    );
+
+    const userPrompt = [
+      '【当前意图】',
+      `[CAPABILITY: ${sc.capability}] (conf: ${sc.confidence.toFixed(2)})`,
+      '',
+      '【本轮用户输入】',
+      ctx.userInput.slice(0, 500),
+      '',
+      '【本轮主Agent回复摘要】',
+      ctx.assistantOutput.slice(0, 300),
+      '',
+      '请判断本轮对话属于哪个意图簇，调用 cluster_assign 工具。',
+    ].join('\n');
+
+    const output = await this.callLLMWithTools(clusterPrompt, userPrompt, 2);
+    logDetail('CLUSTER classification output', output || '(empty)');
+
+    // 解析 cluster_assign 工具调用结果
+    // 工具返回格式: "ok: cluster_id=xxx"
+    const clusterMatch = output.match(/cluster_id=(\S+)/);
+    if (!clusterMatch) return;
+
+    const clusterId = clusterMatch[1];
+    const lineEnd = ctx.fullArchiveLineCount ?? 0;
+    // 找到已有簇的起始行（如果归入已有簇），否则为新簇
+    const existing = sc.clusters.find(c => c.id === clusterId);
+    const lineStart = existing
+      ? existing.line_start  // 归入已有簇：保持原起始行
+      : Math.max(1, lineEnd - 5); // 新簇：粗略估计起始行（假设最近 5 行为新内容）
+
+    // 暂存到实例属性，由 loop.ts 消费
+    this.lastClusterAssign = {
+      cluster_id: clusterId,
+      capability: sc.capability,
+      summary: output.replace(/cluster_id=\S+\s*/g, '').replace(/^ok:\s*/g, '').trim() || clusterId,
+      line_start: lineStart,
+      line_end: lineEnd,
+    };
+
+    // 更新内存中的簇索引
+    if (existing) {
+      existing.line_end = lineEnd;
+      existing.summary = this.lastClusterAssign.summary;
+    } else {
+      sc.clusters.push({
+        id: clusterId,
+        capability: sc.capability,
+        summary: this.lastClusterAssign.summary,
+        line_start: lineStart,
+        line_end: lineEnd,
+      });
+    }
   }
 
   // ── inject_hint 工具实现 ──────────────────────────────────────
@@ -438,6 +620,17 @@ export class ContextOrchestrator extends BypassAgentBase {
     });
     logDetail('INJECT hint via tool', text);
     return 'ok: 已注入提示到 Zone 5';
+  }
+
+  // ── cluster_assign 工具实现 ────────────────────────────────
+
+  private _handleClusterAssign(input: Record<string, unknown>): string {
+    const clusterId = (input.cluster_id as string)?.trim();
+    const summary = (input.summary as string)?.trim();
+    if (!clusterId || !summary) return 'Error: cluster_id 和 summary 必填';
+    // 结果暂存，由 loop.ts 消费后写入 events.jsonl
+    // 这里不写文件——orchestrator 不持有 EventStore 引用
+    return `ok: cluster_id=${clusterId}`;
   }
 }
 

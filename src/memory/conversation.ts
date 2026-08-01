@@ -6,6 +6,9 @@ export class ConversationStore {
   private readonly maxMessages: number;
   private readonly conversationFile: string;
 
+  /** 全量存档文件名（永远追加，永不压缩，行号稳定） */
+  static readonly FULL_FILE = 'conversation_full.jsonl';
+
   constructor(maxMessages: number = 10000, conversationFile: string = 'conversation.jsonl') {
     this.maxMessages = maxMessages;
     this.conversationFile = conversationFile;
@@ -13,6 +16,10 @@ export class ConversationStore {
 
   private getFilePath(sessionDir: string): string {
     return path.join(sessionDir, this.conversationFile);
+  }
+
+  private getFullFilePath(sessionDir: string): string {
+    return path.join(sessionDir, ConversationStore.FULL_FILE);
   }
 
   async ensureFile(filePath: string): Promise<void> {
@@ -24,7 +31,7 @@ export class ConversationStore {
   }
 
   /**
-   * 追加消息到 conversation.jsonl
+   * 追加消息到 conversation.jsonl，同时同步写入全量存档。
    */
   async append(sessionDir: string, message: Message): Promise<void> {
     const filePath = this.getFilePath(sessionDir);
@@ -37,6 +44,9 @@ export class ConversationStore {
     if (count > this.maxMessages) {
       await this.truncate(sessionDir, count - this.maxMessages);
     }
+
+    // 同步写入全量存档（不受压缩器影响，行号稳定）
+    await this.appendFull(sessionDir, message);
   }
 
   /**
@@ -94,6 +104,44 @@ export class ConversationStore {
       // 原文件不存在，忽略
     }
     await fs.rename(tmpPath, filePath);
+  }
+
+  // ── 全量存档（conversation_full.jsonl）──
+
+  /**
+   * 追加消息到全量存档 conversation_full.jsonl。
+   * 永远追加，不受压缩器影响。行号稳定（仅追加，不删中间行）。
+   */
+  async appendFull(sessionDir: string, message: Message): Promise<void> {
+    const filePath = this.getFullFilePath(sessionDir);
+    await ensureDir(sessionDir);
+    const line = JSON.stringify(message) + '\n';
+    await fs.appendFile(filePath, line, 'utf-8');
+
+    const count = await this.countFull(sessionDir);
+    if (count > this.maxMessages) {
+      await this.truncateFull(sessionDir, count - this.maxMessages);
+    }
+  }
+
+  /** 读取全量存档全部消息 */
+  async readFull(sessionDir: string): Promise<Message[]> {
+    return readJsonlFile<Message>(this.getFullFilePath(sessionDir));
+  }
+
+  /** 统计全量存档消息数量 */
+  async countFull(sessionDir: string): Promise<number> {
+    const all = await this.readFull(sessionDir);
+    return all.length;
+  }
+
+  /** 截断全量存档旧消息 */
+  private async truncateFull(sessionDir: string, removeCount: number): Promise<void> {
+    const filePath = this.getFullFilePath(sessionDir);
+    const lines = await this.readFull(sessionDir);
+    const kept = lines.slice(removeCount);
+    const content = kept.map((m) => JSON.stringify(m)).join('\n') + '\n';
+    await fs.writeFile(filePath, content, 'utf-8');
   }
 }
 

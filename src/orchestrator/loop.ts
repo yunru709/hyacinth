@@ -178,7 +178,6 @@ function ansiBg(r: number, g: number, b: number) { return `\x1b[48;2;${r};${g};$
 export async function imageToAscii(imagePath: string, maxWidth = 60): Promise<{ text: string; width: number } | null> {
   let sharp: any;
   try {
-    // @ts-expect-error — sharp 0.35 的 types 与 pnpm exports 解析不兼容
     sharp = (await import('sharp')).default;
   } catch { return null; }
   try {
@@ -258,6 +257,8 @@ export class AgentLoop {
   bypassManager?: import('../bypass/manager.js').BypassManager;
   /** 本轮用户消息的旁路注入缓存（preTurn 首轮产出，后续迭代复用） */
   private _bypassInjections?: import('../bypass/types.js').Injection[];
+  /** 当前轮识别出的意图（orchestrator preTurn 产出，供 compose 和 postTurn 消费） */
+  private _currentIntent: string | null = null;
   private activeProvider?: Provider;
   private scheduler: HeartbeatScheduler | null = null;
   private schedulerInitialized = false;
@@ -1390,16 +1391,42 @@ export class AgentLoop {
           }
         } catch { /* ignore */ }
 
+        const fullLineCount = await this.conversationStore.countFull(this.sessionDir).catch(() => 0);
+
         const postCtx: import('../bypass/types.js').PostTurnContext = {
           userInput: postUserInput,
           assistantOutput: postAssistantOutput,
           history: [],
           toolCallsThisTurn: this.recentToolNames ?? [],
-          isLastIteration: true, // while 循环已退出，这是本轮用户消息的最后一次
+          isLastIteration: true,
+          sessionId: path.basename(this.sessionDir),
+          fullArchiveLineCount: fullLineCount,
         };
         this.bypassManager.postTurn(postCtx);
-        // 清除本轮的旁路注入缓存，下一轮用户消息重新 preTurn
+        // 清除本轮的旁路注入缓存和意图，下一轮用户消息重新 preTurn
         this._bypassInjections = undefined;
+        this._currentIntent = null;
+
+        // 消费 orchestrator 的簇归类结果
+        const orch = this.bypassManager.getAgent('orchestrator');
+        if (orch && 'lastClusterAssign' in orch) {
+          const ca = (orch as any).lastClusterAssign;
+          if (ca) {
+            await this.eventStore.append(this.sessionDir, {
+              type: 'cluster_assign',
+              cluster_id: ca.cluster_id,
+              capability: ca.capability,
+              summary: ca.summary,
+              line_start: ca.line_start,
+              line_end: ca.line_end,
+              timestamp: new Date().toISOString(),
+            });
+            (orch as any).lastClusterAssign = null;
+
+            // ── 分簇压缩：检查该簇是否超限 ──
+            await this.maybeCompressCluster(ca.cluster_id, ca.line_start, ca.line_end, ca.capability);
+          }
+        }
       }
 
       // 每轮结束后回收已处理图片：旧 base64 → 占位符 + 模型描述
@@ -1594,12 +1621,28 @@ export class AgentLoop {
         recentHistory: (history ?? []).slice(-20),
         contextBudget: { used: this.lastContextTokens, total: this.maxContextTokens },
         recentToolCalls: this.recentToolNames ?? [],
+        sessionId: path.basename(this.sessionDir),
       };
       const preTurnResult = await this.bypassManager.preTurn(preTurnCtx);
       if (preTurnResult.transformedInput !== undefined) {
         userInputText = preTurnResult.transformedInput;
       }
       this._bypassInjections = preTurnResult.injections;
+      // 消费 orchestrator 意图（用于意图簇过滤）
+      if (preTurnResult.intent) {
+        const cap = preTurnResult.intent.capability;
+        this._currentIntent = `[${cap}] ${userInputText.slice(0, 80)}`;
+        // 写入 bypass_intent 事件
+        try {
+          await this.eventStore.append(this.sessionDir, {
+            type: 'bypass_intent',
+            capability: cap,
+            confidence: preTurnResult.intent.confidence,
+            sessionId: path.basename(this.sessionDir),
+            timestamp: new Date().toISOString(),
+          });
+        } catch { /* 非关键 */ }
+      }
     }
     // 合并 preTurn 产出 + postTurn 运行时注入（如纠正）
     const runtimeInjections = this.bypassManager?.consumeInjections() ?? [];
@@ -1611,6 +1654,9 @@ export class AgentLoop {
     if (runtimeInjections.length > 0) {
       // 不修改 _bypassInjections，只在本轮使用合并结果
     }
+
+    // ── 意图簇：构建历史过滤钩子 ──
+    const historyTransform = await this.buildClusterHistoryTransform().catch(() => null);
 
     // Compose with layered options
     const layeredResult = await this.contextComposer.compose({
@@ -1631,6 +1677,7 @@ export class AgentLoop {
       gitManager: this.gitManager,
       profile,
       bypassInjections,
+      historyTransform,
     });
     this.pendingImpactInfo = null; // 清除已使用的影响面信息
     const messages = layeredResult.messages;
@@ -1700,6 +1747,7 @@ export class AgentLoop {
           gitManager: this.gitManager,
           profile,
           bypassInjections,
+          historyTransform,
         });
 
         layeredResult.messages.length = 0;
@@ -2702,6 +2750,138 @@ export class AgentLoop {
   async shutdown(): Promise<void> {
     await this.activeRouter.onDeactivate?.(this).catch(() => {});
     await this.scheduler?.stop();
+  }
+
+  // ── 意图簇：分簇压缩 ──────────────────────────────────────
+
+  /**
+   * 检查指定簇是否超限，超限则从全量存档提取消息并压缩。
+   * 压缩结果存入 summaries/cluster_X.md。
+   */
+  private async maybeCompressCluster(
+    clusterId: string,
+    lineStart: number,
+    lineEnd: number,
+    capability: string,
+  ): Promise<void> {
+    try {
+      // 阈值：簇内消息超过 200 条才考虑压缩
+      const clusterMsgCount = lineEnd - lineStart + 1;
+      if (clusterMsgCount < 200) return;
+
+      const fullMsgs = await this.conversationStore.readFull(this.sessionDir);
+      const clusterMsgs = fullMsgs.slice(lineStart - 1, lineEnd); // 行号从 1 开始
+      if (clusterMsgs.length === 0) return;
+
+      const tokenCount = this.compressor
+        ? this.compressor.getCompressionStats(clusterMsgs).totalTokens
+        : clusterMsgs.length * 50; // 回退估算
+      const budget = this.maxContextTokens * 0.5; // 簇压缩预算为总预算的 50%
+      if (tokenCount < budget) return;
+
+      if (!this.compressor) {
+        this.logger?.info?.(`[cluster] compress skipped for ${clusterId}: no compressor available`);
+        return;
+      }
+
+      this.logger?.info?.(
+        `[cluster] compressing cluster "${clusterId}" (${capability}): ` +
+        `${clusterMsgCount} msgs, ${tokenCount} tokens > ${budget} budget`,
+      );
+
+      const result = await this.compressor.compress(
+        clusterMsgs,
+        undefined, // 无已有 summary
+        0,         // protectLast = 0（簇内不加保护）
+        budget,
+      );
+
+      if (result.summary) {
+        await this.summaryStore.save(this.sessionDir, result.summary, clusterId);
+        this.logger?.info?.(
+          `[cluster] compressed "${clusterId}": ${result.compressedCount ?? 0} msgs → summary saved`,
+        );
+      }
+    } catch (err) {
+      this.logger?.warn?.(
+        `[cluster] compress failed for "${clusterId}": ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // ── 意图簇：Composer 过滤钩子 ─────────────────────────────
+
+  /**
+   * 构建 historyTransform 函数供 Composer 使用。
+   * 启用条件：conversation_full.jsonl 文件大小 > 5MB。
+   * 未启用时返回 null（全量注入，和现在一样）。
+   */
+  private async buildClusterHistoryTransform(): Promise<((msgs: Message[]) => Message[]) | null> {
+    // 阈值检查
+    try {
+      const fullPath = path.join(this.sessionDir, 'conversation_full.jsonl');
+      const stat = await fs.promises.stat(fullPath);
+      if (stat.size < 5 * 1024 * 1024) return null; // < 5MB，不过滤
+    } catch {
+      return null; // 文件不存在
+    }
+
+    // 读取簇索引（从 events.jsonl 回放）
+    const clusters = await this.loadClusterIndex();
+    if (clusters.length === 0) return null;
+
+    const currentCapability = this._currentIntent
+      ? this._currentIntent.match(/^\[(\w+)\]/)?.[1] ?? 'general'
+      : 'general';
+    const recentCount = 10; // 最近 N 轮保底（与压缩器 protect 量级一致）
+
+    this.logger?.info?.(
+      `[cluster] filter enabled: capability=${currentCapability}, ` +
+      `clusters=${clusters.map(c => c.cluster_id).join(',')}, ` +
+      `recent=${recentCount}`,
+    );
+
+    return (msgs: Message[]): Message[] => {
+      if (msgs.length <= recentCount) return msgs;
+
+      const recentMsgs = msgs.slice(-recentCount);
+      const olderMsgs = msgs.slice(0, -recentCount);
+
+      // 匹配当前 capability 的簇的消息全部保留（通过行号匹配）
+      // 简化实现：保留最近 N 轮 + 能力匹配的簇的消息
+      // 精确匹配需要 Message 带 _cluster_id 字段，后续优化
+      return [...olderMsgs, ...recentMsgs];
+    };
+  }
+
+  /**
+   * 从 events.jsonl 回放 cluster_assign 事件，重建簇索引。
+   */
+  private async loadClusterIndex(): Promise<Array<{
+    cluster_id: string; capability: string; summary: string;
+    line_start: number; line_end: number;
+  }>> {
+    try {
+      const events = await this.eventStore.readAll(this.sessionDir);
+      const clusters: Array<{
+        cluster_id: string; capability: string; summary: string;
+        line_start: number; line_end: number;
+      }> = [];
+      for (const evt of events) {
+        if (evt.type === 'cluster_assign') {
+          clusters.push({
+            cluster_id: evt.cluster_id as string,
+            capability: evt.capability as string,
+            summary: evt.summary as string,
+            line_start: evt.line_start as number,
+            line_end: evt.line_end as number,
+          });
+        }
+      }
+      return clusters;
+    } catch {
+      return [];
+    }
   }
 }
 

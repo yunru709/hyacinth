@@ -86,7 +86,7 @@ export class XrefManager {
    * @param changedFiles 可选：只重建这些文件（增量更新）。undefined = 全量重建。
    * @param dirs        可选：只扫描这些子目录（相对路径）。undefined = 全项目扫描。
    */
-  async build(changedFiles?: string[], dirs?: string[]): Promise<BuildStats> {
+  async build(changedFiles?: string[], dirs?: string[], batchSize: number = 50): Promise<BuildStats> {
     if (!this.db) throw new Error('XrefManager not initialized. Call init() first.');
 
     const startedAt = Date.now();
@@ -142,8 +142,8 @@ export class XrefManager {
     let totalImports = 0;
     const langBreakdown: Record<string, number> = {};
 
-    // 分批解析（每次最多 50 个文件，避免内存问题）
-    const BATCH_SIZE = 50;
+    // 分批解析（默认 50，可通过工具参数调整）
+    const BATCH_SIZE = Math.max(1, Math.min(batchSize, 500));
     const allParsed: { file: string; data: ParsedFile }[] = [];
 
     for (let i = 0; i < filesToParse.length; i += BATCH_SIZE) {

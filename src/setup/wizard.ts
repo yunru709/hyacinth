@@ -167,7 +167,7 @@ export class SetupWizard {
 
   /** Step 1: Provider */
   private async stepProvider(defaultProvider?: string): Promise<string | symbol> {
-    const initialValue = defaultProvider ?? 'anthropic';
+    const initialValue = defaultProvider || PROVIDERS[0].value;
     return p.select({
       message: '选择 AI 提供商',
       options: PROVIDERS.map(p => ({

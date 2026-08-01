@@ -45,6 +45,14 @@
  *                        外部知识注入区，用户可在 config 中关闭以节省 tokens。
  *   Zone 5 (Live)     — 工作流注入 / 时间戳 / 用户输入 / 会话临时工具
  *                        每轮都会变化的内容，不适合缓存。
+ *
+ * ══ 与 Composer 的关系 ══
+ * 本文件是"菜单"——定义有什么 section、放哪个 zone、什么类型。
+ * composer.ts 是"厨师"——读取本定义，按 zone 遍历 section，调用
+ * section-resolver.ts 解析内容，最终组装成 Message[]。
+ *
+ * 新增一个 section 只需在此文件的对应 zone 中添加一个 SectionEntry。
+ * Composer 会在下次 compose 时自动纳入。无需改 composer 代码。
  */
 
 import type { ContextManifest } from './manifest-types.js';

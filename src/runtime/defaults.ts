@@ -124,7 +124,7 @@ export function getDefaultConfig(): FullConfig {
       conversationFile: 'conversation.jsonl',
       eventsFile: 'events.jsonl',
       statsFile: 'stats.json',
-      summaryFile: 'summary.md',
+      summaryFile: 'summaries/_full.md',
     },
     kb: {
       enabled: false,
@@ -137,7 +137,7 @@ export function getDefaultConfig(): FullConfig {
       defaultMode: 'normal',
     },
     bypass: {
-      orchestratorEnabled: true,
+      orchestratorEnabled: false,
     },
     diagnostics: {
       enabled: true,

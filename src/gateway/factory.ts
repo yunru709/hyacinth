@@ -727,9 +727,8 @@ export async function createAgent(
   if (companionCharName) {
     bypassManager.register(new (await import('../bypass/agents/companion/index.js')).WorldEngine(companionCharName));
   }
-  // 注册 Orchestrator（普通模式旁路Agent）— 已暂停（2026-07-10）
-  // 待分层过滤策略成熟后重新启用，设计方案见：桌面/旁路Agent重构构想.md
-  // bypassManager.register(new (await import('../bypass/agents/orchestrator/index.js')).ContextOrchestrator(memoryFilePath));
+  // 注册 Orchestrator（普通模式旁路Agent）— 默认关闭，通过 /orchestrator on 启用
+  bypassManager.register(new (await import('../bypass/agents/orchestrator/index.js')).ContextOrchestrator(memoryFilePath));
   loop.bypassManager = bypassManager;
 
   // 陪伴模式启动时自动激活 world-engine
@@ -737,13 +736,13 @@ export async function createAgent(
     bypassManager.activateForMode('companion').catch(() => {});
   }
 
-  // 普通模式：orchestrator 已暂停，不再激活
-  // if (sessionType === 'normal') {
-  //   const orchestratorEnabled = configCenter.get<boolean>('bypass.orchestratorEnabled') ?? true;
-  //   if (orchestratorEnabled) {
-  //     bypassManager.activateAgent('orchestrator').catch(() => {});
-  //   }
-  // }
+  // 普通模式：根据配置决定是否激活 orchestrator（默认关闭）
+  if (sessionType === 'normal') {
+    const orchestratorEnabled = configCenter.get<boolean>('bypass.orchestratorEnabled') ?? false;
+    if (orchestratorEnabled) {
+      bypassManager.activateAgent('orchestrator').catch(() => {});
+    }
+  }
 
   // ── Read 工具的图片处理器 — 将读到的图片注入 ImageStore ──
   const readTool = toolRegistry.get('read');

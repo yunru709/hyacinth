@@ -1,174 +1,213 @@
 # 🪻 Hyacinth (风信子)
 
-**多 Provider AI Agent** — 可编程、可扩展、可信任的终端智能助手。
+**多 Provider AI Agent 框架** — 可编程、可扩展、运行在本地的终端智能助手。
 
-> TypeScript 6.0 · Node.js · 37 模块 · 82+ 工具 · 14+ LLM Provider
+> TypeScript 6.0 · Node.js · 35 模块 · 82+ 工具 · 14+ LLM Provider
 
 ---
 
-## 特性
+## 一句话
 
-### 🤖 多模型支持
-14+ Provider 一键切换 — Anthropic、OpenAI、DeepSeek、Google Gemini、阿里通义千问、智谱 GLM、MiniMax、MiMo、Groq、xAI、Mistral、OpenRouter、Moonshot，以及本地模型（llama.cpp / Ollama）。
+Hyacinth 是一个跑在终端里的 AI Agent。它可以**读写文件、执行命令、搜索代码、调用 API**——像一个有完全上下文感知能力的编程伙伴。
 
-### 🛠 工具系统（三层架构）
-| 层 | 来源 | 数量 | 示例 |
-|---|---|---|---|
-| **内置工具** | 启动即注册 | 17+ | `read`、`write`、`bash`、`grep`、`edit`、`glob`、`http_request`、`git` |
-| **运行时控制** | AgentLoop 注入 | 35+ | `switch_provider`、`spawn_sub_agent`、`toggle_tool`、`session` 管理 |
-| **MCP 工具** | 动态桥接 | 动态 | `mcp__chrome-devtools__navigate` 等第三方工具 |
+---
 
-所有工具通过统一注册表管理，支持热插拔、权限白名单、子 Agent 隔离。
+## 架构一览
 
-### 🔀 多渠道
-| 通道 | 类型 | 状态 |
+```
+用户输入 (TUI / CLI / 飞书 / 微信)
+  │
+  ▼
+AgentLoop ── 主循环（每轮对话的核心引擎）
+  │
+  ├─ BypassManager.preTurn  ── 旁路Agent前置注入（意图识别、纠偏、世界引擎）
+  ├─ ContextComposer         ── 5-Zone分层上下文组装（结构→历史→知识→时间→输入）
+  ├─ Provider.callLLM        ── 多Provider适配（Anthropic/OpenAI/DeepSeek等14+）
+  ├─ ToolExecutor            ── 工具执行（安全审查→执行→结果回传）
+  └─ BypassManager.postTurn  ── 旁路Agent后置观察（记忆维护、偏差审查）
+```
+
+**核心设计原则：**
+
+- **模块分层清晰** — 接口层 / 核心执行层 / Provider 层 / 工具层 / 基础设施层，依赖方向单向
+- **上下文 5-Zone 体系** — Zone1 稳定身份 → Zone3 对话历史 → Zone4 知识库 → Zone5 实时输入，按变化频率分离缓存
+- **旁路 Agent 独立运行** — 不占用主 Agent 上下文预算，异常隔离，状态跨轮保持
+- **7 种上下文变更机制各司其职** — manifest 管结构、Router 管模式、Injection 管动态注入、Compressor 管预算保护、ContextSource 管数据供应、activeConditions 管条件开关、filterHistory 管消息过滤
+
+---
+
+## 能力
+
+### 🤖 14+ LLM Provider
+
+一键切换，无需改代码：
+
+| Provider | 命令 |
+|---|---|
+| Anthropic Claude | `hyacinth --provider anthropic` |
+| OpenAI GPT | `hyacinth --provider openai` |
+| DeepSeek | `hyacinth --provider deepseek` |
+| Google Gemini | `hyacinth --provider gemini` |
+| 阿里通义千问 | `hyacinth --provider qwen` |
+| 智谱 GLM | `hyacinth --provider zhipu` |
+| MiniMax / MiMo / Groq / xAI / Mistral / OpenRouter / Moonshot | `--provider <name>` |
+| 本地模型 (llama.cpp / Ollama) | `hyacinth --provider local --start-model` |
+
+### 🛠 完整工具系统
+
+| 层 | 来源 | 示例 |
 |---|---|---|
-| **TUI** | 全屏终端界面 | ✅ 稳定 |
-| **Feishu (飞书)** | 机器人 | ✅ 稳定 |
-| **ClawBot** | 消息通道 | ✅ 可用 |
-| **HTTP Webhook** | Webhook 接入 | ✅ 可用 |
+| **内置工具** | 启动即注册 | `read` `write` `edit` `bash` `glob` `grep` `http_request` `git` `db_query` |
+| **运行时控制** | AgentLoop 注入 | `switch_provider` `spawn_sub_agent` `toggle_tool` `add_task` `new_session` |
+| **MCP 工具** | 动态桥接 | 第三方工具通过 MCP 协议接入，自动注册为可用工具 |
+
+安全模型：危险工具（write/bash/http）需用户确认，支持白名单机制。
 
 ### 🤝 子 Agent 编排
-- 委托式协作：主 Agent 将任务分发给子 Agent
-- 对抗式协作：多 Agent 辩论验证
-- 并行执行：同时处理多个子任务
-- 独立工具白名单、独立上下文、独立 Session
+
+三种协作模式：
+
+| 模式 | 说明 |
+|---|---|
+| **委托 (delegate)** | 主 Agent 将任务分发给子 Agent，子 Agent 独立完成并返回结果 |
+| **对抗 (adversarial)** | 两个子 Agent 从不同角度交叉审查同一任务 |
+| **并行 (parallel)** | 同时启动多个子 Agent，各自处理不同子任务 |
+
+每个子 Agent 拥有独立工具白名单、独立上下文、独立会话。主 Agent 负责规划和验收。
+
+### 🔀 多渠道
+
+| 通道 | 说明 | 状态 |
+|---|---|---|
+| **TUI** | 全屏终端界面（blessed），支持多面板、实时流式输出 | ✅ 稳定 |
+| **CLI** | 命令行交互模式 + 单次执行 | ✅ 稳定 |
+| **HTTP API** | Fastify Server，RESTful 接口 | ✅ 可用 |
+| **飞书** | 飞书机器人，支持私聊和群聊 | ✅ 稳定 |
+| **ClawBot** | 微信 AI 助手插件，二维码授权 | ✅ 可用 |
 
 ### 🔄 Flow 工作流
-内置 Flow 引擎驱动结构化任务执行：
-- **Todo 模式** — 任务拆解 → 步骤定义 → 逐个执行
-- **Spec 模式** — 需求规格 → 任务清单 → 验收检查
 
-### 🔌 插件 + MCP + Skill
-- **插件系统**：`plugin.json` + `PluginApi`，可注册工具/Skill/MCP Server/渠道
-- **MCP 协议**：桥接第三方工具生态，stdio/SSE 双传输，崩溃自动重连
-- **Skill 系统**：可插拔的提示词模板，按需注入上下文
+内置状态机引擎驱动结构化任务：
+
+- **Todo 模式** — 任务拆解 → 步骤定义 → 逐个执行 → 完成验收
+- **Spec 模式** — 需求规格撰写 → 任务清单 → 检查清单，三阶段推进
+
+### 🔌 可扩展性
+
+| 扩展方式 | 说明 |
+|---|---|
+| **Plugin** | `plugin.json` 声明 + PluginApi，可注册工具/Skill/MCP/渠道 |
+| **MCP** | 标准 MCP 协议，stdio/SSE 双传输，崩溃自动重连，危险命令黑名单 |
+| **Skill** | 可插拔的提示词模板，通过 `use_skill` 按需注入上下文 |
+| **ContextSource** | 运行时注册数据源，runtime section 自动获取内容 |
 
 ### 🏗 基础设施
+
 | 子系统 | 说明 |
 |---|---|
-| **MCP** | 第三方工具桥接，安全沙箱，危险命令黑名单 |
+| **上下文压缩** | 四阶段差分压缩（规则裁剪→结构化摘要→增量更新→保护区兜底），Token 预算保护 |
 | **知识库** | SQLite FTS5 全文检索 + CJK bigram 分词 + Tag IDF 语义匹配 |
-| **热重载** | 8 个 Watcher：MCP/Plugin/Prompt/Config/Tool/Skill/Agent/Channel |
-| **调度器** | Interval / Cron / Daily / Fixed-time / Random 五种调度 |
-| **回滚** | 按回合回滚文件更改 (git-driven) |
+| **会话记忆** | 跨会话项目记忆，旁路 Agent 自动维护 |
+| **热重载** | 8 个 Watcher：MCP/Plugin/Prompt/Config/Tool/Skill/Agent/Channel，修改即生效 |
+| **定时调度** | Interval / Cron / Daily / Fixed-time / Random 五种调度策略 |
+| **回滚** | 按回合回滚文件变更（Git 驱动），支持 rollback/rollback_status |
 | **自修复** | Loop 死循环检测、风暴抑制、会话垃圾清理 |
-| **自更新** | GitHub Release / 本地编译两种更新路径 |
-| **守护进程** | 子进程退出 code 42 时自动拉起 |
+| **自更新** | GitHub Release / 本地编译两种路径 |
+| **守护进程** | 子进程异常退出自动拉起 |
 
-### 📦 注册表体系
-所有可扩展点共享同一基类 `GenericRegistry<T>`：
-
-```
-ToolRegistry     → 工具注册
-SkillRegistry    → 技能注册
-AgentRegistry    → 子 Agent 注册
-PluginRegistry   → 插件注册
-ProviderRegistry → Provider 注册
-ChannelRegistry  → 渠道注册
-MachineRegistry  → Flow 注册
-```
+---
 
 ## 快速开始
 
-### 安装
-
 ```bash
-# 全局安装
+# 安装
 npm install -g hyacinth-ai
 
-# 或直接用 npx
-npx hyacinth-ai
-```
-
-### 首次使用
-
-```bash
-# 运行配置向导
+# 首次配置
 hyacinth setup
 
-# 启动 TUI 界面
+# 启动 TUI
 hyacinth tui
 
-# 直接对话
-hyacinth "帮我检查一下这个目录"
+# 或直接对话
+hyacinth "帮我看看这个项目是做什么的"
 ```
 
 ### 配置 API Key
 
-创建 `.env` 文件：
+在项目目录或 `~/.agent/` 下创建 `.env`：
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 DEEPSEEK_API_KEY=sk-...
-GEMINI_API_KEY=...
 ```
 
-或通过命令行：
-
-```bash
-hyacinth --set ANTHROPIC_API_KEY=sk-ant-...
-```
-
-## 支持的 Provider
-
-| Provider | 环境变量 | 默认模型 |
-|---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
-| OpenAI | `OPENAI_API_KEY` | gpt-4o |
-| DeepSeek | `DEEPSEEK_API_KEY` | deepseek-V4 |
-| Google Gemini | `GEMINI_API_KEY` | gemini-2.5-flash |
-| 阿里通义千问 (Qwen) | `QWEN_API_KEY` | qwen-plus |
-| 智谱 GLM (Zhipu) | `ZHIPU_API_KEY` | glm-4-plus |
-| MiniMax | `MINIMAX_API_KEY` | minimax-text-01 |
-| MiMo | `MIMO_API_KEY` | mimo |
-| Groq | `GROQ_API_KEY` | llama-3.3-70b-versatile |
-| xAI (Grok) | `XAI_API_KEY` | grok-2 |
-| Mistral | `MISTRAL_API_KEY` | mistral-large-latest |
-| OpenRouter | `OPENROUTER_API_KEY` | auto |
-| Moonshot | `MOONSHOT_API_KEY` | moonshot-v1-8k |
-| Local (llama.cpp) | — | 本地模型路径 |
-
-## CLI 命令
-
-```bash
-hyacinth                        # 交互模式
-hyacinth <prompt>               # 单次执行
-hyacinth --provider deepseek    # 指定 Provider
-hyacinth --tui                  # 全屏 TUI 模式
-hyacinth serve                  # 启动 HTTP API Server
-hyacinth setup                  # 配置向导
-hyacinth doctor                 # 系统诊断
-hyacinth session list           # 会话管理
-hyacinth config get/set         # 配置管理
-hyacinth model switch/list      # 模型管理
-hyacinth skill enable/disable   # Skill 管理
-hyacinth tool enable/disable    # 工具管理
-hyacinth update                 # 自更新
-```
+---
 
 ## 开发
 
 ```bash
-# 依赖安装
+git clone <repo-url>
+cd hyacinth
+
 pnpm install
-
-# 编译
 pnpm build
-
-# 开发模式（监听）
-pnpm dev
-
-# 测试
-pnpm test
-
-# Windows 启动
-pnpm start:win
+pnpm dev    # 开发模式（watch）
+pnpm test   # 运行测试
 ```
+
+**项目结构：**
+
+```
+src/
+├── gateway/       # CLI/TUI 入口、Agent 工厂装配
+├── orchestrator/  # AgentLoop 主循环
+├── provider/      # 14+ LLM Provider 适配
+├── context/       # 5-Zone 上下文组装、压缩、Router、manifest
+├── tools/         # 工具系统（内置 + 运行时 + MCP）
+├── agents/        # 子 Agent 委托系统
+├── bypass/        # 旁路 Agent（意图识别、纠偏、记忆维护）
+├── memory/        # 会话/对话/事件/统计存储
+├── knowledge/     # 知识库 FTS5 检索
+├── plugins/       # 插件系统
+├── skills/        # Skill 系统
+├── mcp/           # MCP 协议集成
+├── hot-reload/    # 热重载管理器
+├── schedule/      # 定时任务调度
+├── machine/       # Flow 状态机
+├── channels/      # 多渠道消息处理
+└── prompts/       # 提示词模板
+```
+
+---
+
+## RFC：意图块聚类与上下文精炼
+
+我们正在进行一项上下文管理改进的设计讨论：
+
+> **意图块聚类**：旁路 Agent 在每轮对话后将对话按意图归类到不同的"意图块"中。当会话文件达到一定规模时，Zone3 的历史从"全量流水账"切换为"按意图分块 + 最近 N 轮"的结构化呈现。
+
+当前上下文变更有 7 种独立机制（manifest / Router / Injection / Compressor / ContextSource / activeConditions / filterHistory），每种有明确的职责边界。意图块的实现需要新增 Section 运行时开关能力。
+
+### 为什么不走 Embedding / RAG
+
+我们考虑过传统的 Embedding + 向量检索方案。问题在于：
+
+向量检索的本质是相似度匹配——**语义上越接近的内容，越容易被一起检索出来**。这在一个 Agent 的长程对话中反而是缺陷：对话中经常出现不同主题在"字面上"很接近的情况——讨论两个不同项目的 Python 环境配置、分析两个不同文件的代码结构、处理两个相似的错误信息。语义相近但不属于同一个意图块的内容会被打包检索回来，**噪音比信号多**。
+
+更关键的是，embedding 检索的结果是概率性的——同一段对话的检索结果可能因向量模型的微妙差异、查询措辞的细微变化而产生不同的返回内容。对于一个需要稳定运行的 Agent 框架来说，这种不确定性会**降低上下文注入的可预测性**，进而影响 Agent 行为的可复现性。
+
+意图块走的是另一条路：**旁路 Agent 在对话进行时就做归类**，而不是事后检索。归类不是基于语义相似度，而是基于对话的实际意图——"这 5 轮在讨论渠道配置"、"那 3 轮在修环境变量"。块的结构是确定的、可追溯的、不受查询措辞影响的。
+
+换句话说：embedding 回答的是"哪些内容看起来像"，意图块回答的是"哪些内容确实是同一件事"。
+
+如果走传统 RAG，则还需要引入向量数据库、背景 embedding 计算管线，将大幅增加框架复杂度。
+
+欢迎参与讨论：详见 [上下文变更机制分析报告](./上下文变更机制分析报告.md)
+
+---
 
 ## 许可证
 
-[MIT](./LICENSE)
-
-Copyright © 2026 孑遗
+[MIT](./LICENSE) · Copyright © 2026 孑遗

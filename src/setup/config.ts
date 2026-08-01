@@ -179,7 +179,7 @@ export interface AgentConfig {
 
 const DEFAULT_CONFIG: AgentConfig = {
   provider: 'anthropic',
-  model: DEFAULT_PROVIDERS.providers.anthropic?.defaultModel ?? 'unknown',
+  model: '',
   maxTurns: getDefaultConfig().session.maxTurns,
   maxContext: 200000,
   safety: {

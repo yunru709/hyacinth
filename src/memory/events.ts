@@ -72,7 +72,19 @@ export interface UserInputEvent {
   timestamp: string;
 }
 
-export type SessionEvent = SessionStartEvent | UsageEvent | ToolCallEvent | UserInputEvent;
+/** 旁路 Agent 产出——意图簇归类 */
+export interface ClusterAssignEvent {
+  type: 'cluster_assign';
+  cluster_id: string;
+  capability: string;
+  summary: string;
+  /** conversation_full.jsonl 中的行号范围 [start, end]，两端均包含 */
+  line_start: number;
+  line_end: number;
+  timestamp: string;
+}
+
+export type SessionEvent = SessionStartEvent | UsageEvent | ToolCallEvent | UserInputEvent | ClusterAssignEvent;
 
 /**
  * 通用 JSONL 文件读取

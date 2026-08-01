@@ -1,3 +1,24 @@
+// ============================================================
+// ManifestLoader — 上下文清单加载器
+// ============================================================
+//
+// 职责：加载 ContextManifest 定义，暴露查询接口。
+//
+// 加载优先级：
+//   {cwd}/.agent/context-manifest.json  ← 项目级覆盖（优先）
+//   manifest-defaults.ts                 ← 兜底默认（本模块生成）
+//
+// 与 Composer 的关系：
+//   Composer 通过 ManifestLoader 读取 section 列表和 zone 布局。
+//   Composer 不直接依赖 manifest-defaults.ts —— 始终走 loader，
+//   确保项目级覆盖能生效。热重载时 reload() 刷新缓存。
+//
+// 为什么用 loader 而不是直接 import 默认值：
+//   1. 支持用户覆盖（context-manifest.json）
+//   2. 热重载（ManifestWatcher 检测文件变更 → reload）
+//   3. 单一入口（所有 Zone/Section 查询走同一个实例）
+// ============================================================
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_CONTEXT_MANIFEST } from './manifest-defaults.js';

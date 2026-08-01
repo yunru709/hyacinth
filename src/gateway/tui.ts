@@ -1117,7 +1117,11 @@ export async function runTui(
   // 启动所有渠道（每个渠道自行处理消息）
   await channelManager.startAll(agentFactory);
 
-  // 注册跨渠道发送工具（TUI 模式）
+  // ── 跨渠道消息发送工具 ────────────────────────────────────
+  //
+  // 在 channelManager.startAll() 之后注册，此时所有渠道已启动。
+  // 工具内通过 ChannelManager.get() 查找目标渠道并调用其 send()。
+  // 仅在本地 TUI 模式下注册——远程模式（remoteWs）下工具由服务端提供。
   if (agent) {
     const { MessageDispatcher, createSendChannelMessageTool } = await import('../channels/dispatcher.js');
     const dispatcher = new MessageDispatcher(channelManager);

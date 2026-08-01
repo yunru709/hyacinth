@@ -167,6 +167,7 @@ export class BypassManager {
   async preTurn(ctx: PreTurnContext): Promise<{
     transformedInput?: string;
     injections: Injection[];
+    intent?: { capability: string; confidence: number };
   }> {
     if (this.active.length === 0) {
       return { injections: [] };
@@ -174,6 +175,7 @@ export class BypassManager {
 
     const allInjections: Injection[] = [];
     let transformedInput: string | undefined;
+    let intent: { capability: string; confidence: number } | undefined;
 
     for (const agent of this.active) {
       if (!agent.preTurn) continue;
@@ -182,13 +184,17 @@ export class BypassManager {
         if (result.transformedInput !== undefined) {
           transformedInput = result.transformedInput;
         }
+        // orchestrator 是意图的权威来源
+        if (agent.name === 'orchestrator' && result.intent) {
+          intent = result.intent;
+        }
         allInjections.push(...result.injections);
       } catch (err) {
         logger.warn(`BypassAgent preTurn failed: ${agent.name}`, { error: (err as Error).message });
       }
     }
 
-    return { transformedInput, injections: allInjections };
+    return { transformedInput, injections: allInjections, intent };
   }
 
   // ── postTurn：后台并行，不阻塞 ──────────────────────────────

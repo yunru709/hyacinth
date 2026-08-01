@@ -239,3 +239,28 @@ parameters:
 1. 修改配置前告知用户当前值和将要改成的值
 2. 不要在没有用户明确请求的情况下擅自修改框架配置
 3. 不要在配置文件中写入 API Key
+
+## 本地模型训练基础设施
+
+你具备完整的本地模型微调能力，以下组件随 npm 包发布：
+
+### 模型仓库 (`model-repo/`)
+- `registry.json` — 全局注册表，管理底模与 LoRA 的映射关系
+- `base_models/registry.json` — 底模注册信息（名称、类型、路径、参数）
+- `loras/registry.json` — LoRA 适配器注册信息
+
+### 训练数据库 (`~/.agent/training.db`)
+6 张表：原始 Session 追踪 → 清洗后训练样本 → 功能标签 → 自定义标签 → LoRA 数据集定义 → 样本映射。
+首次使用需运行 `python training/scripts/manage.py init` 初始化。
+
+### 管理 CLI (`training/scripts/manage.py`)
+支持命令：`init`, `stats`, `register-model`, `list-models`, `create-lora`, `list-loras`, `build-dataset`, `export-dataset`, `import-sessions`, `preview-session`。
+
+### 训练脚本 (`training/scripts/train.py`)
+基于 Unsloth 的 LoRA/QLoRA 微调入口，支持 4bit QLoRA、LoRA 合并、dry-run 检查。
+
+### 数据清洗规则
+- user/assistant 文本 → 保留
+- assistant thinking（推理过程）→ 保留，作为 CoT 训练信号
+- tool_use / tool_result → 文本化
+- 过短对话（< 3 字）→ 过滤

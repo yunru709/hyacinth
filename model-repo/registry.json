@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "description": "模型仓库注册表 — 管理底模与 LoRA 的映射关系",
+  "updated_at": "2026-07-29T13:16:00.000Z",
+  "base_models": {},
+  "loras": {},
+  "active_mappings": {}
+}

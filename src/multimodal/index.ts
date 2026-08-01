@@ -96,7 +96,6 @@ export async function compressImageIfLarge(
   if (buf.length <= COMPRESS_THRESHOLD) return { buffer: buf, mime, compressed: false };
   let sharp: any;
   try {
-    // @ts-expect-error — sharp 0.35 types incompatible with pnpm exports
     sharp = (await import('sharp')).default;
   } catch { return { buffer: buf, mime, compressed: false }; }
   try {

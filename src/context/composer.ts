@@ -1,3 +1,29 @@
+// ============================================================
+// LayeredContextComposer — 上下文组装器（7 机制之一）
+// ============================================================
+//
+// 职责：filterHistory — 消息过滤
+//
+// 将 manifest 定义的 section 按 Zone 分层组装为最终发送给 LLM 的
+// 消息数组。内置缓存策略（按 provider 类型适配断点/前缀缓存）和
+// 历史消息过滤（跳过 system 消息、纯 thinking 块、系统注入文本）。
+//
+// 与 Manifest 的关系：
+//   Manifest（菜单）定义"有什么" — section 列表、zone 归属、类型。
+//   Composer（厨师）负责"怎么拼" — 读取 manifest → 按 zone 遍历 section
+//     → 调 SectionResolver 解析内容 → 按 role 合并 → 输出 Message[]。
+//   要新增一个上下文 section，只改 Manifest；要改组装逻辑，只改 Composer。
+//
+// 7 种上下文变更机制各司其职：
+//   manifest       — 管结构（有什么 section，放哪个 zone）
+//   Router         — 管模式（不同模式显示/跳过哪些 section）
+//   Injection      — 管动态注入（旁路 Agent 运行时插入内容）
+//   Compressor     — 管预算保护（超 token 时如何裁剪历史）
+//   ContextSource  — 管数据供应（运行时数据从哪来）
+//   activeConditions — 管条件开关（如 precise_mode 触发条件注入）
+//   filterHistory  — 管消息过滤（本文件，历史中哪些消息不显示）
+// ============================================================
+
 import type {
   Message,
   ToolDefinition,
@@ -67,6 +93,8 @@ export interface LayeredComposeOptions {
   profile?: ContextProfile;
   /** 旁路Agent 注入列表 */
   bypassInjections?: import('../bypass/types.js').Injection[];
+  /** 历史消息变换（用于意图簇过滤等场景）。返回筛选后的消息，null/undefined = 不过滤。 */
+  historyTransform?: ((msgs: Message[]) => Message[]) | null;
 }
 
 export type ZoneBreakdown = Record<string, number> & { total: number };
@@ -285,7 +313,10 @@ export class LayeredContextComposer implements ContextComposer {
       if (sec.source === 'runtime:history' && options.history && options.history.length > 0) {
         flushSystemParts();
         flushTextParts();
-        for (const msg of options.history) {
+        const historyMsgs = options.historyTransform
+          ? options.historyTransform(options.history)
+          : options.history;
+        for (const msg of historyMsgs) {
           if (shouldSkipHistoryMessage(msg)) continue;
           messages.push(msg);
         }

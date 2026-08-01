@@ -70,11 +70,24 @@ export interface ChannelReply {
   metadata?: Record<string, unknown>;
 }
 
-/** 主动发送的目标（跨渠道借用能力时指定接收方） */
+// ================================================================
+// ChannelTarget — 跨渠道发送目标
+// ================================================================
+//
+// 用于 ChannelHandler.send() 的第一个参数，指定消息接收方。
+// 当前仅区分私聊和群聊两种目标类型，不做更细粒度的抽象——
+// 各渠道的 ID 体系差异太大（飞书 ou_/oc_、微信 wxid、TUI sessionId），
+// 统一抽象反而增加理解成本。由各渠道的 send() 实现自行解析目标 ID。
+//
+// 新增渠道时：如果该渠道有其他目标类型（如 Telegram 的 channel/supergroup），
+// 扩展此 type 联合即可。
+// ================================================================
+
+/** 跨渠道主动发送的目标接收方 */
 export interface ChannelTarget {
-  /** 目标类型 */
+  /** 目标类型：user=私聊用户，chat=群聊 */
   type: 'user' | 'chat';
-  /** 用户 ID 或群聊 ID */
+  /** 目标 ID（格式由各渠道自行定义：飞书 ou_/oc_，微信 wxid 等） */
   id: string;
 }
 
@@ -190,13 +203,24 @@ export interface ChannelHandler {
   getStatus(): ChannelStatus;
 
   /**
-   * 主动发送消息到渠道（跨 session，不关联任何 AgentLoop、不落盘）。
-   * 用于从其他渠道借用本渠道的发送能力（如 TUI 中的 Agent 通过飞书发消息）。
-   * 未实现 = 该渠道不支持被外部借用。
+   * 主动发送消息（跨渠道借用能力入口）。
    *
-   * @param target 目标用户或群聊
-   * @param content 消息内容
-   * @returns 发送结果描述
+   * 设计意图：reply() 是"回复"——在 handleMessage 生命周期内，将 Agent
+   * 的响应发回给当前会话的用户。send() 是"借用"——任何渠道的 Agent
+   * 都可以调用其他渠道的 send() 来借用其发送能力，不依赖 handleMessage 生命周期。
+   *
+   * 行为保证（"纯借用"语义）：
+   *   - 不创建 session —— 消息是一次性的，不关联 AgentLoop
+   *   - 不写 conversation —— 不污染对话历史
+   *   - 不影响渠道内部状态 —— sessionMap、消息队列等完全不变
+   *
+   * 调用来源：MessageDispatcher → send_channel_message 工具 → Agent
+   *
+   * 未实现 = 该渠道不支持被外部借用（返回 undefined，MessageDispatcher 会给出友好提示）。
+   *
+   * @param target  目标接收方（用户或群聊），各渠道自行解析 ID 格式
+   * @param content 消息内容（文本 + 可选图片），复用 ChannelReply 避免定义新类型
+   * @returns 发送结果描述（成功或失败原因），不抛异常
    */
   send?(target: ChannelTarget, content: ChannelReply): Promise<string>;
 }

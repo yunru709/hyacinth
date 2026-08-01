@@ -1,9 +1,21 @@
 // ============================================================
-// ContextProfile — 模式路由层（兼容保留）
+// ContextProfile — 模式路由层（兼容保留）【机制 2/7: Router】
 // ============================================================
+//
+// 职责：Router — 管模式切换。不同模式下显示/跳过哪些 section，
+//        哪些工具可用，走哪个 persona。
 //
 // 从 v2 开始，上下文路由统一由 IContextRouter（router.ts）管理。
 // ContextProfile 和 ComposeStrategy 保留作为向后兼容的 deprecated 别名。
+//
+// 7 种上下文变更机制：
+//   1. manifest       — 管结构（有什么 section，放哪个 zone）
+//   2. Router         — 管模式（本文件）← 当前机制
+//   3. Injection      — 管动态注入（旁路 Agent 运行时插入内容）
+//   4. Compressor     — 管预算保护（超 token 时如何裁剪历史）
+//   5. ContextSource  — 管数据供应（运行时数据从哪来）
+//   6. activeConditions — 管条件开关（如 precise_mode）
+//   7. filterHistory  — 管消息过滤（历史中哪些消息不显示）
 //
 // 新增模式只需：
 //   1. 实现 IContextRouter 接口

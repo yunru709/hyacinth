@@ -1,3 +1,19 @@
+// ============================================================
+// section-resolver — Section 解析器（7 机制之 Injection + activeConditions）
+// ============================================================
+//
+// 职责：
+//   1. Injection — 旁路 Agent 的动态注入解析。
+//      在 resolveSection 中查找 bypassInjections，匹配 section name，
+//      根据 mode（replace/append）注入内容。
+//   2. activeConditions — 条件开关。
+//      通过 ResolverContext.activeConditions 控制 conditional section
+//      是否启用（如 precise_mode 触发时注入精确模式相关 prompt）。
+//
+// 调用链：composer → resolveSection → 根据 sec.type 分发到不同处理逻辑。
+// 旁路注入优先级高于正常解析，inject mode='replace' 完全替代原内容。
+// ============================================================
+
 import type { Message, TextContent } from '../types.js';
 import type { SectionEntry } from './manifest-types.js';
 import type { TokenCounter } from './tokenizer.js';

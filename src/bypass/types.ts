@@ -25,6 +25,8 @@ export interface PreTurnContext {
   contextBudget: { used: number; total: number };
   /** 最近几轮的工具调用名称 */
   recentToolCalls: string[];
+  /** 当前 session ID（供旁路Agent按 session 隔离内部状态） */
+  sessionId?: string;
 }
 
 /** postTurn 上下文：旁路Agent在每轮对话后的输入 */
@@ -39,6 +41,10 @@ export interface PostTurnContext {
   toolCallsThisTurn: string[];
   /** 是否为本轮用户消息的最后一次迭代（loop 结束） */
   isLastIteration: boolean;
+  /** 当前 session ID（供旁路Agent按 session 隔离内部状态） */
+  sessionId?: string;
+  /** conversation_full.jsonl 当前行数（供簇归类用，确定本轮行号范围） */
+  fullArchiveLineCount?: number;
 }
 
 // ── 注入 ───────────────────────────────────────────────────
@@ -61,6 +67,8 @@ export interface PreTurnResult {
   transformedInput?: string;
   /** 要注入到上下文的 section 列表 */
   injections: Injection[];
+  /** 识别出的意图（orchestrator 产出，供 AgentLoop 消费用于意图簇过滤） */
+  intent?: { capability: string; confidence: number };
 }
 
 // ── 旁路Agent 接口 ─────────────────────────────────────────

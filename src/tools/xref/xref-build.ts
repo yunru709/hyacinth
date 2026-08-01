@@ -51,6 +51,12 @@ export class XrefBuildTool implements Tool {
           'If provided with clean=true, deletes the xref database for the specified project instead of the current one. ' +
           'Can be an absolute path or a project name/key.',
       },
+      batch_size: {
+        type: 'number',
+        description:
+          'Number of files to parse per batch. Lower values use less memory but slower. ' +
+          'Default: 50. Min: 1, Max: 500. Only applies to build mode (not clean).',
+      },
     },
     required: [],
   };
@@ -114,8 +120,11 @@ export class XrefBuildTool implements Tool {
       modeLabel = 'full';
     }
 
+    // 解析 batch_size（默认 50，范围 1-500）
+    const batchSize = typeof args.batch_size === 'number' ? args.batch_size : 50;
+
     try {
-      const stats = await this.manager.build(changedFiles, dirs);
+      const stats = await this.manager.build(changedFiles, dirs, batchSize);
       const lines: string[] = [];
       lines.push(`✅ Cross-reference index built successfully (${modeLabel}).`);
       lines.push('');
