@@ -26,10 +26,16 @@ export class SchedulePersistence {
     this.storagePath = getStoragePath();
   }
 
-  /** 从磁盘加载数据 */
+  /**
+   * 从磁盘加载数据。
+   *
+   * 注意：每次调用都重新读取磁盘，而不是永久缓存内存副本。
+   * 多个 Agent 实例（TUI / Feishu / WebUI 等）共享同一个 tasks.json，
+   * 若缓存 this.data 后永不刷新，某个实例删除任务后，其他实例仍会用它
+   * 内存里的旧任务列表整文件重写（如 addRecord 时 save()），导致已删除的
+   * 任务"复活"。文件读取频率极低（任务 CRUD 及执行记录写入），性能可忽略。
+   */
   async load(): Promise<SerializedSchedulerData> {
-    if (this.data) return this.data;
-
     try {
       const content = await fs.readFile(this.storagePath, 'utf-8');
       const parsed = JSON.parse(content) as SerializedSchedulerData;
@@ -38,7 +44,8 @@ export class SchedulePersistence {
         return parsed;
       }
     } catch {
-      // 不存在或不兼容，使用默认值
+      // 读取失败（文件不存在/损坏）：回退到内存缓存，避免丢数据
+      if (this.data) return this.data;
     }
 
     this.data = { version: CACHE_VERSION, tasks: [], records: [] };

@@ -1,3 +1,18 @@
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  ⚠️ 安全红线 · 旁路智能体（元认知层）工具白名单            ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║  本文件是旁路智能体（意图识别/纠偏/记忆维护），直接注入      ║
+// ║  主 Agent 上下文。出错会带偏主 Agent——【风险最高】的一层。  ║
+// ║                                                              ║
+// ║  ✅ 只允许 ORCHESTRATOR_TOOLS 里的专一化窄工具：             ║
+// ║     memory_* / inject_hint / cluster_assign                  ║
+// ║     （固定 schema · 只读写本 Agent 自己的记忆文件）          ║
+// ║  ❌ 禁止 bash/read/write/edit/http_request 等通用工具。      ║
+// ║     加通用工具 = 安全事故。                                  ║
+// ║  维护此项目的 Agent：即使只读前几行也必须遵守。             ║
+// ║  完整规则见 src/bypass/base.ts 头部。                        ║
+// ╚══════════════════════════════════════════════════════════════╝
+
 // ============================================================
 // bypass/agents/orchestrator — ContextOrchestrator
 // ============================================================
@@ -103,6 +118,15 @@ const POSTTURN_SYSTEM = [
 ].join('\n');
 
 // ── 工具定义 ───────────────────────────────────────────────────
+//
+// ⚠️ 安全约束：本旁路智能体是元认知层（意图识别 / 纠偏 / 记忆维护）。
+// 下方工具是它仅有的能力来源——全部是"极其专一化"的窄工具：
+// 固定 schema、只读写本 Agent 自己的记忆文件（固定路径 + 固定格式
+// `- 条目` 行），绝不触碰任意文件或执行任意命令。
+//
+// ❌ 不要往这里添加 bash / read / write / edit / http_request 等
+// 通用工具。旁路智能体出错 = 元认知层带偏主 Agent，风险极高。
+// 新增工具前先过 base.ts 头部的安全自问清单。
 
 const ORCHESTRATOR_TOOLS: ToolDefinition[] = [
   {
@@ -347,8 +371,16 @@ export class ContextOrchestrator extends BypassAgentBase {
   private static readonly MAX_SESSIONS = 100;
   /** sessionId 安全白名单 */
   private static readonly SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
-  /** 最新一次簇归类结果（loop.ts 消费后写入 events.jsonl） */
-  lastClusterAssign: { cluster_id: string; capability: string; summary: string; line_start: number; line_end: number } | null = null;
+  private static readonly CLUSTER_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+  /** 最新一次簇归类结果（loop.ts 消费后写入 events.jsonl + markCluster） */
+  lastClusterAssign: { cluster_id: string; capability: string; summary: string; line_start: number; line_end: number; session_id: string } | null = null;
+  /** cluster_assign 工具调用时的上下文（classifyCluster 在 LLM 调用前设置，工具内部消费后清空） */
+  private _pendingClusterCtx: {
+    sessionId: string;
+    capability: string;
+    lineEnd: number;
+    loadedClusters: Array<{ cluster_id: string; capability: string; summary: string; line_start: number; line_end: number }>;
+  } | null = null;
 
   constructor(memoryPath: string) {
     const memoryExec = createMemoryExecutor(memoryPath);
@@ -539,13 +571,21 @@ export class ContextOrchestrator extends BypassAgentBase {
     }
   }
 
-  /** 簇归类：LLM 判断本轮属于已有簇还是新簇 */
+  /** 簇归类：LLM 判断本轮属于已有簇还是新簇。
+   *  cluster_assign 工具（_handleClusterAssign）直接在调用时写盘，
+   *  此处仅负责：加载已有簇列表 → 构建 prompt → 调用 LLM（工具在内部完成写入）。
+   *  正则回退路径：LLM 未调工具但在文本中输出了 cluster_id → 此处补写盘。 */
   private async classifyCluster(ctx: PostTurnContext, sc: BypassContext): Promise<void> {
     const provider = this.getProvider();
     if (!provider) return;
 
-    const existingClusters = sc.clusters.length > 0
-      ? sc.clusters.map(c => `- ${c.id}: ${c.summary} (行 ${c.line_start}-${c.line_end})`).join('\n')
+    const sessionId = ctx.sessionId ?? '';
+    const lineEnd = ctx.fullArchiveLineCount ?? 0;
+
+    // 从文件读取已有簇索引
+    const loadedClusters = await this.loadClusterIndex(sessionId);
+    const existingClusters = loadedClusters.length > 0
+      ? loadedClusters.map(c => `- ${c.cluster_id}: ${c.summary} (行 ${c.line_start}-${c.line_end})`).join('\n')
       : '(暂无已有簇)';
 
     const clusterPrompt = CLUSTER_SYSTEM.replace(
@@ -566,43 +606,114 @@ export class ContextOrchestrator extends BypassAgentBase {
       '请判断本轮对话属于哪个意图簇，调用 cluster_assign 工具。',
     ].join('\n');
 
+    // 设置工具上下文：LLM 调 cluster_assign 时，_handleClusterAssign 会消费它并写盘
+    this._pendingClusterCtx = { sessionId, capability: sc.capability, lineEnd, loadedClusters };
+    this.lastClusterAssign = null;
+
     const output = await this.callLLMWithTools(clusterPrompt, userPrompt, 2);
     logDetail('CLUSTER classification output', output || '(empty)');
 
-    // 解析 cluster_assign 工具调用结果
-    // 工具返回格式: "ok: cluster_id=xxx"
-    const clusterMatch = output.match(/cluster_id=(\S+)/);
-    if (!clusterMatch) return;
+    // 工具已在 LLM 调用期间完成写盘 → lastClusterAssign 已被设置
+    if (this.lastClusterAssign) {
+      this._pendingClusterCtx = null;
+      this._updateMemoryClusters(sc, this.lastClusterAssign);
+      return;
+    }
 
-    const clusterId = clusterMatch[1];
-    const lineEnd = ctx.fullArchiveLineCount ?? 0;
-    // 找到已有簇的起始行（如果归入已有簇），否则为新簇
-    const existing = sc.clusters.find(c => c.id === clusterId);
-    const lineStart = existing
-      ? existing.line_start  // 归入已有簇：保持原起始行
-      : Math.max(1, lineEnd - 5); // 新簇：粗略估计起始行（假设最近 5 行为新内容）
+    this._pendingClusterCtx = null;
 
-    // 暂存到实例属性，由 loop.ts 消费
+    // 回退：LLM 未调工具但在文本中输出了 cluster_id
+    const clusterId = output.match(/cluster_id=(\S+)/)?.[1];
+    if (!clusterId) return;
+    if (!ContextOrchestrator.CLUSTER_ID_RE.test(clusterId)) {
+      log('CLUSTER rejected invalid cluster_id: ' + clusterId);
+      return;
+    }
+
+    const fallbackSummary = output.replace(/cluster_id=\S+\s*/g, '').replace(/^ok:\s*/g, '').trim() || clusterId;
+    const lineInfo = this._writeClusterFiles(clusterId, fallbackSummary, sessionId, sc.capability, lineEnd, loadedClusters);
     this.lastClusterAssign = {
       cluster_id: clusterId,
       capability: sc.capability,
-      summary: output.replace(/cluster_id=\S+\s*/g, '').replace(/^ok:\s*/g, '').trim() || clusterId,
-      line_start: lineStart,
+      summary: fallbackSummary,
+      line_start: lineInfo.line_start,
       line_end: lineEnd,
+      session_id: sessionId,
     };
+    this._updateMemoryClusters(sc, this.lastClusterAssign);
+  }
 
-    // 更新内存中的簇索引
+  /** 写簇数据文件（cluster-index.json + 初始摘要），返回行号范围 */
+  private _writeClusterFiles(
+    clusterId: string, summary: string, sessionId: string,
+    capability: string, lineEnd: number,
+    loadedClusters: Array<{ cluster_id: string; capability: string; summary: string; line_start: number; line_end: number }>,
+  ): { line_start: number; line_end: number } {
+    const existing = loadedClusters.find(c => c.cluster_id === clusterId);
+    const lineStart = existing ? existing.line_start : Math.max(1, lineEnd - 5);
+
+    // 1. 更新 cluster-index.json
+    const updated = loadedClusters.filter(c => c.cluster_id !== clusterId);
+    updated.push({ cluster_id: clusterId, capability, summary, line_start: lineStart, line_end: lineEnd });
+    this._writeFile(sessionId, 'cluster-index.json', JSON.stringify(updated, null, 2));
+
+    // 2. 写初始簇摘要
+    const summaryPath = path.join('summaries', `cluster_${clusterId}.md`);
+    this._writeFile(sessionId, summaryPath, summary);
+
+    return { line_start: lineStart, line_end: lineEnd };
+  }
+
+  /** 写 session 目录下的文件（自动拼接 ~/.agent/sessions/{sessionId}/{relPath}） */
+  private _writeFile(sessionId: string, relPath: string, content: string): void {
+    const filePath = path.join(os.homedir(), '.agent', 'sessions', sessionId, relPath);
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf-8');
+    } catch (err) {
+      log(`CLUSTER write failed: ${relPath} — ${(err as Error).message}`);
+    }
+  }
+
+  /** 更新内存中的簇索引（与文件保持同步，供同 session 内后续 classifyCluster 快速查询） */
+  private _updateMemoryClusters(
+    sc: BypassContext,
+    ca: NonNullable<ContextOrchestrator['lastClusterAssign']>,
+  ): void {
+    const existing = sc.clusters.find(c => c.id === ca.cluster_id);
     if (existing) {
-      existing.line_end = lineEnd;
-      existing.summary = this.lastClusterAssign.summary;
+      existing.line_end = ca.line_end;
+      existing.summary = ca.summary;
     } else {
       sc.clusters.push({
-        id: clusterId,
-        capability: sc.capability,
-        summary: this.lastClusterAssign.summary,
-        line_start: lineStart,
-        line_end: lineEnd,
+        id: ca.cluster_id,
+        capability: ca.capability,
+        summary: ca.summary,
+        line_start: ca.line_start,
+        line_end: ca.line_end,
       });
+    }
+  }
+
+  /**
+   * 从 sessionDir/cluster-index.json 读取已有簇索引。
+   * 替代原来纯内存的 sc.clusters，重启后不丢失。
+   */
+  private async loadClusterIndex(sessionId: string): Promise<Array<{
+    cluster_id: string; capability: string; summary: string;
+    line_start: number; line_end: number;
+  }>> {
+    if (!sessionId) return [];
+    const filePath = path.join(os.homedir(), '.agent', 'sessions', sessionId, 'cluster-index.json');
+    try {
+      const raw = await fs.promises.readFile(filePath, 'utf-8');
+      return JSON.parse(raw) as Array<{
+        cluster_id: string; capability: string; summary: string;
+        line_start: number; line_end: number;
+      }>;
+    } catch {
+      return [];
     }
   }
 
@@ -628,9 +739,40 @@ export class ContextOrchestrator extends BypassAgentBase {
     const clusterId = (input.cluster_id as string)?.trim();
     const summary = (input.summary as string)?.trim();
     if (!clusterId || !summary) return 'Error: cluster_id 和 summary 必填';
-    // 结果暂存，由 loop.ts 消费后写入 events.jsonl
-    // 这里不写文件——orchestrator 不持有 EventStore 引用
-    return `ok: cluster_id=${clusterId}`;
+
+    // 白名单校验
+    if (!ContextOrchestrator.CLUSTER_ID_RE.test(clusterId)) {
+      return `Error: cluster_id 格式非法（只允许字母、数字、下划线、连字符，1-64 位）`;
+    }
+
+    const ctx = this._pendingClusterCtx;
+    if (!ctx) return 'Error: cluster_assign 不在归类上下文中调用';
+
+    // 防止同一轮 LLM 迭代中重复调用
+    if (this.lastClusterAssign) {
+      return `Error: 本轮已归入簇 "${this.lastClusterAssign.cluster_id}"，请勿重复调用`;
+    }
+
+    // 写盘：cluster-index.json + summaries/cluster_{id}.md
+    const lineInfo = this._writeClusterFiles(
+      clusterId, summary, ctx.sessionId, ctx.capability, ctx.lineEnd, ctx.loadedClusters,
+    );
+
+    // 设置 lastClusterAssign 供 loop 消费（写 events.jsonl + markCluster）
+    this.lastClusterAssign = {
+      cluster_id: clusterId,
+      capability: ctx.capability,
+      summary,
+      line_start: lineInfo.line_start,
+      line_end: ctx.lineEnd,
+      session_id: ctx.sessionId,
+    };
+
+    // 消费后清空，防止同轮重复处理
+    this._pendingClusterCtx = null;
+
+    log(`CLUSTER assigned: ${clusterId} (${summary})`);
+    return `ok: cluster_id=${clusterId}, summary=${summary}`;
   }
 }
 

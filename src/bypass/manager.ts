@@ -1,3 +1,19 @@
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  ⚠️ 安全红线 · 旁路智能体（元认知层）                        ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║  本模块管理所有旁路智能体的注册/启停/调度。                  ║
+// ║  旁路智能体直接注入主 Agent 上下文，一旦出错会带偏主 Agent， ║
+// ║  是本系统【风险最高】的一层。                                ║
+// ║                                                              ║
+// ║  ✅ 注册的旁路智能体只允许【极其专一化】的窄工具：           ║
+// ║     memory_* / inject_hint / cluster_assign / world_* 等      ║
+// ║  ❌ 禁止 bash / read / write / edit / http_request 等        ║
+// ║     任何通用工具。给旁路智能体加通用工具 = 安全事故。        ║
+// ║                                                              ║
+// ║  维护此项目的 Agent 请注意：即使只读前几行也必须遵守。      ║
+// ║  完整规则见 src/bypass/base.ts 头部。                        ║
+// ╚══════════════════════════════════════════════════════════════╝
+
 // ============================================================
 // bypass/manager — BypassManager
 // ============================================================
@@ -42,7 +58,18 @@ export class BypassManager {
     }
   }
 
-  /** 注册一个旁路Agent */
+  /**
+   * 注册一个旁路Agent。
+   *
+   * ⚠️ 安全约束：旁路智能体 = 元认知层，注册进来即获得 preTurn /
+   * postTurn 的注入与记忆维护能力。它的工具必须被严格限制为
+   * "极其专一化"的窄工具（memory_* / inject_hint / cluster_assign /
+   * world_*），且只能以固定格式读写指定路径的文件。
+   *
+   * ❌ 任何自带 bash / read / write / edit / http_request 等通用
+   * 工具的旁路 Agent 都不应被注册。若确实需要新增旁路能力，
+   * 请先阅读 base.ts 头部的安全自问清单，并确保新工具是窄工具。
+   */
   register(agent: BypassAgent): void {
     this.registry.set(agent.name, agent);
     if (this.modelRouter && 'setModelRouter' in agent) {
@@ -197,12 +224,12 @@ export class BypassManager {
     return { transformedInput, injections: allInjections, intent };
   }
 
-  // ── postTurn：后台并行，不阻塞 ──────────────────────────────
+  // ── postTurn：等所有旁路Agent完成后返回 ──────────────────
 
-  postTurn(ctx: PostTurnContext): void {
+  async postTurn(ctx: PostTurnContext): Promise<void> {
     if (this.active.length === 0) return;
 
-    Promise.allSettled(
+    await Promise.allSettled(
       this.active.map(async (agent) => {
         if (!agent.postTurn) return;
         try {
