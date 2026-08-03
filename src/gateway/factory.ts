@@ -254,7 +254,7 @@ export async function createAgent(
 
   // ── Fallback 上下文自适应：降级链切换 Provider 时自动更新 maxContextTokens ──
   let loopRef: AgentLoop | null = null;
-  const fallbackChain = provider as { setOnFallback?: (cb: (from: unknown, to: unknown, err: Error) => void) => void };
+  const fallbackChain = provider as { setOnFallback?: (cb: (from: unknown, to: unknown, err: Error) => void) => void; setOnRecover?: (cb: (prov: unknown) => void) => void };
   if (fallbackChain.setOnFallback) {
     fallbackChain.setOnFallback((from, to) => {
       const fromP = from as { getProviderType(): string; getModel(): string };
@@ -273,6 +273,27 @@ export async function createAgent(
       // 一次性通知：下一次 runTurn 消费
       if (loopRef) {
         loopRef.pendingFallbackInfo = `[Fallback] "${fromP.getProviderType()}" unavailable — using "${toProvider.getProviderType()}". Check API key or quota.`;
+      }
+    });
+  }
+  // ── 降级链恢复主 Provider 时，把 maxContext 恢复为主 provider 的窗口 ──
+  if (fallbackChain.setOnRecover) {
+    fallbackChain.setOnRecover((prov) => {
+      const recovered = prov as { getProviderType(): string; getModel(): string };
+      const newLimit = getModelContextWindow(
+        recovered.getProviderType() as import('../types.js').ProviderType,
+        recovered.getModel(),
+      );
+      const current = configCenter.get<number>('session.maxContext') ?? 200000;
+      if (newLimit !== current) {
+        configCenter.set('session.maxContext', newLimit);
+        logger.info(
+          `Fallback recovered — context restored: ${current.toLocaleString()} → ${newLimit.toLocaleString()} (${recovered.getProviderType()}/${recovered.getModel()})`,
+        );
+      }
+      // 一次性通知：下一次 runTurn 消费
+      if (loopRef) {
+        loopRef.pendingRecoverInfo = `[Recovered] "${recovered.getProviderType()}" is back online — restored primary provider.`;
       }
     });
   }

@@ -24,6 +24,8 @@ export interface FallbackChainConfig {
   circuitBreaker?: Partial<CircuitBreakerConfig>;
   /** Called when fallback from one provider to the next occurs */
   onFallback?: (from: Provider, to: Provider, error: Error) => void;
+  /** Called when the chain recovers back to the primary provider (index 0 succeeds after being on a fallback). */
+  onRecover?: (provider: Provider) => void;
 }
 
 export class FallbackProviderChain implements Provider {
@@ -31,6 +33,14 @@ export class FallbackProviderChain implements Provider {
   private retryConfig: Partial<RetryConfig>;
   private cbConfig: Partial<CircuitBreakerConfig>;
   private onFallback?: (from: Provider, to: Provider, error: Error) => void;
+  private onRecover?: (provider: Provider) => void;
+  /**
+   * 是否曾发生降级切换（onFallback 已触发）。
+   * 用独立标志而非 lastSuccessfulIdx>0 判断恢复，因为存在「降级触发但 fallback
+   * 也失败（lastSuccessfulIdx 未移出 0）」的场景——此时恢复主 provider 也必须触发
+   * onRecover 以还原 maxContext，否则会卡在 fallback 窗口。
+   */
+  private hasFallenBack = false;
 
   constructor(config: FallbackChainConfig) {
     if (config.providers.length === 0) {
@@ -39,6 +49,7 @@ export class FallbackProviderChain implements Provider {
     this.retryConfig = config.retry ?? {};
     this.cbConfig = config.circuitBreaker ?? {};
     this.onFallback = config.onFallback;
+    this.onRecover = config.onRecover;
     this.providers = config.providers.map(
       (p) => new ResilientProvider(p, this.retryConfig, this.cbConfig),
     );
@@ -100,6 +111,11 @@ export class FallbackProviderChain implements Provider {
     this.onFallback = cb;
   }
 
+  /** Set a recover callback after construction (e.g. once configCenter is ready). */
+  setOnRecover(cb: (provider: Provider) => void): void {
+    this.onRecover = cb;
+  }
+
   async *createStream(
     messages: Message[],
     tools?: ToolDefinition[],
@@ -113,9 +129,19 @@ export class FallbackProviderChain implements Provider {
 
       try {
         yield* provider.createStream(messages, tools, signal);
-        // Success — track which provider actually worked
-        if (i > 0 && this.lastSuccessfulIdx !== i) {
+        // Success — track which provider actually worked.
+        // Note: update even for i===0 so that recovering back to the primary
+        // clears the stale fallback index (previously only updated for i>0).
+        if (this.lastSuccessfulIdx !== i) {
           this.lastSuccessfulIdx = i;
+        }
+        // Recovered back to the primary provider after a prior fallback → notify
+        // so callers can restore e.g. maxContext to the primary's window.
+        // Use hasFallenBack (not lastSuccessfulIdx>0) so recovery also fires
+        // when a fallback was attempted but also failed (lastSuccessfulIdx stayed 0).
+        if (i === 0 && this.hasFallenBack) {
+          this.hasFallenBack = false;
+          this.onRecover?.(provider);
         }
         return;
       } catch (error: unknown) {
@@ -145,6 +171,7 @@ export class FallbackProviderChain implements Provider {
 
         // Notify callback so the system can adapt (context window, cache strategy, etc.)
         const nextProvider = this.providers[i + 1];
+        this.hasFallenBack = true;
         this.onFallback?.(provider, nextProvider, err);
 
         continue;

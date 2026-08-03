@@ -9,7 +9,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
-
+import { sanitizeText } from './sanitize.js';
 export interface GeminiProviderOptions {
   apiKey?: string;
   model?: string;
@@ -127,7 +127,7 @@ export class GeminiProvider implements Provider {
 
       if (msg.role === 'system') {
         for (const b of blocks) {
-          if (b.type === 'text') systemParts.push(b.text);
+          if (b.type === 'text') systemParts.push(sanitizeText(b.text));
         }
         continue;
       }
@@ -135,7 +135,7 @@ export class GeminiProvider implements Provider {
       if (msg.role === 'assistant') {
         const parts: Array<{ text?: string }> = [];
         for (const b of blocks) {
-          if (b.type === 'text') parts.push({ text: b.text });
+          if (b.type === 'text') parts.push({ text: sanitizeText(b.text) });
           else if (b.type === 'tool_use') parts.push({ text: `[Tool: ${b.name}]` });
         }
         if (parts.length > 0) {
@@ -149,8 +149,8 @@ export class GeminiProvider implements Provider {
         const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
 
         for (const b of blocks) {
-          if (b.type === 'text') textParts.push(b.text);
-          else if (b.type === 'tool_result') textParts.push(`[Tool result: ${b.content.substring(0, 200)}]`);
+          if (b.type === 'text') textParts.push(sanitizeText(b.text));
+          else if (b.type === 'tool_result') textParts.push(`[Tool result: ${sanitizeText(b.content.substring(0, 200))}]`);
           else if (b.type === 'image' && b.source.type === 'base64') {
             imageParts.push({ inlineData: { mimeType: b.source.media_type, data: b.source.data } });
           } else if (b.type === 'image' && b.source.type === 'url') {

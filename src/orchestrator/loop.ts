@@ -279,6 +279,8 @@ export class AgentLoop {
   channelImages: Array<{ data: string; media_type: string }> | null = null;
   /** Fallback 通知（onFallback 回调写入，runTurn 一次性消费后清空） */
   pendingFallbackInfo: string | null = null;
+  /** 降级链恢复主 Provider 通知（onRecover 回调写入，runTurn 一次性消费后清空） */
+  pendingRecoverInfo: string | null = null;
   /** 上下文组装策略（精确模式切换用，deprecated：新代码使用 activeRouter） */
   composeStrategy: ComposeStrategy | null = null;
   /** 当前激活的上下文路由器，初始化为 NormalRouter，首次 syncRouter() 时同步到全局状态 */
@@ -1636,6 +1638,15 @@ export class AgentLoop {
         'warn',
       );
       this.pendingFallbackInfo = null;
+    }
+
+    // 一次性降级恢复通知（由 onRecover 回调写入，此处消费）
+    if (this.pendingRecoverInfo) {
+      this.outputHandler?.onStatus?.(
+        this.pendingRecoverInfo,
+        'info',
+      );
+      this.pendingRecoverInfo = null;
     }
 
     // 精确模式/陪伴模式：应用策略

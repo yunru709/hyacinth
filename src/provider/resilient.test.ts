@@ -241,4 +241,73 @@ describe('FallbackProviderChain', () => {
     expect(providers[0].getInner()).toBe(p1);
     expect(providers[1].getInner()).toBe(p2);
   });
+
+  it('recovers to primary after fallback and fires onRecover', async () => {
+    // primary: 第一次调用失败（触发 fallback），第二次成功（触发恢复）
+    const primary = createMockProvider({ type: 'anthropic', model: 'claude', behavior: 'flaky', failCount: 1 });
+    const fallback = createMockProvider({ type: 'openai', model: 'gpt-4o' });
+    const onRecover = vi.fn();
+    const chain = new FallbackProviderChain({
+      providers: [primary, fallback],
+      retry: { maxRetries: 0 }, // 不重试，让 fallback 立即接管
+      onRecover,
+    });
+
+    // 第一次：primary 失败 → fallback 接管
+    await collectStream(chain, [msg]);
+    expect(chain.getActiveType()).toBe('openai');
+    expect(chain.getActiveModel()).toBe('gpt-4o');
+    expect(onRecover).not.toHaveBeenCalled();
+
+    // 第二次：primary 恢复成功 → 切回 primary 并触发 onRecover
+    await collectStream(chain, [msg]);
+    expect(chain.getActiveType()).toBe('anthropic');
+    expect(chain.getActiveModel()).toBe('claude');
+    expect(onRecover).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire onRecover when always on primary', async () => {
+    const primary = createMockProvider({ type: 'anthropic', model: 'claude' });
+    const fallback = createMockProvider({ type: 'openai', model: 'gpt-4o' });
+    const onRecover = vi.fn();
+    const chain = new FallbackProviderChain({ providers: [primary, fallback], onRecover });
+
+    await collectStream(chain, [msg]);
+    await collectStream(chain, [msg]);
+    expect(chain.getActiveType()).toBe('anthropic');
+    expect(onRecover).not.toHaveBeenCalled();
+  });
+
+
+  it('fires onRecover when fallback also failed but primary recovers later', async () => {
+    // #2 场景：降级已触发（onFallback 已调用），但 fallback 也失败，
+    // lastSuccessfulIdx 未移出 0。之后主 provider 恢复成功 → 必须触发 onRecover。
+    const onFallback = vi.fn();
+    const onRecover = vi.fn();
+    // primary: 前 2 次失败，第 3 次成功（模拟挂掉后恢复）
+    const primary = createMockProvider({ type: 'anthropic', model: 'claude', behavior: 'flaky', failCount: 2 });
+    // fallback: 始终失败（非可重试），导致整条链失败
+    const fallback = createMockProvider({ type: 'openai', model: 'gpt-4o', behavior: 'fail-nonretryable' });
+    const chain = new FallbackProviderChain({
+      providers: [primary, fallback],
+      retry: { maxRetries: 0 },
+      onFallback,
+      onRecover,
+    });
+
+    // 前两次：primary + fallback 都失败 → 抛聚合错误，lastSuccessfulIdx 保持 0
+    await expect(collectStream(chain, [msg])).rejects.toThrow();
+    await expect(collectStream(chain, [msg])).rejects.toThrow();
+    expect(onFallback).toHaveBeenCalled();
+    // lastSuccessfulIdx 未移出 0 → getActiveType 仍是 primary
+    expect(chain.getActiveType()).toBe('anthropic');
+    expect(onRecover).not.toHaveBeenCalled();
+
+    // 第三次：primary 恢复成功 → 必须触发 onRecover
+    await collectStream(chain, [msg]);
+    expect(chain.getActiveType()).toBe('anthropic');
+    expect(chain.getActiveModel()).toBe('claude');
+    expect(onRecover).toHaveBeenCalledTimes(1);
+  });
+
 });

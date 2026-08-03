@@ -10,7 +10,7 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
-
+import { sanitizeText } from './sanitize.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {
   /** 必须提供 apiKey，或通过 ANTHROPIC_API_KEY 环境变量自动读取 */
@@ -275,7 +275,7 @@ export class AnthropicProvider implements Provider {
           if (block.type === 'text') {
             const textBlock: Anthropic.TextBlockParam = {
               type: 'text' as const,
-              text: block.text,
+              text: sanitizeText(block.text),
             };
             // 传递 cache_control 标记
             if (block.cache_control) {
@@ -335,7 +335,7 @@ export class AnthropicProvider implements Provider {
 
       switch (block.type) {
         case 'text': {
-          const textBlock: Anthropic.TextBlockParam = { type: 'text' as const, text: block.text };
+          const textBlock: Anthropic.TextBlockParam = { type: 'text' as const, text: sanitizeText(block.text) };
           // If the content block already has cache_control (set by composer), pass it through
           if (block.cache_control) {
             textBlock.cache_control = block.cache_control;
@@ -357,7 +357,7 @@ export class AnthropicProvider implements Provider {
           result.push({
             type: 'tool_result' as const,
             tool_use_id: block.tool_use_id,
-            content: block.content,
+            content: sanitizeText(block.content),
             ...(block.is_error != null ? { is_error: block.is_error } : {}),
           });
           break;

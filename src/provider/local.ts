@@ -8,6 +8,7 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
+import { sanitizeText } from './sanitize.js';
 
 /** LocalProvider 构造选项 */
 export interface LocalProviderOptions {
@@ -204,7 +205,7 @@ export class LocalProvider implements Provider {
 
         for (const block of blocks) {
           if (block.type === 'text') {
-            textParts.push(block.text);
+            textParts.push(sanitizeText(block.text));
           } else if (block.type === 'tool_use') {
             toolCalls.push({
               id: block.id,
@@ -232,12 +233,12 @@ export class LocalProvider implements Provider {
 
         for (const block of blocks) {
           if (block.type === 'text') {
-            textParts.push(block.text);
+            textParts.push(sanitizeText(block.text));
           } else if (block.type === 'tool_result') {
             toolResults.push({
               role: 'tool',
               tool_call_id: block.tool_use_id,
-              content: block.content,
+              content: sanitizeText(block.content),
             });
           } else if (block.type === 'image') {
             // 仅视觉模型发送图片。LocalProvider 默认为非视觉，视图片为文本占位
