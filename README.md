@@ -3,6 +3,8 @@
 **多 Provider AI Agent 框架** — 可编程、可扩展、运行在本地的终端智能助手。
 
 > TypeScript 6.0 · Node.js · 35 模块 · 82+ 工具 · v0.9.33
+>
+> 📦 npm: [`hyacinth-ai`](https://www.npmjs.com/package/hyacinth-ai) · 🐙 源码: [github.com/yunru709/hyacinth](https://github.com/yunru709/hyacinth)
 
 ---
 
