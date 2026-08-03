@@ -411,6 +411,9 @@ export async function runTui(
   let compactionMessage: string | null = null;
   let compressionLoader: Loader | null = null;
   let compressionTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** 旁路Agent（意图识别/簇归类）运行指示器 */
+  let bypassLoader: Loader | null = null;
+  let bypassTimeout: ReturnType<typeof setTimeout> | null = null;
   let prevProviderLabel: string | null = null;
   let prevProviderIsLocal = false;
   let fallbackMessage: string | null = null;
@@ -777,6 +780,41 @@ export async function runTui(
         }
         return;
       }
+      // 旁路Agent 预处理指示器（意图识别/簇归类）
+      if (message === 'bypass-start') {
+        if (!bypassLoader) {
+          bypassLoader = new Loader(
+            tui,
+            (spinner: string) => theme.accent(spinner),
+            (text: string) => theme.dim(text),
+            '预处理中...',
+          );
+          thinkingBar.addChild(bypassLoader);
+        }
+        if (bypassTimeout) clearTimeout(bypassTimeout);
+        bypassTimeout = setTimeout(() => {
+          if (bypassLoader) {
+            bypassLoader.stop();
+            thinkingBar.removeChild(bypassLoader);
+            bypassLoader = null;
+          }
+          bypassTimeout = null;
+        }, 60000); // 超时保护：60 秒后自动清除，防止残留
+        return;
+      }
+      if (message === 'bypass-end') {
+        if (bypassTimeout) {
+          clearTimeout(bypassTimeout);
+          bypassTimeout = null;
+        }
+        if (bypassLoader) {
+          bypassLoader.stop();
+          thinkingBar.removeChild(bypassLoader);
+          bypassLoader = null;
+        }
+        return;
+      }
+
       if (level === 'error') {
         // 原始 API 错误细节走日志，TUI 只显示简洁消息
         if (message.length > 150 || message.includes('{') || message.includes('\n')) {

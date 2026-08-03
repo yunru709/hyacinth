@@ -1414,7 +1414,9 @@ export class AgentLoop {
           sessionId: path.basename(this.sessionDir),
           fullArchiveLineCount: fullLineCount,
         };
+        this.outputHandler?.onStatus?.('bypass-start', 'info');
         await this.bypassManager.postTurn(postCtx);
+        this.outputHandler?.onStatus?.('bypass-end', 'info');
         // 清除本轮的旁路注入缓存和意图，下一轮用户消息重新 preTurn
         this._bypassInjections = undefined;
         this._currentIntent = null;
@@ -1450,6 +1452,44 @@ export class AgentLoop {
 
               // ── 分簇压缩：检查该簇是否超限 ──
               await this.maybeCompressCluster(ca.cluster_id, ca.line_start, ca.line_end, ca.capability);
+            }
+          }
+        }
+
+        // ── 历史回填（方案 A）：orchestrator 开启晚时，对开启前未分类历史补做归类 ──
+        // 预判：已回填到 fullLineCount（即无新增历史）时跳过，避免每轮全量读文件。
+        if (orch && typeof (orch as any).backfillUnclassified === 'function') {
+          const currentSessionId = path.basename(this.sessionDir);
+          const backfillUpto: number = (typeof (orch as any).getBackfillUpto === 'function')
+            ? (orch as any).getBackfillUpto(currentSessionId)
+            : 0;
+          if (fullLineCount > backfillUpto) {
+            const backfills: Array<{
+              cluster_id: string; capability: string; summary: string;
+              line_start: number; line_end: number; session_id: string;
+            }> = await (orch as any).backfillUnclassified(currentSessionId);
+            for (const bf of backfills) {
+              if (!bf || !bf.cluster_id) continue;
+              await this.eventStore.append(this.sessionDir, {
+                type: 'cluster_assign',
+                cluster_id: bf.cluster_id,
+                capability: bf.capability,
+                summary: bf.summary,
+                line_start: bf.line_start,
+                line_end: bf.line_end,
+                timestamp: new Date().toISOString(),
+              });
+              await this.conversationStore.markCluster(
+                this.sessionDir,
+                bf.line_start,
+                bf.line_end,
+                bf.cluster_id,
+              );
+              // 回填块也可能超预算，顺带做簇级压缩
+              await this.maybeCompressCluster(bf.cluster_id, bf.line_start, bf.line_end, bf.capability);
+              this.logger?.info?.(
+                `[cluster] backfilled "${bf.cluster_id}" (${bf.line_start}-${bf.line_end}, ${bf.capability})`,
+              );
             }
           }
         }
@@ -1649,7 +1689,9 @@ export class AgentLoop {
         recentToolCalls: this.recentToolNames ?? [],
         sessionId: path.basename(this.sessionDir),
       };
+      this.outputHandler?.onStatus?.('bypass-start', 'info');
       const preTurnResult = await this.bypassManager.preTurn(preTurnCtx);
+      this.outputHandler?.onStatus?.('bypass-end', 'info');
       if (preTurnResult.transformedInput !== undefined) {
         userInputText = preTurnResult.transformedInput;
       }

@@ -308,6 +308,25 @@ const CLUSTER_SYSTEM = [
   '- 如果已有簇的 summary 已经准确，不需要修改',
 ].join('\n');
 
+// ── 历史回填归类（方案 A：orchestrator 开启晚时，对未分类历史补做归类）──
+
+const BACKFILL_SYSTEM = [
+  '你是主Agent的"历史归档员"。你的任务是把一段【历史对话】归入意图簇。',
+  '',
+  '这段对话来自早期历史，当时没有进行过意图分类。',
+  '',
+  '输出要求（严格一行，无其他文字）：',
+  'cluster_id=<英文下划线ID> capability=<coding|chat|tool_use|reasoning|general> summary=<一句话描述，不超过30字>',
+  '',
+  '判断标准：',
+  '- 主题与已有簇一致 → 复用该簇的 cluster_id，capability 保持该簇的，summary 可更新',
+  '- 全新主题 → 创建新 cluster_id（英文下划线，如 "env_fix", "agent_design"），capability 按对话性质判断',
+  '- 对话太零碎/无法归类 → cluster_id=legacy_general capability=general summary=早期历史杂项',
+  '',
+  'capability 含义：coding=编程/代码, chat=普通闲聊, tool_use=操作工具/文件, reasoning=分析推理, general=通用',
+  '注意：只输出 cluster_id=... capability=... summary=... 这一行。',
+].join('\n');
+
 // ── 介入策略 ───────────────────────────────────────────────────
 
 /** 意图簇索引条目 */
@@ -329,6 +348,8 @@ interface BypassContext {
   lastInjectionIteration: number;
   /** 当前 session 的意图簇列表（按时间顺序） */
   clusters: ClusterIndex[];
+  /** 回填进度：已回填到 conversation_full.jsonl 的行号（0 = 从未回填）。防止重复回填历史。 */
+  backfilledUpto: number;
 }
 
 /** 从 LLM 输出中解析结构化意图标签 */
@@ -366,6 +387,7 @@ export class ContextOrchestrator extends BypassAgentBase {
     consecutiveDeviations: 0,
     lastInjectionIteration: -999,
     clusters: [],
+    backfilledUpto: 0,
   };
   /** Map 上限（防止内存泄漏） */
   private static readonly MAX_SESSIONS = 100;
@@ -403,7 +425,7 @@ export class ContextOrchestrator extends BypassAgentBase {
 
   async start(): Promise<void> {
     this._sessions.clear();
-    this._defaultCtx = { intent: '', capability: 'general', confidence: 0, iterationCount: 0, consecutiveDeviations: 0, lastInjectionIteration: -999, clusters: [] };
+    this._defaultCtx = { intent: '', capability: 'general', confidence: 0, iterationCount: 0, consecutiveDeviations: 0, lastInjectionIteration: -999, clusters: [], backfilledUpto: 0 };
     log('START');
   }
   async stop(): Promise<void> {
@@ -431,6 +453,7 @@ export class ContextOrchestrator extends BypassAgentBase {
         consecutiveDeviations: 0,
         lastInjectionIteration: -999,
         clusters: [],
+        backfilledUpto: 0,
       };
       this._sessions.set(sessionId, ctx);
     }
@@ -717,6 +740,164 @@ export class ContextOrchestrator extends BypassAgentBase {
     }
   }
 
+  /** 轻量查询：某 session 已回填到的行号（loop 用 fullLineCount 预判是否需要真正回填，避免每轮读全量文件） */
+  getBackfillUpto(sessionId: string): number {
+    if (!sessionId || !ContextOrchestrator.SESSION_ID_RE.test(sessionId)) return 0;
+    const sc = this._sessions.get(sessionId);
+    return sc?.backfilledUpto ?? 0;
+  }
+
+  /**
+   * 历史回填归类（方案 A）：orchestrator 开启晚时，对开启前的未分类历史补做意图簇归类。
+   *
+   * 幂等设计：基于 BypassContext.backfilledUpto 增量扫描，只处理新增的无标记块，
+   * 每轮调用都是安全的（大多数时候返回 []）。
+   *
+   * 归类结果直接写盘（cluster-index.json + summaries/cluster_{id}.md），行号为精确的块范围，
+   * 不使用 lastClusterAssign 通道（避免与本轮归类冲突）。返回结果数组供 loop 消费 markCluster。
+   *
+   * 摘要兜底（方案 E）：BACKFILL_SYSTEM 要求无法归类的块归 legacy_general 簇，
+   * 保证 LLM 正常时所有历史都有归属；LLM 失败时静默跳过，不影响主流程。
+   */
+  async backfillUnclassified(sessionId: string): Promise<Array<{
+    cluster_id: string; capability: string; summary: string;
+    line_start: number; line_end: number; session_id: string;
+  }>> {
+    const results: Array<{
+      cluster_id: string; capability: string; summary: string;
+      line_start: number; line_end: number; session_id: string;
+    }> = [];
+    try {
+      if (!sessionId || !ContextOrchestrator.SESSION_ID_RE.test(sessionId)) return results;
+      const sc = this.sessionCtx(sessionId);
+      const fullPath = path.join(os.homedir(), '.agent', 'sessions', sessionId, 'conversation_full.jsonl');
+      if (!fs.existsSync(fullPath)) return results;
+      const lines = fs.readFileSync(fullPath, 'utf-8').split('\n').filter(l => l.trim());
+      if (lines.length === 0) return results;
+
+      const upto = sc.backfilledUpto ?? 0;
+      if (upto >= lines.length) return results;
+
+      // 找 [upto, lines.length) 区间内无 _cluster_id 的连续块
+      const blocks: Array<{ start: number; end: number }> = [];
+      let blockStart = -1;
+      for (let i = upto; i < lines.length; i++) {
+        let hasCluster = false;
+        try { hasCluster = !!(JSON.parse(lines[i]) as { _cluster_id?: string })._cluster_id; } catch { /* 解析失败按未标记 */ }
+        if (!hasCluster && blockStart < 0) blockStart = i;
+        if (hasCluster && blockStart >= 0) {
+          blocks.push({ start: blockStart, end: i - 1 });
+          blockStart = -1;
+        }
+      }
+      if (blockStart >= 0) blocks.push({ start: blockStart, end: lines.length - 1 });
+
+      // 分批归类：每批最多 30 条历史消息（控制单次 LLM 上下文与成本）
+      const BATCH = 30;
+      for (const block of blocks) {
+        if (block.end - block.start + 1 < 3) continue; // 块太短不单独归类（<3 条），留给最近 N 轮保底
+
+        for (let s = block.start; s <= block.end; s += BATCH) {
+          const e = Math.min(s + BATCH - 1, block.end);
+          // 每批重新加载最新索引：既用于 LLM 提示（能看到刚创建的簇），
+          // 也避免同簇多批次写盘时互相覆盖行号。
+          const loadedClusters = await this.loadClusterIndex(sessionId);
+          const existingClusters = loadedClusters.length > 0
+            ? loadedClusters.map(c => `- ${c.cluster_id}: ${c.summary} (行 ${c.line_start}-${c.line_end})`).join('\n')
+            : '(暂无已有簇)';
+
+          const chunk = lines.slice(s, e + 1).map((l, i) => {
+            try {
+              const m = JSON.parse(l) as { role?: string; content?: unknown };
+              const role = m.role ?? '?';
+              const text = m.content !== undefined ? extractText({ role: m.role ?? 'unknown', content: m.content }) : '';
+              return `[行 ${s + i + 1}] ${role}: ${text.slice(0, 120)}`;
+            } catch { return ''; }
+          }).filter(Boolean).join('\n');
+
+          const userPrompt = [
+            '【已有意图簇】',
+            existingClusters,
+            '',
+            '【待归类历史对话】（行号从 1 开始）',
+            chunk,
+          ].join('\n');
+
+          const output = await this.callLLM(BACKFILL_SYSTEM, userPrompt);
+          const clusterId = output.match(/cluster_id=(\S+)/)?.[1];
+          if (!clusterId || !ContextOrchestrator.CLUSTER_ID_RE.test(clusterId)) {
+            log(`BACKFILL skipped (invalid cluster_id) block 行 ${s + 1}-${e + 1}`);
+            continue;
+          }
+          // 解析 capability（白名单校验，失败回退 general）
+          const capMatch = output.match(/capability=(\S+)/i)?.[1]?.toLowerCase();
+          const capability = capMatch && /^(coding|chat|tool_use|reasoning|general)$/.test(capMatch)
+            ? capMatch
+            : 'general';
+          const summary = output
+            .replace(/cluster_id=\S+\s*/i, '')
+            .replace(/capability=\S+\s*/i, '')
+            .replace(/summary=\s*/i, '')
+            .trim()
+            .slice(0, 30) || clusterId;
+
+          // 直接写盘（精确行号），不依赖 _writeClusterFiles 的行号估算。
+          // 同簇合并：保留最小 line_start、最大 line_end（同簇多批次不覆盖）。
+          const latest = await this.loadClusterIndex(sessionId);
+          const existing = latest.find(c => c.cluster_id === clusterId);
+          let line_start: number;
+          let line_end: number;
+          if (existing) {
+            existing.line_start = Math.min(existing.line_start, s + 1);
+            existing.line_end = Math.max(existing.line_end, e + 1);
+            existing.summary = summary;
+            existing.capability = capability;
+            line_start = existing.line_start;
+            line_end = existing.line_end;
+            this._writeFile(sessionId, 'cluster-index.json', JSON.stringify(latest, null, 2));
+          } else {
+            const updated = latest.filter(c => c.cluster_id !== clusterId);
+            updated.push({
+              cluster_id: clusterId,
+              capability,
+              summary,
+              line_start: s + 1,
+              line_end: e + 1,
+            });
+            line_start = s + 1;
+            line_end = e + 1;
+            this._writeFile(sessionId, 'cluster-index.json', JSON.stringify(updated, null, 2));
+          }
+          this._writeFile(sessionId, path.join('summaries', `cluster_${clusterId}.md`), summary);
+
+          results.push({
+            cluster_id: clusterId,
+            capability,
+            summary,
+            line_start,
+            line_end,
+            session_id: sessionId,
+          });
+          this._updateMemoryClusters(sc, {
+            cluster_id: clusterId,
+            capability,
+            summary,
+            line_start,
+            line_end,
+            session_id: sessionId,
+          });
+          log(`BACKFILL: 行 ${s + 1}-${e + 1} → ${clusterId} (${capability}, ${summary})`);
+        }
+      }
+
+      sc.backfilledUpto = lines.length;
+      return results;
+    } catch (err) {
+      log(`BACKFILL failed: ${(err as Error).message}`);
+      return results;
+    }
+  }
+
   // ── inject_hint 工具实现 ──────────────────────────────────────
 
   private _handleInjectHint(input: Record<string, unknown>): string {
@@ -792,3 +973,4 @@ function extractText(msg: { role: string; content: unknown }): string {
   }
   return '';
 }
+
