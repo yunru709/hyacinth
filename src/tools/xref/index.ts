@@ -15,7 +15,7 @@
  *              → new XrefGraphTool(manager)
  *              → toolRegistry.register(...)
  *
- * 数据库：~/.agent/cache/xref-<projectKey>.sqlite (better-sqlite3)
+ * 数据库：~/.agent/cache/xref-<projectKey>.sqlite (node:sqlite)
  * 解析器：TypeScript Compiler API + 正则回退
  */
 

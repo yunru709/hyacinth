@@ -1,31 +1,17 @@
 /**
  * Fts5Retriever — SQLite FTS5 全文检索实现
  *
- * 使用 better-sqlite3 存储文档 + FTS5 虚拟表做 BM25 关键词检索。
+ * 使用 Node 内置 node:sqlite（DatabaseSync）存储文档 + FTS5 虚拟表做 BM25 关键词检索。
  * 对 CJK 文本自动追加 bigram 到索引内容中，以支持中文搜索。
  */
 
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import type { Retriever, KbDocument, KbSearchResult } from './retriever.js';
 import { preprocessQuery } from './query-preprocessor.js';
-
-// ── 懒加载 better-sqlite3（可选依赖） ────────────────────────────
-
-const _require = createRequire(import.meta.url);
-
-function getDatabase(): any {
-  try {
-    return _require('better-sqlite3');
-  } catch {
-    throw new Error(
-      'better-sqlite3 未安装。FTS5 知识库功能需要此可选依赖。\n' +
-      '请运行: npm install better-sqlite3 或 pnpm add better-sqlite3'
-    );
-  }
-}
+import Database from '../tools/sqlite.js';
+import type { SqliteDatabase } from '../tools/sqlite.js';
 
 // ── CJK bigram 分词 ────────────────────────────────────────────────
 
@@ -63,13 +49,12 @@ function bigramQuery(query: string): string {
 
 export class Fts5Retriever implements Retriever {
   readonly name = 'fts5';
-  private db: any;
+  private db: SqliteDatabase;
 
   constructor(dbPath: string) {
-    const Database = getDatabase();
     const dir = path.dirname(dbPath);
     fs.mkdirSync(dir, { recursive: true });
-    this.db = new Database(dbPath);
+    this.db = Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.initTables();
     this.migrateSchema();
@@ -196,7 +181,7 @@ export class Fts5Retriever implements Retriever {
       LIMIT ?
     `);
     try {
-      const raw = stmt.all(searchQuery, k) as KbSearchResult[];
+      const raw = stmt.all(searchQuery, k) as unknown as KbSearchResult[];
       // 去重（按 title+source）
       const seen = new Set<string>();
       return raw.filter(r => {
@@ -253,7 +238,7 @@ export class Fts5Retriever implements Retriever {
   list(): KbDocument[] {
     return this.db.prepare(
       'SELECT id, title, source, content, created_at FROM docs ORDER BY created_at DESC'
-    ).all() as KbDocument[];
+    ).all() as unknown as KbDocument[];
   }
 
   count(): number {

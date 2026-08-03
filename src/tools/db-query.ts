@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
+import Database from './sqlite.js';
 
 /**
  * DbQueryTool — SQLite 内置支持，参数化查询。
- * 使用 better-sqlite3 进行本地 SQLite 查询。
+ * 使用 node:sqlite（兼容封装层）进行本地 SQLite 查询，无需编译原生依赖。
  */
 export class DbQueryTool implements Tool {
   readonly name = 'db_query';
@@ -65,17 +66,7 @@ export class DbQueryTool implements Tool {
     const isSelect = /^\s*SELECT|PRAGMA|EXPLAIN/i.test(query.trim());
     const readOnly = readonlyFlag ?? isSelect;
 
-    // Dynamic import of better-sqlite3 (optional dependency)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let BetterSqlite3: any;
-    try {
-      BetterSqlite3 = (await import('better-sqlite3')).default;
-    } catch {
-      return 'Error: better-sqlite3 module not available.';
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db: any = new BetterSqlite3(absDb, { readonly: readOnly });
+    const db = Database(absDb, { readonly: readOnly });
     try {
       const isQuery = /^\s*SELECT|PRAGMA|EXPLAIN|WITH\s/i.test(query.trim());
 

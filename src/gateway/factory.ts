@@ -540,7 +540,7 @@ export async function createAgent(
     toolRegistry.register(new XrefQueryTool(xrefManager));
     toolRegistry.register(new XrefGraphTool(xrefManager));
   } catch {
-    // xref 工具注册失败不影响核心功能（如 better-sqlite3 不可用等）
+    // xref 工具注册失败不影响核心功能（如 node:sqlite 不可用等）
   }
 
   // ── 子 Agent 系统 ─────────────────────────────────────────────────
@@ -588,7 +588,7 @@ export async function createAgent(
   const kbDir = path.join(os.homedir(), '.agent', 'knowledge');
   const kbStorePath = path.join(kbDir, 'kb.sqlite');
 
-  // 结构化存储 — 懒加载（不启用知识库时不创建，避免缺少 better-sqlite3 时报错）
+  // 结构化存储 — 懒加载（不启用知识库时不创建，避免额外开销）
   let _structuredStore: StructuredStore | null = null;
   function getStructuredStore(): StructuredStore {
     if (!_structuredStore) {

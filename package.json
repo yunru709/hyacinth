@@ -50,11 +50,8 @@
     "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },
-  "optionalDependencies": {
-    "better-sqlite3": "^12.10.0"
-  },
+  "optionalDependencies": {},
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
     "typescript": "^6.0.3",

@@ -1,5 +1,3 @@
 ignoredBuiltDependencies:
   - '@google/genai'
   - protobufjs
-
-onlyBuiltDependencies: better-sqlite3

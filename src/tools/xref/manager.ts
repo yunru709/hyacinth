@@ -13,7 +13,7 @@
  * 上下文注册链路：
  *   manifest-defaults.ts → 无（工具通过 Tool API 提供，不进入上下文）
  *   工具注册：factory.ts → toolRegistry.register(new XrefBuildTool(manager))
- *   数据库：better-sqlite3 → ~/.agent/cache/xref-*.sqlite
+ *   数据库：node:sqlite → ~/.agent/cache/xref-*.sqlite
  */
 
 import fs from 'node:fs/promises';
@@ -27,20 +27,11 @@ import type {
 } from './schema.js';
 import { ParserRegistry, createParserRegistry } from './parser.js';
 import { toProjectKey } from '../../utils/misc.js';
-
-// 动态导入 better-sqlite3（使用 any 类型，与 db-query.ts 保持一致）
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let BetterSqlite3: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadDb(): Promise<any> {
-  if (BetterSqlite3) return BetterSqlite3;
-  BetterSqlite3 = (await import('better-sqlite3')).default;
-  return BetterSqlite3;
-}
+import Database from '../sqlite.js';
+import type { SqliteDatabase } from '../sqlite.js';
 
 export class XrefManager {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private db: any = null;
+  private db: SqliteDatabase | null = null;
   private dbPath: string = '';
   private parserRegistry: ParserRegistry | null = null;
   private rootDir: string = '';
@@ -53,8 +44,7 @@ export class XrefManager {
     await fs.mkdir(cacheDir, { recursive: true });
     this.dbPath = path.join(cacheDir, `xref-${projectKey}.sqlite`);
 
-    const SqliteDb = await loadDb();
-    this.db = new SqliteDb(this.dbPath);
+    this.db = Database(this.dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA_DDL);
@@ -90,7 +80,6 @@ export class XrefManager {
     if (!this.db) throw new Error('XrefManager not initialized. Call init() first.');
 
     const startedAt = Date.now();
-    const SqliteDb = await loadDb();
 
     // 初始化 parser
     if (!this.parserRegistry) {

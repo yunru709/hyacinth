@@ -3,8 +3,8 @@
  *
  * 检查项：
  *   1. 运行环境（Node 版本、OS、编码）
- *   2. 依赖完整性（sharp、chokidar、better-sqlite3）
- *   3. 原生模块（better-sqlite3 .node 二进制）
+ *   2. 依赖完整性（sharp、chokidar）
+ *   3. 内置 SQLite（node:sqlite，Node ≥22.5 自带，无需原生编译）
  *   4. Persona 文件（是否仍是模板？显示原始提示词）
  *   5. 配置文件（~/.agent/config.json）
  *   6. 知识库状态（kb.sqlite、files/ 目录）
@@ -17,6 +17,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import Database from '../tools/sqlite.js';
 
 // ── 原始 Persona 提示词（运行时从文件读取，避免内嵌不同步）─────────
 
@@ -47,11 +48,14 @@ interface CheckResult {
 function checkNodeEnv(): CheckResult {
   const v = process.version;
   const major = parseInt(v.slice(1).split('.')[0]!);
+  const minor = parseInt(v.slice(1).split('.')[1] ?? '0');
+  // node:sqlite（内置 SQLite）需要 Node ≥22.5；数据库/知识库/xref 均依赖它
+  const ok = major > 22 || (major === 22 && minor >= 5);
   return {
     label: 'Node.js 版本',
-    ok: major >= 18,
-    detail: `${v} (需要 >= 18)`,
-    fix: major < 18 ? '升级 Node.js 到 v18 或以上' : undefined,
+    ok,
+    detail: `${v} (需要 >= 22.5，内置 SQLite)`,
+    fix: ok ? undefined : '升级 Node.js 到 v22.5 或以上（知识库/xref 依赖内置 node:sqlite）',
   };
 }
 
@@ -91,7 +95,7 @@ function checkPersona(): CheckResult {
 
 function checkDeps(): CheckResult {
   const failures: string[] = [];
-  const deps = ['sharp', 'chokidar', 'better-sqlite3'];
+  const deps = ['sharp', 'chokidar'];
 
   for (const dep of deps) {
     try {
@@ -111,17 +115,20 @@ function checkDeps(): CheckResult {
 
 function checkNativeModule(): CheckResult {
   try {
-    const m = require.resolve('better-sqlite3');
-    // 尝试加载验证
-    require(m);
-    return { label: '原生模块 (better-sqlite3)', ok: true, detail: '已加载' };
+    // 内置 node:sqlite（Node ≥22.5 自带，无需原生编译）
+    const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE t(a)');
+    db.exec('INSERT INTO t VALUES (1)');
+    db.close();
+    return { label: '内置 SQLite (node:sqlite)', ok: true, detail: '已加载（无需原生编译）' };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return {
-      label: '原生模块 (better-sqlite3)',
+      label: '内置 SQLite (node:sqlite)',
       ok: false,
       detail: msg.slice(0, 120),
-      fix: 'pnpm rebuild better-sqlite3 或 pnpm approve-builds',
+      fix: '升级 Node.js 到 v22.5 或以上（node:sqlite 为内置模块）',
     };
   }
 }
@@ -169,9 +176,8 @@ function checkKnowledgeBase(): CheckResult {
   let docCount = 0;
   if (hasDb) {
     try {
-      // 尝试读取 SQLite 统计
-      const Database = require('better-sqlite3');
-      const db = new Database(dbPath, { readonly: true });
+      // 尝试读取 SQLite 统计（内置 node:sqlite）
+      const db = Database(dbPath, { readonly: true });
       const row = db.prepare('SELECT COUNT(*) as cnt FROM docs').get() as { cnt: number };
       docCount = row.cnt;
       db.close();

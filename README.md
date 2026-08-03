@@ -105,7 +105,7 @@ Flow 状态持久化（v0.9.33+）：活跃 Flow 自动保存到 `flow-state.jso
 | 子系统 | 说明 |
 |---|---|
 | **上下文压缩** | 四阶段差分压缩（工具输出裁剪→结构化摘要→增量更新→保护区兜底），Token 预算保护 |
-| **知识库** | SQLite FTS5 全文检索 + CJK bigram 分词 + Tag IDF 语义匹配（better-sqlite3 可选依赖懒加载） |
+| **知识库** | SQLite FTS5 全文检索 + CJK bigram 分词 + Tag IDF 语义匹配（Node 内置 node:sqlite，零编译） |
 | **会话记忆** | 跨会话项目记忆，旁路 Agent 自动维护；`conversation_full.jsonl` 全量存档永不压缩，供意图簇标记 |
 | **热重载** | 13 个 Watcher：MCP/Plugin/Prompt/Agent/Config/Tool/Skill/Command/Provider/ModelCatalog/Channel/Manifest/Bundle，修改即生效 |
 | **定时调度** | Interval / Cron / Daily / Fixed-time / Random 五种策略；Random 支持时间窗口、可变次数（U 形分布）、概率权重；多实例共享任务文件 |

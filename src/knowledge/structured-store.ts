@@ -7,25 +7,11 @@
  *   FTS5 全文索引为兜底
  */
 
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-
-// ── 懒加载 better-sqlite3（可选依赖） ────────────────────────────
-
-const _require = createRequire(import.meta.url);
-
-function getDatabase(): any {
-  try {
-    return _require('better-sqlite3');
-  } catch {
-    throw new Error(
-      'better-sqlite3 未安装。结构化知识库需要此可选依赖。\n' +
-      '请运行: npm install better-sqlite3 或 pnpm add better-sqlite3'
-    );
-  }
-}
+import Database from '../tools/sqlite.js';
+import type { SqliteDatabase } from '../tools/sqlite.js';
 
 // ── 类型 ────────────────────────────────────────────────────────────
 
@@ -54,13 +40,12 @@ export interface TagMatchResult {
 // ── Store ───────────────────────────────────────────────────────────
 
 export class StructuredStore {
-  private db: any;
+  private db: SqliteDatabase;
 
   constructor(dbPath: string) {
-    const Database = getDatabase();
     const dir = path.dirname(dbPath);
     fs.mkdirSync(dir, { recursive: true });
-    this.db = new Database(dbPath);
+    this.db = Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.initTables();
   }
