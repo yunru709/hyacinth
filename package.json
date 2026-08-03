@@ -51,9 +51,7 @@
     "xlsx": "^0.18.5"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.10.0",
-    "chrome-devtools-mcp": "^1.2.0",
-    "mcp-chrome-bridge": "^1.0.31"
+    "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
