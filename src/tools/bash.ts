@@ -83,6 +83,10 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
     '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
     '[Console]::InputEncoding  = [Text.Encoding]::UTF8',
     '$OutputEncoding = [Text.Encoding]::UTF8',
+    // 关键修复：PS 5.1 的 Get-Content/Select-String 默认按 ANSI(GB2312) 解码
+    // 无 BOM 的 UTF-8 文件导致中文乱码。用 PSDefaultParameterValues 强制读取走 UTF-8。
+    '$PSDefaultParameterValues["Get-Content:Encoding"] = "utf8"',
+    '$PSDefaultParameterValues["Select-String:Encoding"] = "utf8"',
     'chcp 65001 > $null',       // 让 cmd.exe / 外部命令也走 UTF-8
   ].join('\n');
   fs.writeFileSync(psFile, '﻿' + preamble + '\n' + script + '\n', 'utf-8');
