@@ -115,6 +115,10 @@ export class EditTool implements Tool {
       }
     } catch {}
 
+    // TODO: 回收站机制 — edit 替换前把旧文件备份到 {sessionDir}/.recycle/{filename}.{timestamp}.bak
+    //       当前 session 目录删除时（delete_session / cleanup 过期）回收站自动随 session 一起清掉，无需额外维护。
+    //       需先解决 EditTool 获取 sessionDir 的问题（目前没有注入该信息）。
+
     let result: string;
     if (lineStart !== undefined) {
       result = await this.executeLineReplace(filePath, content, newString, lineStart, args);

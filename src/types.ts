@@ -41,6 +41,17 @@ export type MessageContent = TextContent | ThinkingContent | ToolUseContent | To
 export interface Message {
   role: MessageRole;
   content: MessageContent | MessageContent[];
+  /** 所属意图簇 ID（旁路 orchestrator 归类后回填，用于按意图过滤历史） */
+  _cluster_id?: string;
+  /** 被簇级压缩的标记（方案 3.6/决策C：压缩不丢弃，追加标记；仅保留最近一次压缩记录） */
+  _compressed?: {
+    /** 所属意图簇 capability（coding/chat/tool_use...） */
+    intent: string;
+    /** 压缩后摘要的 hash（用于去重/追溯） */
+    summary_hash: string;
+    /** 压缩时间 ISO 字符串 */
+    compressed_at: string;
+  };
 }
 
 // === Tool 相关 ===

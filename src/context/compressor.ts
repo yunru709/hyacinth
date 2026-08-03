@@ -25,6 +25,7 @@ import type {
 import type { Provider } from '../provider/interface.js';
 import type { ModelRouter } from '../provider/model-router.js';
 import type { GitManager } from '../evolution/git-manager.js';
+import { SummaryStore } from '../memory/summary.js';
 import { loadPrompt } from '../prompts/loader.js';
 
 
@@ -424,13 +425,6 @@ export class ToolOutputTrimmer {
   }
 }
 
-// ─── StructuredSummaryTemplate ───────────────────────────────────────
-
-/**
- * 12 字段结构化摘要模板 — 用于 Phase 2/3 的 LLM 摘要生成。
- */
-export const STRUCTURED_SUMMARY_TEMPLATE = loadPrompt('summary');
-
 // ─── StructuredSummarizer ────────────────────────────────────────────
 
 /**
@@ -492,13 +486,13 @@ export class StructuredSummarizer {
         taskFocus +
         `增量更新前一次摘要：已完成的任务移到"✅ 已完成"，新内容补到对应章节，不要重复已完成的项。\n\n` +
         `对话历史:\n${this.serializeMessages(messages)}\n\n` +
-        STRUCTURED_SUMMARY_TEMPLATE;
+        loadPrompt('summary', { skipCache: true });
     } else {
       // Phase 2: 首次摘要
       prompt =
         taskFocus +
         `对话历史:\n${this.serializeMessages(messages)}\n\n` +
-        STRUCTURED_SUMMARY_TEMPLATE;
+        loadPrompt('summary', { skipCache: true });
     }
 
     const summaryMessages: Message[] = [
@@ -553,6 +547,8 @@ export interface CompressionResult {
   phasesUsed: number[];
   /** 本轮压缩覆盖的原始消息数量（输入消息数 - 返回消息数） */
   compressedCount?: number;
+  /** 被压缩的原始消息（已标记 _compressed），供调用方写回全量存档追溯（方案 3.5/决策C） */
+  compressedMessages?: Message[];
 }
 
 /** 压缩统计 */
@@ -580,8 +576,10 @@ export class CompressorOrchestrator {
   private compressDepth: number;
   /** 压缩预算基准：当调用方传入 historyBudget 时使用该值，否则回退到 maxContextTokens */
   #historyBudget: number | null = null;
-  /** 当前压缩摘要内容 */
+  /** 当前压缩摘要内容（全局模式） */
   private _currentSummary: string | undefined;
+  /** 各意图簇的压缩摘要（key = clusterKey/capability，方案 3.5：替代单一 _currentSummary 的分桶存储） */
+  private clusterSummaries: Map<string, string> = new Map();
 
   constructor(
     tokenizer: { countMessagesTokens(messages: Message[]): number },
@@ -626,9 +624,15 @@ export class CompressorOrchestrator {
     options?: {
       /** Git 管理器（热文件检测用） */
       gitManager?: GitManager;
+      /** 意图簇 key（capability）。提供时：仅压缩该簇，摘要存 clusterSummaries；不提供时全局压缩（方案 3.5） */
+      clusterKey?: string;
     },
   ): Promise<CompressionResult> {
-    this.#historyBudget = historyBudget;
+    // 方案 3.5/决策H：分簇预算 = totalBudget * 0.7（留 30% 给其他 zone）
+    const clusterKey = options?.clusterKey;
+    this.#historyBudget = clusterKey
+      ? Math.floor(historyBudget * 0.7)
+      : historyBudget;
 
     try {
     const phasesUsed: number[] = [];
@@ -636,6 +640,8 @@ export class CompressorOrchestrator {
     let summary = currentSummary;
     let currentProtectCount = protectLast;
     let liveMessages = [...messages];
+    // 决策 C：被压缩消息标记 _compressed（不丢弃，仅保留最近一次压缩记录）
+    const compressedMessages: Message[] = [];
 
     let round = 0;
     while (round < this.maxRounds && liveMessages.length > 0) {
@@ -677,7 +683,25 @@ export class CompressorOrchestrator {
           const hadSummary = !!summary;
           const recentContext = [...layer2, ...layer1];
           summary = await this.summarizer.summarize(layer3, summary, recentContext);
-          this._currentSummary = summary;
+          // 决策 C：被压缩消息不丢弃，标记 _compressed（仅保留最近一次压缩记录，覆盖而非追加）
+          const compressedAt = new Date().toISOString();
+          const intentTag = clusterKey ?? 'general';
+          for (const msg of layer3) {
+            compressedMessages.push({
+              ...msg,
+              _compressed: {
+                intent: intentTag,
+                summary_hash: md5(summary),
+                compressed_at: compressedAt,
+              },
+            });
+          }
+          // 方案 3.5：簇压缩存分桶，全局压缩存 _currentSummary
+          if (clusterKey) {
+            this.clusterSummaries.set(clusterKey, summary);
+          } else {
+            this._currentSummary = summary;
+          }
           if (!phasesUsed.includes(2) && !phasesUsed.includes(3)) {
             phasesUsed.push(hadSummary ? 3 : 2);
           }
@@ -721,7 +745,14 @@ export class CompressorOrchestrator {
     liveMessages = this.fixGlobalOrphanedToolCalls(liveMessages);
 
     const compressedCount = inputMsgsLength - liveMessages.length;
-    return { messages: liveMessages, summary, phasesUsed, compressedCount };
+    return {
+      messages: liveMessages,
+      summary,
+      phasesUsed,
+      compressedCount,
+      // 决策 C：仅在有被压缩消息时返回（调用方写回全量存档标记）
+      compressedMessages: compressedMessages.length > 0 ? compressedMessages : undefined,
+    };
     } finally {
       this.#historyBudget = null;
     }
@@ -767,9 +798,21 @@ export class CompressorOrchestrator {
     return this.compressDepth;
   }
 
-  /** 获取当前压缩摘要 */
+  /** 获取当前压缩摘要（全局模式） */
   get currentSummary(): string | undefined {
     return this._currentSummary;
+  }
+
+  /** 获取某意图簇的压缩摘要（方案 3.5） */
+  getClusterSummary(clusterKey: string): string | undefined {
+    return this.clusterSummaries.get(clusterKey);
+  }
+
+  /** 持久化某意图簇摘要到 sessionDir/summary.{cluster}.md（方案 3.5/G） */
+  async saveClusterSummary(sessionDir: string, clusterKey: string): Promise<void> {
+    const text = this.clusterSummaries.get(clusterKey);
+    if (!text) return;
+    await new SummaryStore().saveClusterSummary(sessionDir, clusterKey, text);
   }
 
   // ─── 私有方法 ──────────────────────────────────────────────────────

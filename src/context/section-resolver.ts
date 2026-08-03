@@ -188,6 +188,14 @@ async function resolveRuntime(
     return ctx.impactInfo ? `[Dependency Impact Analysis]\n${ctx.impactInfo}` : undefined;
   }
   if (src === 'runtime:summary') {
+    // 优先使用当前意图簇摘要（intent_cluster_summary 源已注册且有内容时）
+    const clusterSource = ctx.sources?.get('intent_cluster_summary');
+    if (clusterSource?.getContent) {
+      const clusterText = await clusterSource.getContent();
+      if (clusterText && typeof clusterText === 'string' && clusterText.trim()) {
+        return `[Context Summary]\n${clusterText}`;
+      }
+    }
     return ctx.historySummary ? `[Context Summary]\n${ctx.historySummary}` : undefined;
   }
   if (src === 'runtime:timestamp') {

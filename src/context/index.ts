@@ -31,7 +31,6 @@ export {
   ToolOutputTrimmer,
   StructuredSummarizer,
   CompressorOrchestrator,
-  STRUCTURED_SUMMARY_TEMPLATE,
 } from './compressor.js';
 export type { CompressionResult, CompressionStats } from './compressor.js';
 export {

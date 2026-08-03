@@ -199,6 +199,36 @@ export class MachineRunner {
     return this.status === 'completed';
   }
 
+  // ── 持久化 ──────────────────────────────────────────────────
+
+  /** 序列化为可持久化的纯数据 */
+  toJSON(): MachineRunnerState {
+    return {
+      machineId: this.definition.id,
+      currentState: this.currentState,
+      status: this.status,
+      context: { ...this.context },
+      transitionHistory: [...this.transitionHistory],
+    };
+  }
+
+  /** 从持久化数据恢复状态（不触发任何副作用/onEnter/onExit） */
+  restoreState(data: MachineRunnerState): void {
+    if (data.machineId !== this.definition.id) {
+      throw new Error(
+        `Machine ID mismatch: stored "${data.machineId}" vs runner "${this.definition.id}"`,
+      );
+    }
+    this.currentState = data.currentState;
+    this.status = data.status;
+    // 清空并重建 context（不直接 assign，避免残留上个生命周期的 key）
+    for (const key of Object.keys(this.context)) {
+      delete this.context[key];
+    }
+    Object.assign(this.context, data.context);
+    this.transitionHistory = data.transitionHistory ?? [];
+  }
+
   // ── 上下文突变（非转移操作） ──────────────────────────────
 
   /**
@@ -210,4 +240,13 @@ export class MachineRunner {
   updateContext(patch: Partial<MachineContext>): void {
     Object.assign(this.context, patch);
   }
+}
+
+/** MachineRunner 可序列化状态（纯数据，无方法） */
+export interface MachineRunnerState {
+  machineId: string;
+  currentState: string;
+  status: MachineStatus;
+  context: MachineContext;
+  transitionHistory: Array<{ from: string; to: string; event: string }>;
 }

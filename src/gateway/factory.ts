@@ -219,6 +219,10 @@ export async function createAgent(
   flowRegistry.register(new TodoFlow());
   flowRegistry.register(new SpecFlow());
 
+  // ── Flow 状态持久化（崩溃后恢复活跃 flow） ──────────────────
+  flowRegistry.setPersistenceDir(sessionDir);
+  await flowRegistry.load();
+
   // ── Provider Config Loader（必须在 getDefaultConfig 之前，确保 providerDefault 读到 JSON） ──
   const providerConfigLoader = getProviderConfigLoader(cwd);
   await providerConfigLoader.load();
@@ -683,6 +687,41 @@ export async function createAgent(
   loop.kbState = kbState;
   loop.pendingAsyncResults = pendingAsyncResults; // 异步子Agent结果队列（和 delegateTool 共享引用）
   loopRef = loop; // wire fallback notification
+
+  // ── 意图簇摘要注册源（Zone 3 history_summary 的数据来源）──
+  // 按 orchestrator 当前识别的意图读取对应簇的压缩摘要；无意图或无可读摘要时返回空串，
+  // section-resolver 会回退到全局 summary（旧策略）。
+  contextComposer.registerSource({
+    name: 'intent_cluster_summary',
+    strategy: 'always_inline',
+    cacheability: 'summarized',
+    description: '当前意图簇的压缩摘要（按 orchestrator 识别的意图读取）',
+    getContent: async () => {
+      const cap = loopRef?.getCurrentIntentCapability?.() ?? 'general';
+      if (!cap || cap === 'general') return '';
+      // 修复 key 不匹配 bug：写入端摘要文件以 cluster_id 命名（cluster_{clusterId}.md，
+      // 如 channel_config），而非 capability（coding）。故不能直接用 load(sessionDir, cap)，
+      // 必须先从 cluster-index.json 聚合该 capability 对应的全部 cluster_id，再逐个读取合并。
+      try {
+        const indexPath = path.join(sessionDir, 'cluster-index.json');
+        if (!fs.existsSync(indexPath)) return '';
+        const raw = fs.readFileSync(indexPath, 'utf-8');
+        const clusters: Array<{ cluster_id: string; capability: string; summary: string }> =
+          JSON.parse(raw);
+        const matches = clusters.filter((c) => c.capability === cap);
+        if (matches.length === 0) return '';
+        const parts: string[] = [];
+        for (const c of matches) {
+          const s = await summaryStore.load(sessionDir, c.cluster_id);
+          if (s) parts.push(s);
+        }
+        return parts.length > 0 ? parts.join('\n\n') : '';
+      } catch {
+        return '';
+      }
+    },
+  });
+
 
   // 注入旁路 Provider 引用（供模式切换时 setBypassUserId 使用）
   if (bypassProvider) loop.setBypassProvider(bypassProvider);

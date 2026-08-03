@@ -143,6 +143,70 @@ export class ConversationStore {
     const content = kept.map((m) => JSON.stringify(m)).join('\n') + '\n';
     await fs.writeFile(filePath, content, 'utf-8');
   }
+
+  /**
+   * 给全量存档中 [lineStart, lineEnd]（两端包含，行号从 1 开始）范围内的消息写入簇标记。
+   * 使用 write-to-temp + rename 原子写入，防止中途崩溃损坏归档。
+   */
+  async markCluster(
+    sessionDir: string,
+    lineStart: number,
+    lineEnd: number,
+    clusterId: string,
+  ): Promise<void> {
+    const filePath = this.getFullFilePath(sessionDir);
+    const msgs = await this.readFull(sessionDir);
+    let changed = false;
+    for (let i = Math.max(0, lineStart - 1); i <= lineEnd - 1 && i < msgs.length; i++) {
+      if (msgs[i]._cluster_id !== clusterId) {
+        msgs[i]._cluster_id = clusterId;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const content = msgs.map((m) => JSON.stringify(m)).join('\n') + '\n';
+    const tmpPath = filePath + '.tmp';
+    await fs.writeFile(tmpPath, content, 'utf-8');
+    try {
+      await fs.unlink(filePath);
+    } catch {
+      // 原文件不存在，忽略
+    }
+    await fs.rename(tmpPath, filePath);
+  }
+
+  /**
+   * 给全量存档中 [lineStart, lineStart+count)（行号从 1 开始）的消息写入 _compressed 标记
+   * （决策 C：被压缩消息不丢弃，追加标记，仅保留最近一次压缩记录，覆盖而非追加）。
+   * 使用 write-to-temp + rename 原子写入，防止中途崩溃损坏归档。
+   */
+  async markCompressed(
+    sessionDir: string,
+    lineStart: number,
+    count: number,
+    marker: NonNullable<Message['_compressed']>,
+  ): Promise<void> {
+    if (count <= 0) return;
+    const filePath = this.getFullFilePath(sessionDir);
+    const msgs = await this.readFull(sessionDir);
+    let changed = false;
+    const end = Math.min(lineStart - 1 + count, msgs.length);
+    for (let i = Math.max(0, lineStart - 1); i < end; i++) {
+      if (msgs[i]._compressed) continue; // 仅保留最近一次压缩记录（覆盖而非追加）
+      msgs[i]._compressed = marker;
+      changed = true;
+    }
+    if (!changed) return;
+    const content = msgs.map((m) => JSON.stringify(m)).join('\n') + '\n';
+    const tmpPath = filePath + '.tmp';
+    await fs.writeFile(tmpPath, content, 'utf-8');
+    try {
+      await fs.unlink(filePath);
+    } catch {
+      // 原文件不存在，忽略
+    }
+    await fs.rename(tmpPath, filePath);
+  }
 }
 
 /**

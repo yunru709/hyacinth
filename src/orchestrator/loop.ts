@@ -26,6 +26,7 @@ import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { LifecycleSupervisor } from '../lifecycle/supervisor.js';
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { ImageStore, buildUserContentWithImages, buildUserContentWithInlineImages, createViewImageTool } from '../multimodal/index.js';
@@ -305,6 +306,9 @@ export class AgentLoop {
   private lastContextTokens = 0;
   private needsCompression = false;
   private pendingCompression: Promise<CompressionResult | null> | null = null;
+  // deep compression: 临时替换 summary.md 后的恢复标记
+  private _deepCompressOriginal: string | null = null;
+  private _deepCompressRestore = false;
 
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
@@ -517,6 +521,8 @@ export class AgentLoop {
     this.pendingImpactInfo = null;
     this.pendingTaskNotifications = [];
     this.pendingCompression = null;
+    this._deepCompressOriginal = null;
+    this._deepCompressRestore = false;
     this.lastContextTokens = 0;
     // 重载摘要
     try {
@@ -790,6 +796,12 @@ export class AgentLoop {
   /** 由 factory 注入：旁路Agent 共享的 Provider 实例 */
   setBypassProvider(provider: Provider): void {
     this.bypassProvider = provider;
+  }
+
+  /** 获取当前意图簇 capability（用于簇摘要读取与历史过滤）。无意图时返回 'general'。 */
+  getCurrentIntentCapability(): string {
+    if (!this._currentIntent) return 'general';
+    return this._currentIntent.match(/^\[(\w+)\]/)?.[1] ?? 'general';
   }
 
   /** 运行时切换旁路Agent 的 KVCache 隔离 ID（与主Agent 同步切换） */
@@ -1347,7 +1359,7 @@ export class AgentLoop {
               toolCallsThisTurn: this.recentToolNames ?? [],
               isLastIteration: false, // 仍在 loop 中
             };
-            this.bypassManager.postTurn(iterCtx);
+            this.bypassManager.postTurn(iterCtx).catch(() => {});
           } catch { /* ignore */ }
         }
 
@@ -1402,7 +1414,7 @@ export class AgentLoop {
           sessionId: path.basename(this.sessionDir),
           fullArchiveLineCount: fullLineCount,
         };
-        this.bypassManager.postTurn(postCtx);
+        await this.bypassManager.postTurn(postCtx);
         // 清除本轮的旁路注入缓存和意图，下一轮用户消息重新 preTurn
         this._bypassInjections = undefined;
         this._currentIntent = null;
@@ -1412,19 +1424,33 @@ export class AgentLoop {
         if (orch && 'lastClusterAssign' in orch) {
           const ca = (orch as any).lastClusterAssign;
           if (ca) {
-            await this.eventStore.append(this.sessionDir, {
-              type: 'cluster_assign',
-              cluster_id: ca.cluster_id,
-              capability: ca.capability,
-              summary: ca.summary,
-              line_start: ca.line_start,
-              line_end: ca.line_end,
-              timestamp: new Date().toISOString(),
-            });
-            (orch as any).lastClusterAssign = null;
+            // 跨 session 污染防护：仅消费当前 session 的归类
+            const currentSessionId = path.basename(this.sessionDir);
+            if (ca.session_id && ca.session_id !== currentSessionId) {
+              (orch as any).lastClusterAssign = null;
+            } else {
+              await this.eventStore.append(this.sessionDir, {
+                type: 'cluster_assign',
+                cluster_id: ca.cluster_id,
+                capability: ca.capability,
+                summary: ca.summary,
+                line_start: ca.line_start,
+                line_end: ca.line_end,
+                timestamp: new Date().toISOString(),
+              });
+              (orch as any).lastClusterAssign = null;
 
-            // ── 分簇压缩：检查该簇是否超限 ──
-            await this.maybeCompressCluster(ca.cluster_id, ca.line_start, ca.line_end, ca.capability);
+              // ── 簇标记回填：给全量归档中该簇行号范围的消息打上 _cluster_id ──
+              await this.conversationStore.markCluster(
+                this.sessionDir,
+                ca.line_start,
+                ca.line_end,
+                ca.cluster_id,
+              );
+
+              // ── 分簇压缩：检查该簇是否超限 ──
+              await this.maybeCompressCluster(ca.cluster_id, ca.line_start, ca.line_end, ca.capability);
+            }
           }
         }
       }
@@ -1436,7 +1462,7 @@ export class AgentLoop {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.outputHandler?.onStatus?.(
-        `Provider error: ${message}`,
+        `Agent error: ${message}`,
         'error',
       );
       throw error;
@@ -1788,6 +1814,8 @@ export class AgentLoop {
           this.needsAggressiveCompress = false;
         }
       }
+      // Step 1 消费完毕 → 恢复 deep 压缩临时模板
+      this._maybeRestoreSummary();
     }
 
     // Step 2: 当前轮次超标 → 异步或同步压缩
@@ -1880,6 +1908,8 @@ export class AgentLoop {
             this.logger.warn('Emergency compression failed', { error: (err as Error)?.message ?? String(err) });
           } finally {
             this.outputHandler?.onStatus?.('compress-end', 'info');
+            // 紧急同步压缩完成 → 恢复 deep 压缩临时模板
+            this._maybeRestoreSummary();
           }
         }
       } else {
@@ -1902,6 +1932,8 @@ export class AgentLoop {
             return null;
           }).finally(() => {
             this.outputHandler?.onStatus?.('compress-end', 'info');
+            // 后台异步压缩完成 → 恢复 deep 压缩临时模板
+            this._maybeRestoreSummary();
           });
         }
       }
@@ -2754,9 +2786,32 @@ export class AgentLoop {
 
   // ── 意图簇：分簇压缩 ──────────────────────────────────────
 
+
+  // ── deep 压缩模板恢复 ────────────────────────────────────────
+
+  /** 恢复被 trigger_compression(level=deep) 临时替换的 summary.md */
+  private _maybeRestoreSummary(): void {
+    if (!this._deepCompressRestore) return;
+    this._deepCompressRestore = false;
+    const summaryPath = path.join(os.homedir(), '.agent', 'prompts', 'summary.md');
+    try {
+      if (this._deepCompressOriginal !== null) {
+        fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+        fs.writeFileSync(summaryPath, this._deepCompressOriginal, 'utf-8');
+      } else {
+        // 原本没有自定义模板 → 删除临时文件，回退到内置默认
+        try { fs.unlinkSync(summaryPath); } catch {}
+      }
+    } catch {
+      // 恢复失败不阻塞主流程
+    }
+    this._deepCompressOriginal = null;
+  }
+
   /**
    * 检查指定簇是否超限，超限则从全量存档提取消息并压缩。
    * 压缩结果存入 summaries/cluster_X.md。
+   * 触发阈值沿用现有全局压缩阈值（context.compressThreshold），不为簇独立设计。
    */
   private async maybeCompressCluster(
     clusterId: string,
@@ -2765,10 +2820,6 @@ export class AgentLoop {
     capability: string,
   ): Promise<void> {
     try {
-      // 阈值：簇内消息超过 200 条才考虑压缩
-      const clusterMsgCount = lineEnd - lineStart + 1;
-      if (clusterMsgCount < 200) return;
-
       const fullMsgs = await this.conversationStore.readFull(this.sessionDir);
       const clusterMsgs = fullMsgs.slice(lineStart - 1, lineEnd); // 行号从 1 开始
       if (clusterMsgs.length === 0) return;
@@ -2776,7 +2827,12 @@ export class AgentLoop {
       const tokenCount = this.compressor
         ? this.compressor.getCompressionStats(clusterMsgs).totalTokens
         : clusterMsgs.length * 50; // 回退估算
-      const budget = this.maxContextTokens * 0.5; // 簇压缩预算为总预算的 50%
+
+      // 沿用全局压缩阈值（与主流程一致），预算 = 总上限 × 全局阈值
+      const compressThreshold = this.configCenter
+        ? (this.configCenter.get('context.compressThreshold') as number) ?? 0.75
+        : 0.75;
+      const budget = this.maxContextTokens * compressThreshold;
       if (tokenCount < budget) return;
 
       if (!this.compressor) {
@@ -2786,20 +2842,43 @@ export class AgentLoop {
 
       this.logger?.info?.(
         `[cluster] compressing cluster "${clusterId}" (${capability}): ` +
-        `${clusterMsgCount} msgs, ${tokenCount} tokens > ${budget} budget`,
+        `${clusterMsgs.length} msgs, ${tokenCount} tokens > ${budget} budget`,
       );
 
+      // 加载已有簇摘要做增量压缩
+      const existingSummary = await this.summaryStore.load(this.sessionDir, clusterId);
       const result = await this.compressor.compress(
         clusterMsgs,
-        undefined, // 无已有 summary
+        existingSummary ?? undefined,
         0,         // protectLast = 0（簇内不加保护）
         budget,
+        // 方案 3.5：指定 clusterKey 按簇压缩——预算 ×0.7、摘要入 clusterSummaries 分桶、收集 compressedMessages
+        { clusterKey: capability },
       );
 
       if (result.summary) {
+        // 簇级摘要（cluster_{clusterId}.md）——factory 读取端依赖此路径（Step 4 对齐）
         await this.summaryStore.save(this.sessionDir, result.summary, clusterId);
+        // 方案 G：capability 分桶（summary.{capability}.md），渐进式新增包装层
+        try {
+          await this.compressor.saveClusterSummary(this.sessionDir, capability);
+        } catch { /* 分桶写入失败不阻塞 */ }
+        // 决策 C：被压缩消息写回 _compressed 标记（仅保留最近一次压缩记录，覆盖而非追加）
+        if (result.compressedCount && result.compressedCount > 0) {
+          const marker = result.compressedMessages?.[0]?._compressed ?? {
+            intent: capability,
+            summary_hash: '',
+            compressed_at: new Date().toISOString(),
+          };
+          await this.conversationStore.markCompressed(
+            this.sessionDir,
+            lineStart,
+            result.compressedCount,
+            marker,
+          );
+        }
         this.logger?.info?.(
-          `[cluster] compressed "${clusterId}": ${result.compressedCount ?? 0} msgs → summary saved`,
+          `[cluster] compressed "${clusterId}" (${capability}): ${result.compressedCount ?? 0} msgs → summary saved + _compressed marked`,
         );
       }
     } catch (err) {
@@ -2813,7 +2892,9 @@ export class AgentLoop {
 
   /**
    * 构建 historyTransform 函数供 Composer 使用。
-   * 启用条件：conversation_full.jsonl 文件大小 > 5MB。
+   * 启用条件：conversation_full.jsonl 文件大小 > 5MB 且存在匹配当前意图的簇。
+   * 过滤基于全量归档（conversation_full.jsonl，含 _cluster_id 标记）：
+   *   保留「当前意图簇的消息 + 最近 N 轮保底」，其余丢弃。
    * 未启用时返回 null（全量注入，和现在一样）。
    */
   private async buildClusterHistoryTransform(): Promise<((msgs: Message[]) => Message[]) | null> {
@@ -2830,27 +2911,44 @@ export class AgentLoop {
     const clusters = await this.loadClusterIndex();
     if (clusters.length === 0) return null;
 
-    const currentCapability = this._currentIntent
-      ? this._currentIntent.match(/^\[(\w+)\]/)?.[1] ?? 'general'
-      : 'general';
+    const currentCapability = this.getCurrentIntentCapability();
+    // 当前意图对应的簇 ID 集合（capability 匹配）
+    const targetClusterIds = new Set(
+      clusters.filter((c) => c.capability === currentCapability).map((c) => c.cluster_id),
+    );
+    if (targetClusterIds.size === 0) {
+      this.logger?.info?.(
+        `[cluster] filter skipped: capability=${currentCapability} 无匹配簇，回退全量注入`,
+      );
+      return null;
+    }
+
     const recentCount = 10; // 最近 N 轮保底（与压缩器 protect 量级一致）
 
     this.logger?.info?.(
       `[cluster] filter enabled: capability=${currentCapability}, ` +
-      `clusters=${clusters.map(c => c.cluster_id).join(',')}, ` +
+      `targetClusters=${[...targetClusterIds].join(',')}, ` +
       `recent=${recentCount}`,
     );
 
-    return (msgs: Message[]): Message[] => {
-      if (msgs.length <= recentCount) return msgs;
+    // 预取全量归档并预筛（全量归档含 _cluster_id 标记，conversation.jsonl 没有）
+    // 闭包内同步返回，避免 composer 的同步 historyTransform 阻塞。
+    const fullMsgs = await this.conversationStore.readFull(this.sessionDir);
+    if (fullMsgs.length === 0) return null;
+    const recentMsgs = fullMsgs.slice(-recentCount);
+    const olderMsgs = fullMsgs.slice(0, -recentCount);
+    const keptOlder = olderMsgs.filter(
+      (m) => m._cluster_id && targetClusterIds.has(m._cluster_id),
+    );
+    const filteredFull = [...keptOlder, ...recentMsgs];
 
-      const recentMsgs = msgs.slice(-recentCount);
-      const olderMsgs = msgs.slice(0, -recentCount);
-
-      // 匹配当前 capability 的簇的消息全部保留（通过行号匹配）
-      // 简化实现：保留最近 N 轮 + 能力匹配的簇的消息
-      // 精确匹配需要 Message 带 _cluster_id 字段，后续优化
-      return [...olderMsgs, ...recentMsgs];
+    return (_msgs: Message[]): Message[] => {
+      // 若过滤结果为空，回退调用方传入的历史（防御）
+      if (filteredFull.length === 0) return _msgs;
+      // 全量归档远大于 conversation 历史时（压缩已发生），以 conversation 为准
+      // 避免压缩后的精简历史被全量原始消息绕过
+      if (filteredFull.length > _msgs.length * 3) return _msgs;
+      return filteredFull;
     };
   }
 
@@ -2883,6 +2981,7 @@ export class AgentLoop {
       return [];
     }
   }
+
 }
 
 /**

@@ -84,7 +84,15 @@ export interface ClusterAssignEvent {
   timestamp: string;
 }
 
-export type SessionEvent = SessionStartEvent | UsageEvent | ToolCallEvent | UserInputEvent | ClusterAssignEvent;
+export interface BypassIntentEvent {
+  type: 'bypass_intent';
+  capability: string;
+  confidence: number;
+  sessionId: string;
+  timestamp: string;
+}
+
+export type SessionEvent = SessionStartEvent | UsageEvent | ToolCallEvent | UserInputEvent | ClusterAssignEvent | BypassIntentEvent;
 
 /**
  * 通用 JSONL 文件读取

@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionStats } from '../types.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('stats');
 
 const DEFAULT_STATS: SessionStats = {
   input_tokens: 0,
@@ -35,7 +38,7 @@ export class StatsManager {
     const current = await this.get(sessionDir);
     const merged: SessionStats = { ...current, ...updates };
     const filePath = this.getFilePath(sessionDir);
-    await fs.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf-8');
+    await this.safeWrite(filePath, JSON.stringify(merged, null, 2));
   }
 
   /**
@@ -60,6 +63,34 @@ export class StatsManager {
     // SessionStats 的所有字段都是 number 类型
     (current[field] as number) = (currentValue as number) + value;
     const filePath = this.getFilePath(sessionDir);
-    await fs.writeFile(filePath, JSON.stringify(current, null, 2), 'utf-8');
+    await this.safeWrite(filePath, JSON.stringify(current, null, 2));
+  }
+
+  /**
+   * 安全写入：目录缺失时自动重建，异常不传播
+   */
+  private async safeWrite(filePath: string, content: string): Promise<void> {
+    try {
+      await fs.writeFile(filePath, content, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        // 目录可能被清理/不存在 → 尝试重建
+        try {
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await fs.writeFile(filePath, content, 'utf-8');
+        } catch (retryErr) {
+          logger.warn('Failed to write stats after directory recreation', {
+            path: filePath,
+            error: (retryErr as Error).message,
+          });
+        }
+      } else {
+        logger.warn('Failed to write stats', {
+          path: filePath,
+          error: (err as Error).message,
+        });
+      }
+    }
   }
 }

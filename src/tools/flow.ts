@@ -173,7 +173,7 @@ export function createFlowCompleteTool(registry: MachineRegistry): Tool {
     async execute(_args: Record<string, unknown>): Promise<string> {
       const active = registry.getActive();
       if (!active) {
-        return 'No active flow. Nothing to complete.';
+        return 'No active flow. If a flow was previously running, it may have been completed or the session was restarted. Check whether all steps are done — if the task is complete, just report the results to the user. If you need to start a new flow, use flow_start. Do NOT call flow_complete again unless you start a new flow.';
       }
 
       const snap = active.getSnapshot();
