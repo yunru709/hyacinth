@@ -134,6 +134,17 @@ hyacinth tui
 hyacinth "帮我看看这个项目是做什么的"
 ```
 
+### 终端要求（Windows）
+
+TUI 界面渲染依赖 Unicode 字符（emoji、框线、进度符号）。Windows 上**推荐使用 [Windows Terminal](https://github.com/microsoft/terminal)**：
+
+- Windows 11 已自带，无需安装
+- Windows 10 或旧系统：`winget install Microsoft.WindowsTerminal` 或 Microsoft Store 搜索 "Windows Terminal"
+
+如果用**旧版控制台**（cmd 直接打开、经典 conhost）运行，emoji 和特殊符号可能显示成方块/乱码。启动时如果检测到旧终端，Hyacinth 会打印提示。也可通过 `start:win`（`chcp 65001` + UTF-8）缓解部分编码问题。
+
+> 其他平台（macOS 的 Terminal/iTerm、Linux 各终端）一般无此问题，均开箱即用。
+
 ### 配置 API Key
 
 在项目目录或 `~/.agent/` 下创建 `.env`：

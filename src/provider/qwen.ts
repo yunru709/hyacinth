@@ -23,7 +23,7 @@ export function createQwenProvider(config?: {
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.DASHSCOPE_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://dashscope.aliyuncs.com/apps/anthropic',
-    model: config?.model ?? provCfg?.defaultModel ?? 'qwen3-vl-plus',
+    model: config?.model ?? provCfg?.defaultModel ?? 'qwen3.7-plus',
     maxOutputTokens: config?.maxOutputTokens,
     providerType: 'qwen',
   } satisfies AnthropicProviderOptions);

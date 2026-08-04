@@ -62,9 +62,10 @@ export class SessionManager {
   private projectKey: string;
   private sessionsRoot: string;
 
-  constructor(cwd: string) {
+  constructor(cwd: string, sessionsRoot?: string) {
     this.projectKey = toProjectKey(cwd);
-    this.sessionsRoot = getSessionsRoot();
+    // 可注入自定义 sessions 根目录（测试隔离用）；默认全局 ~/.agent/sessions/
+    this.sessionsRoot = sessionsRoot ?? getSessionsRoot();
   }
 
   /**
@@ -85,7 +86,7 @@ export class SessionManager {
       channel,
     };
 
-    const sessionDir = getSessionDir(id);
+    const sessionDir = path.join(this.sessionsRoot, id);
     await ensureDir(sessionDir);
 
     // 创建 session 必需的文件
@@ -125,7 +126,7 @@ export class SessionManager {
    */
   async resume(sessionId?: string): Promise<Session> {
     if (sessionId) {
-      const sessionDir = getSessionDir(sessionId);
+      const sessionDir = path.join(this.sessionsRoot, sessionId);
 
       // 目录不存在 → 自动创建（首次调用或重启后重建）
       try {
@@ -261,10 +262,23 @@ export class SessionManager {
   }
 
   /**
+   * 获取指定渠道最近一次会话（按渠道过滤，防止重启后跨渠道串用 session）。
+   *
+   * 场景：TUI 与飞书共享同一进程，重启恢复时若不按渠道过滤，
+   * resume() 会取全局最近 session —— 可能把飞书渠道的 session 恢复给 TUI。
+   * 跨渠道加载应通过工具（switch_session）显式完成，重启自动恢复必须按渠道隔离。
+   */
+  async getLatestByChannel(channel: string): Promise<Session | null> {
+    const sessions = await this.list();
+    // list() 已按 createdAt 降序，取第一个匹配渠道的即为该渠道最近 session
+    return sessions.find((s) => s.channel === channel) ?? null;
+  }
+
+  /**
    * 获取 session 目录路径
    */
   getSessionDir(sessionId: string): string {
-    return getSessionDir(sessionId);
+    return path.join(this.sessionsRoot, sessionId);
   }
 
   /**
@@ -296,7 +310,7 @@ export class SessionManager {
     for (const session of sessions) {
       const updatedAtTime = new Date(session.updatedAt).getTime();
       if (now - updatedAtTime > maxAgeMs) {
-        const sessionDir = getSessionDir(session.id);
+        const sessionDir = path.join(this.sessionsRoot, session.id);
         await fs.rm(sessionDir, { recursive: true, force: true });
         logger.info('Cleaned up expired session', { sessionId: session.id });
         deletedCount++;

@@ -8,18 +8,18 @@ import { ConfigManager, type AgentConfig } from './config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
 import { getModelContextWindow, PROVIDER_MODELS } from './model-defaults.js';
 import { ensurePersonaFiles, DEFAULT_PERSONA_DIR } from './persona-bootstrap.js';
+import { DEFAULT_PROVIDERS } from '../provider/config.js';
 
-/** Provider 选项 */
-const PROVIDERS = [
-  { value: 'anthropic', label: 'Anthropic (Claude)', hint: 'claude-sonnet-4' },
-  { value: 'openai', label: 'OpenAI (GPT)', hint: 'gpt-4o' },
-  { value: 'deepseek', label: 'DeepSeek', hint: 'deepseek-v4' },
-  { value: 'gemini', label: 'Google Gemini', hint: 'gemini-2.5-pro' },
-  { value: 'groq', label: 'Groq', hint: 'llama-3.3' },
-  { value: 'xai', label: 'xAI (Grok)', hint: 'grok-4' },
-  { value: 'mistral', label: 'Mistral', hint: 'mistral-large' },
-  { value: 'openrouter', label: 'OpenRouter', hint: 'multi-provider' },
-  { value: 'moonshot', label: 'Moonshot (Kimi)', hint: 'kimi-k2' },
+/**
+ * Provider 选项 —— 从 DEFAULT_PROVIDERS 派生（单一事实源，含新增的 qwen/zhipu/minimax/mimo），
+ * 外加 local 特殊项（本地 OpenAI 兼容服务，不在 DEFAULT_PROVIDERS 中）。
+ */
+const PROVIDERS: { value: string; label: string; hint: string }[] = [
+  ...Object.entries(DEFAULT_PROVIDERS.providers).map(([id, meta]) => ({
+    value: id,
+    label: meta.name,
+    hint: meta.defaultModel,
+  })),
   { value: 'local', label: 'Local (OpenAI-compatible)', hint: 'localhost' },
 ];
 
@@ -34,6 +34,10 @@ const KEY_URLS: Record<string, string> = {
   mistral: 'https://console.mistral.ai/api-keys',
   openrouter: 'https://openrouter.ai/keys',
   moonshot: 'https://platform.moonshot.cn/console/api-keys',
+  qwen: 'https://bailian.console.aliyun.com/',
+  zhipu: 'https://open.bigmodel.cn/usercenter/apikeys',
+  minimax: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+  mimo: 'https://platform.xiaomimimo.com/',
 };
 
 /** 从 PROVIDER_MODELS 生成每个 provider 的模型选项 */
@@ -82,12 +86,25 @@ export class SetupWizard {
 
     while (true) {
       // Step 1: Provider
-      const provider = await this.stepProvider(existingConfig?.provider);
+      let provider = await this.stepProvider(existingConfig?.provider);
       if (p.isCancel(provider)) return this.cancel();
 
-      // Step 2: API Key
+      // 支持跳过：保留已有提供商，继续后续设置
+      let providerSkipped = false;
+      if (provider === '__skip__') {
+        if (existingConfig?.provider) {
+          provider = existingConfig.provider;
+          providerSkipped = true;
+          p.log.info(pc.cyan(`保持现有提供商: ${provider}`));
+        } else {
+          p.log.warn('尚无已有提供商可跳过，请先选择一项');
+          continue;
+        }
+      }
+
+      // Step 2: API Key（provider 未变时跳过，沿用已有 Key）
       let apiKey: string | undefined;
-      if (provider !== 'local') {
+      if (!providerSkipped && provider !== 'local') {
         const keyResult = await this.stepApiKey(provider as string);
         if (p.isCancel(keyResult)) return this.cancel();
         apiKey = keyResult as string;
@@ -99,17 +116,30 @@ export class SetupWizard {
         if (p.isCancel(llamaResult)) return this.cancel();
       }
 
-      // Step 3: Model
-      const model = await this.stepModel(provider as string, existingConfig?.model);
-      if (p.isCancel(model)) return this.cancel();
+      // Step 3: Model —— provider 未变时沿用现有模型，跳过模型配置
+      let model: string;
+      let maxContext: number;
+      if (providerSkipped) {
+        model = existingConfig?.model ?? '';
+        maxContext = existingConfig?.maxContext ?? getDefaultConfig().session.maxContext;
+        p.log.info(pc.cyan(`保持现有模型: ${model}`));
+      } else {
+        const selectedModel = await this.stepModel(provider as string, existingConfig?.model);
+        if (p.isCancel(selectedModel)) return this.cancel();
+        model = selectedModel as string;
 
-      // ▲ 根据模型自动计算推荐的 maxContext
-      const recommendedCtx = getModelContextWindow(provider as string, model as string);
-      const defaultCtx = existingConfig?.maxContext ?? recommendedCtx;
+        // ▲ 根据模型自动计算推荐的 maxContext
+        const recommendedCtx = getModelContextWindow(provider as string, model);
+        const defaultCtx = existingConfig?.maxContext ?? recommendedCtx;
+        const selectedCtx = await this.stepMaxContext(defaultCtx, recommendedCtx);
+        if (p.isCancel(selectedCtx)) return this.cancel();
+        maxContext = selectedCtx as number;
+      }
 
-      // Step 4: maxContext
-      const maxContext = await this.stepMaxContext(defaultCtx, recommendedCtx);
-      if (p.isCancel(maxContext)) return this.cancel();
+      // Step 4.5: 默认功能开关（旁路 Agent + 知识库）
+      const features = await this.stepFeatureDefaults(existingConfig);
+      if (p.isCancel(features)) return this.cancel();
+      const featureDefaults = features as { orchestratorEnabled: boolean; kbEnabled: boolean };
 
       // Step 5: Confirm
       const config: AgentConfig = {
@@ -117,6 +147,8 @@ export class SetupWizard {
         model: model as string,
         maxTurns: existingConfig?.maxTurns ?? getDefaultConfig().session.maxTurns,
         maxContext: maxContext as number,
+        bypass: { orchestratorEnabled: featureDefaults.orchestratorEnabled },
+        kb: { enabled: featureDefaults.kbEnabled },
       };
 
       const confirmed = await this.stepConfirm(config, apiKey);
@@ -170,10 +202,13 @@ export class SetupWizard {
     const initialValue = defaultProvider || PROVIDERS[0].value;
     return p.select({
       message: '选择 AI 提供商',
-      options: PROVIDERS.map(p => ({
-        ...p,
-        hint: p.value === initialValue ? `${p.hint} (当前)` : p.hint,
-      })),
+      options: [
+        ...PROVIDERS.map(p => ({
+          ...p,
+          hint: p.value === initialValue ? `${p.hint} (当前)` : p.hint,
+        })),
+        { value: '__skip__', label: '跳过', hint: '保持现有提供商，继续后续设置' },
+      ],
       initialValue,
     });
   }
@@ -277,6 +312,32 @@ export class SetupWizard {
     return Number(result);
   }
 
+  /** Step 4.5: 默认功能开关（旁路 Agent + 知识库） */
+  private async stepFeatureDefaults(
+    existingConfig?: AgentConfig,
+  ): Promise<{ orchestratorEnabled: boolean; kbEnabled: boolean } | symbol> {
+    const orchestrator = await p.confirm({
+      message: '默认启用旁路 Agent（orchestrator）?',
+      active: '启用',
+      inactive: '关闭',
+      initialValue: existingConfig?.bypass?.orchestratorEnabled ?? false,
+    });
+    if (p.isCancel(orchestrator)) return orchestrator;
+
+    const kb = await p.confirm({
+      message: '默认启用知识库（kb）?',
+      active: '启用',
+      inactive: '关闭',
+      initialValue: existingConfig?.kb?.enabled ?? false,
+    });
+    if (p.isCancel(kb)) return kb;
+
+    return {
+      orchestratorEnabled: orchestrator as boolean,
+      kbEnabled: kb as boolean,
+    };
+  }
+
   /** Step 5: Confirm */
   private async stepConfirm(config: AgentConfig, apiKey?: string): Promise<boolean | symbol> {
     const ctxDisplay = config.maxContext >= 1_000_000
@@ -290,6 +351,8 @@ export class SetupWizard {
       `${pc.dim('Max Turns:')}   ${config.maxTurns}`,
       `${pc.dim('Max Context:')} ${ctxDisplay} (${config.maxContext.toLocaleString()} tokens)`,
       `${pc.dim('API Key:')}     ${apiKey ? pc.green('已设置') : pc.yellow('未设置')}`,
+      `${pc.dim('旁路Agent:')}   ${config.bypass?.orchestratorEnabled ? pc.green('启动') : pc.yellow('关闭')}`,
+      `${pc.dim('知识库:')}      ${config.kb?.enabled ? pc.green('启动') : pc.yellow('关闭')}`,
     ];
 
     p.note(lines.join('\n'), '确认配置');

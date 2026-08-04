@@ -175,6 +175,16 @@ export interface AgentConfig {
   channels?: ChannelsConfig;
   /** 跨会话记忆文件路径（默认 ~/.agent/prompts/persona/memory.md） */
   memoryFile?: string;
+  /** 旁路 Agent 配置（默认开关，运行时可用 /orchestrator 切换） */
+  bypass?: {
+    /** Orchestrator 是否默认启用（每轮增加少量延迟） */
+    orchestratorEnabled?: boolean;
+  };
+  /** 知识库配置（默认开关，运行时可用 /kb 切换） */
+  kb?: {
+    /** 是否默认启用 */
+    enabled?: boolean;
+  };
 }
 
 const DEFAULT_CONFIG: AgentConfig = {

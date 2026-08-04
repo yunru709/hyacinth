@@ -53,11 +53,13 @@ export class HeartbeatScheduler {
   private configUnsubscribers: Array<() => void> = [];
   /** tasks.json 上次加载时的 mtime（毫秒），用于跨实例同步检测 */
   private lastLoadMtime = 0;
-  private readonly storagePath = path.join(os.homedir(), '.agent', 'scheduler', 'tasks.json');
+  private readonly storagePath: string;
 
   constructor(config?: Partial<SchedulerConfig>, scheduleConfig?: SystemScheduleConfig) {
     this.config = { ...DEFAULT_CONFIG, ...(scheduleConfig ?? {}), ...config };
-    this.persistence = new SchedulePersistence();
+    // 可注入自定义存储路径（测试隔离用）；默认 ~/.agent/scheduler/tasks.json
+    this.storagePath = this.config.storagePath ?? path.join(os.homedir(), '.agent', 'scheduler', 'tasks.json');
+    this.persistence = new SchedulePersistence(this.storagePath);
   }
 
   /** 注册任务执行处理器 */

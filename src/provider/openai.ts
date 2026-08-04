@@ -19,7 +19,7 @@ export interface OpenAIProviderOptions {
   apiKey?: string;
   /** 可选自定义 base URL（代理/兼容端点） */
   baseUrl?: string;
-  /** 模型名称，默认 gpt-4o */
+  /** 模型名称，默认 gpt-5.5 */
   model?: string;
   /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
   maxOutputTokens?: number;
@@ -57,7 +57,7 @@ export class OpenAIProvider implements Provider {
       baseURL: opts.baseUrl ?? process.env.OPENAI_BASE_URL,
     });
 
-    this.model = opts.model ?? 'gpt-4o';
+    this.model = opts.model ?? 'gpt-5.5';
     this.maxTokens = opts.maxOutputTokens                          // ① 临时覆盖
       ?? opts.maxTokens                                            // 向后兼容
       ?? getModelInfo('openai', this.model)?.maxOutputTokens       // ② 本机模型目录

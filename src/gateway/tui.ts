@@ -252,8 +252,18 @@ function replayEvents(chatLog: ChatLog, sessionDir: string): void {
   });
 }
 
-// ─── Main TUI ─────────────────────────────────────────────────────────────
+/**
+ * 检测是否运行在旧版 Windows 控制台（conhost）。
+ * Windows Terminal / VS Code 集成终端 / WezTerm 等现代终端都会设置
+ * WT_SESSION 或 TERM_PROGRAM 环境变量；旧 conhost 两者皆无。
+ * 非 Windows 平台（macOS/Linux 各终端）一般无渲染问题，恒返回 false。
+ */
+function detectLegacyTerminal(): boolean {
+  if (process.platform !== 'win32') return false;
+  return !process.env.WT_SESSION && !process.env.TERM_PROGRAM;
+}
 
+// ─── Main TUI ─────────────────────────────────────────────────────────────
 export async function runTui(
   provider: Provider,
   sessionId: string | undefined,
@@ -1245,6 +1255,15 @@ export async function runTui(
       theme.dim(' to toggle provider.'),
   );
   chatLog.addSystem('');
+  if (detectLegacyTerminal()) {
+    chatLog.addSystem(
+      theme.warning('\u26a0 \u68c0\u6d4b\u5230\u65e7\u7248\u63a7\u5236\u53f0\uff0cUnicode/emoji \u53ef\u80fd\u663e\u793a\u6210\u65b9\u5757\u3002') +
+        '\n' +
+        theme.dim('  \u5efa\u8bae\u5b89\u88c5 Windows Terminal: ') +
+        theme.accent('winget install Microsoft.WindowsTerminal'),
+    );
+    chatLog.addSystem('');
+  }
   tui.requestRender();
 
   // Replay previous session events

@@ -31,8 +31,8 @@ adapters/
 # Per-user config (auto-generated)
 .agent/
 
-# Build scripts (not needed at runtime)
-scripts/
+# Build scripts (not needed at runtime) — 仅根目录，放行 training/scripts/（随包发布，供微调使用）
+/scripts/
 
 # IDE / dev config
 .claude/

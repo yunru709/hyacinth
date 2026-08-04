@@ -114,13 +114,21 @@ User Input → [preTurn] → Composer组装上下文 → LLM调用 → [postTurn
 | 文件 | 用途 | 修改方式 |
 |------|------|---------|
 | `context-manifest.json` | Zone 架构声明（section 增删改序） | 直接编辑 |
-| `models-catalog.json` | 模型目录（上下文窗口、价格） | 直接编辑 |
-| `providers.json` | Provider 配置（API Key、默认模型） | 直接编辑 |
+| `providers.json` | Provider 配置 + 模型目录（API Key、默认模型、`models` 数组） | 直接编辑 |
 | `model-channels.json` | 多通道模型路由配置（通道定义 + 角色映射；含 `narration` 旁路角色） | 直接编辑 或 `/channel` 命令 |
 | `world-engine.json` | 世界引擎开关与参数（仅陪伴模式，默认关） | 直接编辑 |
 | `models.json` | 本地模型配置 | `/model local register` 或直接编辑 |
 | `agents.json` | 子 Agent 定义 | 直接编辑 |
 | `skills/*.md` | Skill 提示词模板 | 直接编辑 |
+| `commands.json` | 自定义斜杠命令 | 直接编辑 |
+
+## 使用原则
+
+1. 不要擅自修改用户设定的配置值（特别是 `session.maxContext`）
+2. 修改配置前先告知当前值和将要改成的值
+3. 用户设异常小的值时，先确认意图再操作
+4. 修改配置后即时生效并自动持久化，重启后保持
+�编辑 |
 | `commands.json` | 自定义斜杠命令 | 直接编辑 |
 
 ## 使用原则

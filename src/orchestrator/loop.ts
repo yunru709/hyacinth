@@ -459,7 +459,7 @@ export class AgentLoop {
         this.contextDirty = true;
       });
 
-      // 思考模式由 models-catalog.json 的 reasoningEffort 控制，启动时自动应用
+      // 思考模式由 providers.json 中模型的 reasoningEffort 控制，启动时自动应用
       // 运行时通过 /model thinking <on|off|high|max> 临时覆盖
     }
 

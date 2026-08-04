@@ -14,7 +14,11 @@ interface ModelCatalogWatcherDeps {
 }
 
 /**
- * 监听 models-catalog.json 文件变化，自动重载模型目录并同步 maxContext。
+ * 监听 providers.json 文件变化，自动重载模型目录并同步 maxContext。
+ *
+ * 模型数据源已统一到 providers.json（原 models-catalog.json 已并入）：
+ *  - provider-watcher 负责 ProviderConfigLoader.reload()
+ *  - 本 watcher 负责 ModelCatalog.reload() + session.maxContext 同步
  *
  * 使用 fs.watchFile（原因同 provider-watcher）。
  */
@@ -23,7 +27,7 @@ export function watchModelCatalogConfig(deps: ModelCatalogWatcherDeps): any[] {
   const logger = createLogger('hot-reload:model-catalog');
   const { cwd } = deps;
 
-  const watchPath = path.join(os.homedir(), '.agent', 'models-catalog.json');
+  const watchPath = path.join(os.homedir(), '.agent', 'providers.json');
   const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
 
   let lastMtime = 0;

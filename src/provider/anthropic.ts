@@ -17,7 +17,7 @@ export interface AnthropicProviderOptions {
   apiKey?: string;
   /** 可选自定义 base URL（代理/企业端点） */
   baseUrl?: string;
-  /** 模型名称，默认 claude-sonnet-4-20250514 */
+  /** 模型名称，默认 claude-sonnet-5 */
   model?: string;
   /** 单次请求最大输出 token 数。兼容旧键名 maxTokens。 */
   maxOutputTokens?: number;
@@ -65,7 +65,7 @@ export class AnthropicProvider implements Provider {
       baseURL: opts.baseUrl ?? process.env.ANTHROPIC_BASE_URL,
     });
 
-    this.model = opts.model ?? 'claude-sonnet-4-20250514';
+    this.model = opts.model ?? 'claude-sonnet-5';
     this.maxTokens = opts.maxOutputTokens                         // ① 临时覆盖
       ?? opts.maxTokens                                           // 向后兼容
       ?? getModelInfo('anthropic', this.model)?.maxOutputTokens   // ② 本机模型目录

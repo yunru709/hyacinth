@@ -74,8 +74,15 @@ import type { GitManager } from '../evolution/git-manager.js';
  * 创建包含所有内置工具的默认注册表（不包含 GitTool，需要 GitManager 实例）
  * @param cwd BashTool 的工作目录，默认为 process.cwd()
  * @param sandboxConfig 可选沙箱配置，传入后 BashTool 将启用命令拦截
+ * @param sessionId 当前 session ID（供 RestartTool 写入重启标记，按渠道精确恢复）
+ * @param channel 当前渠道（'tui' | 'feishu' 等，供 RestartTool 渠道隔离）
  */
-export function createDefaultRegistry(cwd?: string, sandboxConfig?: SandboxConfig): ToolRegistry {
+export function createDefaultRegistry(
+  cwd?: string,
+  sandboxConfig?: SandboxConfig,
+  sessionId?: string,
+  channel?: string,
+): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(new ReadTool());
   registry.register(new WriteTool());
@@ -85,7 +92,7 @@ export function createDefaultRegistry(cwd?: string, sandboxConfig?: SandboxConfi
   registry.register(new GrepTool());
   registry.register(new MultiEditTool());
   registry.register(new InsertTool());
-  registry.register(new RestartTool(cwd ?? process.cwd()));
+  registry.register(new RestartTool(cwd ?? process.cwd(), sessionId, channel));
   registry.register(new DiffFilesTool());
   registry.register(new JsonEditTool());
   registry.register(new HttpRequestTool());
@@ -107,8 +114,9 @@ export function createBuiltInTools(
   sessionId?: string,
   cwd?: string,
   sandboxConfig?: SandboxConfig,
+  channel?: string,
 ): ToolRegistry {
-  const registry = createDefaultRegistry(cwd, sandboxConfig);
+  const registry = createDefaultRegistry(cwd, sandboxConfig, sessionId, channel);
   registry.register(new GitTool(gitManager, sessionId));
   return registry;
 }

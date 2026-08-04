@@ -192,16 +192,20 @@ function normalizeConfig(persisted: Record<string, unknown>): Record<string, unk
   if (typeof normalized.provider === 'string') {
     const providerName = normalized.provider as string;
     const modelName = normalized.model as string | undefined;
+    // 旧格式只有一个 provider+model，仅 active 的那个继承 model；
+    // 其余 provider 未配置 → model 留空（''），不污染、不填默认值
+    const modelFor = (id: string): string =>
+      id === providerName ? (modelName || providerDefault(id)) : '';
     normalized.provider = {
       active: providerName,
       routeMode: 'auto',
       enableThinking: false,
-      anthropic: { model: modelName || providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
-      openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
-      deepseek: { model: providerDefault('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },
-      gemini: { model: providerDefault('gemini'), apiKeyEnv: 'GEMINI_API_KEY' },
+      anthropic: { model: modelFor('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
+      openai: { model: modelFor('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
+      deepseek: { model: modelFor('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },
+      gemini: { model: modelFor('gemini'), apiKeyEnv: 'GEMINI_API_KEY' },
       local: {
-        model: modelName || 'qwen2.5-7b',
+        model: providerName === 'local' ? (modelName || 'qwen2.5-7b') : '',
         baseUrl: 'http://127.0.0.1:8080/v1',
         maxOutputTokens: 4096,
         healthCheck: {

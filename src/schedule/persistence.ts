@@ -22,8 +22,9 @@ export class SchedulePersistence {
   private storagePath: string;
   private data: SerializedSchedulerData | null = null;
 
-  constructor() {
-    this.storagePath = getStoragePath();
+  constructor(storagePath?: string) {
+    // 可注入自定义存储路径（测试隔离用）；默认 ~/.agent/scheduler/tasks.json
+    this.storagePath = storagePath ?? getStoragePath();
   }
 
   /**

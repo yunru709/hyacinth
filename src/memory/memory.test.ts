@@ -254,7 +254,8 @@ describe('SessionManager', () => {
     // Use a unique temp directory as the "cwd" so sessions are isolated
     tempProjectDir = makeTempDir();
     await ensureDir(tempProjectDir);
-    manager = new SessionManager(tempProjectDir);
+    // 注入临时 sessionsRoot，避免读写全局 ~/.agent/sessions/（真实 session 会干扰断言）
+    manager = new SessionManager(tempProjectDir, path.join(tempProjectDir, 'sessions'));
   });
 
   afterEach(async () => {

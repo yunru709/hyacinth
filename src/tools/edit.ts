@@ -110,7 +110,10 @@ export class EditTool implements Tool {
     }
     try {
       const stat = await fs.stat(filePath);
-      if (stat.mtimeMs > lastRead) {
+      // 注意：stat.mtimeMs 是高精度（带小数），Date.now() 是整数毫秒。
+      // 同一毫秒内 read 后 edit 时，mtimeMs 小数部分会让它 > lastRead，误判为"外部修改"。
+      // 加 50ms 容差吸收精度差异；真正的并发外部修改通常间隔更久。
+      if (stat.mtimeMs > lastRead + 50) {
         return 'Error: File has been modified on disk since it was last read. Please re-read it first.';
       }
     } catch {}

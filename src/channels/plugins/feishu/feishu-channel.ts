@@ -149,6 +149,9 @@ export class FeishuChannel implements ChannelHandler {
       });
       this.logger.info('registered in channelLoop registry for scheduled task routing');
     }
+    // 注：飞书渠道的重启 session 恢复不依赖 __channelSessionRegistry，
+    // 而是走既有 persistFeishuState/restoreFeishuState（chatId + conversation→session 映射），
+    // 该机制更完整，且避免了向注册表写入 '__shared__'/'feishu_default' 等伪 session。
 
     this.logger.info(`starting with appId=${this.config.appId.slice(0, 8)}...`);
 
@@ -320,32 +323,47 @@ export class FeishuChannel implements ChannelHandler {
   // 再用 image_key 调用 im.message.create（msg_type='image'）发送。
   //
   // API: POST https://open.feishu.cn/open-apis/im/v1/images
-  // 参数: image_type='message'（消息用图，非头像），image=base64（不含 data:xxx;base64, 前缀）
+  // 参数（multipart/form-data）: image_type='message'（消息用图），image=文件
   // 返回: { code: 0, data: { image_key: 'img_xxx' } }
   //
   // 注意：
+  //   - 必须用 multipart/form-data 上传（base64 JSON body 已被飞书废弃，
+  //     会返回 234011 "Can't recognize image format"）
   //   - token 由调用方传入（来自 getTenantAccessToken 的缓存结果）
-  //   - mediaType 参数保留供未来扩展（如格式校验），当前仅透传 base64
   //   - 飞书 image_key 有时效性（约 2 小时），不持久化缓存
   // ================================================================
-  private async uploadImage(token: string, base64Data: string, _mediaType?: string): Promise<string> {
-    const domain = this.config?.domain ?? 'https://open.feishu.cn';
+  private async uploadImage(token: string, base64Data: string, mediaType?: string): Promise<string> {
+    const domain = this.resolveApiBase();
+    // base64 → Buffer → Blob
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    const mime = mediaType && mediaType.includes('/') ? mediaType : 'image/png';
+    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/gif' ? 'gif' : mime === 'image/webp' ? 'webp' : 'png';
+
+    // 飞书上传图片必须用 multipart/form-data（base64 JSON body 方式已被飞书废弃，
+    // 返回 234011 "Can't recognize image format"）。Content-Type 由 fetch 根据
+    // FormData 自动生成（含 boundary），不要手动设置。
+    const form = new FormData();
+    form.append('image_type', 'message');
+    form.append('image', new Blob([imageBuffer], { type: mime }), `camera.${ext}`);
+
     const resp = await fetch(`${domain}/open-apis/im/v1/images`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image_type: 'message',
-        image: base64Data,
-      }),
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: form,
     });
-    const json = await resp.json() as { code?: number; data?: { image_key?: string } };
+    const json = await resp.json() as { code?: number; msg?: string; data?: { image_key?: string } };
     if (json.code !== 0 || !json.data?.image_key) {
-      throw new Error(`飞书图片上传失败: code=${json.code}`);
+      throw new Error(`飞书图片上传失败: code=${json.code} ${json.msg ?? ''}`);
     }
     return json.data.image_key;
+  }
+
+  /** 解析飞书 API 基础域名：'feishu'/'lark' 短标识 → 完整 URL（配置里存的是短标识） */
+  private resolveApiBase(): string {
+    const d = this.config?.domain;
+    if (d === 'lark') return 'https://open.larksuite.com';
+    if (!d || d === 'feishu') return 'https://open.feishu.cn';
+    return d;
   }
 
   /** 获取 tenant access token（缓存，提前 60s 刷新，token 有效期 2h） */
@@ -354,7 +372,7 @@ export class FeishuChannel implements ChannelHandler {
       return this.cachedToken;
     }
     try {
-      const domain = this.config?.domain ?? 'https://open.feishu.cn';
+      const domain = this.resolveApiBase();
       const resp = await fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -796,7 +814,7 @@ export class FeishuChannel implements ChannelHandler {
       try {
         const token = await this.getTenantAccessToken();
         if (token) {
-          const domain = this.config?.domain ?? 'https://open.feishu.cn';
+          const domain = this.resolveApiBase();
           const resp = await fetch(
             `${domain}/open-apis/im/v1/messages/${ctx.messageId}/resources/${ctx.imageKey}?type=image`,
             { headers: { Authorization: `Bearer ${token}` } },

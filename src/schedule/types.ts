@@ -173,6 +173,8 @@ export interface SchedulerConfig {
   taskTimeoutMs: number;
   /** 执行记录保留条数，默认 1000 */
   maxRecords: number;
+  /** 存储文件路径（测试隔离用）。默认 ~/.agent/scheduler/tasks.json */
+  storagePath?: string;
   /**
    * 全局默认渠道降级链。
    * 当任务的 channel 离线且未配置 fallback 时，按此顺序尝试。

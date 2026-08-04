@@ -109,6 +109,8 @@ describe('WriteTool', () => {
   it('overwrites existing file', async () => {
     const filePath = path.join(tempDir, 'output.txt');
     await fs.writeFile(filePath, 'old content', 'utf-8');
+    // read-before-write 门控：覆盖已存在文件前必须先 read
+    await new ReadTool().execute({ file_path: filePath });
     await tool.execute({ file_path: filePath, content: 'new content' });
 
     const content = await fs.readFile(filePath, 'utf-8');
@@ -141,6 +143,8 @@ describe('EditTool', () => {
   });
 
   it('edits a line in a file', async () => {
+    // read-before-write 门控：编辑前必须先 read
+    await new ReadTool().execute({ file_path: filePath });
     await tool.execute({ file_path: filePath, old_string: 'Hello World', new_string: 'Hello Agent' });
 
     const content = await fs.readFile(filePath, 'utf-8');
@@ -149,6 +153,7 @@ describe('EditTool', () => {
   });
 
   it('throws error when old_string is not found', async () => {
+    await new ReadTool().execute({ file_path: filePath });
     await expect(
       tool.execute({ file_path: filePath, old_string: 'Not found', new_string: 'replacement' }),
     ).rejects.toThrow(/String not found/);
@@ -156,6 +161,7 @@ describe('EditTool', () => {
 
   it('throws error when multiple matches exist without replace_all', async () => {
     await fs.writeFile(filePath, 'aaa\naaa\nbbb', 'utf-8');
+    await new ReadTool().execute({ file_path: filePath });
     await expect(
       tool.execute({ file_path: filePath, old_string: 'aaa', new_string: 'ccc' }),
     ).rejects.toThrow(/Multiple matches found/);
@@ -163,6 +169,7 @@ describe('EditTool', () => {
 
   it('replaces all occurrences with replace_all=true', async () => {
     await fs.writeFile(filePath, 'aaa\naaa\nbbb', 'utf-8');
+    await new ReadTool().execute({ file_path: filePath });
     await tool.execute({ file_path: filePath, old_string: 'aaa', new_string: 'ccc', replace_all: true });
 
     const content = await fs.readFile(filePath, 'utf-8');
@@ -260,13 +267,13 @@ describe('BashTool', () => {
 
   it('captures stderr in error output on Windows', async () => {
     const tool = new BashTool(tempDir);
-    // On Windows PowerShell, Write-Error causes a non-zero exit code,
-    // so BashTool throws an Error containing the stderr content.
+    // On Windows PowerShell, Write-Error alone exits with code 0,
+    // so force a non-zero exit code to make BashTool throw with stderr content.
     const isWin = os.platform() === 'win32';
     if (isWin) {
-      // PowerShell: Write-Error writes to stderr and exits with error
+      // PowerShell: Write-Error writes to stderr; `exit 1` forces failure
       await expect(
-        tool.execute({ command: 'Write-Error "test-error-output"' }),
+        tool.execute({ command: 'Write-Error "test-error-output"; exit 1' }),
       ).rejects.toThrow(/test-error-output/);
     } else {
       // Unix: echo to stderr, command still succeeds

@@ -14,7 +14,7 @@ import { getModelContextWindow } from '../setup/model-defaults.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/env-collector.js';
 import type { AgentFactory } from '../channels/interface.js';
-import { watchFile } from 'node:fs';
+import { watchFile, existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 const logger = createLogger('server');
@@ -37,6 +37,19 @@ export interface ServerInstance {
 
 export async function startServer(options: ServerOptions): Promise<ServerInstance> {
   const { port, cwd, provider: providerType, model: modelOverride, maxTurns = getDefaultConfig().session.maxTurns } = options;
+
+  // ── 清理重启残留标记 ──
+  // .restart-session 只被 TUI 入口（cli.ts）消费；serve 模式不消费它。
+  // 若 serve 进程内触发过 restart（如飞书渠道），文件会残留，下次单独启动 TUI 时
+  // 可能把 serve 期间记录的 session（如 http 会话）误当成 TUI 会话恢复。
+  // 故 serve 启动即删除，防止跨启动模式的数据残留。
+  try {
+    const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
+    if (existsSync(restartFile)) {
+      unlinkSync(restartFile);
+      logger.info('cleaned stale .restart-session (serve mode does not consume it)');
+    }
+  } catch { /* 清理失败不影响启动 */ }
 
   // 加载配置
   const configManager = new ConfigManager(cwd);

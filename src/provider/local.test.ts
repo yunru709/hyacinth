@@ -16,8 +16,9 @@ describe('LocalProvider', () => {
 
   it('creates with default values', () => {
     const provider = new LocalProvider();
-    expect(provider.getProviderType()).toBe('local');
-    expect(provider.getModel()).toBe('qwen2.5-7b-q4_k_m');
+    // 默认 baseUrl http://127.0.0.1:11434/v1 → backend=ollama；默认 model 来自 local-config
+    expect(provider.getProviderType()).toBe('ollama');
+    expect(provider.getModel()).toBe('llama3.2');
   });
 
   it('accepts custom baseUrl and model', () => {
@@ -37,8 +38,8 @@ describe('LocalProvider', () => {
   it('reads baseUrl from LOCAL_BASE_URL env var', () => {
     process.env.LOCAL_BASE_URL = 'http://192.168.1.100:8080/v1';
     const provider = new LocalProvider();
-    // Can't easily assert private client.baseURL, but no error means it accepted it
-    expect(provider.getProviderType()).toBe('local');
+    // 8080 端口不含 :11434 → backend=llamacpp
+    expect(provider.getProviderType()).toBe('llamacpp');
   });
 
   it('setModel changes model at runtime', () => {

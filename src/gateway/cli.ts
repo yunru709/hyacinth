@@ -723,15 +723,53 @@ async function executeAction(
     : undefined;
 
   // 重启恢复：检查 .restart-session（/restart 写入）
+  // 格式优先级：
+  //   1. JSON 快照 {"channel": "sessionId", ...} —— RestartTool 多渠道快照（当前版本）
+  //   2. "channel:sessionId" —— 旧格式（单渠道）
+  //   3. 'true' —— 无渠道信息（继续最近）
+  // 渠道隔离：仅当快照包含当前启动渠道时才恢复对应 session；否则忽略特定 session，
+  // 走 shouldContinue（由 factory 按当前渠道恢复最近 session）。
+  // 统一策略：非 TUI 启动（launchChannel 为空）一律不恢复特定 session——
+  // 因为 .restart-session 只服务于渠道感知的 TUI 恢复，CLI/服务模式恢复最近即可，
+  // 避免把其他渠道（如飞书）的 session 恢复给 CLI 交互。
   const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
   let restartSessionId: string | undefined;
   let restartContinue = false;
+  // 当前启动渠道：TUI 模式为 'tui'，否则不启用渠道恢复
+  const launchChannel = options.tui ? 'tui' : undefined;
   if (fsSync.existsSync(restartFile)) {
     const content = fsSync.readFileSync(restartFile, 'utf-8').trim();
     fsSync.unlinkSync(restartFile);
     restartContinue = true;
-    if (content && content !== 'true') {
-      restartSessionId = content;  // /restart 写入的 session ID
+    // 非 TUI 模式：忽略特定 session，统一走 shouldContinue（恢复最近）
+    if (content && content !== 'true' && launchChannel) {
+      // 1) 尝试 JSON 多渠道快照
+      let snapshot: Record<string, string> | null = null;
+      try {
+        const parsed = JSON.parse(content) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          snapshot = parsed as Record<string, string>;
+        }
+      } catch { /* 非 JSON，走旧格式 */ }
+
+      if (snapshot) {
+        // 仅当快照包含当前启动渠道（tui）时才恢复；否则交给 factory 的 shouldContinue
+        if (snapshot[launchChannel]) {
+          restartSessionId = snapshot[launchChannel];
+        }
+      } else {
+        // 2) 旧格式：channel:sessionId
+        const sep = content.indexOf(':');
+        if (sep > 0) {
+          const restartChannel = content.slice(0, sep);
+          const restartSid = content.slice(sep + 1);
+          if (restartChannel === launchChannel) {
+            restartSessionId = restartSid;
+          }
+        } else {
+          restartSessionId = content;  // 3) 旧格式：纯 session ID，兼容
+        }
+      }
     }
   }
 
@@ -1053,7 +1091,7 @@ function getDefaultModel(type: ProviderType): string {
   // 最后按 provider 类型兜底
   switch (type) {
     case 'openrouter': return 'openrouter/auto';
-    case 'gemini': return 'gemini-2.5-flash';
+    case 'gemini': return 'gemini-3.6-flash';
     case 'local': case 'llamacpp': return 'local';
     default: return 'unknown';
   }

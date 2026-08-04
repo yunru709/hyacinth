@@ -6,8 +6,8 @@
  * sequentially until one succeeds.
  *
  * Example config:
- *   primary: anthropic/claude-sonnet-4-20250514
- *   fallback: [openai/gpt-4o, deepseek/deepseek-v4-flash]
+ *   primary: anthropic/claude-sonnet-5
+ *   fallback: [openai/gpt-5.5, deepseek/deepseek-v4-flash-0731]
  */
 
 import type { Provider } from './interface.js';

@@ -2,7 +2,7 @@ export interface FullConfig {
   provider: {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
     routeMode: 'auto' | 'manual';
-    enableThinking: boolean; // 启用 thinking/reasoning 模式（启动时自动从 models-catalog.json 读取 reasoningEffort）
+    enableThinking: boolean; // 启用 thinking/reasoning 模式（启动时自动从 providers.json 读取模型 reasoningEffort）
     /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
     anthropic: { model: string; apiKeyEnv: string };

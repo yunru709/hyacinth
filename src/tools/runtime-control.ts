@@ -12,7 +12,6 @@ import type { MCPSystem } from '../mcp/system.js';
 import type { CompanionSessionManager } from '../memory/companion-session.js';
 import { clearPromptCache } from '../prompts/loader.js';
 import { switchRouter } from '../context/profiles.js';
-import { listAsyncTasks, getAsyncTask } from '../agents/delegate-tool.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -423,6 +422,8 @@ export function createListSubAgentTasksTool(): Tool {
     description: '列出所有通过 delegate_to_agent(async=true) 启动的异步子 Agent 任务。包含句柄、Agent 名称、任务描述、状态（running/completed/failed）、启动时间和结果摘要。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
+      // 动态 import 避免循环依赖：runtime-control → delegate-tool → filtered-registry → tool.registry → runtime-control
+      const { listAsyncTasks } = await import('../agents/delegate-tool.js');
       const tasks = listAsyncTasks();
       if (tasks.length === 0) {
         return '暂无异步子 Agent 任务。使用 delegate_to_agent 并设置 async=true 来启动异步任务。';
@@ -464,6 +465,8 @@ export function createGetSubAgentResultTool(): Tool {
     },
     async execute(args: Record<string, unknown>): Promise<string> {
       const handle = args.handle as string;
+      // 动态 import 避免循环依赖（同 list_sub_agent_tasks）
+      const { getAsyncTask } = await import('../agents/delegate-tool.js');
       const task = getAsyncTask(handle);
       if (!task) {
         return `错误：未找到异步任务 "${handle}"。使用 list_sub_agent_tasks 查看所有任务及其句柄。`;
@@ -2017,3 +2020,4 @@ export function createResetCompanionSessionTool(
     },
   };
 }
+

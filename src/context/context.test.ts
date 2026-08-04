@@ -153,11 +153,12 @@ describe('LayeredContextComposer', () => {
     expect(composer.getSource('nonexistent')).toBeUndefined();
   });
 
-  it('assembleZone2() with index_only strategy includes only name and description', async () => {
+  it('index_only source renders as index entry (name + description only)', async () => {
     const composer = new LayeredContextComposer(200000);
 
+    // zone1 的 runtime:skills section 只渲染 skill- 前缀的 manifest source
     const source: ContextSource = {
-      name: 'index-source',
+      name: 'skill-index-source',
       strategy: 'index_only',
       cacheability: 'manifest',
       description: 'Index only source',
@@ -177,20 +178,19 @@ describe('LayeredContextComposer', () => {
       userInput: 'test',
     });
 
-    // The index_only source should appear as "- index-source: Index only source"
-    // not as the full content
-    const userMessages = result.messages.filter(
-      m => m.role === 'user' && typeof m.content === 'object',
-    );
+    // The index_only source should appear as "- skill-index-source: Index only source"
+    // not as the full content. 注意：项目 manifest 里 zone2 skills section 是 system role，
+    // 所以不限定消息 role，在全部消息里找索引条目。
+    const allMessages = result.messages.filter(m => typeof m.content === 'object');
 
     // Find the message that contains the index entry
-    const indexMessage = userMessages.find(m => {
+    const indexMessage = allMessages.find(m => {
       const content = m.content;
       if (Array.isArray(content)) {
-        return content.some(c => c.type === 'text' && c.text.includes('index-source'));
+        return content.some(c => c.type === 'text' && c.text.includes('skill-index-source'));
       }
       if (content && typeof content === 'object' && 'type' in content && content.type === 'text') {
-        return content.text.includes('index-source');
+        return content.text.includes('skill-index-source');
       }
       return false;
     });
@@ -198,16 +198,16 @@ describe('LayeredContextComposer', () => {
     expect(indexMessage).toBeDefined();
     // Verify it contains the index format, not the full content
     const text = extractText(indexMessage!);
-    expect(text).toContain('index-source');
+    expect(text).toContain('skill-index-source');
     expect(text).toContain('Index only source');
     expect(text).not.toContain('full content that should not appear');
   });
 
-  it('assembleZone2() with lazy_expand strategy expands in precise mode', async () => {
+  it('lazy_expand source expands when selected', async () => {
     const composer = new LayeredContextComposer(200000);
 
     const source: ContextSource = {
-      name: 'lazy-source',
+      name: 'skill-lazy-source',
       strategy: 'lazy_expand',
       cacheability: 'manifest',
       description: 'Lazy expand source',
@@ -225,6 +225,8 @@ describe('LayeredContextComposer', () => {
       tools: [],
       history: [],
       userInput: 'test',
+      // 选中该 skill → lazy_expand 展开全文
+      selectedSkills: ['lazy-source'],
     });
 
     // With source selected, full content should appear
@@ -236,11 +238,11 @@ describe('LayeredContextComposer', () => {
     expect(allText).toContain('expanded content');
   });
 
-  it('assembleZone2() with lazy_expand strategy shows index in normal mode', async () => {
+  it('lazy_expand source shows index when not selected', async () => {
     const composer = new LayeredContextComposer(200000);
 
     const source: ContextSource = {
-      name: 'lazy-source',
+      name: 'skill-lazy-source',
       strategy: 'lazy_expand',
       cacheability: 'manifest',
       description: 'Lazy expand source',
@@ -260,15 +262,15 @@ describe('LayeredContextComposer', () => {
       userInput: 'test',
     });
 
-    // In normal mode, should show index entry, not full content
+    // Not selected → show index entry, not full content
     const allText = result.messages
       .map(m => extractText(m))
       .filter(Boolean)
       .join('\n');
 
-    expect(allText).toContain('lazy-source');
+    expect(allText).toContain('skill-lazy-source');
     expect(allText).toContain('Lazy expand source');
-    // The full content should NOT appear in normal mode
+    // The full content should NOT appear when not selected
     expect(allText).not.toContain('expanded content');
   });
 });

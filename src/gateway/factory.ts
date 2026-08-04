@@ -173,11 +173,16 @@ export async function createAgent(
     sessionType = session.type ?? 'normal';
     logger.info('Resumed session', { sessionId: session.id, type: sessionType });
   } else if (shouldContinue) {
-    const session = await sessionManager.resume();
+    // 渠道隔离恢复：TUI 与飞书共享进程时，重启应恢复各自渠道的 session，
+    // 而非全局最近（否则会把飞书 session 恢复给 TUI）。跨渠道加载由 switch_session 显式完成。
+    const channelSession = options.channel
+      ? await sessionManager.getLatestByChannel(options.channel)
+      : null;
+    const session = channelSession ?? (await sessionManager.resume());
     sessionDir = sessionManager.getSessionDir(session.id);
     currentSessionId = session.id;
     sessionType = session.type ?? 'normal';
-    logger.info('Continued session', { sessionId: session.id, type: sessionType });
+    logger.info('Continued session', { sessionId: session.id, type: sessionType, channel: options.channel ?? '(global)' });
   } else {
     // 新 session：根据 startup.defaultMode 决定初始 Router 模式
     // 注意：陪伴模式也创建 normal session，实际 session 切换由 CompanionRouter.onActivate 负责
@@ -458,7 +463,7 @@ export async function createAgent(
     compressThreshold: config.context?.compressThreshold,
     compressDepth: config.context?.compressDepth,
   });
-  const toolRegistry = createBuiltInTools(gitManager, currentSessionId, cwd);
+  const toolRegistry = createBuiltInTools(gitManager, currentSessionId, cwd, undefined, options.channel);
   const toolExecutor = new ToolExecutor(toolRegistry);
 
   // ── 后台进程注册表（异步工具支持）────────────────────────────────────
@@ -881,6 +886,22 @@ export async function createAgent(
     notifyTaskFired(name: string, sessionId?: string): Promise<void>;
     sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
   }> = (globalThis as any).__channelLoopRegistry;
+
+  // ── 渠道 Session 注册表（重启前快照，重启后按渠道恢复） ──
+  // 各渠道把「获取自己当前 sessionId 的 getter」注册进来（而非静态值），
+  // 这样用户切换 session（switch_session/new_session/load）后 getter 实时反映最新 session，
+  // 避免重启时恢复旧 session。RestartTool 重启时调用 getter 序列化快照写入 .restart-session，
+  // 重启后 cli 按启动渠道取对应 session，避免多渠道共享进程（TUI + 飞书）时重启串 session。
+  // 注意：仅当显式传入 channel 时才注册——http-webhook/tui-ws 等不传 channel 的渠道
+  // 不注册，防止它们静默污染 'tui' 键（否则 serve 模式每个 http 请求都会顶掉真实 TUI 会话）。
+  if (!(globalThis as any).__channelSessionRegistry) {
+    (globalThis as any).__channelSessionRegistry = new Map<string, () => string>();
+  }
+  const channelSessions: Map<string, () => string> = (globalThis as any).__channelSessionRegistry;
+  if (options.channel) {
+    channelSessions.set(options.channel, () => path.basename((loop as any).sessionDir));
+  }
+
   // 主 loop 注册为 'tui'（TUI 本地模式的默认渠道）
   channelLoops.set('tui', loop);
 

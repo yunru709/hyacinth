@@ -9,10 +9,9 @@ import { getProviderConfigLoader } from './config.js';
  * Endpoint: https://api.deepseek.com/v1
  *
  * 支持模型：
- *   - deepseek-v4-flash (V4 快速，1M上下文，推荐)
+ *   - deepseek-v4-flash-0731 (V4 Flash 0731，1M上下文，推荐)
  *   - deepseek-v4-pro (V4 Pro，1M上下文)
- *   - deepseek-chat (即将退役，路由到 V4 Flash)
- *   - deepseek-reasoner (即将退役，路由到 V4 Flash 思考模式)
+ *   - deepseek-v4-flash (旧版，已退役，replacedBy deepseek-v4-flash-0731)
  */
 export function createDeepSeekProvider(config?: {
   apiKey?: string;

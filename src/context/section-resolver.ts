@@ -227,7 +227,10 @@ async function resolveRuntime(
   }
 
   if (src === 'runtime:skills' || src === 'runtime:agents' || src === 'runtime:mcp') {
-    const kind = src.replace('runtime:', '');
+    // 注意：kind 必须与 ContextSource 名称前缀一致（单数）。
+    // factory.ts 注册的是 'skill-*' / 'agent-*' / 'mcp-*'，
+    // 若直接用 src.replace('runtime:','') 会得到复数 'skills'/'agents' 导致前缀匹配失败。
+    const kind = src === 'runtime:skills' ? 'skill' : src === 'runtime:agents' ? 'agent' : 'mcp';
     return buildSourcePartsFromCtx(kind, ctx);
   }
 
@@ -451,10 +454,10 @@ function buildLiveMcpIndex(ctx: ResolverContext): string | undefined {
   return `会话临时 MCP — 本次对话可用\n${parts.join('\n')}`;
 }
 
-function buildSourcePartsFromCtx(
+async function buildSourcePartsFromCtx(
   kind: string,
   ctx: ResolverContext,
-): string | undefined {
+): Promise<string | undefined> {
   if (!ctx.sources) return undefined;
 
   const prefix = kind === 'mcp' ? 'mcp-' : `${kind}-`;
@@ -486,7 +489,8 @@ function buildSourcePartsFromCtx(
             ? ctx.selectedAgents?.includes(source.name.replace('agent-', ''))
             : false;
         if (isSelected && source.getContent) {
-          const content = source.getContent();
+          // getContent 可能是 async（ContextSource 接口允许 Promise），必须 await
+          const content = await source.getContent();
           const text = typeof content === 'string' ? content : '';
           parts.push(`- ${source.name}: ${text}`);
         } else {
