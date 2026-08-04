@@ -1460,7 +1460,10 @@ export class AgentLoop {
 
         // ── 历史回填（方案 A）：orchestrator 开启晚时，对开启前未分类历史补做归类 ──
         // 预判：已回填到 fullLineCount（即无新增历史）时跳过，避免每轮全量读文件。
-        if (orch && typeof (orch as any).backfillUnclassified === 'function') {
+        // ⚠️ 必须校验 orchestrator 已激活：getAgent 只看注册表（orchestrator 默认无条件注册），
+        //    未激活时若执行 backfill 会触发阻塞 LLM 调用，拖住 loop.run 的 resolve，
+        //    导致消息完成后队列续上延迟数秒。
+        if (orch && this.bypassManager.isActive('orchestrator') && typeof (orch as any).backfillUnclassified === 'function') {
           const currentSessionId = path.basename(this.sessionDir);
           const backfillUpto: number = (typeof (orch as any).getBackfillUpto === 'function')
             ? (orch as any).getBackfillUpto(currentSessionId)
