@@ -28,6 +28,7 @@ export type { GenerationAdapterFactory } from './registry.js';
 export { GenerationService } from './service.js';
 export type { GenerateOptions } from './service.js';
 export { VolcSeedreamProvider, createVolcSeedreamProvider } from './adapters/volc-seedream.js';
+export { VolcSeedanceProvider, createVolcSeedanceProvider } from './adapters/volc-seedance.js';
 export {
   loadGenerationConfig,
   getGenerationConfigPath,

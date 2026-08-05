@@ -15,6 +15,7 @@ import type {
 } from './interface.js';
 import { loadGenerationConfig } from './config.js';
 import { createVolcSeedreamProvider } from './adapters/volc-seedream.js';
+import { createVolcSeedanceProvider } from './adapters/volc-seedance.js';
 
 /** 适配器工厂：type 字符串 → Provider 实例构造函数 */
 export type GenerationAdapterFactory = (
@@ -25,6 +26,7 @@ export type GenerationAdapterFactory = (
 /** 内置适配器注册表：type → 工厂。新适配器在这里登记后即可在配置中引用。 */
 const BUILTIN_ADAPTERS: Record<string, GenerationAdapterFactory> = {
   'volc-seedream': createVolcSeedreamProvider,
+  'volc-seedance': createVolcSeedanceProvider,
 };
 
 export class GenerationRegistry {
