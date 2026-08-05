@@ -42,6 +42,7 @@ export { HttpRequestTool } from './http-request.js';
 export { ArchiveTool } from './archive.js';
 export { DbQueryTool } from './db-query.js';
 export { DiskUsageTool } from './disk-usage.js';
+export { GenerateImageTool } from './generate-image.js';
 export { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool } from './xref/index.js';
 export { PythonToolBridge } from './python-bridge/index.js';
 export type { PythonToolMeta } from './python-bridge/index.js';
@@ -99,6 +100,7 @@ export function createDefaultRegistry(
   registry.register(new ArchiveTool());
   registry.register(new DbQueryTool());
   registry.register(new DiskUsageTool(cwd));
+  registry.register(new GenerateImageTool(cwd));
   return registry;
 }
 

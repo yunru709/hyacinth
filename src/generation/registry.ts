@@ -73,6 +73,11 @@ export class GenerationRegistry {
     return instance;
   }
 
+  /** 获取某模态的默认供应商名 */
+  getDefaultProviderName(modality: GenerationModality): string | null {
+    return this.config.defaults?.[modality] ?? null;
+  }
+
   /** 获取某模态的默认供应商 */
   getDefaultProvider(modality: GenerationModality): GenerationProvider | null {
     const name = this.config.defaults?.[modality];
