@@ -154,7 +154,7 @@ describe('generation end-to-end (real HTTP)', () => {
       }),
     );
 
-    const tool = new GenerateImageTool(tmpDir);
+    const tool = new GenerateImageTool(tmpDir, path.join(tmpDir, 'outputs', 'generation'));
     const result = await tool.execute({
       prompt: '赛博朋克小猫',
       negative_prompt: '模糊',

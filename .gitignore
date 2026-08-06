@@ -28,3 +28,5 @@ Thumbs.db
 
 # æœ¬åœ°æ‰“åŒ…äº§ç‰©ï¼ˆnpm pack ç”Ÿæˆçš„ .tgzï¼Œä¸åº”æäº¤ï¼‰
 *.tgz
+# Éú³É²úÎï£¨ÓÃ»§»·¾³ ~/.agent/generation£¬Ô´ÂëÄ¿Â¼²»Ó¦²ĞÁô£©
+/outputs/generation/

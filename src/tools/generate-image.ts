@@ -18,7 +18,6 @@
  * - watermark: 是否加水印（可选）
  */
 
-import path from 'node:path';
 import type { Tool } from './interface.js';
 
 export class GenerateImageTool implements Tool {
@@ -65,9 +64,11 @@ export class GenerateImageTool implements Tool {
   };
 
   private cwd: string;
+  private outputDir?: string;
 
-  constructor(cwd?: string) {
+  constructor(cwd?: string, outputDir?: string) {
     this.cwd = cwd ?? process.cwd();
+    this.outputDir = outputDir;
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
@@ -130,7 +131,8 @@ export class GenerateImageTool implements Tool {
           referenceImages: refs,
           watermark: args.watermark !== undefined ? Boolean(args.watermark) : undefined,
         },
-        { outputDir: path.join(this.cwd, 'outputs', 'generation') },
+        // 未显式指定 outputDir 时，service 默认落 ~/.agent/generation（用户运行环境）
+        this.outputDir ? { outputDir: this.outputDir } : {},
       );
 
       if (!artifact.localPath) {

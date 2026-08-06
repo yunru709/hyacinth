@@ -36,4 +36,5 @@ export {
   loadGenerationConfig,
   getGenerationConfigPath,
   getGlobalGenerationConfigPath,
+  getGlobalGenerationOutputDir,
 } from './config.js';

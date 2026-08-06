@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GenerationRegistry } from './registry.js';
+import { getGlobalGenerationOutputDir } from './config.js';
 import type {
   GeneratedArtifact,
   GenerationTaskType,
@@ -36,7 +37,7 @@ export interface GenerateOptions {
   maxAttempts?: number;
   /** 是否下载转存（默认 true） */
   download?: boolean;
-  /** 输出目录（默认 <cwd>/outputs/generation） */
+  /** 输出目录（默认 ~/.agent/generation，即用户实际运行环境） */
   outputDir?: string;
   /** 完成后回调（可用于通知前端/渠道） */
   onStatus?: (status: { status: GenerationStatus; progress?: number }) => void;
@@ -169,7 +170,7 @@ export class GenerationService {
       throw new Error(`generation task ${task.taskId} has no resultUrl`);
     }
 
-    const outputDir = opts.outputDir ?? path.join(this.cwd, 'outputs', 'generation');
+    const outputDir = opts.outputDir ?? getGlobalGenerationOutputDir();
     fs.mkdirSync(outputDir, { recursive: true });
 
     const url = status.resultUrl;

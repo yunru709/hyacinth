@@ -29,6 +29,15 @@ export function getGlobalGenerationConfigPath(): string {
   return path.join(os.homedir(), '.agent', 'generation.json');
 }
 
+/**
+ * 全局产物输出目录：~/.agent/generation/
+ * 用户实际运行的是 npm 包（非源码），产物必须落在用户环境 ~/.agent 下，
+ * 与 scheduler/companion/sessions 等模块的约定一致。
+ */
+export function getGlobalGenerationOutputDir(): string {
+  return path.join(os.homedir(), '.agent', 'generation');
+}
+
 function readJsonFile(p: string): GenerationConfig | null {
   try {
     if (!fs.existsSync(p)) return null;
