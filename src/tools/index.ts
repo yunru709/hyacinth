@@ -68,6 +68,7 @@ import { HttpRequestTool } from './http-request.js';
 import { ArchiveTool } from './archive.js';
 import { DbQueryTool } from './db-query.js';
 import { DiskUsageTool } from './disk-usage.js';
+import { GenerateImageTool } from './generate-image.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
