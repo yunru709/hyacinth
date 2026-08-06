@@ -50,9 +50,13 @@ describe('GenerateImageTool', () => {
       path.join(agentDir, 'generation.json'),
       JSON.stringify({
         providers: {
-          volc: { type: 'volc-seedream', model: 'doubao-seedream-5-0-lite-260128', apiKey: 'test-key' },
+          volc: {
+            type: 'volcengine',
+            models: { text_to_image: 'doubao-seedream-5-0-lite-260128' },
+            apiKey: 'test-key',
+          },
         },
-        defaults: { image: 'volc' },
+        defaults: { text_to_image: 'volc' },
       }),
     );
     process.env.ARK_API_KEY = 'test-key';

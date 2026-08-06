@@ -158,8 +158,9 @@ export interface GeneratedArtifact {
 // ── 能力描述 ────────────────────────────────────────────────────────
 
 export interface GenerationCapabilities {
-  modality: GenerationModality;
-  /** 支持的任务类型 */
+  /** 支持的模态集合（图片/视频/音频），由 taskTypes 派生辅助 */
+  modalities: GenerationModality[];
+  /** 支持的任务类型（权威能力清单，一厂商可支持多个） */
   taskTypes: GenerationTaskType[];
   /** 支持的分辨率档位 */
   resolutions?: string[];
@@ -222,12 +223,14 @@ export interface GenerationProvider {
 
 // ── 注册表条目 ──────────────────────────────────────────────────────
 
-/** 生成供应商配置（复用 ChannelConfig 字段风格，独立命名空间） */
+/** 生成供应商配置（一厂商一条目，凭证共享，能力按 taskType 声明） */
 export interface GenerationProviderConfig {
-  /** Provider 适配器类型（如 'volcengine'） */
+  /** 适配器类型（如 'volcengine'，对应 adapters/index.ts 里的 meta.type） */
   type: string;
-  /** 默认模型 */
+  /** 默认模型（未按 taskType 指定时兜底） */
   model?: string;
+  /** 各任务类型使用的模型（一厂商多能力 → 多模型） */
+  models?: Partial<Record<GenerationTaskType, string>>;
   /** API Key（可选，不填则从环境变量获取） */
   apiKey?: string;
   /** API Key 环境变量名 */
@@ -239,8 +242,19 @@ export interface GenerationProviderConfig {
 }
 
 export interface GenerationConfig {
-  /** 各供应商实例配置 */
+  /** 各供应商实例配置（一厂商一条目） */
   providers: Record<string, GenerationProviderConfig>;
-  /** 模态默认供应商（image/video/audio → provider 名） */
-  defaults?: Partial<Record<GenerationModality, string>>;
+  /** 各任务类型的默认供应商（text_to_image/video 等 → provider 名） */
+  defaults?: Partial<Record<GenerationTaskType, string>>;
+}
+
+/**
+ * 适配器自描述元数据 — 适配器文件末尾导出，供 adapters/index.ts 聚合。
+ * 加新厂商：新建 adapters/xxx.ts（实现 + 导出 meta）→ adapters/index.ts 加一行 import。
+ */
+export interface AdapterMeta {
+  /** 适配器类型（配置里 providers[].type 引用，如 'volcengine'） */
+  type: string;
+  /** 创建 Provider 实例的工厂 */
+  create: (name: string, cfg: GenerationProviderConfig) => GenerationProvider;
 }

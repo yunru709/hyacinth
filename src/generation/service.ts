@@ -18,6 +18,7 @@ import path from 'node:path';
 import { GenerationRegistry } from './registry.js';
 import type {
   GeneratedArtifact,
+  GenerationTaskType,
   GenerationRequest,
   GenerationStatus,
   GenerationTask,
@@ -55,9 +56,9 @@ export class GenerationService {
     return this.registry.getProvider(name);
   }
 
-  /** 按模态取默认供应商 */
-  getDefaultProvider(modality: GenerationRequest['taskType'] extends never ? never : 'image' | 'video' | 'audio') {
-    return this.registry.getDefaultProvider(modality);
+  /** 按任务类型取默认供应商 */
+  getDefaultProvider(taskType: GenerationTaskType) {
+    return this.registry.getDefaultProvider(taskType);
   }
 
   /**

@@ -1,33 +1,29 @@
 /**
- * 生成供应商注册表 — 管理 GenerationProvider 实例的创建、路由、fallback。
+ * 生成供应商注册表 — 管理 GenerationProvider 实例的创建、路由。
  *
  * 与对话侧 ModelChannelRegistry 平行但不共享接口：
  * - 对话走 Provider（重，createStream）
  * - 生成走 GenerationProvider（轻，submitTask/getTaskStatus）
  * 两者共用"apiKey/apiKeyEnv/baseUrl"的配置字段风格，凭证管理一致。
+ *
+ * 适配器注册：从 adapters/index.ts 的 BUILTIN_ADAPTERS 自动收集（全自动，无需手改）。
+ * 加新厂商：adapters/xxx.ts 导出 meta → adapters/index.ts 加一行 import。
  */
 
 import type {
   GenerationConfig,
-  GenerationModality,
   GenerationProvider,
   GenerationProviderConfig,
+  GenerationTaskType,
 } from './interface.js';
 import { loadGenerationConfig } from './config.js';
-import { createVolcSeedreamProvider } from './adapters/volc-seedream.js';
-import { createVolcSeedanceProvider } from './adapters/volc-seedance.js';
+import { BUILTIN_ADAPTERS } from './adapters/index.js';
 
 /** 适配器工厂：type 字符串 → Provider 实例构造函数 */
 export type GenerationAdapterFactory = (
   name: string,
   cfg: GenerationProviderConfig,
 ) => GenerationProvider;
-
-/** 内置适配器注册表：type → 工厂。新适配器在这里登记后即可在配置中引用。 */
-const BUILTIN_ADAPTERS: Record<string, GenerationAdapterFactory> = {
-  'volc-seedream': createVolcSeedreamProvider,
-  'volc-seedance': createVolcSeedanceProvider,
-};
 
 export class GenerationRegistry {
   private adapters = new Map<string, GenerationAdapterFactory>();
@@ -39,10 +35,10 @@ export class GenerationRegistry {
     this.registerBuiltins();
   }
 
-  /** 注册所有内置适配器工厂 */
+  /** 注册所有内置适配器工厂（从聚合文件自动收集） */
   private registerBuiltins(): void {
-    for (const [type, factory] of Object.entries(BUILTIN_ADAPTERS)) {
-      this.adapters.set(type, factory);
+    for (const { type, create } of BUILTIN_ADAPTERS) {
+      this.adapters.set(type, create);
     }
   }
 
@@ -51,9 +47,14 @@ export class GenerationRegistry {
     return new GenerationRegistry(config);
   }
 
-  /** 注册适配器工厂（type → 构造函数）。启动时由各适配器模块调用。 */
+  /** 注册适配器工厂（type → 构造函数）。插件/外部适配器用，内置走 BUILTIN_ADAPTERS。 */
   registerAdapter(type: string, factory: GenerationAdapterFactory): void {
     this.adapters.set(type, factory);
+  }
+
+  /** 列出已注册的适配器类型 */
+  listAdapterTypes(): string[] {
+    return [...this.adapters.keys()];
   }
 
   /** 按配置创建/获取 Provider 实例（懒加载 + 缓存） */
@@ -67,7 +68,7 @@ export class GenerationRegistry {
     }
     const factory = this.adapters.get(cfg.type);
     if (!factory) {
-      throw new Error(`generation adapter type "${cfg.type}" not registered`);
+      throw new Error(`generation adapter type "${cfg.type}" not registered (available: ${this.listAdapterTypes().join(', ') || 'none'})`);
     }
 
     const instance = factory(name, cfg);
@@ -75,14 +76,14 @@ export class GenerationRegistry {
     return instance;
   }
 
-  /** 获取某模态的默认供应商名 */
-  getDefaultProviderName(modality: GenerationModality): string | null {
-    return this.config.defaults?.[modality] ?? null;
+  /** 获取某任务类型的默认供应商名（如 text_to_image → provider 名） */
+  getDefaultProviderName(taskType: GenerationTaskType): string | null {
+    return this.config.defaults?.[taskType] ?? null;
   }
 
-  /** 获取某模态的默认供应商 */
-  getDefaultProvider(modality: GenerationModality): GenerationProvider | null {
-    const name = this.config.defaults?.[modality];
+  /** 获取某任务类型的默认供应商 */
+  getDefaultProvider(taskType: GenerationTaskType): GenerationProvider | null {
+    const name = this.config.defaults?.[taskType];
     if (!name) return null;
     try {
       return this.getProvider(name);
@@ -96,9 +97,9 @@ export class GenerationRegistry {
     return Object.keys(this.config.providers);
   }
 
-  /** 某模态是否有可用供应商 */
-  hasModality(modality: GenerationModality): boolean {
-    const def = this.config.defaults?.[modality];
+  /** 某任务类型是否有可用默认供应商 */
+  hasTaskType(taskType: GenerationTaskType): boolean {
+    const def = this.config.defaults?.[taskType];
     if (!def) return false;
     try {
       this.getProvider(def);

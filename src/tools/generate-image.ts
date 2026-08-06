@@ -94,34 +94,35 @@ export class GenerateImageTool implements Tool {
     }
 
     const provider = args.provider ? String(args.provider) : undefined;
-    // 未指定供应商时，用 image 模态默认名；都没有则报错并给指引
+    // 参考图 → image_to_image，否则 text_to_image
+    const refs = Array.isArray(args.reference_images)
+      ? (args.reference_images as string[]).map(u => ({ type: 'url' as const, url: String(u), role: 'reference' as const }))
+      : undefined;
+    const taskType = refs && refs.length > 0 ? 'image_to_image' : 'text_to_image';
+
+    // 未指定供应商时，用该任务类型的默认供应商名；都没有则报错并给指引
     let providerName: string | null = provider ?? null;
     if (!providerName) {
-      providerName = registry.getDefaultProviderName('image');
+      providerName = registry.getDefaultProviderName(taskType);
       if (!providerName) {
         return (
           'Error: no image generation provider configured.\n' +
           'Set up .agent/generation.json:\n' +
           '{\n' +
-          '  "providers": { "volc": { "type": "volc-seedream", "model": "doubao-seedream-5-0-lite-260128", "apiKeyEnv": "ARK_API_KEY" } },\n' +
-          '  "defaults": { "image": "volc" }\n' +
+          '  "providers": { "volc": { "type": "volcengine", "models": { "text_to_image": "doubao-seedream-5-0-lite-260128" }, "apiKeyEnv": "ARK_API_KEY" } },\n' +
+          '  "defaults": { "text_to_image": "volc" }\n' +
           '}\n' +
           'And set ARK_API_KEY environment variable.'
         );
       }
     }
 
-    // 参考图
-    const refs = Array.isArray(args.reference_images)
-      ? (args.reference_images as string[]).map(u => ({ type: 'url' as const, url: String(u), role: 'reference' as const }))
-      : undefined;
-
     const service = new GenerationService(registry, this.cwd);
     try {
       const artifact = await service.generate(
         {
           provider: providerName,
-          taskType: refs && refs.length > 0 ? 'image_to_image' : 'text_to_image',
+          taskType,
           prompt,
           negativePrompt: args.negative_prompt ? String(args.negative_prompt) : undefined,
           resolution: args.size ? String(args.size) : undefined,
