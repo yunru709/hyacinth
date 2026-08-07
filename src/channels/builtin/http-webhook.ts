@@ -23,6 +23,7 @@ import type { AgentComponents } from '../../gateway/factory.js';
 import { createLogger } from '../../logging/logger.js';
 import { getModelContextWindow } from '../../setup/model-defaults.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
+import { registerMediaRoutes, isPublicReadRoute } from '../../gateway/media-routes.js';
 
 const logger = createLogger('http-webhook');
 
@@ -37,8 +38,8 @@ function getApiKey(config: ChannelConfig): string | null {
 
 function authHook(apiKey: string | null) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    // /api/health 无需认证
-    if (req.url === '/api/health') return;
+    // /api/health、/api/media、/api/companion 无需认证（WebUI 只读展示）
+    if (isPublicReadRoute(req.url)) return;
 
     if (!apiKey) {
       return reply.status(401).send({
@@ -145,6 +146,10 @@ export class HttpWebhookChannel implements ChannelHandler {
       return reply.send({ status: 'ok', version: '1.0.0', auth: !!apiKey });
     });
 
+    // ── Media / Scene（WebUI 只读）──────────────────────────────
+    registerMediaRoutes(this.app, this.cwd);
+
+    // ── Chat ────────────────────────────────────────────────────
     // ── Chat ────────────────────────────────────────────────────
     this.app.post('/api/chat', async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
