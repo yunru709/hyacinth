@@ -2305,19 +2305,26 @@ export class AgentLoop {
       return { stop: false, toolCalled: true };
     }
 
-    // 没有 tool_calls，说明 Agent 正常结束
+    // 没有 tool_calls —— 先检查 Flow 状态机是否仍在运行。
+    // 若 flow 活跃（即使本轮 LLM 失误没调 flow_complete），不终止主循环：
+    // 下一轮 Zone 5 注入 flow 状态，引导 LLM 继续推进。
+    const flowStillActive = this.flowRegistry.getActive();
     await this.checkTextLoop(textParts);
-    appendEvent(this.sessionDir, {
-      type: 'stop',
-      reason: stopReason || 'end_turn',
-      timestamp: new Date().toISOString(),
-    }).catch(() => {});
     // ── 回合回滚：回合结束记录 ──
     if (this.turnRecorder) {
       this.turnRecorder.endTurn().catch(err => {
         this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
       });
     }
+    if (flowStillActive) {
+      // Flow 仍在运行 → 继续 loop（不写 stop 事件；死循环由 LoopGuard 兜底）
+      return { stop: false, toolCalled: false };
+    }
+    appendEvent(this.sessionDir, {
+      type: 'stop',
+      reason: stopReason || 'end_turn',
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
     return { stop: true, stopReason: stopReason ?? 'end_turn' };
   }
 
