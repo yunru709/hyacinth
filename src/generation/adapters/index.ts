@@ -9,11 +9,12 @@
  */
 import type { AdapterMeta } from '../interface.js';
 import { meta as volcengine } from './volcengine.js';
+import { meta as minimax } from './minimax.js';
 
 export const BUILTIN_ADAPTERS: AdapterMeta[] = [
   volcengine,
+  minimax,
   // —— 新厂商在这里加一行（示例）——
   // kling,          // adapters/kling.ts 导出 meta
-  // minimax,        // adapters/minimax.ts 导出 meta
   // wanxiang,       // adapters/wanxiang.ts 导出 meta（通义万相）
 ];
