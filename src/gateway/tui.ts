@@ -709,7 +709,7 @@ export async function runTui(
     onToolUse(name: string, inputSummary: string, toolId?: string) {
       if (pendingThinking.trim()) {
         if (showThinking) {
-          chatLog.addSystem(theme.dim('\u{1F9E0} Thinking:\n') + theme.dim(pendingThinking.trim()));
+          chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(pendingThinking.trim()));
         }
         pendingThinking = '';
       }
@@ -863,7 +863,7 @@ export async function runTui(
       const providerInfo = loop.getProviderRoutingInfo();
       if (pendingThinking.trim()) {
         if (showThinking) {
-          chatLog.addSystem(theme.dim('\u{1F9E0} Thinking:\n') + theme.dim(pendingThinking.trim()));
+          chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(pendingThinking.trim()));
         }
         // thinking-only 模型兜底：thinking 有内容但 text 为空时，将 thinking 作为回复显示
         if (!currentTextLine.trim()) {
