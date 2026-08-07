@@ -72,7 +72,7 @@ describe('GenerateImageTool', () => {
       .mockImplementationOnce(genFetch)
       .mockImplementationOnce(dlFetch));
 
-    const tool = new GenerateImageTool(tmpDir, path.join(tmpDir, 'outputs', 'generation'));
+    const tool = new GenerateImageTool(tmpDir, path.join(tmpDir, 'outputs', 'generation'), path.join(tmpDir, 'media.sqlite'));
     const result = await tool.execute({
       prompt: '赛博朋克小猫',
       negative_prompt: '模糊',

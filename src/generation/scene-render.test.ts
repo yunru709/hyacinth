@@ -64,6 +64,7 @@ describe('executeSceneRender 签名去重', () => {
       characterName: '测试角色',
       cwd: tmpDir,
       outputDir: path.join(tmpDir, 'scene-out'),
+      mediaDbPath: path.join(tmpDir, 'media.sqlite'),
     };
   });
   afterEach(() => {
