@@ -227,6 +227,14 @@ export interface GenerationProvider {
 export interface GenerationProviderConfig {
   /** 适配器类型（如 'volcengine'，对应 adapters/index.ts 里的 meta.type） */
   type: string;
+  /**
+   * 继承的 LLM 厂商名（可选，vendor 引用机制）。
+   * 当同一厂商既跑 LLM（providers.json）又跑生成时，配置生成侧只需：
+   *   { "type": "minimax", "vendor": "minimax", "models": { "text_to_video": "..." } }
+   * baseUrl/apiKeyEnv 会从 LLM 侧同名厂商（providers.json / DEFAULT_PROVIDERS）继承，
+   * 无需重复填写。独立生成厂商（无 LLM，如 Runway）不填 vendor，自带 baseUrl/apiKeyEnv。
+   */
+  vendor?: string;
   /** 默认模型（未按 taskType 指定时兜底） */
   model?: string;
   /** 各任务类型使用的模型（一厂商多能力 → 多模型） */

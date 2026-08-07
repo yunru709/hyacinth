@@ -17,6 +17,7 @@ import type {
   GenerationTaskType,
 } from './interface.js';
 import { loadGenerationConfig } from './config.js';
+import { resolveVendorInheritance } from './vendor.js';
 import { BUILTIN_ADAPTERS } from './adapters/index.js';
 
 /** 适配器工厂：type 字符串 → Provider 实例构造函数 */
@@ -44,7 +45,8 @@ export class GenerationRegistry {
 
   static load(cwd: string): GenerationRegistry {
     const { config } = loadGenerationConfig(cwd);
-    return new GenerationRegistry(config);
+    // vendor 引用：生成侧厂商从 LLM 侧继承 baseUrl/apiKeyEnv（避免重复配置）
+    return new GenerationRegistry(resolveVendorInheritance(config));
   }
 
   /** 注册适配器工厂（type → 构造函数）。插件/外部适配器用，内置走 BUILTIN_ADAPTERS。 */

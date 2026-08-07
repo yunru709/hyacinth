@@ -34,6 +34,7 @@ export { VolcengineProvider, createVolcengineProvider, meta as volcengineMeta } 
 export { BUILTIN_ADAPTERS } from './adapters/index.js';
 export { SCENE_RENDER_TOOL, executeSceneRender, getSceneDir } from './scene-render.js';
 export type { SceneRenderDeps } from './scene-render.js';
+export { resolveVendorInheritance, getLlmProvidersPath } from './vendor.js';
 export {
   loadGenerationConfig,
   getGenerationConfigPath,
