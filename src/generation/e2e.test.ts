@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { GenerationRegistry, GenerationService } from './index.js';
-import { GenerateImageTool } from '../tools/generate-image.js';
+import { GenerateMediaTool } from '../tools/generate-media.js';
 
 /** 1x1 透明 PNG */
 const PNG_BYTES = Buffer.from(
@@ -135,7 +135,7 @@ describe('generation end-to-end (real HTTP)', () => {
     expect(artifact.height).toBe(1024);
   });
 
-  it('GenerateImageTool 工具入口：LLM 调用路径也能走通', async () => {
+  it('GenerateMediaTool 工具入口：LLM 调用路径也能走通', async () => {
     // 写入工具会读取的 .agent/generation.json
     const agentDir = path.join(tmpDir, '.agent');
     fs.mkdirSync(agentDir, { recursive: true });
@@ -154,8 +154,9 @@ describe('generation end-to-end (real HTTP)', () => {
       }),
     );
 
-    const tool = new GenerateImageTool(tmpDir, path.join(tmpDir, 'outputs', 'generation'));
+    const tool = new GenerateMediaTool(tmpDir, path.join(tmpDir, 'outputs', 'generation'));
     const result = await tool.execute({
+      modality: 'image',
       prompt: '赛博朋克小猫',
       negative_prompt: '模糊',
       size: '2K',
@@ -175,3 +176,4 @@ describe('generation end-to-end (real HTTP)', () => {
     expect(buf.toString('hex', 0, 8)).toBe('89504e470d0a1a0a'); // PNG signature
   });
 });
+

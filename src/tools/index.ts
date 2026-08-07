@@ -42,8 +42,7 @@ export { HttpRequestTool } from './http-request.js';
 export { ArchiveTool } from './archive.js';
 export { DbQueryTool } from './db-query.js';
 export { DiskUsageTool } from './disk-usage.js';
-export { GenerateImageTool } from './generate-image.js';
-export { GenerateVideoTool } from './generate-video.js';
+export { GenerateMediaTool } from './generate-media.js';
 export { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool } from './xref/index.js';
 export { PythonToolBridge } from './python-bridge/index.js';
 export type { PythonToolMeta } from './python-bridge/index.js';
@@ -69,8 +68,7 @@ import { HttpRequestTool } from './http-request.js';
 import { ArchiveTool } from './archive.js';
 import { DbQueryTool } from './db-query.js';
 import { DiskUsageTool } from './disk-usage.js';
-import { GenerateImageTool } from './generate-image.js';
-import { GenerateVideoTool } from './generate-video.js';
+import { GenerateMediaTool } from './generate-media.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
@@ -103,8 +101,7 @@ export function createDefaultRegistry(
   registry.register(new ArchiveTool());
   registry.register(new DbQueryTool());
   registry.register(new DiskUsageTool(cwd));
-  registry.register(new GenerateImageTool(cwd));
-  registry.register(new GenerateVideoTool(cwd));
+  registry.register(new GenerateMediaTool(cwd));
   return registry;
 }
 
@@ -126,3 +123,4 @@ export function createBuiltInTools(
   registry.register(new GitTool(gitManager, sessionId));
   return registry;
 }
+

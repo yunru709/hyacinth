@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { GenerateImageTool } from '../dist/tools/generate-image.js';
+import { GenerateMediaTool } from '../dist/tools/generate-media.js';
 
 // 模拟 cli.ts 的 loadEnvKeys：从 ~/.agent/.env 加载到 process.env
 const envPath = path.join(os.homedir(), '.agent', '.env');
@@ -24,11 +24,13 @@ if (!process.env.ARK_API_KEY) {
 }
 console.log(`OK: ARK_API_KEY 已加载（长度 ${process.env.ARK_API_KEY.length}）`);
 
-const tool = new GenerateImageTool(process.cwd());
+const tool = new GenerateMediaTool(process.cwd());
 const result = await tool.execute({
+  modality: 'image',
   prompt: '一只戴宇航头盔的橘猫，坐在月球表面看地球升起，电影感，暖色光',
   negative_prompt: '模糊，低画质',
   size: '2K',
 });
 console.log('=== RESULT ===');
+
 console.log(result);
