@@ -24,6 +24,7 @@ import { createAgent } from './factory.js';
 import { ConfigManager, API_KEY_MAP, DEFAULT_MAX_CONTEXT_TOKENS } from '../setup/config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { SetupWizard } from '../setup/wizard.js';
+import { runGenerationWizard } from '../setup/generation-wizard.js';
 import { PROVIDER_MODELS } from '../setup/model-defaults.js';
 import { DEFAULT_PERSONA_DIR, ensurePersonaFiles } from '../setup/persona-bootstrap.js';
 import { createLogger } from '../logging/logger.js';
@@ -205,6 +206,14 @@ export async function runCli(): Promise<void> {
           skipSetup: true,
         });
       }
+    });
+  // setup-generation 子命令（生成能力配置向导，独立于主 setup）
+  program
+    .command('setup-generation')
+    .description('配置生成能力（图片/视频/音频厂商 + API Key + 模型）')
+    .action(async () => {
+      const configManager = new ConfigManager(process.cwd());
+      await runGenerationWizard(configManager);
     });
 
   // doctor 子命令

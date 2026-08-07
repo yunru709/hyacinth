@@ -388,11 +388,16 @@ export class ConfigManager {
     }
   }
 
-  /** 保存 API Key 到全局 .env 文件 */
+  /** 保存 API Key 到全局 .env 文件（按 provider 映射 envKey） */
   async saveApiKey(provider: string, apiKey: string): Promise<void> {
-    await this.ensureDir();
     const envKey = API_KEY_MAP[provider];
     if (!envKey) return;
+    await this.saveApiKeyToEnv(envKey, apiKey);
+  }
+
+  /** 保存任意 envKey 到全局 .env（生成厂商等非 LLM 凭证通用入口） */
+  async saveApiKeyToEnv(envKey: string, apiKey: string): Promise<void> {
+    await this.ensureDir();
 
     let content = '';
     try {
@@ -425,6 +430,8 @@ export class ConfigManager {
     const envKey = API_KEY_MAP[provider];
     return envKey ? process.env[envKey] : undefined;
   }
+
+  /** 获取 Provider 对应的 API Key 环境变量名 */
 
   /** 获取 Provider 对应的 API Key 环境变量名 */
   getApiKeyEnvName(provider: string): string | undefined {
