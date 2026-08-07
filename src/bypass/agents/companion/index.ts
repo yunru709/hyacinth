@@ -43,6 +43,7 @@ import { WorldStore } from '../../../world-engine/store.js';
 import { WorldTicker, type WorldTickerOptions } from '../../../world-engine/ticker.js';
 import type { Relationship, EnvironmentSnapshot, CharacterInfo } from '../../../world-engine/types.js';
 import { WORLD_TOOLS, executeWorldTool } from '../../../world-engine/tools.js';
+import { SCENE_RENDER_TOOL, executeSceneRender } from '../../../generation/scene-render.js';
 import { BypassAgentBase } from '../../base.js';
 import type { BypassAgentConfig } from '../../base.js';
 import type {
@@ -114,6 +115,11 @@ const OBSERVE_SYSTEM = [
   '【场景与事件】',
   '6. 移动 → world_move（who=both/user/companion）。环境变化 → world_scene_change。',
   '7. 有意义的事 → world_note_event（简短一句）。',
+  '',
+  '【场景画面（背景图）】',
+  '8. 仅当【场景显著变化】时调用 scene_render（地点换了/天气突变/重要事件发生/新角色登场），',
+  '   用一句话画面描述更新陪伴模式的视觉背景。场景没变就不要调——',
+  '   重复调用会被自动跳过（签名去重），不会产生新图，也不浪费。',
   '',
   '只调用工具，不输出散文。无更新就结束。宁缺毋滥，不编造对话未提及的内容。',
 ].join('\n');
@@ -388,8 +394,11 @@ export class WorldEngine extends BypassAgentBase {
       name: 'world-engine',
       modes: ['companion'],
       modelChannel: 'narration',
-      tools: WORLD_TOOLS,
-      executeTool: (name, input) => executeWorldTool(store, name, input),
+      tools: [...WORLD_TOOLS, SCENE_RENDER_TOOL],
+      executeTool: (name, input) =>
+        name === 'scene_render'
+          ? executeSceneRender(input, { characterName })
+          : executeWorldTool(store, name, input),
     });
     this.characterName = characterName;
     this.store = store;
