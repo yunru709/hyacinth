@@ -19,6 +19,7 @@
  */
 
 import type { Tool } from './interface.js';
+import { recordMediaFile } from '../media/index.js';
 
 export class GenerateImageTool implements Tool {
   readonly name = 'generate_image';
@@ -65,10 +66,12 @@ export class GenerateImageTool implements Tool {
 
   private cwd: string;
   private outputDir?: string;
+  private mediaDbPath?: string;
 
-  constructor(cwd?: string, outputDir?: string) {
+  constructor(cwd?: string, outputDir?: string, mediaDbPath?: string) {
     this.cwd = cwd ?? process.cwd();
     this.outputDir = outputDir;
+    this.mediaDbPath = mediaDbPath;
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
@@ -138,6 +141,13 @@ export class GenerateImageTool implements Tool {
       if (!artifact.localPath) {
         return `Generated (remote only): ${artifact.sourceUrl}`;
       }
+
+      // 归档到媒体库（独立 media.sqlite；失败不阻断主流程）
+      recordMediaFile(
+        artifact.localPath,
+        { type: 'image', source: 'generation', taskType, prompt },
+        this.mediaDbPath,
+      );
 
       return (
         `Image generated and saved to ${artifact.localPath}\n` +

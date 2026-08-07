@@ -288,3 +288,37 @@ function inferExt(type: MediaType): string {
       return '.mp3';
   }
 }
+
+/** 从 MIME 类型推断媒体库分类（image/video/audio，默认 image） */
+export function inferMediaType(mime: string): MediaType {
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'image';
+}
+
+/**
+ * 落库辅助：把产物文件复制进媒体库并登记索引。
+ * 失败不抛错（媒体库是附属索引，落库失败不应阻断生成主流程）。
+ * @returns 登记记录（失败返回 null）
+ */
+export function recordMediaFile(
+  srcPath: string,
+  entry: Omit<MediaEntry, 'type'> & { type: MediaType },
+  dbPath?: string,
+): MediaRecord | null {
+  let store: MediaStore | null = null;
+  try {
+    store = new MediaStore(dbPath ?? getMediaDbPath());
+    const rec = store.importFile(srcPath, entry);
+    return rec;
+  } catch (err) {
+    logger.warn(`media record skipped: ${(err as Error).message}`);
+    return null;
+  } finally {
+    try {
+      store?.close();
+    } catch {
+      /* ignore close errors */
+    }
+  }
+}

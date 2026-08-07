@@ -14,6 +14,8 @@ export {
   getMediaDir,
   getMediaDbPath,
   getMediaFilesDir,
+  inferMediaType,
+  recordMediaFile,
 } from './media-store.js';
 export type {
   MediaType,

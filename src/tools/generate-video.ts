@@ -23,6 +23,7 @@
  */
 
 import type { Tool } from './interface.js';
+import { recordMediaFile } from '../media/index.js';
 
 export class GenerateVideoTool implements Tool {
   readonly name = 'generate_video';
@@ -75,11 +76,13 @@ export class GenerateVideoTool implements Tool {
   private cwd: string;
   private outputDir?: string;
   private pollIntervalMs?: number;
+  private mediaDbPath?: string;
 
-  constructor(cwd?: string, outputDir?: string, pollIntervalMs?: number) {
+  constructor(cwd?: string, outputDir?: string, pollIntervalMs?: number, mediaDbPath?: string) {
     this.cwd = cwd ?? process.cwd();
     this.outputDir = outputDir;
     this.pollIntervalMs = pollIntervalMs;
+    this.mediaDbPath = mediaDbPath;
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
@@ -159,6 +162,13 @@ export class GenerateVideoTool implements Tool {
       if (!artifact.localPath) {
         return `Generated (remote only): ${artifact.sourceUrl}`;
       }
+
+      // 归档到媒体库（独立 media.sqlite；失败不阻断主流程）
+      recordMediaFile(
+        artifact.localPath,
+        { type: 'video', source: 'generation', taskType, prompt },
+        this.mediaDbPath,
+      );
 
       return (
         `Video generated and saved to ${artifact.localPath}\n` +

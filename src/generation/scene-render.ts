@@ -26,6 +26,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '../types.js';
+import { recordMediaFile } from '../media/index.js';
 
 // ── 工具定义（LLM 可见面）────────────────────────────────────────
 
@@ -57,6 +58,8 @@ export interface SceneRenderDeps {
   cwd?: string;
   /** 覆盖输出目录（默认 ~/.agent/companion/<角色>/，测试隔离用） */
   outputDir?: string;
+  /** 覆盖媒体库路径（默认 ~/.agent/media/media.sqlite，测试隔离用） */
+  mediaDbPath?: string;
 }
 
 interface SceneMeta {
@@ -182,6 +185,13 @@ export async function executeSceneRender(
     createdAt: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(sceneDir, 'scene.json'), JSON.stringify(meta, null, 2), 'utf8');
+
+  // 归档到媒体库（独立 media.sqlite；失败不阻断主流程）
+  recordMediaFile(
+    scenePath,
+    { type: 'image', source: 'scene', character: deps.characterName, signature, prompt: sceneDesc },
+    deps.mediaDbPath,
+  );
 
   return (
     `ok: 场景已渲染到 ${scenePath}\n` +
