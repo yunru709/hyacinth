@@ -1,10 +1,33 @@
-// 真实 API 冒烟：走 GenerateImageTool 完整链路
+// 凭证迁移后验证：apiKeyEnv 模式走真实 API
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { GenerateImageTool } from '../dist/tools/generate-image.js';
+
+// 模拟 cli.ts 的 loadEnvKeys：从 ~/.agent/.env 加载到 process.env
+const envPath = path.join(os.homedir(), '.agent', '.env');
+try {
+  const content = fs.readFileSync(envPath, 'utf8');
+  for (const line of content.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq === -1) continue;
+    process.env[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
+  }
+} catch { /* ignore */ }
+
+// 确认 key 已从环境变量读到（不回显值）
+if (!process.env.ARK_API_KEY) {
+  console.error('FAIL: ARK_API_KEY 未从 .env 加载');
+  process.exit(1);
+}
+console.log(`OK: ARK_API_KEY 已加载（长度 ${process.env.ARK_API_KEY.length}）`);
 
 const tool = new GenerateImageTool(process.cwd());
 const result = await tool.execute({
-  prompt: '星际穿越，黑洞，黑洞里冲出一辆快支离破碎的复古列车，电影大片，末日既视感，动感，对比色，oc渲染，光线追踪，超现实主义，深蓝，暗黑风背景的光影效果，广角透视，耀光，反射，极致的光影，强引力',
-  negative_prompt: '模糊，低画质，变形',
+  prompt: '一只戴宇航头盔的橘猫，坐在月球表面看地球升起，电影感，暖色光',
+  negative_prompt: '模糊，低画质',
   size: '2K',
 });
 console.log('=== RESULT ===');

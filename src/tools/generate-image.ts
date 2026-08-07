@@ -38,8 +38,8 @@ export class GenerateImageTool implements Tool {
       },
       size: {
         type: 'string',
-        enum: ['1K', '2K', '3K', '4K'],
-        description: '分辨率档位，默认 2K',
+        enum: ['2K', '3K', '4K'],
+        description: '分辨率档位（2K/3K/4K，或像素串如 1024x1024），默认 2K',
       },
       aspect_ratio: {
         type: 'string',

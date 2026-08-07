@@ -147,7 +147,7 @@ export class VolcengineProvider implements GenerationProvider {
     return {
       modalities: ['image', 'video'],
       taskTypes: ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video', 'reference_to_video'],
-      resolutions: ['1K', '2K', '3K', '4K', '480p', '720p', '1080p', '4k'],
+      resolutions: ['2K', '3K', '4K', '480p', '720p', '1080p', '4k'],
       maxResolution: '4K',
       maxDuration: 15,
       aspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9', 'adaptive'],
@@ -188,6 +188,21 @@ export class VolcengineProvider implements GenerationProvider {
 
   private resolveModel(req: GenerationRequest, fallback: string): string {
     return req.model || this.cfg.models?.[req.taskType] || this.cfg.model || fallback;
+  }
+
+  /**
+   * 规范化火山图片 size 参数。
+   * 有效值：像素串（如 "1024x1024"）或档位 "2k"/"3k"/"4k"（小写）。
+   * 接受 "2K"/"3K"/"4K" 大写输入，统一转小写；不支持的档位回退 2k。
+   */
+  private normalizeSize(size: string): string {
+    const trimmed = size.trim().toLowerCase();
+    // 像素串：数字x数字
+    if (/^\d+x\d+$/.test(trimmed)) return trimmed;
+    // 档位：2k/3k/4k
+    if (['2k', '3k', '4k'].includes(trimmed)) return trimmed;
+    // 未知值回退 2k（火山实际不支持 1k）
+    return '2k';
   }
 
   // ── 内部：图片（同步）────────────────────────────────────────────
@@ -249,9 +264,9 @@ export class VolcengineProvider implements GenerationProvider {
     };
 
     const size = req.extraParams?.size as string | undefined;
-    if (size) body.size = size;
-    else if (req.resolution && ['1K', '2K', '3K', '4K'].includes(req.resolution)) body.size = req.resolution;
-    else body.size = '2K';
+    if (size) body.size = this.normalizeSize(size);
+    else if (req.resolution && ['2K', '3K', '4K'].includes(req.resolution)) body.size = req.resolution.toLowerCase();
+    else body.size = '2k';
 
     if (req.seed !== undefined && req.seed >= 0) body.seed = req.seed;
     if (req.watermark !== undefined) body.watermark = req.watermark;
