@@ -42,7 +42,7 @@ export const DEFAULT_PROVIDERS: ProvidersConfig = {
       id: 'deepseek',
       name: 'DeepSeek',
       baseUrl: 'https://api.deepseek.com/v1',
-      defaultModel: 'deepseek-v4-flash-0731',
+      defaultModel: 'deepseek-v4-flash',
       envKey: 'DEEPSEEK_API_KEY',
       models: MODEL_CATALOG.deepseek,
     },

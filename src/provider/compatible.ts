@@ -287,7 +287,7 @@ export class OpenAICompatibleProvider implements Provider {
 
         for (const block of blocks) {
           if (block.type === 'text') {
-            textParts.push(block.text);
+            textParts.push(sanitizeText(block.text));
           } else if (block.type === 'tool_result') {
             toolResults.push({
               role: 'tool',
