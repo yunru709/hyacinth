@@ -1,6 +1,6 @@
 # Hyacinth
 
-> npm v0.9.42 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 16 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
+> npm v0.9.43 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 16 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
 
 **Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在飞书 / 微信 / WebUI 等渠道之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
 
@@ -74,7 +74,7 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及飞书（WebSocket 长连接）
 
 - **自修复**：文本循环检测（滑动窗口 Jaccard）、工具风暴抑制、会话垃圾清理
 
-- **热重载**：13+ Watcher，配置 / 插件 / 工具 / 技能 / MCP 等修改即生效
+- **热重载**：14 Watcher，配置 / 插件 / 工具 / 技能 / MCP 等修改即生效
 
 - **定时调度**：Cron / Daily / Interval / Fixed-time，支持跨渠道主动推送
 
@@ -256,7 +256,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | <br />       | `machine/` `schedule/` `dependency/`                | Flow 状态机；定时调度；依赖分析                                                                         |
 | **交互界面**     | `channels/`                                         | ChannelManager + TUI/HTTP 内置渠道 + feishu/clawbot 插件渠道 + 跨渠道分发                               |
 | <br />       | `ui/` `ui-protocol/` `webui/`                       | TUI 组件；统一 RPC+事件协议（19 域）；WebUI 静态前端                                                        |
-| **基础设施**     | `hot-reload/` `lifecycle/`                          | 13+ Watcher 家族；受管进程状态                                                                      |
+| **基础设施**     | `hot-reload/` `lifecycle/`                          | 14 Watcher 家族；受管进程状态                                                                      |
 | <br />       | `runtime/` `logging/` `utils/` `shims/`             | 运行时配置中心；日志器；通用工具；类型兜底                                                                      |
 
 ***
@@ -278,9 +278,9 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 git clone https://github.com/yunru709/hyacinth
 cd hyacinth
 pnpm install
-pnpm build          # tsc + copy-prompts + copy-webui + clean
+pnpm build          # tsc + copy-prompts + copy-webui + clean-tests + clean-maps
 pnpm dev            # watch 模式
-pnpm test           # vitest（114 个测试套件）
+pnpm test           # vitest（133 个测试套件）
 pnpm smoke          # 真实装配链冒烟（stub provider）
 pnpm verify:layers  # 分层约束机器校验
 ```
