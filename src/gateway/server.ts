@@ -4,7 +4,7 @@ import { getProviderConfigLoader } from '../provider/config.js';
 import { SessionManager } from '../memory/session.js';
 import { ChannelManager } from '../channels/manager.js';
 import { HttpWebhookChannel } from '../channels/builtin/http-webhook.js';
-import { registerConfigChannels } from '../channels/auto-detect.js';
+import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
 import { createAgent } from './factory.js';
 import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
@@ -14,8 +14,9 @@ import { getModelContextWindow } from '../setup/model-defaults.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/env-collector.js';
 import type { AgentFactory } from '../channels/interface.js';
-import { watchFile, existsSync, unlinkSync } from 'node:fs';
+import { watchFile } from 'node:fs';
 import path from 'node:path';
+import { RESTART_SESSION_MARKER, removeMarker } from '../supervisor/protocol.js';
 
 const logger = createLogger('server');
 
@@ -28,6 +29,8 @@ export interface ServerOptions {
   maxContext?: number;
   apiKey?: string;
   corsOrigin?: string;
+  /** WebUI 静态资源目录（serve --webui 时启用；http-webhook 用 @fastify/static 托管） */
+  webuiRoot?: string;
 }
 
 export interface ServerInstance {
@@ -44,9 +47,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   // 可能把 serve 期间记录的 session（如 http 会话）误当成 TUI 会话恢复。
   // 故 serve 启动即删除，防止跨启动模式的数据残留。
   try {
-    const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
-    if (existsSync(restartFile)) {
-      unlinkSync(restartFile);
+    if (removeMarker(RESTART_SESSION_MARKER)) {
       logger.info('cleaned stale .restart-session (serve mode does not consume it)');
     }
   } catch { /* 清理失败不影响启动 */ }
@@ -85,6 +86,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     maxContext,
     apiKey: options.apiKey,
     corsOrigin: options.corsOrigin,
+    webuiRoot: options.webuiRoot,
   });
 
   // ── 配置热监听（fs.watchFile） ────────────────────────────────────
@@ -114,6 +116,16 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   // ── 首次检测：根据 config.json 注册配置驱动渠道（飞书等） ──────────
 
   await registerConfigChannels(manager, cwd);
+
+  // ── 调用所有插件的 onGatewayInit 钩子（如飞书 SDK 日志拦截）──
+  // 与 tui.ts 对齐：serve 模式下插件全局初始化同样需要生效
+  for (const plugin of getChannelPlugins()) {
+    try {
+      plugin.onGatewayInit?.();
+    } catch (err) {
+      logger.warn('channel plugin onGatewayInit failed', { err: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   // ── 启动配置热监听 ──────────────────────────────────────────────
 

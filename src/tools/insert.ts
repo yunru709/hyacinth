@@ -8,6 +8,7 @@ import type { Tool } from './interface.js';
  */
 export class InsertTool implements Tool {
   readonly name = 'insert';
+  readonly sideEffect = 'write' as const;
   readonly description =
     '在文件的指定行号位置插入内容。line_number=1 插入到文件开头。line_number=0 或 "end" 追加到文件末尾（无需先读取文件）。行中插入时先用 grep 定位目标行号。';
   readonly inputSchema: Record<string, unknown> = {

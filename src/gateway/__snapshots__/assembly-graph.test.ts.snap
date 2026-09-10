@@ -1,0 +1,6 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`assembly-graph（P6-0 装配声明表守卫） > 守卫 B：装配主体直接 new 业务类 = 白名单（P6-4 门禁单一真源；迁移时删白名单条目） 1`] = `
+"AgentLoop
+DelegateToAgentTool"
+`;

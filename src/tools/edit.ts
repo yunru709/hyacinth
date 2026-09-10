@@ -3,7 +3,7 @@ import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
-import { runDiagnostics } from './diagnostics.js';
+import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
 
 /**
@@ -23,6 +23,7 @@ import { autoReferenceCheck } from './symbol-references.js';
  */
 export class EditTool implements Tool {
   readonly name = 'edit';
+  readonly sideEffect = 'write' as const;
   readonly description =
     '精确替换文件中的字符串，或按行号替换。字符串模式：old_string 必须唯一匹配（除非 replace_all=true）。行号模式：line_start 指定起始行（1-based），line_count 指定行数。两种模式互斥。';
   readonly companionDescription = '得改一下了。';
@@ -134,7 +135,7 @@ export class EditTool implements Tool {
 
     // ── 自动诊断：修改后运行类型检查/编译检查 ──
     try {
-      const diag = await runDiagnostics(process.cwd(), 15000);
+      const diag = await maybeRunDiagnostics(process.cwd());
       if (diag) result += '\n\n' + diag;
     } catch { /* 诊断失败不影响工具返回值 */ }
 

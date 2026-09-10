@@ -1,4 +1,6 @@
 import type { Tool } from './interface.js';
+import { getToolConfig } from './tool-config.js';
+import { checkNetwork } from '../kernel/security/index.js';
 
 /**
  * HttpRequestTool — HTTP 客户端，支持 GET/POST/PUT/DELETE。
@@ -39,7 +41,6 @@ export class HttpRequestTool implements Tool {
 
   private static readonly DEFAULT_UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
-  private static readonly MAX_RESPONSE_BYTES = 50 * 1024; // 50KB
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const url = args.url as string;
@@ -48,8 +49,9 @@ export class HttpRequestTool implements Tool {
     const method = ((args.method as string) ?? 'GET').toUpperCase();
     const body = args.body as string | undefined;
     const isJson = args.json === true;
+    // tools.http.timeoutMs（默认 30000）；硬上限 120000 保留为安全边界
     const timeoutMs = Math.min(
-      (args.timeout as number) ?? 30000,
+      (args.timeout as number) ?? getToolConfig('http.timeoutMs', 30000),
       120000,
     );
 
@@ -78,6 +80,14 @@ export class HttpRequestTool implements Tool {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    // 双保险：内核已在 fetch 边界拦私网（LLM 归因），此处按 URL 再查一次，
+    // 保证即使 fetch 守卫失效（degraded/off）工具层仍有 SSRF 防线
+    const netDecision = checkNetwork(url);
+    if (!netDecision.allowed) {
+      clearTimeout(timer);
+      return `Error: ${netDecision.reason}`;
+    }
+
     try {
       const fetchInit: RequestInit = {
         method,
@@ -105,7 +115,7 @@ export class HttpRequestTool implements Tool {
           if (done) break;
           totalBytes += value.length;
           respBody += decoder.decode(value, { stream: true });
-          if (totalBytes > HttpRequestTool.MAX_RESPONSE_BYTES) {
+          if (totalBytes > getToolConfig('http.maxResponseBytes', 50 * 1024)) {
             respBody += '\n... (response truncated at 50KB)';
             reader.cancel();
             break;

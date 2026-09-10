@@ -6,7 +6,7 @@
 //        哪些工具可用，走哪个 persona。
 //
 // 从 v2 开始，上下文路由统一由 IContextRouter（router.ts）管理。
-// ContextProfile 和 ComposeStrategy 保留作为向后兼容的 deprecated 别名。
+// ContextProfile 保留作为向后兼容的 deprecated 别名（ComposeStrategy 旧轨已于 D2 消灭）。
 //
 // 7 种上下文变更机制：
 //   1. manifest       — 管结构（有什么 section，放哪个 zone）

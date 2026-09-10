@@ -275,6 +275,62 @@ describe('LayeredContextComposer', () => {
   });
 });
 
+// ─── LayeredContextComposer.previewZone ─────────────────────────────────
+
+describe('LayeredContextComposer.previewZone', () => {
+  const baseOpts = {
+    cwd: process.cwd(),
+    sessionDir: '',
+    timestamp: '2026-08-29T00:00:00.000Z',
+    maxContextTokens: 200000,
+    tools: [],
+    history: [],
+    userInput: '',
+  };
+
+  it('zone1 预览返回非空真实文本；不存在的 zone 返回 null', async () => {
+    const composer = new LayeredContextComposer(200000);
+    const result = await composer.previewZone('zone1', baseOpts);
+    expect(result).not.toBeNull();
+    expect(result!.zone).toBe('zone1');
+    expect(result!.text.length).toBeGreaterThan(0);
+    expect(result!.tokens).toBeGreaterThanOrEqual(0);
+
+    // 不存在的 zone → null
+    const missing = await composer.previewZone('zone_does_not_exist', baseOpts);
+    expect(missing).toBeNull();
+  });
+
+  it('已注册 ContextSource 的内容出现在预览中（与线上组装一致）', async () => {
+    const composer = new LayeredContextComposer(200000);
+    // zone1 的 runtime:env 段按 'env-info' 名称查 source
+    composer.registerSource({
+      name: 'env-info',
+      strategy: 'always_inline',
+      cacheability: 'anchor',
+      getContent: async () => 'FAKE_ENV_PREVIEW_MARKER',
+    });
+    const result = await composer.previewZone('zone1', baseOpts);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain('FAKE_ENV_PREVIEW_MARKER');
+  });
+
+  it('preview 后不影响后续正常 compose（promptBuilder 状态已还原）', async () => {
+    const composer = new LayeredContextComposer(200000);
+    await composer.previewZone('zone1', baseOpts);
+    // 正常 compose（legacy 路径）仍可用，且不包含 zone1 泄漏 section 的报错
+    const messages = await composer.compose({
+      systemPrompt: 'LEGACY_SYS',
+      tools: [],
+      history: [],
+      userInput: 'hi',
+      maxContextTokens: 200000,
+    });
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 // ─── Helper ────────────────────────────────────────────────────────────
 
 function extractText(message: Message): string {

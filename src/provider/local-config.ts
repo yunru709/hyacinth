@@ -25,6 +25,9 @@ const DEFAULT_CONFIG: LocalProviderConfig = {
 
 // ── 自动检测 ────────────────────────────────────────────────────────
 
+/** llama.cpp 默认端口（schema 无独立键，defaults 会把 local.port 烙成 11434，无法区分显式配置，故暂不配置化） */
+export const LLAMACPP_DEFAULT_PORT = 8080;
+
 function httpGet(url: string): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: 2000 }, (res) => {
@@ -66,7 +69,7 @@ interface OllamaTagsResponse {
  * 返回模型名列表（如 ["llama3.2:latest", "mistral:latest"]）。
  */
 export async function fetchOllamaModels(baseUrl?: string): Promise<string[]> {
-  const apiUrl = `${baseUrl ?? 'http://127.0.0.1:11434'}/api/tags`;
+  const apiUrl = `${baseUrl ?? getOllamaEndpoints().apiBase}/api/tags`;
   const data = await httpGetJson<OllamaTagsResponse>(apiUrl);
   if (!data?.models?.length) return [];
   return data.models.map((m) => m.name).filter(Boolean);
@@ -103,15 +106,16 @@ export function pickBestOllamaModel(
 
 /** 检测哪个本地后端正在运行。返回 null 表示都没在跑 */
 export async function detectLocalBackend(): Promise<{ backend: LocalBackend; baseUrl: string; port: number } | null> {
-  // 先检查 Ollama
-  const ollamaAlive = await httpGet('http://127.0.0.1:11434/api/tags');
+  // 先检查 Ollama（端口走配置 local.port）
+  const ep = getOllamaEndpoints();
+  const ollamaAlive = await httpGet(`${ep.apiBase}/api/tags`);
   if (ollamaAlive) {
-    return { backend: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', port: 11434 };
+    return { backend: 'ollama', baseUrl: ep.v1Base, port: ep.port };
   }
   // 再检查 llama.cpp
-  const llamaAlive = await httpGet('http://127.0.0.1:8080/health');
+  const llamaAlive = await httpGet(`http://127.0.0.1:${LLAMACPP_DEFAULT_PORT}/health`);
   if (llamaAlive) {
-    return { backend: 'llamacpp', baseUrl: 'http://127.0.0.1:8080/v1', port: 8080 };
+    return { backend: 'llamacpp', baseUrl: `http://127.0.0.1:${LLAMACPP_DEFAULT_PORT}/v1`, port: LLAMACPP_DEFAULT_PORT };
   }
   return null;
 }
@@ -149,32 +153,104 @@ export function injectConfigCenter(cc: RuntimeConfigCenter): void {
   _configCenter = cc;
 }
 
+/** 单键读取（provider.local.* 是运行时覆盖，local.* 是默认值，前者优先） */
+function readConfigValue<T>(key: string): T | undefined {
+  if (!_configCenter) return undefined;
+  try {
+    return _configCenter.get<T>(`provider.local.${key}`) ?? _configCenter.get<T>(`local.${key}`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 旧键名向后兼容链：provider.local 优先于 local，新键名优先于旧键名 */
+function readMaxOutputTokens(): number | undefined {
+  if (!_configCenter) return undefined;
+  try {
+    return (
+      _configCenter.get<number>('provider.local.maxOutputTokens') ??
+      _configCenter.get<number>('provider.local.maxTokens') ??
+      _configCenter.get<number>('local.maxOutputTokens') ??
+      _configCenter.get<number>('local.maxTokens')
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读取 local 相关的全部配置覆盖（可能为空对象 = 无任何配置） */
+function readLocalOverrides(): Partial<LocalProviderConfig> {
+  const overrides: Partial<LocalProviderConfig> = {};
+  const baseUrl = readConfigValue<string>('baseUrl');
+  if (baseUrl) overrides.baseUrl = baseUrl; // 空串视为未设置（对齐旧 || 语义）
+  const port = readConfigValue<number>('port');
+  if (port !== undefined) overrides.port = port;
+  const model = readConfigValue<string>('model') ?? readConfigValue<string>('defaultModel');
+  if (model !== undefined) overrides.defaultModel = model;
+  const maxOutputTokens = readMaxOutputTokens();
+  if (maxOutputTokens !== undefined) overrides.maxOutputTokens = maxOutputTokens;
+  const backend = readConfigValue<LocalBackend>('backend');
+  if (backend !== undefined) overrides.backend = backend;
+  return overrides;
+}
+
 function readFromConfigCenter(): LocalProviderConfig | null {
   if (!_configCenter) return null;
-  try {
-    // provider.local.* 是运行时覆盖（TUI/切换写入），local.* 是默认值
-    const baseUrl =
-      _configCenter.get<string>('provider.local.baseUrl') ||
-      _configCenter.get<string>('local.baseUrl');
-    if (!baseUrl && _configCenter.get<string>('local.baseUrl') === undefined) return null;
-    return {
-      baseUrl: baseUrl || DEFAULT_CONFIG.baseUrl,
-      port: (_configCenter.get<number>('local.port')) ?? DEFAULT_CONFIG.port,
-      defaultModel:
-        _configCenter.get<string>('provider.local.model') ||
-        _configCenter.get<string>('local.defaultModel') ||
-        DEFAULT_CONFIG.defaultModel,
-      maxOutputTokens:
-        (_configCenter.get<number>('provider.local.maxOutputTokens')) ??
-        (_configCenter.get<number>('provider.local.maxTokens')) ??  // 向后兼容旧键名
-        (_configCenter.get<number>('local.maxOutputTokens')) ??
-        (_configCenter.get<number>('local.maxTokens')) ??  // 向后兼容旧键名
-        DEFAULT_CONFIG.maxOutputTokens,
-      backend: (_configCenter.get<string>('local.backend') as LocalBackend | undefined),
-    };
-  } catch {
-    return null;
+  const overrides = readLocalOverrides();
+  // 无任何 local 配置 → 回退硬编码默认值
+  if (Object.keys(overrides).length === 0) return null;
+  return { ...DEFAULT_CONFIG, ...overrides };
+}
+
+/**
+ * Ollama 各端点（全部由 local.port / local.baseUrl 派生）。
+ *   apiBase   — 原生 API 根（/api/tags 等）
+ *   v1Base    — OpenAI 兼容端点根
+ *   healthUrl — 进程健康检查地址
+ */
+export function getOllamaEndpoints(): {
+  port: number;
+  apiBase: string;
+  v1Base: string;
+  healthUrl: string;
+} {
+  const port = readConfigValue<number>('port') ?? DEFAULT_CONFIG.port;
+  // host 允许通过 baseUrl 覆盖（如局域网部署），默认本机
+  const baseUrl = readConfigValue<string>('baseUrl');
+  let host = '127.0.0.1';
+  if (baseUrl) {
+    try {
+      const u = new URL(baseUrl);
+      if (u.hostname) host = u.hostname;
+    } catch { /* 非法 baseUrl，忽略用默认 host */ }
   }
+  const apiBase = `http://${host}:${port}`;
+  return {
+    port,
+    apiBase,
+    v1Base: `${apiBase}/v1`,
+    healthUrl: `${apiBase}/api/tags`,
+  };
+}
+
+/**
+ * 本地后端进程管理参数（provider.local.healthCheck.* / local.healthCheck.*）。
+ * 默认值与 runtime/defaults.ts 的 provider.local.healthCheck 一致（单一真源原则）。
+ */
+export function getLocalProcessConfig(): {
+  restartDelayMs: number;
+  intervalMs: number;
+  timeoutMs: number;
+  maxRetries: number;
+  startupTimeoutMs: number;
+} {
+  return {
+    restartDelayMs: readConfigValue<number>('healthCheck.restartDelayMs') ?? 3000,
+    intervalMs: readConfigValue<number>('healthCheck.intervalMs') ?? 5000,
+    timeoutMs: readConfigValue<number>('healthCheck.timeoutMs') ?? 5000,
+    maxRetries: readConfigValue<number>('healthCheck.maxRetries') ?? 6,
+    startupTimeoutMs: readConfigValue<number>('healthCheck.startupTimeoutMs') ?? 120000,
+  };
 }
 
 export function getLocalProviderConfigLoader(_cwd?: string): LocalProviderConfig {

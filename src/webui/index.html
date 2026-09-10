@@ -1,0 +1,2251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hyacinth WebUI</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
+  <link rel="stylesheet" href="/theme.css">
+  <script src="/vendor/tailwind-browser.js"></script>
+  <script src="/vendor/lucide.min.js"></script>
+  <link rel="stylesheet" href="/app.css">
+  <style type="text/tailwindcss">
+@theme inline {
+    --color-background: var(--hyacinth-background);
+    --color-foreground: var(--hyacinth-foreground);
+    --color-card: var(--hyacinth-card);
+    --color-card-foreground: var(--hyacinth-card-foreground);
+    --color-popover: var(--hyacinth-popover);
+    --color-popover-foreground: var(--hyacinth-popover-foreground);
+    --color-primary: var(--hyacinth-primary);
+    --color-primary-foreground: var(--hyacinth-primary-foreground);
+    --color-muted: var(--hyacinth-muted);
+    --color-muted-foreground: var(--hyacinth-muted-foreground);
+    --color-border: var(--hyacinth-border);
+    --color-input: var(--hyacinth-input);
+    --color-ring: var(--hyacinth-ring);
+    --radius-sm: var(--radius-sm);
+    --radius-md: var(--radius-md);
+    --radius-lg: var(--radius-lg);
+    --radius-xl: var(--radius-xl);
+    --radius-2xl: var(--radius-2xl);
+    --radius-full: var(--radius-full);
+  }
+  @layer base {
+    body { background: var(--hyacinth-background); color: var(--hyacinth-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden font-sans antialiased">
+<div class="h-screen w-screen overflow-hidden flex flex-col bg-background text-foreground" id="app-shell" data-viewport-mode="app-shell">
+  <!-- Header -->
+  <header data-nav-key="header" class="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-3 gap-3">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="#/companion" data-dom-id="companion-entry" class="companion-entry-btn" aria-label="陪伴模式">
+        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+      </a>
+      <div class="flex items-center gap-2 text-primary">
+        <i data-lucide="hexagon" class="w-5 h-5"></i>
+        <span class="font-semibold text-sm tracking-tight brand-wordmark">Hyacinth</span>
+      </div>
+      <div class="h-5 w-px bg-border"></div>
+      <div class="flex items-center gap-2 px-2 py-1 rounded-md bg-muted border border-border">
+        <i data-lucide="cpu" class="w-3.5 h-3.5 text-muted-foreground"></i>
+        <span id="header-model-name" class="text-xs font-medium truncate max-w-[180px]">—</span>
+        <span id="header-model-provider" class="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary"></span>
+      </div>
+    </div>
+
+    <div class="hidden md:flex items-center gap-3 flex-1 justify-center max-w-xl">
+      <span class="text-xs text-muted-foreground whitespace-nowrap">Context</span>
+      <div class="flex-1 h-2 bg-muted rounded-full overflow-hidden border border-border">
+        <div id="header-context-bar" class="h-full bg-primary" style="width: 0%"></div>
+      </div>
+      <span id="header-context-text" class="text-xs font-mono text-muted-foreground whitespace-nowrap">— / —</span>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <div id="header-online" class="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border bg-muted cursor-default" title="正在连接后端…">
+        <span id="header-online-dot" class="w-2 h-2 rounded-full shrink-0" style="background-color:#6b7280"></span>
+        <span id="header-online-text" class="text-xs" style="color:#9ca3af">连接中…</span>
+      </div>
+      <button class="p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors" aria-label="Settings">
+        <i data-lucide="settings" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Body area -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside data-nav-key="sidebar" class="w-[260px] shrink-0 border-r border-border bg-card flex flex-col">
+      <div class="p-3">
+        <button class="w-full flex items-center justify-center gap-2 h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-600 transition-colors">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>新会话</span>
+        </button>
+      </div>
+
+      <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar">
+        <a href="#/chat" data-dom-id="nav-chat" data-nav-item="chat" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
+          <i data-lucide="message-square" class="w-4 h-4 text-muted-foreground"></i>
+          <span class="font-medium">主界面</span>
+        </a>
+        <a href="#/model" data-dom-id="nav-models" data-nav-item="models" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
+          <i data-lucide="cpu" class="w-4 h-4 text-muted-foreground"></i>
+          <span class="font-medium">模型选择</span>
+        </a>
+        <a href="#/sessions" data-dom-id="nav-sessions" data-nav-item="sessions" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
+          <i data-lucide="folder-clock" class="w-4 h-4 text-muted-foreground"></i>
+          <span class="font-medium">会话管理</span>
+        </a>
+        <a href="#/settings" data-dom-id="nav-settings" data-nav-item="settings" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
+          <i data-lucide="sliders-horizontal" class="w-4 h-4 text-muted-foreground"></i>
+          <span class="font-medium">设置</span>
+        </a>
+      </nav>
+
+      <div class="p-3 border-t border-border">
+        <div class="flex items-center justify-between text-xs text-muted-foreground">
+          <span id="sidebar-version">Hyacinth</span>
+          <span class="font-mono">WebUI</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main content region -->
+    
+    <main id="hyacinth-main" data-nav-key="main" class="flex-1 overflow-hidden relative bg-background">
+      <section data-view="chat" class="view-section h-full">
+      <div id="chat-wrapper" class="h-full flex flex-col min-w-0">
+        <!-- Message canvas -->
+        <div id="message-list" class="flex-1 overflow-y-auto px-4 py-5 space-y-5" data-scroll-region="primary"></div>
+
+        <!-- Composer -->
+        <div id="chat-composer" class="shrink-0 border-t border-border bg-card p-3">
+          <div class="flex items-end gap-2 rounded-lg border border-border bg-background p-2 focus-within:ring-1 focus-within:ring-primary transition-shadow">
+            <textarea
+              class="flex-1 min-h-[40px] max-h-[160px] resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+              id="chat-input" placeholder="输入消息…"
+              rows="1"
+              aria-label="消息输入"></textarea>
+            <div class="flex items-center gap-1 pb-1">
+              <button class="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" aria-label="附加文件">
+                <i data-lucide="paperclip" class="w-4 h-4"></i>
+              </button>
+              <button id="chat-send-btn" class="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity" aria-label="发送">
+                <i data-lucide="send-horizontal" class="w-4 h-4"></i>
+              </button>
+              <button id="chat-stop-btn" class="p-1.5 rounded-md bg-muted text-muted-foreground hover:bg-muted/70 transition-opacity" aria-label="停止" hidden>
+                <i data-lucide="square" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mt-2 flex items-center justify-between text-xs text-muted-foreground px-1">
+            <span>Enter 发送 / Shift+Enter 换行</span>
+          </div>
+        </div>
+      </div>
+    </section>
+      <section data-view="model" class="view-section h-full" hidden>
+        <div class="model-panel p-6 md:p-8">
+          <div class="max-w-6xl mx-auto space-y-8">
+            <div class="space-y-2">
+              <h1 class="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">模型选择</h1>
+              <p class="text-sm text-muted-foreground">管理在线提供商、本地模型与推理强度。</p>
+            </div>
+
+            <section aria-labelledby="active-provider-heading" class="bg-card border border-border rounded-lg p-5">
+              <div class="flex items-center justify-between mb-4">
+                <h2 id="active-provider-heading" class="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <i data-lucide="check-circle-2" class="w-4 h-4 text-primary"></i>
+                  当前启用
+                </h2>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">默认通道</span>
+              </div>
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span id="model-active-name" class="text-lg font-semibold text-foreground">—</span>
+                    <span id="model-active-via" class="text-xs text-muted-foreground"></span>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span id="model-active-id" class="font-mono"></span>
+                    <span id="model-active-ctx"></span>
+                  </div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <span class="text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border">由后端数据填充</span>
+                </div>
+              </div>
+            </section>
+
+            <section aria-labelledby="online-providers-heading">
+              <div class="flex items-center justify-between mb-4">
+                <h2 id="online-providers-heading" class="text-sm font-semibold text-foreground">在线提供商</h2>
+                <button id="model-add-key-btn" class="text-xs px-3 py-1.5 rounded-md border border-border bg-card text-foreground hover:bg-muted transition-colors">添加密钥</button>
+              </div>
+              <div id="model-provider-grid" class="provider-grid">
+                <div class="text-xs text-muted-foreground col-span-full">连接后端后加载提供商…</div>
+              </div>
+            </section>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section aria-labelledby="reasoning-heading" class="bg-card border border-border rounded-lg p-5">
+                <h2 id="reasoning-heading" class="text-sm font-semibold text-foreground mb-4">推理强度</h2>
+                <div class="inline-flex p-1 rounded-md bg-muted border border-border" role="radiogroup" aria-label="推理强度">
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="low" class="sr-only peer">
+                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">低</span>
+                  </label>
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="medium" class="sr-only peer" checked>
+                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-primary peer-checked:border peer-checked:border-primary transition-colors">中</span>
+                  </label>
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="high" class="sr-only peer">
+                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">高</span>
+                  </label>
+                </div>
+                <p id="model-reasoning-desc" class="mt-3 text-xs text-muted-foreground">中等强度在响应速度与复杂推理之间取得平衡。</p>
+              </section>
+
+              <section aria-labelledby="local-model-heading" class="bg-card border border-border rounded-lg p-5">
+                <h2 id="local-model-heading" class="text-sm font-semibold text-foreground mb-4">本地模型</h2>
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="w-2 h-2 rounded-full bg-muted-foreground"></span>
+                  <span class="text-xs text-muted-foreground">未连接本地模型服务</span>
+                </div>
+                <div class="flex gap-2 mb-4">
+                  <input id="model-ollama-url" type="text" value="http://localhost:11434" class="flex-1 min-w-0 h-9 px-3 text-xs rounded-md bg-input border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary" aria-label="Ollama 地址">
+                  <button id="model-refresh-btn" class="h-9 px-3 rounded-md border border-border bg-card text-foreground hover:bg-muted transition-colors" aria-label="刷新">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <div id="model-local-list" class="space-y-2">
+                    <div class="text-xs text-muted-foreground px-3 py-2">连接后端后加载本地模型…</div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section aria-labelledby="channels-heading">
+              <h2 id="channels-heading" class="text-sm font-semibold text-foreground mb-4">模型通道</h2>
+              <div class="bg-card border border-border rounded-lg overflow-hidden">
+                <div class="channel-row px-4 py-3 border-b border-border bg-muted text-xs text-muted-foreground">
+                  <span>模型</span>
+                  <span class="channel-provider">提供商</span>
+                  <span>能力</span>
+                </div>
+                <div id="model-channels-body"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+      <section data-view="sessions" class="view-section h-full" hidden>
+      <!-- Session management panel -->
+      <div class="h-full flex flex-col" data-dom-id="sessions-panel">
+        <!-- Page header -->
+        <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-4">
+          <div>
+            <h1 class="text-lg font-semibold text-foreground">会话管理</h1>
+            <p class="text-xs text-muted-foreground mt-0.5">查看、加载或删除已保存的会话</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="sessions-import-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors" aria-label="Import sessions">
+              <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+              <span>导入</span>
+            </button>
+            <button id="sessions-create-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors" aria-label="Create session">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>新建</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="shrink-0 px-5 py-3 border-b border-border bg-background flex flex-wrap items-center gap-3">
+          <div class="relative flex-1 min-w-[200px] max-w-md">
+            <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"></i>
+            <input id="sessions-search" type="text" placeholder="搜索会话 ID 或名称" class="w-full h-9 pl-9 pr-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="sessions-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Filter by type">
+              <option value="">全部类型</option>
+              <option value="chat">Chat</option>
+              <option value="completion">Completion</option>
+              <option value="agent">Agent</option>
+            </select>
+            <select id="sessions-sort" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Sort sessions">
+              <option value="updated-desc">最近更新</option>
+              <option value="created-desc">最近创建</option>
+              <option value="name-asc">名称升序</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="sessions-selected-count" class="text-xs text-muted-foreground hidden">已选 <b class="text-primary font-mono">0</b> 项</span>
+            <button id="sessions-batch-delete" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none" aria-label="Delete selected sessions" disabled>
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>删除所选</span>
+            </button>
+            <button id="sessions-export-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-card text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none" aria-label="Export selected sessions" disabled>
+              <i data-lucide="archive" class="w-3.5 h-3.5"></i>
+              <span>导出所选</span>
+            </button>
+          </div>
+          <div class="flex items-center gap-1.5 ml-auto">
+            <span class="text-xs text-muted-foreground">共</span>
+            <span id="sessions-count" class="text-xs font-mono text-foreground">0</span>
+            <span class="text-xs text-muted-foreground">个会话</span>
+          </div>
+        </div>
+
+        <!-- Session list table -->
+        <div class="flex-1 overflow-auto p-5">
+          <div class="rounded-lg border border-border bg-card overflow-hidden">
+            <table class="w-full text-left border-collapse">
+              <thead class="bg-muted sticky top-0 z-10">
+                <tr>
+                  <th scope="col" class="px-4 py-2.5 w-10">
+                    <input type="checkbox" id="sessions-select-all" class="session-check w-3.5 h-3.5 rounded cursor-pointer accent-[var(--hyacinth-primary)]" aria-label="全选" />
+                  </th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground w-12"></th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground">会话 ID</th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground">名称</th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground">类型</th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground">创建时间</th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground">更新时间</th>
+                  <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted-foreground text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody id="sessions-tbody" class="divide-y divide-border">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+      <section data-view="settings" class="view-section h-full" hidden>
+      <style id="critical-layout">
+        .settings-root { position: relative; display: flex; height: 100%; width: 100%; }
+        .settings-tab-radio { position: absolute; opacity: 0; pointer-events: none; }
+        .settings-frame { display: flex; height: 100%; width: 100%; min-width: 0; }
+        .settings-tabs { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; border-right: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); }
+        .settings-tabs-header { padding: 0 10px 12px; font-size: 14px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+        .settings-tab:hover { background-color: var(--hyacinth-muted); }
+        #tab-context:checked ~ .settings-frame .settings-tabs label[for="tab-context"],
+        #tab-turns:checked ~ .settings-frame .settings-tabs label[for="tab-turns"],
+        #tab-compress:checked ~ .settings-frame .settings-tabs label[for="tab-compress"],
+        #tab-modes:checked ~ .settings-frame .settings-tabs label[for="tab-modes"],
+        #tab-companion:checked ~ .settings-frame .settings-tabs label[for="tab-companion"],
+        #tab-model:checked ~ .settings-frame .settings-tabs label[for="tab-model"],
+        #tab-repair:checked ~ .settings-frame .settings-tabs label[for="tab-repair"],
+        #tab-appearance:checked ~ .settings-frame .settings-tabs label[for="tab-appearance"],
+        #tab-tools:checked ~ .settings-frame .settings-tabs label[for="tab-tools"],
+        #tab-mcp:checked ~ .settings-frame .settings-tabs label[for="tab-mcp"] { background-color: var(--primary-100); color: var(--hyacinth-primary); border-right: 2px solid var(--hyacinth-primary); }
+        .settings-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background-color: var(--hyacinth-background); }
+        .settings-scroll { flex: 1; overflow: auto; padding: 24px; }
+        .settings-panel { display: none; flex-direction: column; gap: 20px; max-width: 760px; }
+        #panel-context { display: flex; }
+        #tab-turns:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-compress:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-modes:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-companion:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-model:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-repair:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-appearance:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-tools:checked ~ .settings-frame .settings-content #panel-context,
+        #tab-mcp:checked ~ .settings-frame .settings-content #panel-context { display: none; }
+        #tab-turns:checked ~ .settings-frame .settings-content #panel-turns,
+        #tab-compress:checked ~ .settings-frame .settings-content #panel-compress,
+        #tab-modes:checked ~ .settings-frame .settings-content #panel-modes,
+        #tab-companion:checked ~ .settings-frame .settings-content #panel-companion,
+        #tab-model:checked ~ .settings-frame .settings-content #panel-model,
+        #tab-repair:checked ~ .settings-frame .settings-content #panel-repair,
+        #tab-appearance:checked ~ .settings-frame .settings-content #panel-appearance,
+        #tab-tools:checked ~ .settings-frame .settings-content #panel-tools,
+        #tab-mcp:checked ~ .settings-frame .settings-content #panel-mcp { display: flex; }
+
+        /* 主题选择卡片 */
+        .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+        .theme-card { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); cursor: pointer; transition: border-color 120ms ease, box-shadow 120ms ease; }
+        .theme-card:hover { border-color: var(--hyacinth-primary); }
+        .theme-card[aria-pressed="true"] { border-color: var(--hyacinth-primary); box-shadow: 0 0 0 2px var(--primary-100); }
+        .theme-preview { display: flex; gap: 4px; height: 44px; padding: 6px; border-radius: 6px; border: 1px solid var(--hyacinth-border); }
+        .theme-preview-swatch { flex: 1; border-radius: 3px; }
+        .theme-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .theme-name { font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .theme-check { font-size: 11px; color: var(--hyacinth-primary); display: none; }
+        .theme-card[aria-pressed="true"] .theme-check { display: inline; }
+        .settings-card { background-color: var(--hyacinth-card); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 16px; }
+        .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid transparent; }
+        .settings-row + .settings-row { border-top: 1px solid var(--hyacinth-border); }
+        .settings-row-stack { display: flex; flex-direction: column; gap: 8px; }
+        .settings-label { font-size: 13px; color: var(--hyacinth-foreground); }
+        .settings-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
+        .settings-input { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; font-family: var(--font-mono); }
+        .settings-input:focus { outline: none; border-color: var(--hyacinth-primary); }
+        .settings-textarea { min-height: 88px; padding: 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; line-height: 1.5; resize: vertical; }
+        .settings-textarea:focus { outline: none; border-color: var(--hyacinth-primary); }
+        .settings-select { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; }
+        .settings-select:focus { outline: none; border-color: var(--hyacinth-primary); }
+        .settings-toggle { position: relative; width: 40px; height: 22px; appearance: none; border-radius: 999px; background-color: var(--hyacinth-muted); cursor: pointer; transition: background-color 120ms ease; }
+        .settings-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 999px; background-color: var(--hyacinth-foreground); transition: transform 120ms ease; }
+        .settings-toggle:checked { background-color: var(--hyacinth-primary); }
+        .settings-toggle:checked::after { transform: translateX(18px); background-color: var(--hyacinth-primary-foreground); }
+
+        /* 声音管理面板（音色库 + 生成语音库容量治理） */
+        .voice-mgr { margin-top: 10px; display: flex; flex-direction: column; gap: 12px; }
+        .vm-section { border: 1px solid var(--hyacinth-border); border-radius: 10px; padding: 10px 12px; }
+        .vm-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+        .vm-title { font-size: 12px; font-weight: 500; color: var(--hyacinth-foreground); }
+        .vm-summary { font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .vm-list { display: flex; flex-direction: column; gap: 6px; max-height: 170px; overflow-y: auto; }
+        .vm-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 10px; border-radius: 8px; background-color: var(--hyacinth-input); border: 1px solid transparent; }
+        .vm-item:hover { border-color: var(--hyacinth-border); }
+        .vm-item.vm-bound { border-color: var(--hyacinth-primary); }
+        .vm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hyacinth-foreground); }
+        .vm-meta { font-size: 11px; color: var(--hyacinth-muted-foreground); white-space: nowrap; }
+        .vm-del { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; font-size: 14px; line-height: 1; }
+        .vm-del:hover { color: var(--hyacinth-primary-foreground); background-color: #e24b4a; }
+        .vm-add { display: flex; gap: 6px; margin-top: 8px; }
+        .vm-btn { padding: 0 14px; height: 32px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--primary-100); color: var(--hyacinth-primary); font-size: 12px; cursor: pointer; white-space: nowrap; }
+        .vm-btn:hover { border-color: var(--hyacinth-primary); }
+        .vm-btn:disabled { opacity: 0.5; cursor: default; }
+        .vm-empty { font-size: 12px; color: var(--hyacinth-muted-foreground); padding: 6px 0; }
+        .settings-unit { font-size: 12px; color: var(--hyacinth-muted-foreground); margin-left: 6px; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
+        .command-shortcuts { display: flex; flex-direction: column; gap: 8px; }
+        .command-shortcut-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
+        .command-shortcut-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .command-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); background-color: var(--primary-100); padding: 2px 6px; border-radius: 4px; width: fit-content; }
+        .command-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
+        .command-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); color: var(--hyacinth-foreground); font-size: 12px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap; }
+        .command-link:hover { background-color: var(--hyacinth-muted); border-color: var(--hyacinth-primary); }
+        .prompt-source-list { display: flex; flex-direction: column; gap: 8px; }
+        .prompt-source-item { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
+        .prompt-source-main { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .prompt-source-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
+        .prompt-source-type { font-size: 10px; padding: 1px 6px; border-radius: 999px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); text-transform: uppercase; }
+        .prompt-source-type.conditional { background-color: var(--primary-100); color: var(--hyacinth-primary); }
+        .prompt-source-type.runtime { background-color: rgba(140, 200, 255, 0.12); color: var(--state-info); }
+        .prompt-source-path { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .prompt-source-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); margin-top: 4px; }
+        .settings-subcard { background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 12px; }
+        .assembly-pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .assembly-pipeline-step { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
+        .assembly-pipeline-arrow { color: var(--hyacinth-primary); display: inline-flex; }
+        .zone-list { display: flex; flex-direction: column; gap: 12px; }
+        .zone-header { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); padding: 6px 10px; border-radius: 6px; background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); }
+        .zone-sections { display: flex; flex-direction: column; gap: 6px; padding-left: 8px; }
+        .zone-section-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
+        .zone-section-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .zone-section-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
+        .zone-section-name .prompt-source-type { margin-left: 6px; }
+        .zone-section-source { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .zone-section-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .mechanism-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+        .mechanism-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-muted-foreground); }
+      </style>
+
+      <h1 class="sr-only">设置</h1>
+
+      <div class="settings-root" data-dom-id="settings-root">
+        <input type="radio" name="settings-tab" id="tab-context" class="settings-tab-radio" data-dom-id="tab-context" checked aria-label="上下文">
+        <input type="radio" name="settings-tab" id="tab-turns" class="settings-tab-radio" data-dom-id="tab-turns" aria-label="轮次">
+        <input type="radio" name="settings-tab" id="tab-compress" class="settings-tab-radio" data-dom-id="tab-compress" aria-label="压缩">
+        <input type="radio" name="settings-tab" id="tab-modes" class="settings-tab-radio" data-dom-id="tab-modes" aria-label="模式">
+        <input type="radio" name="settings-tab" id="tab-companion" class="settings-tab-radio" data-dom-id="tab-companion" aria-label="陪伴模式">
+        <input type="radio" name="settings-tab" id="tab-model" class="settings-tab-radio" data-dom-id="tab-model" aria-label="模型">
+        <input type="radio" name="settings-tab" id="tab-repair" class="settings-tab-radio" data-dom-id="tab-repair" aria-label="高级">
+        <input type="radio" name="settings-tab" id="tab-appearance" class="settings-tab-radio" data-dom-id="tab-appearance" aria-label="外观">
+        <input type="radio" name="settings-tab" id="tab-tools" class="settings-tab-radio" data-dom-id="tab-tools" aria-label="工具">
+        <input type="radio" name="settings-tab" id="tab-mcp" class="settings-tab-radio" data-dom-id="tab-mcp" aria-label="MCP">
+
+        <div class="settings-frame">
+          <nav class="settings-tabs" aria-label="设置分类">
+            <div class="settings-tabs-header">设置</div>
+            <label for="tab-context" class="settings-tab" data-dom-id="label-context">
+              <i data-lucide="layers" class="w-4 h-4"></i>
+              <span>上下文</span>
+            </label>
+            <label for="tab-turns" class="settings-tab" data-dom-id="label-turns">
+              <i data-lucide="repeat" class="w-4 h-4"></i>
+              <span>轮次</span>
+            </label>
+            <label for="tab-compress" class="settings-tab" data-dom-id="label-compress">
+              <i data-lucide="minimize-2" class="w-4 h-4"></i>
+              <span>压缩</span>
+            </label>
+            <label for="tab-modes" class="settings-tab" data-dom-id="label-modes">
+              <i data-lucide="toggle-left" class="w-4 h-4"></i>
+              <span>模式</span>
+            </label>
+            <label for="tab-companion" class="settings-tab" data-dom-id="label-companion">
+              <i data-lucide="heart" class="w-4 h-4"></i>
+              <span>陪伴模式</span>
+            </label>
+            <label for="tab-model" class="settings-tab" data-dom-id="label-model">
+              <i data-lucide="cpu" class="w-4 h-4"></i>
+              <span>模型</span>
+            </label>
+            <label for="tab-repair" class="settings-tab" data-dom-id="label-repair">
+              <i data-lucide="wrench" class="w-4 h-4"></i>
+              <span>高级</span>
+            </label>
+            <label for="tab-appearance" class="settings-tab" data-dom-id="label-appearance">
+              <i data-lucide="palette" class="w-4 h-4"></i>
+              <span>外观</span>
+            </label>
+            <label for="tab-tools" class="settings-tab" data-dom-id="label-tools">
+              <i data-lucide="blocks" class="w-4 h-4"></i>
+              <span>工具</span>
+            </label>
+            <label for="tab-mcp" class="settings-tab" data-dom-id="label-mcp">
+              <i data-lucide="plug" class="w-4 h-4"></i>
+              <span>MCP</span>
+            </label>
+          </nav>
+
+          <section class="settings-content" data-dom-id="settings-content">
+            <div class="settings-scroll">
+              <!-- Context -->
+              <div class="settings-panel" id="panel-context" data-dom-id="panel-context" role="tabpanel" aria-labelledby="label-context">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="layers" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">上下文 Zone 开关</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">Zone 1 — Anchor</div>
+                      <div class="settings-desc">身份 / 工具规则 / Skill-Agent-MCP 注册表 / 记忆（稳定，享受前缀缓存）</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-zone1" checked aria-label="启用 Zone 1 Anchor">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">Zone 2 — Manifest</div>
+                      <div class="settings-desc">辅助索引区，为需要独立缓存断点的 Provider 预留（默认关闭）</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-zone2" aria-label="启用 Zone 2 Manifest">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">Zone 3 — History</div>
+                      <div class="settings-desc">压缩摘要 / 项目上下文 / 对话历史（持续增长，由压缩器管理）</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-zone3" checked aria-label="启用 Zone 3 History">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">Zone 4 — Context（知识库）</div>
+                      <div class="settings-desc">外部知识检索结果，可独立关闭以节省 tokens</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-zone4" checked aria-label="启用 Zone 4 Context">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">Zone 5 — Live</div>
+                      <div class="settings-desc">工作流注入 / 时间戳 / 用户输入 / 会话临时工具（每轮变化）</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-zone5" checked aria-label="启用 Zone 5 Live">
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="toggle-left" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">条件与记忆</h2>
+                  </div>
+
+
+
+
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">意图块模式（intent_block）</div>
+                      <div class="settings-desc">激活意图块 conditional section，使用聚焦人格与关键词历史过滤</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-intent-block" aria-label="启用意图块模式">
+                  </div>
+
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">启用长期记忆</div>
+                      <div class="settings-desc">跨会话保留关键事实与偏好（Zone 1 memory section）</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-long-term-memory" checked aria-label="启用长期记忆">
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="database" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">上下文预算</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-context" class="settings-label">最大上下文长度</label>
+                    <div class="flex items-center">
+                      <input id="input-max-context" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-context" value="200000" min="1024" max="200000" step="1024">
+                      <span class="settings-unit">tokens</span>
+                    </div>
+                  </div>
+
+
+                  <div class="settings-row">
+                    <label for="input-kb-max-total" class="settings-label">知识库最大返回</label>
+                    <div class="flex items-center">
+                      <input id="input-kb-max-total" type="number" class="settings-input w-20 text-right" data-dom-id="input-kb-max-total" value="5" min="0" max="50" step="1">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-kb-max-main" class="settings-label">知识库主要结果</label>
+                    <div class="flex items-center">
+                      <input id="input-kb-max-main" type="number" class="settings-input w-20 text-right" data-dom-id="input-kb-max-main" value="3" min="0" max="20" step="1">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-kb-max-refs" class="settings-label">知识库补充引用</label>
+                    <div class="flex items-center">
+                      <input id="input-kb-max-refs" type="number" class="settings-input w-20 text-right" data-dom-id="input-kb-max-refs" value="2" min="0" max="20" step="1">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="file-text" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">系统提示组装器</h2>
+                  </div>
+
+                  <div class="space-y-4">
+                    <p class="text-xs text-muted-foreground leading-relaxed">
+                      系统提示不是单个文件，而是由 <code class="text-primary">LayeredContextComposer</code> 按照 <code class="text-primary">context-manifest.json</code> 声明的 Zone → Section 结构，在每轮对话前实时组装而成。每个 Section 可以是 prompt 文件、runtime 数据源、检索结果或条件注入，最终按 priority 排序拼接。
+                    </p>
+
+                    <div class="settings-subcard">
+                      <div class="settings-card-header" style="margin-bottom: 8px; font-size: 13px;">
+                        <i data-lucide="layers" class="w-3.5 h-3.5 text-primary"></i>
+                        <span>覆盖优先级</span>
+                      </div>
+                      <div class="space-y-2 text-xs text-muted-foreground font-mono">
+                        <div class="flex items-center gap-2 flex-wrap"><span class="text-primary">上下文蓝图</span><span>.agent/context-manifest.json</span><span class="text-dim">&gt;</span><span>manifest-defaults.ts</span></div>
+                        <div class="flex items-center gap-2 flex-wrap"><span class="text-primary">Prompt 文件</span><span>.agent/prompts/{name}.md</span><span class="text-dim">&gt;</span><span>~/.agent/prompts/{name}.md</span><span class="text-dim">&gt;</span><span>dist/prompts/{name}.md</span></div>
+                      </div>
+                    </div>
+
+                    <div class="assembly-pipeline">
+                      <div class="assembly-pipeline-step"><i data-lucide="book-open" class="w-3 h-3"></i>加载 Manifest</div>
+                      <span class="assembly-pipeline-arrow"><i data-lucide="chevron-right" class="w-3 h-3"></i></span>
+                      <div class="assembly-pipeline-step"><i data-lucide="layers" class="w-3 h-3"></i>遍历 Zone</div>
+                      <span class="assembly-pipeline-arrow"><i data-lucide="chevron-right" class="w-3 h-3"></i></span>
+                      <div class="assembly-pipeline-step"><i data-lucide="puzzle" class="w-3 h-3"></i>解析 Section</div>
+                      <span class="assembly-pipeline-arrow"><i data-lucide="chevron-right" class="w-3 h-3"></i></span>
+                      <div class="assembly-pipeline-step"><i data-lucide="align-justify" class="w-3 h-3"></i>按 priority 拼接</div>
+                    </div>
+
+                    <div class="zone-list" data-dom-id="prompt-assembly-zones">
+                      <div class="zone-header"><i data-lucide="anchor" class="w-3.5 h-3.5 text-primary"></i>Zone 1 Anchor — 稳定前缀缓存区</div>
+                      <div class="zone-sections">
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">persona_precise <span class="prompt-source-type conditional">conditional</span></div>
+                            <div class="zone-section-source">prompts/precise/persona.md</div>
+                            <div class="zone-section-desc">精确模式人格，仅在 precise_mode 激活时注入，可替代默认 persona_soul</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">persona_soul <span class="prompt-source-type static">static</span></div>
+                            <div class="zone-section-source">prompts/persona/SOUL.md + IDENTITY.md + USER.md</div>
+                            <div class="zone-section-desc">核心身份与人格，按顺序拼接；Router 可覆写 source（如 companion 模式）</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">tool_rules <span class="prompt-source-type static">static</span></div>
+                            <div class="zone-section-source">prompts/tool-rules.md</div>
+                            <div class="zone-section-desc">工具使用规则与调用规范</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">tool_bundles <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:tool_bundles</div>
+                            <div class="zone-section-desc">已注册工具包索引，来自 ContextSource</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">skills / agents / mcp <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:skills / runtime:agents / runtime:mcp</div>
+                            <div class="zone-section-desc">Skill、子 Agent、MCP 工具注册表内容，按 lazy_expand / index_only 策略输出</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">memory <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:memory</div>
+                            <div class="zone-section-desc">跨会话项目记忆，Router 可覆写来源（如 companion_memory）</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">attention <span class="prompt-source-type static">static</span></div>
+                            <div class="zone-section-source">prompts/attention/attention.md</div>
+                            <div class="zone-section-desc">尾部注意与约束提醒</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="zone-header"><i data-lucide="history" class="w-3.5 h-3.5 text-primary"></i>Zone 3 History — 压缩摘要与对话历史</div>
+                      <div class="zone-sections">
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">project_context <span class="prompt-source-type runtime">retrieval</span></div>
+                            <div class="zone-section-source">runtime:projectContext</div>
+                            <div class="zone-section-desc">按优先级加载 .agent.md / AGENTS.md / CLAUDE.md / .cursorrules</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">history_summary <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:summary</div>
+                            <div class="zone-section-desc">上下文压缩摘要，由 Compressor 维护</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">history <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:history</div>
+                            <div class="zone-section-desc">对话历史消息（含边界标记），保留原始 role</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="zone-header"><i data-lucide="database" class="w-3.5 h-3.5 text-primary"></i>Zone 4 Context — 知识库检索</div>
+                      <div class="zone-sections">
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">kb_context <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:kb_context</div>
+                            <div class="zone-section-desc">知识库检索结果，可独立开关以节省 tokens</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="zone-header"><i data-lucide="zap" class="w-3.5 h-3.5 text-primary"></i>Zone 5 Live — 每轮变化的动态内容</div>
+                      <div class="zone-sections">
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">flow_injection / channel_context / session_mcp / session_tools / orchestrator_hint</div>
+                            <div class="zone-section-source">runtime:flow / runtime:channel_context / runtime:mcp_live / runtime:tools_live / runtime:orchestrator_hint</div>
+                            <div class="zone-section-desc">工作流注入、渠道上下文、会话临时 MCP/工具、旁路 Agent 提示</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">timestamp <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:timestamp</div>
+                            <div class="zone-section-desc">当前时间戳；Router 可控制概率注入或改以 assistant 身份注入</div>
+                          </div>
+                        </div>
+                        <div class="zone-section-row">
+                          <div class="zone-section-info">
+                            <div class="zone-section-name">user_input <span class="prompt-source-type runtime">runtime</span></div>
+                            <div class="zone-section-source">runtime:userInput</div>
+                            <div class="zone-section-desc">本轮用户输入</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="mechanism-legend">
+                      <span class="mechanism-chip"><i data-lucide="route" class="w-3 h-3 text-primary"></i>Router</span>
+                      <span class="mechanism-chip"><i data-lucide="arrow-right-circle" class="w-3 h-3 text-primary"></i>Injection</span>
+                      <span class="mechanism-chip"><i data-lucide="toggle-right" class="w-3 h-3 text-primary"></i>activeConditions</span>
+                      <span class="mechanism-chip"><i data-lucide="hard-drive" class="w-3 h-3 text-primary"></i>ContextSource</span>
+                      <span class="mechanism-chip"><i data-lucide="minimize-2" class="w-3 h-3 text-primary"></i>Compressor</span>
+                      <span class="mechanism-chip"><i data-lucide="bookmark" class="w-3 h-3 text-primary"></i>CacheStrategy</span>
+                    </div>
+
+
+                    <div>
+                      <div class="flex items-center justify-between gap-2">
+                        <label for="textarea-system-prompt-preview" class="settings-label">Zone 1 组装预览（只读）</label>
+                        <button type="button" id="btn-context-preview" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-background text-xs text-foreground hover:bg-muted transition-colors" aria-label="刷新 Zone 1 预览">
+                          <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                          <span>刷新预览</span>
+                        </button>
+                      </div>
+                      <textarea id="textarea-system-prompt-preview" class="settings-textarea w-full" data-dom-id="textarea-system-prompt-preview" readonly placeholder="点击「刷新预览」查看 Zone 1（Anchor 锚点区）的真实组装内容（persona / tool-rules / skills / agents / mcp / memory 等）。">此处展示后端 LayeredContextComposer 实时组装 Zone 1 的结果。点击右上角「刷新预览」加载。</textarea>
+                    </div></div>
+                </section>
+              </div>
+
+              <!-- Turns -->
+              <div class="settings-panel" id="panel-turns" data-dom-id="panel-turns" role="tabpanel" aria-labelledby="label-turns">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="repeat" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">轮次限制</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-turns" class="settings-label">单会话最大轮次</label>
+                    <div class="flex items-center">
+                      <input id="input-max-turns" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-turns" value="100" min="10" max="10000" step="10">
+                      <span class="settings-unit">轮</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-messages-turns" class="settings-label">单会话最大消息数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-messages-turns" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-messages-turns" value="10000" min="100" max="100000" step="100">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-response-timeout" class="settings-label">响应超时</label>
+                    <div class="flex items-center">
+                      <input id="input-response-timeout" type="number" class="settings-input w-20 text-right" data-dom-id="input-response-timeout" value="60" min="5" max="600" step="5">
+                      <span class="settings-unit">秒</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">折叠工具调用</div>
+                      <div class="settings-desc">默认收起工具调用与结果卡片</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-collapse-tools" checked aria-label="折叠工具调用">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">显示推理令牌</div>
+                      <div class="settings-desc">在回复下方展示推理过程</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-reasoning-tokens" aria-label="显示推理令牌">
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="select-continuity" class="settings-label">对话连续性</label>
+                    <select id="select-continuity" class="settings-select w-40" data-dom-id="select-continuity">
+                      <option value="strict" selected>严格</option>
+                      <option value="relaxed">宽松</option>
+                      <option value="user-only">仅用户</option>
+                    </select>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Compress -->
+              <div class="settings-panel" id="panel-compress" data-dom-id="panel-compress" role="tabpanel" aria-labelledby="label-compress">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="minimize-2" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">压缩策略</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-compress-threshold" class="settings-label">压缩触发阈值</label>
+                    <div class="flex items-center">
+                      <input id="input-compress-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-compress-threshold" value="0.75" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-emergency-threshold" class="settings-label">紧急压缩阈值</label>
+                    <div class="flex items-center">
+                      <input id="input-emergency-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-emergency-threshold" value="0.92" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-compress-depth" class="settings-label">压缩深度</label>
+                    <div class="flex items-center gap-3">
+                      <input id="input-compress-depth" type="range" class="flex-1" data-dom-id="input-compress-depth" min="0" max="1" step="0.1" value="0.5">
+                      <span class="font-mono text-sm text-muted-foreground w-10 text-right">0.5</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-compress-rounds" class="settings-label">最大压缩轮数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-compress-rounds" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-compress-rounds" value="3" min="1" max="10" step="1">
+                      <span class="settings-unit">轮</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-trim-window" class="settings-label">工具结果保护窗口</label>
+                    <div class="flex items-center">
+                      <input id="input-trim-window" type="number" class="settings-input w-20 text-right" data-dom-id="input-trim-window" value="6" min="0" max="50" step="1">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="list-tree" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">压缩阶段说明</h2>
+                  </div>
+                  <div class="space-y-2 text-xs text-muted-foreground">
+                    <p><span class="text-primary font-medium">Phase 1</span> — ToolOutputTrimmer：规则裁剪旧工具结果、去重、截断过大 tool_call JSON。</p>
+                    <p><span class="text-primary font-medium">Phase 2</span> — 首次结构化摘要：LLM 将最旧历史压缩为 12 字段结构化摘要。</p>
+                    <p><span class="text-primary font-medium">Phase 3</span> — 增量摘要更新：基于已有摘要合并新内容，避免重复。</p>
+                    <p><span class="text-primary font-medium">Phase 4</span> — 保护区规则兜底：超过安全阈值时强制裁剪最近消息。</p>
+                    <p><span class="text-primary font-medium">Phase 5</span> — 工具消息完整性校验：修复孤立 tool_result / tool_calls。</p>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Modes -->
+              <div class="settings-panel" id="panel-modes" data-dom-id="panel-modes" role="tabpanel" aria-labelledby="label-modes">
+
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="toggle-left" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">运行模式</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-desc">普通模式与陪伴模式在代码里是并列的两套 Router：
+                        普通模式用主上下文与完整工具，陪伴模式切换人格与会话、只保留表达相关能力。
+                        这里选择启动时进入哪一个（也可通过左上角 ✨ 随时切换）。</div>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">默认模式</div>
+                      <div class="settings-desc">启动时自动进入的模式；也可通过左上角 ✨ 按钮随时切换陪伴模式</div>
+                    </div>
+                    <select id="select-default-context-mode" class="settings-select w-36" data-dom-id="select-default-context-mode">
+                      <option value="normal" selected>标准</option>
+                      <option value="companion">陪伴模式</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">启用旁路 Agent</div>
+                      <div class="settings-desc">允许 orchestrator 等旁路 Agent 在每轮对话前后注入提示并维护记忆</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-bypass-agents" checked aria-label="启用旁路 Agent">
+                  </div>
+                </section>
+              </div>
+              <div class="settings-panel" id="panel-companion" data-dom-id="panel-companion" role="tabpanel" aria-labelledby="label-companion">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="heart" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">陪伴角色与声音</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-desc">以下配置只在陪伴模式生效：角色决定人格与会话目录，
+                        音色决定「用谁的嗓子说话」，声音管理负责音色库（资产）与生成语音（缓存）。</div>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">陪伴角色</div>
+                      <div class="settings-desc">进入陪伴模式时使用的角色（自动检测 ~/.agent/companion/ 下的人格目录）；陪伴中切换会立即换角色</div>
+                    </div>
+                    <select id="select-companion-character" class="settings-select w-36" data-dom-id="select-companion-character">
+                      <option value="">自动（跟随上次）</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">陪伴音色</div>
+                      <div class="settings-desc">该角色说话用的音色（在下方「声音管理」登记与绑定）；换选立即生效</div>
+                    </div>
+                    <select id="select-companion-voice" class="settings-select w-36" data-dom-id="select-companion-voice">
+                      <option value="">未绑定</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row" style="align-items: flex-start;">
+                    <div style="flex: 1; min-width: 0;">
+                      <div class="settings-label">声音管理</div>
+                      <div class="settings-desc">音色是你录的真人声音（不可重建，删除前请想清楚）；生成语音是缓存（台词文本仍在），可安全清理</div>
+                      <div class="voice-mgr">
+                        <!-- 音色库（资产） -->
+                        <div class="vm-section">
+                          <div class="vm-head">
+                            <span class="vm-title">音色库</span>
+                            <span id="vm-voices-summary" class="vm-summary"></span>
+                          </div>
+                          <div id="vm-voice-list" class="vm-list"><div class="vm-empty">加载中…</div></div>
+                          <div class="vm-add">
+                            <input id="vm-voice-path" class="settings-input" style="flex: 1; min-width: 0;" placeholder="参考音频绝对路径（wav/mp3，3~10 秒人声）">
+                            <input id="vm-voice-id" class="settings-input" style="width: 110px;" placeholder="音色 id（可留空）">
+                            <button id="vm-voice-add" class="vm-btn" type="button">登记</button>
+                          </div>
+                        </div>
+                        <!-- 生成语音库（缓存） -->
+                        <div class="vm-section">
+                          <div class="vm-head">
+                            <span class="vm-title">生成语音（缓存）</span>
+                            <span id="vm-gen-summary" class="vm-summary"></span>
+                          </div>
+                          <div id="vm-gen-list" class="vm-list"><div class="vm-empty">加载中…</div></div>
+                          <div class="vm-add">
+                            <select id="vm-prune-char" class="settings-select" style="flex: 1; min-width: 0;"></select>
+                            <input id="vm-keep-n" class="settings-input" style="width: 110px;" type="number" min="0" placeholder="保留条数">
+                            <button id="vm-prune" class="vm-btn" type="button">清理</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <div class="settings-panel" id="panel-model" data-dom-id="panel-model" role="tabpanel" aria-labelledby="label-model">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="sliders" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">生成参数</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="select-default-mode" class="settings-label">生成预设</label>
+                    <select id="select-default-mode" class="settings-select w-36" data-dom-id="select-default-mode">
+                      <option value="balanced" selected>平衡</option>
+                      <option value="creative">创意</option>
+                      <option value="precise">精确</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-temperature" class="settings-label">温度</label>
+                    <div class="flex items-center">
+                      <input id="input-temperature" type="number" class="settings-input w-20 text-right" data-dom-id="input-temperature" value="0.70" min="0" max="2" step="0.05">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-top-p" class="settings-label">Top P</label>
+                    <div class="flex items-center">
+                      <input id="input-top-p" type="number" class="settings-input w-20 text-right" data-dom-id="input-top-p" value="0.95" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-frequency-penalty" class="settings-label">频率惩罚</label>
+                    <div class="flex items-center">
+                      <input id="input-frequency-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-frequency-penalty" value="0.00" min="-2" max="2" step="0.05">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-presence-penalty" class="settings-label">存在惩罚</label>
+                    <div class="flex items-center">
+                      <input id="input-presence-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-presence-penalty" value="0.00" min="-2" max="2" step="0.05">
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="bot" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">模型行为</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">流式输出</div>
+                      <div class="settings-desc">逐字返回模型生成内容</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-streaming" checked aria-label="流式输出">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">JSON 模式</div>
+                      <div class="settings-desc">强制输出合法 JSON</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-json-mode" aria-label="JSON 模式">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">工具调用</div>
+                      <div class="settings-desc">允许模型调用已注册工具</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-tool-use" checked aria-label="工具调用">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">自动选择模型</div>
+                      <div class="settings-desc">根据提示复杂度切换模型</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-auto-model" aria-label="自动选择模型">
+                  </div>
+                </section>
+              </div>
+
+
+
+              <!-- Repair -->
+              <div class="settings-panel" id="panel-repair" data-dom-id="panel-repair" role="tabpanel" aria-labelledby="label-repair">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="wrench" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">故障恢复</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">自动重试</div>
+                      <div class="settings-desc">请求失败时自动重新发送</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-auto-retry" checked aria-label="自动重试">
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-retries" class="settings-label">最大重试次数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-retries" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-retries" value="3" min="0" max="10" step="1">
+                      <span class="settings-unit">次</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="select-fallback-model" class="settings-label">降级模型</label>
+                    <select id="select-fallback-model" class="settings-select w-48" data-dom-id="select-fallback-model">
+                      <option value="claude-3-haiku" selected>claude-3-haiku</option>
+                      <option value="gpt-4o-mini">gpt-4o-mini</option>
+                      <option value="current">当前模型</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">清理输出</div>
+                      <div class="settings-desc">自动去除 markdown  fence 与多余换行</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-sanitize" checked aria-label="清理输出">
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">记录修复日志</div>
+                      <div class="settings-desc">在控制台输出重试与修复事件</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-repair-log" checked aria-label="记录修复日志">
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4 text-error"></i>
+                    <h2 class="text-base font-semibold">重置</h2>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">恢复默认设置</div>
+                      <div class="settings-desc">所有选项将恢复为出厂默认值</div>
+                    </div>
+                    <button type="button" class="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-muted transition-colors" data-dom-id="btn-reset-defaults">重置</button>
+                  </div>
+                </section>
+
+                    <div class="settings-row">
+                      <div>
+                        <div class="settings-label">允许热重载提示词</div>
+                        <div class="settings-desc">文件变更时自动重新加载 prompt 缓存与 manifest</div>
+                      </div>
+                      <input type="checkbox" class="settings-toggle" data-dom-id="toggle-watch-prompts" checked aria-label="允许热重载提示词">
+                    </div>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="terminal" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">命令快捷方式</h2>
+                  </div>
+                  <div class="command-shortcuts" data-dom-id="command-shortcuts">
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/model</code>
+                        <span class="command-desc">在线/本地模型切换与参数调整</span>
+                      </div>
+                      <a href="#/model" class="command-link" data-dom-id="cmd-model-link">模型选择</a>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/context</code>
+                        <span class="command-desc">Zone 1-5 开关、Router 模式、精确模式</span>
+                      </div>
+                      <label for="tab-context" class="command-link">上下文</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/turns</code>
+                        <span class="command-desc">设置最大对话轮数与最大消息数</span>
+                      </div>
+                      <label for="tab-turns" class="command-link">轮次</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/compress</code>
+                        <span class="command-desc">压缩阈值、紧急阈值、压缩深度</span>
+                      </div>
+                      <label for="tab-compress" class="command-link">压缩</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/modes</code>
+                        <span class="command-desc">切换 normal / companion 上下文 Router</span>
+                      </div>
+                      <label for="tab-context" class="command-link">上下文</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/kb /zone4</code>
+                        <span class="command-desc">知识库开关与 Zone 4 检索结果条数</span>
+                      </div>
+                      <label for="tab-context" class="command-link">上下文</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/precise</code>
+                        <span class="command-desc">精确模式：激活 conditional persona 与关键词过滤</span>
+                      </div>
+                      <label for="tab-context" class="command-link">上下文</label>
+                    </div>
+                    <div class="command-shortcut-row">
+                      <div class="command-shortcut-info">
+                        <code class="command-name">/repair</code>
+                        <span class="command-desc">scavenge / storm / textLoop 故障恢复开关</span>
+                      </div>
+                      <label for="tab-repair" class="command-link">修复</label>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Appearance / 主题 -->
+              <div class="settings-panel" id="panel-appearance" data-dom-id="panel-appearance" role="tabpanel" aria-labelledby="label-appearance">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="palette" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">主题</h2>
+                  </div>
+                  <div class="settings-row-stack">
+                    <div class="settings-desc">
+                      选择界面配色。主题属于用户偏好，保存在全局配置（<code class="font-mono">~/.agent/config.json</code> 的 <code class="font-mono">ui.theme</code>），
+                      切换项目目录不会丢失。
+                    </div>
+                    <div id="theme-grid" class="theme-grid" data-dom-id="theme-grid" role="radiogroup" aria-label="主题选择"></div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Tools（工具包 + 工具管理） -->
+              <div class="settings-panel" id="panel-tools" data-dom-id="panel-tools" role="tabpanel" aria-labelledby="label-tools">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="package" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">工具包</h2>
+                  </div>
+                  <div class="settings-desc mb-3">
+                    工具包决定 LLM 每轮可用工具的过滤集合。全量模式 = 不限制；激活一个或多个工具包后，仅包内工具可用（common 始终加载）。
+                  </div>
+                  <div class="flex items-center gap-2 mb-3">
+                    <span class="text-xs text-muted-foreground" id="bundle-mode-label">—</span>
+                    <button type="button" id="bundle-deactivate-btn" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-background text-xs hover:bg-muted transition-colors" aria-label="回到全量模式">
+                      <i data-lucide="unlock" class="w-3 h-3"></i>
+                      <span>回到全量模式</span>
+                    </button>
+                  </div>
+                  <div id="bundle-list" class="flex flex-col gap-2" data-dom-id="bundle-list"></div>
+                  <div class="settings-row-stack mt-4 pt-3 border-t border-border">
+                    <div class="settings-label">新建工具包</div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <input id="bundle-new-name" class="settings-input w-32" placeholder="名称" aria-label="工具包名称" />
+                      <input id="bundle-new-desc" class="settings-input w-48" placeholder="描述" aria-label="工具包描述" />
+                      <input id="bundle-new-tools" class="settings-input flex-1 min-w-[180px]" placeholder="工具名（逗号分隔，留空=全量）" aria-label="包含工具" />
+                      <button type="button" id="bundle-create-btn" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+                        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                        <span>创建</span>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="wrench" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">工具列表</h2>
+                  </div>
+                  <div class="settings-desc mb-3">
+                    已注册的全部工具。启停开关为内存级（与会话同生命周期）。「被过滤」表示当前工具包激活集未包含该工具，LLM 本轮不可用。<br />
+                    包名徽章表示工具所属的工具包，点 <b>×</b> 即可将其移出该包（内置包同样持久生效）。右侧下拉可把工具加入到其他包。
+                  </div>
+                  <div class="flex items-center gap-2 mb-3 flex-wrap">
+                    <input id="tools-filter" type="text" placeholder="搜索工具名…" class="h-8 px-3 rounded-md bg-card border border-border text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring w-56" />
+                    <select id="tools-source-filter" class="h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="按来源筛选">
+                      <option value="">全部来源</option>
+                      <option value="builtin">内置</option>
+                      <option value="mcp">MCP</option>
+                      <option value="plugin">插件</option>
+                    </select>
+                    <span class="text-xs text-muted-foreground">共 <b id="tools-count" class="font-mono text-foreground">0</b> 个</span>
+                  </div>
+                  <div id="tools-list" class="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden" data-dom-id="tools-list"></div>
+                </section>
+              </div>
+
+              <!-- MCP 管理 -->
+              <div class="settings-panel" id="panel-mcp" data-dom-id="panel-mcp" role="tabpanel" aria-labelledby="label-mcp">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="plug" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">MCP 服务器</h2>
+                  </div>
+                  <div class="settings-desc mb-3">
+                    配置文件按优先级合并，同名后者覆盖前者：<code class="font-mono">~/.agent/mcp.json</code> → <code class="font-mono">&lt;项目&gt;/.mcp.json</code> → <code class="font-mono">&lt;项目&gt;/.agent/mcp.json</code>。<br />
+                    <b>启用开关</b>写入对应配置文件的 <code class="font-mono">_disabled</code> 并立即重载；下方「连接」为运行时热插拔，不落配置（重启丢失）。
+                  </div>
+                  <div id="mcp-list" class="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden" data-dom-id="mcp-list"></div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="plus" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">添加服务器</h2>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <input id="mcp-new-name" class="settings-input w-36" placeholder="名称 *" aria-label="服务器名称" />
+                    <input id="mcp-new-command" class="settings-input w-44" placeholder="command（如 npx）" aria-label="启动命令" />
+                    <input id="mcp-new-args" class="settings-input flex-1 min-w-[200px]" placeholder="args（空格分隔，如 -y @modelcontextprotocol/server-filesystem）" aria-label="命令参数" />
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2 mt-2">
+                    <input id="mcp-new-url" class="settings-input flex-1 min-w-[220px]" placeholder="或 SSE URL（https://…，留空则用 command 模式）" aria-label="SSE URL" />
+                    <button type="button" id="mcp-add-btn" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+                      <i data-lucide="plug-zap" class="w-3.5 h-3.5"></i>
+                      <span>连接</span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+    </main>
+  </div>
+</div>
+  <section data-view="companion" class="view-section companion-view" hidden>
+    <div id="companion-stage">
+        <!--
+          Scene backdrop — 全屏自动播放的场景媒体播放器
+          -------------------------------------------------
+          背景本身就是"场景"：图片按 holdMs 停留后 crossfade 切换，
+          视频播完（ended）自动切下一个场景。UI（对话/控件）浮在其上。
+          真实场景接入（companion.scene 协议）：旁路 agent 的 scene_render
+          产出 scene.png + scene.json，前端 15s 轮询检测变化 → live 单图
+          驻留显示；角色无场景时回落内置 demo 序列。
+        -->
+        <div id="scene-backdrop">
+            <!-- 双层媒体层：一层显示、一层预载，实现 crossfade 过渡 -->
+            <div class="scene-layer" data-role="current"></div>
+            <div class="scene-layer" data-role="next"></div>
+            <!-- 暗角遮罩：保证前景文字/控件可读 -->
+            <div class="scene-vignette"></div>
+            <!-- 场景信息角标（鼠标活动时显示，空闲隐藏） -->
+            <div class="scene-info" id="scene-info">
+                <div class="scene-info-title" id="scene-info-title"></div>
+                <div class="scene-info-meta" id="scene-info-meta"></div>
+            </div>
+        </div>
+
+        <!-- Ambient background glows -->
+        <div class="ambient-glow glow-1"></div>
+        <div class="ambient-glow glow-2"></div>
+
+        <!-- Hot corners / strip to reveal controls -->
+        <div class="hot-corner tl" aria-hidden="true"></div>
+        <div class="hot-corner tr" aria-hidden="true"></div>
+        <div class="hot-corner br" aria-hidden="true"></div>
+        <div class="hot-strip bottom" aria-hidden="true"></div>
+
+        <!-- Top-left: exit companion mode -->
+        <a href="#/chat" data-dom-id="companion-exit" class="comp-ctrl tl" aria-label="退出陪伴模式">
+            <i data-lucide="arrow-left" class="w-5 h-5"></i>
+        </a>
+
+        <!-- Top-right: history toggle -->
+        <button id="history-toggle" data-dom-id="companion-history-toggle" class="comp-ctrl tr" aria-label="历史对话">
+            <i data-lucide="book-open" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Bottom: current assistant dialogue (galgame style) -->
+        <div id="companion-dialogue" data-force-visible="true">
+            <div class="dialogue-name">
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                <span>陪伴</span>
+            </div>
+            <div class="dialogue-text-wrap">
+                <p class="dialogue-text">
+                </p>
+                <button id="dialogue-media-trigger" class="dialogue-media-trigger" aria-label="查看生成的图片" style="display:none">
+                    <i data-lucide="image" class="w-3.5 h-3.5"></i>
+                    <span></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Dialogue media overlay (image / video / audio preview) -->
+        <div id="dialogue-media-overlay" aria-hidden="true">
+            <button id="dialogue-media-close" class="dialogue-media-close" aria-label="关闭">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+            <div class="dialogue-media-content">
+                <figure class="dm-media dm-image">
+                    <img src="assets/rainy-study.svg" alt="雨夜书房">
+                    <figcaption class="dm-meta">
+                        <span><i data-lucide="image" class="w-3.5 h-3.5"></i>rainy-study.png</span>
+                        <span>1280 × 720 · 298 KB</span>
+                    </figcaption>
+                </figure>
+            </div>
+        </div>
+
+        <!-- Bottom-right: user input -->
+        <div id="companion-input-wrap" data-force-visible="false">
+            <textarea id="companion-input" rows="1" placeholder="说点什么…" aria-label="发送消息"></textarea>
+            <button id="companion-send" aria-label="发送">
+                <i data-lucide="send-horizontal" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- History overlay（对话 / 它说过的话 双 tab） -->
+    <div id="companion-history" aria-hidden="true">
+        <div class="history-header">
+            <div class="history-tabs" role="tablist">
+                <button class="history-tab active" data-history-tab="chat" type="button" role="tab">对话</button>
+                <button class="history-tab" data-history-tab="voice" type="button" role="tab">它说过的话</button>
+            </div>
+            <button id="history-close" class="history-close" aria-label="关闭">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="history-scroll" id="history-scroll">
+            <div class="history-inner" id="history-list">
+                <button id="history-load-more" class="history-load-more" type="button">
+                    <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                    <span>显示更多</span>
+                </button>
+            </div>
+        </div>
+        <!-- 语音重放列表（数据源：协议层 companion.voiceList） -->
+        <div class="history-scroll" id="voice-scroll" hidden>
+            <div class="history-inner" id="voice-replay-list">
+                <div class="voice-empty">还没有留下声音</div>
+            </div>
+        </div>
+    </div>
+
+    <style id="companion-styles">
+/* Immersive companion mode */
+#companion-stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(ellipse at 20% 20%, var(--ambient-primary-backdrop) 0%, transparent 40%),
+    radial-gradient(ellipse at 80% 70%, var(--ambient-info-backdrop) 0%, transparent 45%),
+    linear-gradient(180deg, var(--neutral-50) 0%, var(--neutral-0) 100%);
+  overflow: hidden;
+}
+
+/* Hot corners / strip that keep controls visible when hovered */
+.hot-corner {
+  position: fixed;
+  z-index: 40;
+  width: 96px;
+  height: 96px;
+}
+.hot-corner.tl { top: 0; left: 0; }
+.hot-corner.tr { top: 0; right: 0; }
+.hot-corner.br { bottom: 0; right: 0; }
+
+.hot-strip.bottom {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(92vw, 980px);
+  height: 96px;
+  z-index: 40;
+}
+
+/* Frosted-glass control buttons */
+.comp-ctrl {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  color: var(--hyacinth-foreground);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 300ms ease, transform 300ms ease, background-color 200ms ease;
+  cursor: pointer;
+}
+.comp-ctrl:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--hyacinth-primary);
+}
+
+/* Show controls when any hot corner is hovered or when focused */
+.hot-corner:hover ~ .comp-ctrl,
+.hot-corner:hover ~ #companion-input-wrap,
+.comp-ctrl:hover,
+.comp-ctrl:focus-visible,
+#companion-input-wrap:hover,
+#companion-input-wrap:focus-within,
+#companion-input-wrap[data-force-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.comp-ctrl.tl { top: 16px; left: 16px; }
+.comp-ctrl.tr { top: 16px; right: 16px; }
+
+/* Galgame-style assistant text box */
+#companion-dialogue {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%) translateY(10px);
+  width: min(92vw, 980px);
+  z-index: 30;
+  padding: 28px 32px 48px;
+  background: rgba(13, 14, 17, 0.38);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 24px 24px 0 0;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms ease, transform 400ms ease, background-color 300ms ease;
+}
+
+/* 心声模式（companion_say as=think）：弱显示，与说出口的台词区分 */
+#companion-dialogue[data-mode="think"] .dialogue-text {
+  opacity: 0.6;
+  font-style: italic;
+}
+#companion-dialogue[data-mode="think"]::before {
+  opacity: 0.35;
+}
+
+/* Soft top-edge fade to blur the boundary */
+#companion-dialogue::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 24px 24px 0 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(13, 14, 17, 0) 0%, rgba(13, 14, 17, 0.22) 60%);
+  z-index: -1;
+}
+
+.hot-strip.bottom:hover ~ #companion-dialogue,
+#companion-dialogue:hover,
+#companion-dialogue[data-force-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.dialogue-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--hyacinth-primary);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialogue-text {
+  font-size: 17px;
+  line-height: 1.85;
+  color: var(--hyacinth-foreground);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.dialogue-text-wrap {
+  position: relative;
+  padding-right: 160px;
+}
+
+.dialogue-media-trigger {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--hyacinth-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: background-color 200ms ease, transform 200ms ease;
+}
+.dialogue-media-trigger:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+/* Dialogue media overlay */
+#dialogue-media-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 250ms ease;
+}
+#dialogue-media-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dialogue-media-close {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--hyacinth-foreground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 200ms ease;
+}
+.dialogue-media-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--hyacinth-primary);
+}
+.dialogue-media-content {
+  max-width: min(88vw, 900px);
+  max-height: 82vh;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.dm-media {
+  margin: 0;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(13, 14, 17, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.dm-image img,
+.dm-video video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  background: var(--media-backdrop);
+}
+.dm-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+.dm-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--hyacinth-muted-foreground);
+  font-family: var(--font-mono);
+}
+
+/* Bottom-right user input */
+#companion-input-wrap {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  width: min(520px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+
+#companion-input {
+  flex: 1;
+  min-height: 28px;
+  max-height: 140px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--hyacinth-foreground);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+}
+#companion-input::placeholder { color: var(--hyacinth-muted-foreground); }
+
+#companion-send {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  background: var(--hyacinth-primary);
+  color: var(--hyacinth-primary-foreground);
+  cursor: pointer;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+#companion-send:hover { opacity: 0.9; transform: scale(1.04); }
+
+/* History overlay */
+.history-more {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 8px 12px;
+  padding: 8px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--hyacinth-muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.history-more:hover {
+  color: var(--hyacinth-foreground);
+  background: rgba(255,255,255,0.08);
+}
+
+#companion-history {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(13, 14, 17, 0.86);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 250ms ease;
+}
+#companion-history.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.history-header {
+  height: 56px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+.history-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--hyacinth-foreground);
+}
+.history-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--hyacinth-muted-foreground);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.history-close:hover { color: var(--hyacinth-foreground); background: rgba(255,255,255,0.06); }
+
+/* 浮层 tab：对话 / 它说过的话 */
+.history-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.history-tab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+.history-tab:hover { color: var(--hyacinth-foreground); }
+.history-tab.active {
+  background: var(--primary-100);
+  color: var(--hyacinth-primary);
+}
+
+/* 语音重放列表 */
+.voice-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+.voice-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.voice-item.playing {
+  border-color: var(--hyacinth-primary);
+  background: var(--primary-100);
+}
+.voice-play {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--hyacinth-foreground);
+}
+.voice-item.playing .voice-play {
+  background: var(--hyacinth-primary);
+  color: var(--hyacinth-primary-foreground);
+}
+.voice-main { flex: 1; min-width: 0; }
+.voice-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--hyacinth-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.voice-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+}
+.voice-empty {
+  padding: 48px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--hyacinth-muted-foreground);
+}
+
+.history-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--hyacinth-muted-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+.history-load-more:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--hyacinth-foreground);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.history-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+/* tab 切换用 hidden 属性控制；flex 子项需显式声明才可靠隐藏 */
+.history-scroll[hidden] { display: none; }
+.history-inner {
+  max-width: 840px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.history-turn {
+  display: flex;
+  gap: 14px;
+}
+.history-turn.user { flex-direction: row-reverse; }
+
+.history-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.history-turn.assistant .history-avatar {
+  background: var(--primary-100);
+  color: var(--hyacinth-primary);
+}
+.history-turn.user .history-avatar {
+  background: var(--neutral-200);
+  color: var(--hyacinth-foreground);
+}
+
+.history-bubble {
+  max-width: min(70%, 560px);
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  font-size: 14px;
+  line-height: 1.7;
+  background: var(--hyacinth-bubble-assistant-bg, var(--hyacinth-card));
+  border: 1px solid var(--hyacinth-bubble-assistant-border, var(--hyacinth-border));
+  color: var(--hyacinth-foreground);
+}
+.history-turn.user .history-bubble {
+  background: var(--hyacinth-primary);
+  color: var(--hyacinth-primary-foreground);
+  border-color: transparent;
+}
+
+/* 台词历史：心声弱化 + 时间戳 */
+.history-turn.assistant.think .history-bubble {
+  opacity: 0.72;
+  font-style: italic;
+}
+.history-turn.assistant .history-time {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* Multimodal media inside history bubbles */
+.hm-media {
+  margin: 10px 0 0 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--hyacinth-muted);
+  border: 1px solid var(--hyacinth-bubble-assistant-border, var(--hyacinth-border));
+}
+.hm-image img,
+.hm-video video {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  background: var(--media-backdrop);
+}
+.hm-video video {
+  max-height: 320px;
+}
+.hm-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.2);
+}
+.hm-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  font-family: var(--font-mono);
+}
+
+/* Audio card inside history */
+.hm-audio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.hm-audio-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary-200), var(--primary-400));
+  color: var(--hyacinth-primary-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hm-audio-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hm-audio-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hyacinth-foreground);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hm-audio-sub {
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  font-family: var(--font-mono);
+}
+.hm-audio-ctrl {
+  width: 100%;
+  height: 28px;
+  margin-top: 2px;
+}
+
+/* Scrollbar */
+.history-scroll::-webkit-scrollbar { width: 6px; }
+.history-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+/* ── Scene backdrop — 全屏自动播放的场景媒体播放器 ────────────── */
+#scene-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--neutral-0);
+}
+/* 双层媒体层：一层显示、一层预载，交叉淡化实现场景过渡 */
+.scene-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1400ms ease;
+  pointer-events: none;
+}
+.scene-layer[data-active="true"] {
+  opacity: 1;
+}
+.scene-layer img,
+.scene-layer video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: var(--neutral-0);
+}
+/* 暗角遮罩：让前景文字/控件在场景图上始终可读 */
+.scene-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(13, 14, 17, 0.45) 0%, rgba(13, 14, 17, 0) 28%, rgba(13, 14, 17, 0) 62%, rgba(13, 14, 17, 0.55) 100%),
+    radial-gradient(ellipse at 50% 45%, rgba(13, 14, 17, 0) 55%, rgba(13, 14, 17, 0.35) 100%);
+}
+/* 场景信息角标：左下角，鼠标活动时浮现，空闲隐藏 */
+.scene-info {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(13, 14, 17, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 350ms ease, transform 350ms ease;
+  pointer-events: none;
+}
+.scene-info.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.scene-info-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hyacinth-foreground);
+}
+.scene-info-meta {
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Decorative ambient particles */
+.ambient-glow {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 10;
+}
+.glow-1 {
+  width: 360px;
+  height: 360px;
+  top: 10%;
+  left: 15%;
+  background: radial-gradient(circle, var(--ambient-primary-glow), transparent 70%);
+  animation: drift 18s ease-in-out infinite alternate;
+}
+.glow-2 {
+  width: 420px;
+  height: 420px;
+  bottom: 20%;
+  right: 10%;
+  background: radial-gradient(circle, var(--ambient-info-glow), transparent 70%);
+  animation: drift 22s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(30px, -20px) scale(1.08); }
+}
+    </style>
+</section>
+
+  <!-- 工具权限对话框（协议 permission.request / resolve） -->
+  <div id="permission-dialog" class="cmd-overlay" hidden>
+    <div class="cmd-box permission-box">
+      <h4 class="text-sm font-semibold text-foreground">工具权限请求</h4>
+      <p id="permission-text" class="text-xs text-muted-foreground"></p>
+      <div class="permission-actions">
+        <button data-perm="yes" class="dialog-btn">允许一次</button>
+        <button data-perm="always" class="dialog-btn">此工具始终允许</button>
+        <button data-perm="aor" class="dialog-btn">全部放行 (AOR)</button>
+        <button data-perm="no" class="dialog-btn">拒绝</button>
+      </div>
+      <p class="text-xs text-muted-foreground">「此工具始终允许 / 全部放行」仅本会话生效；跨会话持久放行请让 Agent 使用 allow_tool 工具。</p>
+    </div>
+  </div>
+
+  <!-- ask_user 表单对话框（协议 message.ask_user / askUserResolve） -->
+  <div id="askuser-dialog" class="cmd-overlay" hidden>
+    <div class="cmd-box askuser-box">
+      <h4 class="text-sm font-semibold text-foreground">请回答问题</h4>
+      <div id="askuser-questions"></div>
+      <div class="permission-actions">
+        <button id="askuser-submit" class="dialog-btn">提交</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

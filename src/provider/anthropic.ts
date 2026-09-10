@@ -91,6 +91,7 @@ export class AnthropicProvider implements Provider {
       maxContextTokens: info?.contextWindow ?? 200000,
       isLocal: false,
       vision: info?.capabilities.vision ?? true, // Anthropic models mostly support vision
+      inputTypes: info?.capabilities.inputTypes ?? (info?.capabilities.vision ? ['text', 'image'] : ['text']),
     };
   }
 
@@ -391,6 +392,41 @@ export class AnthropicProvider implements Provider {
             }
             result.push(imgBlock);
           }
+          break;
+        }
+
+        case 'video': {
+          const supportsVideo = this.getCapabilities().inputTypes?.includes('video') ?? false;
+          const src = block.source;
+          if (!supportsVideo || src.type === 'file') {
+            // 无视频能力 / 本地文件引用 → 文本占位（抽帧降级在管线层做）
+            result.push({
+              type: 'text' as const,
+              text: src.type === 'file' ? `[Video file: ${src.path} — 需先抽帧/内联再发送]` : `[Video: ${src.type === 'base64' ? src.media_type : src.url}]`,
+            } as Anthropic.TextBlockParam);
+          } else {
+            const mime = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska'].includes(block.media_type)
+              ? block.media_type as 'video/mp4' | 'video/webm' | 'video/quicktime' | 'video/x-matroska'
+              : 'video/mp4';
+            const videoSrc = src.type === 'base64'
+              ? { type: 'base64' as const, media_type: mime, data: src.data }
+              : { type: 'url' as const, url: src.url };
+            const videoBlock = { type: 'video' as const, source: videoSrc } as unknown as Anthropic.ContentBlockParam;
+            if (block.cache_control) {
+              (videoBlock as unknown as Record<string, unknown>).cache_control = block.cache_control;
+            }
+            result.push(videoBlock);
+          }
+          break;
+        }
+
+        case 'audio': {
+          // Anthropic 无音频输入能力 → 一律文本占位
+          const src = block.source;
+          result.push({
+            type: 'text' as const,
+            text: src.type === 'file' ? `[Audio file: ${src.path}]` : `[Audio: ${src.type === 'base64' ? src.media_type : src.url}]`,
+          } as Anthropic.TextBlockParam);
           break;
         }
 

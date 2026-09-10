@@ -15,6 +15,8 @@ export interface ModelEntry {
   host?: string;
   ctxSize?: number;
   nGpuLayers?: number;
+  /** 追加的启动参数（vllm / custom 后端用） */
+  extraArgs?: string[];
   addedAt: string;
   enabled: boolean;
 }
@@ -28,6 +30,8 @@ export interface ModelRegisterOptions {
   host?: string;
   ctxSize?: number;
   nGpuLayers?: number;
+  /** 追加的启动参数（vllm / custom 后端用） */
+  extraArgs?: string[];
 }
 
 // ── 从 model-bridge.ts 提取 ──
@@ -56,4 +60,19 @@ export interface LlamaCppOptions {
   maxTokens?: number;
   /** 最大上下文 token 数（用于 getCapabilities），默认 8192 */
   maxContextTokens?: number;
+}
+// ── 对外契约：运行中本地模型信息（D3 从 lifecycle/local-model.ts 迁入） ──
+
+/**
+ * 已加载/运行中的本地模型对外信息（supervisor.loadAndStartModels /
+ * startModelOnDemand 返回，CLI/TUI 据此配置 LocalProvider）。
+ */
+export interface LoadedModelInfo {
+  name: string;
+  backend: ModelBackend;
+  port: number;
+  /** 传给 LocalProvider 的 model 名称（llama.cpp = 去扩展名的 modelFile） */
+  modelName: string;
+  /** 传给 LocalProvider 的 baseUrl */
+  baseUrl: string;
 }

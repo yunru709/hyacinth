@@ -52,12 +52,25 @@ export function companionUserId(characterName: string): string {
 
 // ── 旁路Agent ───────────────────────────────────────────────
 
-export function orchestratorUserId(): string { return make('orchestrator'); }
-export function narrationUserId(): string { return make('narration'); }
+// 旁路双模式各自独立实例（userId 跟随通道）；session 粒度待 base 调用链
+// 携带 sessionId 后升级（签名已按 make 预留）
+export function orchestratorUserId(sessionTag?: string): string {
+  return sessionTag ? make('orchestrator', sessionTag) : make('orchestrator');
+}
+export function narrationUserId(sessionTag?: string): string {
+  return sessionTag ? make('narration', sessionTag) : make('narration');
+}
 
 // ── 压缩器 ──────────────────────────────────────────────────
 
-export function compressorUserId(): string { return make('compressor'); }
+/**
+ * 压缩器。传入 sessionTag（如 session 目录名）时按 session 隔离 KVCache——
+ * 压缩请求含用户对话内容，内容安全/KVCache 均按 user_id 聚合，session 粒度隔离
+ * 依赖 ModelRouter.createScopedProvider 按次现建实例（长驻共享实例无法按 session 切换）。
+ */
+export function compressorUserId(sessionTag?: string): string {
+  return sessionTag ? make('compressor', sessionTag) : make('compressor');
+}
 
 // ── 子Agent ─────────────────────────────────────────────────
 

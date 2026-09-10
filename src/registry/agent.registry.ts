@@ -194,7 +194,6 @@ export class AgentRegistry extends GenericRegistry<RegisteredAgent> {
     if (partial.allowedTools !== undefined) def.allowedTools = partial.allowedTools;
     if (partial.modelPreference !== undefined) def.modelPreference = partial.modelPreference;
     if (partial.maxTurns !== undefined) def.maxTurns = partial.maxTurns;
-    if (partial.collaborationMode !== undefined) def.collaborationMode = partial.collaborationMode;
     if (partial.sessionTtlMinutes !== undefined) def.sessionTtlMinutes = partial.sessionTtlMinutes;
 
     this.emit('update', instanceId);
@@ -211,7 +210,7 @@ export class AgentRegistry extends GenericRegistry<RegisteredAgent> {
       const extra = all.filter(x => x.name === a.name).length > 1
         ? ` (id: ${a.instanceId})`
         : '';
-      return `- ${a.name}${extra}: ${a.description} [${a.collaborationMode}]`;
+      return `- ${a.name}${extra}: ${a.description}`;
     }).join('\n');
   }
 
@@ -223,7 +222,7 @@ export class AgentRegistry extends GenericRegistry<RegisteredAgent> {
     if (agents.length === 0) return '';
     return agents.map(a => {
       const tools = a.allowedTools.length > 0 ? a.allowedTools.join(', ') : 'all';
-      return `## Sub-Agent: ${a.name}\nInstance: ${a.instanceId}\nDescription: ${a.description}\nMode: ${a.collaborationMode}\nAllowed Tools: ${tools}\nMax Turns: ${a.maxTurns}\nSystem Prompt: ${a.systemPrompt}`;
+      return `## Sub-Agent: ${a.name}\nInstance: ${a.instanceId}\nDescription: ${a.description}\nAllowed Tools: ${tools}\nMax Turns: ${a.maxTurns}\nSystem Prompt: ${a.systemPrompt}`;
     }).join('\n\n');
   }
 

@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
@@ -90,5 +90,42 @@ export class CompanionSessionManager {
       JSON.stringify({ turns: 0, input_tokens: 0, output_tokens: 0, tool_calls: 0 }),
       'utf-8',
     );
+  }
+
+  /**
+   * 列出所有可用角色（~/.agent/companion/ 下有 persona.md 的目录名）。
+   */
+  listCharacters(): string[] {
+    const base = path.join(os.homedir(), '.agent', 'companion');
+    try {
+      return readdirSync(base).filter((name) => {
+        if (name.startsWith('.')) return false;
+        const dir = path.join(base, name);
+        return existsSync(dir) && existsSync(path.join(dir, 'persona.md'));
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /** 读取上次使用的角色名（.last-character；不存在返回空串） */
+  getLastCharacter(): string {
+    try {
+      return readFileSync(
+        path.join(os.homedir(), '.agent', 'companion', '.last-character'), 'utf-8',
+      ).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /** 记住本次使用的角色名（写 .last-character；失败静默） */
+  setLastCharacter(name: string): void {
+    try {
+      writeFileSync(
+        path.join(os.homedir(), '.agent', 'companion', '.last-character'),
+        name, 'utf-8',
+      );
+    } catch { /* 写入失败不影响 */ }
   }
 }

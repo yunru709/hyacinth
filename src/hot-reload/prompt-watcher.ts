@@ -2,47 +2,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { clearPromptCache, getPromptsDir } from '../prompts/loader.js';
-import { createLogger } from '../logging/logger.js';
-
-const logger = createLogger('hot-reload:prompt-watcher');
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 export interface PromptWatcherDeps {
   debounceMs: number;
 }
 
-export function watchPrompts(deps: PromptWatcherDeps): fs.FSWatcher[] {
-  const promptsDir = getPromptsDir();
+/**
+ * 监听 prompts 目录（内置 + ~/.agent/prompts）的 .md 变更 → 清空 prompt 缓存。
+ */
+export function watchPrompts(deps: PromptWatcherDeps): WatcherHandle[] {
   const externalPromptsDir = path.join(os.homedir(), '.agent', 'prompts');
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const watchers: fs.FSWatcher[] = [];
-
-  const handleChange = (_eventType: string, filename: string | null) => {
-    if (!filename || !filename.endsWith('.md')) return;
-
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
+  return createWatcher({
+    name: 'prompt-watcher',
+    debounceMs: deps.debounceMs,
+    recursive: true,
+    filter: (filename) => filename.endsWith('.md'),
+    paths: () => {
+      const dirs = [getPromptsDir()];
+      if (fs.existsSync(externalPromptsDir)) dirs.push(externalPromptsDir);
+      return dirs;
+    },
+    reload: ({ filename }) => {
       clearPromptCache();
-      logger.info(`Prompt cache cleared due to file change: ${filename}`);
-    }, deps.debounceMs);
-  };
-
-  logger.info(`Watching prompts directory: ${promptsDir}`);
-  const internalWatcher = fs.watch(promptsDir, { recursive: true }, handleChange);
-  internalWatcher.on('error', (err) => {
-    logger.warn(`Prompt watcher error: ${err.message}`, { error: err.message });
+      // filename 透传日志（原行为），骨架已记录 error 场景
+      if (filename) return;
+    },
   });
-  watchers.push(internalWatcher);
-
-  if (fs.existsSync(externalPromptsDir)) {
-    logger.info(`Watching external prompts directory: ${externalPromptsDir}`);
-    const externalWatcher = fs.watch(externalPromptsDir, { recursive: true }, handleChange);
-    externalWatcher.on('error', (err) => {
-      logger.warn(`External prompt watcher error: ${err.message}`, { error: err.message });
-    });
-    watchers.push(externalWatcher);
-  }
-
-  return watchers;
 }

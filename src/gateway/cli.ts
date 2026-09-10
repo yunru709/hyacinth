@@ -1,8 +1,11 @@
 import readline from 'node:readline';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, installUpdate } from '../update/index.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
@@ -18,7 +21,7 @@ import { StatsManager } from '../memory/stats.js';
 import { SessionManager } from '../memory/session.js';
 import { AgentLoop } from '../orchestrator/loop.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
-import { LifecycleSupervisor } from '../lifecycle/index.js';
+import { LifecycleSupervisor } from '../supervisor/shutdown.js';
 import { runTui } from './tui.js';
 import { createAgent } from './factory.js';
 import { ConfigManager, API_KEY_MAP, DEFAULT_MAX_CONTEXT_TOKENS } from '../setup/config.js';
@@ -27,8 +30,21 @@ import { SetupWizard } from '../setup/wizard.js';
 import { runGenerationWizard } from '../setup/generation-wizard.js';
 import { PROVIDER_MODELS } from '../setup/model-defaults.js';
 import { DEFAULT_PERSONA_DIR, ensurePersonaFiles } from '../setup/persona-bootstrap.js';
+import {
+  RESTART_SESSION_MARKER,
+  RESTART_CONTINUATION_MARKER,
+  RESTART_AFTER_UPDATE_EXIT_CODE,
+  GUARDIAN_ENV,
+  consumeMarker,
+  markerIsFresh,
+  removeMarker,
+  writeRestartReason,
+} from '../supervisor/protocol.js';
 import { createLogger } from '../logging/logger.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
+import { RuntimeConfigCenter } from '../runtime/config-center.js';
+import { createConfigDomain } from '../ui-protocol/domains/config.js';
+import { createSessionDomain } from '../ui-protocol/domains/session.js';
 import type { FullConfig } from '../runtime/config-schema.js';
 
 const logger = createLogger('cli');
@@ -129,7 +145,9 @@ function createCliHandler(): OutputHandler {
           .map(([k, v]) => `${k}=${String(v).substring(0, 60)}`)
           .join(', ');
         process.stdout.write(
-          chalk.yellow(`\n[Permission] ${toolName}(${inputStr}) - [Y]es/[O] AOR/[A]lways/[N]o? `),
+          chalk.yellow(`\n[Permission] ${toolName}(${inputStr}) - [Y]es once / [O] AOR all (session) / [A]lways this tool (session) / [N]o? `) +
+          chalk.dim(`(Always/AOR are session-scoped; use allow_tool to persist globally)`) +
+          ' ',
         );
         rl.question('', (answer: string) => {
           rl.close();
@@ -223,7 +241,7 @@ export async function runCli(): Promise<void> {
     .option('--fix', '自动修复检测到的问题')
     .option('--prompts', '显示原始 Persona 提示词')
     .action(async (options: { fix?: boolean; prompts?: boolean }) => {
-      const { runDoctor } = await import('../cli/doctor.js');
+      const { runDoctor } = await import('../diagnostics/doctor.js');
       await runDoctor({ fix: options.fix, showPrompts: options.prompts });
     });
 
@@ -244,6 +262,99 @@ export async function runCli(): Promise<void> {
       await executeAction(undefined, { ...options, tui: true });
     });
 
+  // serve 与 webui 子命令共用的服务器启动逻辑
+  async function runServer(options: Record<string, string>, webuiEnabled: boolean): Promise<void> {
+    const { startServer } = await import('./server.js');
+    const port = webuiEnabled
+      ? parseInt(options.webuiPort || options.port || '3100', 10)
+      : parseInt(options.port || '3000', 10);
+
+    // ── 单实例守卫 ────────────────────────────────────────────────
+    // 目标端口已被占用（大概率是已在运行的 hyacinth 实例）时提示并退出，
+    // 防止重复启动造成后端与 MCP 子进程树堆积。多实例请用 --port 换端口。
+    if (await isPortInUse(port)) {
+      console.error(
+        `\n[hyacinth] 端口 ${port} 已被占用（大概率已有 hyacinth 实例在运行：http://127.0.0.1:${port}）。\n` +
+        `[hyacinth] 如需多实例，请用 --port 指定其他端口。本次启动退出。\n`,
+      );
+      process.exit(1);
+    }
+
+    // WebUI 静态资源必须基于模块自身位置（dist/gateway/）解析，而非 process.cwd()：
+    // 全局命令可在任意目录运行（如 C:\Users\xxx），cwd 下没有 src/webui 或 dist/webui。
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const srcWebui = path.resolve(__dirname, '../../src/webui');
+    const distWebui = path.resolve(__dirname, '../webui');
+    const webuiRoot = webuiEnabled
+      ? (fsSync.existsSync(srcWebui) ? srcWebui : distWebui)
+      : undefined;
+
+    const { manager } = await startServer({
+      port,
+      cwd: process.cwd(),
+      provider: options.provider,
+      model: options.model,
+      maxTurns: parseInt(options.maxTurns || '100', 10),
+      maxContext: parseInt(options.maxContext || String(DEFAULT_MAX_CONTEXT_TOKENS), 10),
+      apiKey: options.apiKey,
+      corsOrigin: options.corsOrigin,
+      webuiRoot,
+    });
+
+    // WebUI 模式：后端就绪后自动拉起默认浏览器
+    if (webuiEnabled) {
+      openBrowser(`http://127.0.0.1:${port}`);
+    }
+
+    const shutdown = async () => {
+      console.log('\nShutting down...');
+      await manager.stopAll();
+      process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  }
+
+  /**
+   * 检测端口是否已被占用（尝试绑定 127.0.0.1:port）。
+   */
+  function isPortInUse(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const srv = net.createServer();
+      srv.once('error', () => resolve(true));
+      srv.once('listening', () => srv.close(() => resolve(false)));
+      srv.listen(port, '127.0.0.1');
+    });
+  }
+
+  /**
+   * 用系统默认浏览器打开 URL（跨平台，失败不阻塞后端）。
+   * Windows → start；macOS → open；Linux → xdg-open。
+   */
+  function openBrowser(url: string): void {
+    const platform = process.platform;
+    let cmd: string;
+    let args: string[];
+    if (platform === 'win32') {
+      cmd = 'cmd';
+      args = ['/c', 'start', '', url];
+    } else if (platform === 'darwin') {
+      cmd = 'open';
+      args = [url];
+    } else {
+      cmd = 'xdg-open';
+      args = [url];
+    }
+    try {
+      const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+      child.on('error', () => { /* 打开失败不影响服务 */ });
+      child.unref();
+      console.log(`\nWebUI 已启动：${url}`);
+    } catch {
+      console.log(`\nWebUI 已启动：${url}（请手动在浏览器打开）`);
+    }
+  }
+
   // serve 子命令
   program
     .command('serve')
@@ -255,28 +366,25 @@ export async function runCli(): Promise<void> {
     .option('--model <name>', '模型名称')
         .option('--max-turns <n>', '轮次统计上限', '100')
     .option('--max-context <tokens>', '最大上下文 Token', String(DEFAULT_MAX_CONTEXT_TOKENS))
+    .option('--webui', '启用 WebUI 静态服务（服务 webui/ 目录，端口取 --webui-port）')
+    .option('--webui-port <port>', 'WebUI 服务端口（--webui 时生效，默认 3100）', '3100')
     .action(async (options: Record<string, string>) => {
-      const { startServer } = await import('./server.js');
-      const port = parseInt(options.port, 10);
+      await runServer(options, !!options.webui);
+    });
 
-      const { manager } = await startServer({
-        port,
-        cwd: process.cwd(),
-        provider: options.provider,
-        model: options.model,
-        maxTurns: parseInt(options.maxTurns, 10),
-        maxContext: parseInt(options.maxContext, 10),
-        apiKey: options.apiKey,
-        corsOrigin: options.corsOrigin,
-      });
-
-      const shutdown = async () => {
-        console.log('\nShutting down...');
-        await manager.stopAll();
-        process.exit(0);
-      };
-      process.on('SIGINT', shutdown);
-      process.on('SIGTERM', shutdown);
+  // webui 子命令 — 统一入口：hyacinth webui（等价 hyacinth serve --webui，默认端口 3100）
+  program
+    .command('webui')
+    .description('启动 WebUI 服务（HTTP API + WebUI 静态页面，默认端口 3100）')
+    .option('-p, --port <port>', 'WebUI 服务端口', '3100')
+    .option('--provider <type>', 'Provider 类型')
+    .option('--model <name>', '模型名称')
+    .option('--max-turns <n>', '轮次统计上限', '100')
+    .option('--max-context <tokens>', '最大上下文 Token', String(DEFAULT_MAX_CONTEXT_TOKENS))
+    .option('--api-key <key>', 'API 认证密钥（或设置 HYACINTH_API_KEY 环境变量）')
+    .option('--cors-origin <origin>', 'CORS 允许的域名（默认 *）')
+    .action(async (options: Record<string, string>) => {
+      await runServer(options, true);
     });
 
   // Session management commands
@@ -309,18 +417,19 @@ export async function runCli(): Promise<void> {
     .description('Delete a session and all its data')
     .option('-p, --project <dir>', 'Project directory', process.cwd())
     .action(async (sessionId, options) => {
+      // 协议收口（T6 第二批）：经 ui-protocol session 域 handler 执行——与
+      // WebUI/TUI 的 session.delete 同一存在性校验（ensureExists）与删除路径。
+      // list/export 未收口：list 为读操作（优先级最低）；export 语义不同源
+      // （CLI 单会话 JSON vs 域 zip 打包），硬收口会改变输出物。
       const projectKey = toProjectKey(options.project);
       const sessionManager = new SessionManager(projectKey);
-      const sessionDir = sessionManager.getSessionDir(sessionId);
-
+      const domain = createSessionDomain({ sessionManager });
       try {
-        await fs.access(sessionDir);
+        await (domain.delete as (p: unknown) => Promise<unknown>)({ sessionId });
       } catch {
         logger.error('Session not found', undefined, { sessionId });
         process.exit(1);
       }
-
-      await fs.rm(sessionDir, { recursive: true, force: true });
       logger.info('Deleted session', { sessionId });
     });
 
@@ -376,17 +485,53 @@ export async function runCli(): Promise<void> {
     .command('config')
     .description('Manage agent configuration');
 
+  // ============================================================
+  // config group: agent config get/set/schema/reset
+  // 协议收口（T6 第一批）：经 ui-protocol config 域 handler 执行。
+  // CLI 是单发进程、无 RPC 对端，但直接复用协议域 handler —— 与 WebUI/TUI
+  // 经 RPC 调用的是同一份校验/持久化逻辑（代码路径唯一）。
+  // ============================================================
+
+  /**
+   * 构造 CLI 侧协议 config 域。RuntimeConfigCenter 与协议会话同源：
+   * initialize 装入默认 schema（createConfigDomain 内部即真实配置中心）。
+   * RuntimeConfigCenter 结构满足 ConfigCenterLike（FullConfig 与 Record 的
+   * index-signature 差异仅类型面，与 tui.ts 传参同款断言）；config 域实现
+   * 均不使用 ctx —— 直调时剥掉 DomainAction 签名的第二参。
+   */
+  function createCliConfigDomain() {
+    const cm = new ConfigManager(process.cwd());
+    const cc = RuntimeConfigCenter.getInstance();
+    cc.initialize(getDefaultConfig(), cm);
+    const domain = createConfigDomain({
+      configCenter: cc as unknown as Parameters<typeof createConfigDomain>[0]['configCenter'],
+    });
+    const direct = domain as unknown as {
+      get(params: { path?: string }): { path?: string; value: unknown };
+      set(params: { path: string; value: unknown }): Promise<unknown>;
+      reset(params: { path?: string }): Promise<unknown>;
+    };
+    return { cc, domain: direct };
+  }
+
+  /** 磁盘现状 → runtime 覆盖（get 语义等价于读盘；与协议会话装配一致） */
+  async function loadDiskConfigIntoCenter(cc: RuntimeConfigCenter, cm: ConfigManager): Promise<void> {
+    cc.merge((await cm.load()) as never);
+  }
+
   configCmd
     .command('get [path]')
     .description('Get a config value by dot-path, or the full config if no path given')
     .action(async (path?: string) => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load();
-      if (path) {
-        const val = getByPath(cfg as unknown as Record<string, unknown>, path);
-        process.stdout.write(JSON.stringify(val, null, 2) + '\n');
-      } else {
-        process.stdout.write(JSON.stringify(cfg, null, 2) + '\n');
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      try {
+        const resp = domain.get({ path }) as { path?: string; value: unknown };
+        process.stdout.write(JSON.stringify(resp.value, null, 2) + '\n');
+      } catch (err) {
+        logger.error(`Config get failed: ${(err as Error).message}`);
+        process.exitCode = 1;
       }
     });
 
@@ -395,10 +540,16 @@ export async function runCli(): Promise<void> {
     .description('Set a config value by dot-path and save (changes take effect on next restart)')
     .action(async (path: string, value: string) => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load();
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
       const parsed = parseValue(value);
-      setByPath(cfg as unknown as Record<string, unknown>, path, parsed);
-      await cm.save(cfg);
+      try {
+        await domain.set({ path, value: parsed });
+      } catch (err) {
+        logger.error(`Config set failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.info('Config updated', { path, value: parsed });
       logger.info('Changes will take effect on next restart.');
     });
@@ -416,18 +567,18 @@ export async function runCli(): Promise<void> {
     .description('Reset a config path (or all config) to defaults')
     .action(async (path?: string) => {
       const cm = new ConfigManager(process.cwd());
-      const defaults = getDefaultConfig() as unknown as Record<string, unknown>;
-
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      try {
+        await domain.reset({ path });
+      } catch (err) {
+        logger.error(`Config reset failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       if (path) {
-        // Reset single path
-        const cfg = await cm.load();
-        const defaultVal = getByPath(defaults, path);
-        setByPath(cfg as unknown as Record<string, unknown>, path, defaultVal);
-        await cm.save(cfg);
-        logger.info('Config path reset to default', { path, defaultValue: defaultVal });
+        logger.info('Config path reset to default', { path });
       } else {
-        // Reset everything
-        await cm.save(defaults as unknown as Parameters<ConfigManager['save']>[0]);
         logger.info('All config reset to defaults.');
       }
       logger.info('Changes will take effect on next restart.');
@@ -454,11 +605,20 @@ export async function runCli(): Promise<void> {
         process.exit(1);
       }
 
+      // T8 二批·语义修复：schema 无顶层 provider/model 键 —— 真实结构是
+      // provider.active（当前激活）+ provider.<name>.model（该 provider 默认模型）。
+      // 旧实现写 cfg.provider/cfg.model 顶层非法键，装配方（读 provider.active）
+      // 永远看不到 → switch 从未生效。现修正写入位置。完整协议化需经 model 域
+      // main 通道绑定（registry.setChannelModel），CLI 单发进程无 loop，标注待后续。
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load();
-      cfg.provider = provider;
-      cfg.model = models[0].id;
-      await cm.save(cfg);
+      const cfg = await cm.load() as unknown as Record<string, unknown>;
+      const prov = (cfg.provider as Record<string, unknown>) ?? {};
+      prov.active = provider;
+      const providerNode = (prov[provider] as Record<string, unknown>) ?? {};
+      providerNode.model = models[0].id;
+      prov[provider] = providerNode;
+      cfg.provider = prov;
+      await cm.save(cfg as unknown as Parameters<ConfigManager['save']>[0]);
       logger.info('Provider switched', { provider, model: models[0].id });
       logger.info('Changes will take effect on next restart.');
     });
@@ -483,13 +643,21 @@ export async function runCli(): Promise<void> {
     .command('info')
     .description('Show current provider and model details')
     .action(async () => {
+      // 协议收口（T8 二批）：经 config 域读取 provider.active 与对应默认模型
+      // （schema 真实结构）；模型目录详情仍来自静态表 PROVIDER_MODELS
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load();
-      logger.info('Current provider', { provider: cfg.provider, model: cfg.model });
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const provider = (domain.get({ path: 'provider.active' }) as { value?: string }).value;
+      const model =
+        provider === undefined
+          ? undefined
+          : (domain.get({ path: `provider.${provider}.model` }) as { value?: string }).value;
+      logger.info('Current provider', { provider, model });
 
-      const models = PROVIDER_MODELS[cfg.provider];
+      const models = PROVIDER_MODELS[provider ?? ''];
       if (models) {
-        const current = models.find((m) => m.id === cfg.model);
+        const current = models.find((m) => m.id === model);
         if (current) {
           logger.info('Model details', {
             name: current.name,
@@ -514,50 +682,64 @@ export async function runCli(): Promise<void> {
 
   skillCmd
     .command('enable <name>')
-    .description('Enable a skill (writes to config, takes effect on next restart)')
+    .description('Enable a skill (removes it from skills.disabled, takes effect on next restart)')
     .action(async (name: string) => {
+      // 协议收口（T8 二批）+ 语义修复：运行时消费的格式是 skills.disabled:
+      // string[] 黑名单（runtime-wiring 装配过滤 / runtime-control toggle 同款）。
+      // 旧实现写 cfg.skills[name]=bool，无任何消费方 → enable 从未真正生效。
+      // 现在经 config 域把 name 从 disabled 数组移除。
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-
-      const skills: Record<string, boolean> = (cfg.skills as Record<string, boolean>) ?? {};
-      skills[name] = true;
-      cfg.skills = skills;
-      await cm.save(cfg as unknown as Parameters<ConfigManager['save']>[0]);
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const cur = ((domain.get({ path: 'skills.disabled' }) as { value?: unknown }).value ?? []) as string[];
+      const next = cur.filter((x) => x !== name);
+      try {
+        await domain.set({ path: 'skills.disabled', value: next });
+      } catch (err) {
+        logger.error(`Skill enable failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.info('Skill enabled', { name });
       logger.info('Changes will take effect on next restart.');
     });
 
   skillCmd
     .command('disable <name>')
-    .description('Disable a skill (writes to config, takes effect on next restart)')
+    .description('Disable a skill (adds it to skills.disabled, takes effect on next restart)')
     .action(async (name: string) => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-
-      const skills: Record<string, boolean> = (cfg.skills as Record<string, boolean>) ?? {};
-      skills[name] = false;
-      cfg.skills = skills;
-      await cm.save(cfg as unknown as Parameters<ConfigManager['save']>[0]);
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const cur = ((domain.get({ path: 'skills.disabled' }) as { value?: unknown }).value ?? []) as string[];
+      const next = cur.includes(name) ? cur : [...cur, name];
+      try {
+        await domain.set({ path: 'skills.disabled', value: next });
+      } catch (err) {
+        logger.error(`Skill disable failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.info('Skill disabled', { name });
       logger.info('Changes will take effect on next restart.');
     });
 
   skillCmd
     .command('list')
-    .description('List all skills with enabled/disabled status')
+    .description('List disabled skills (skills not listed are enabled by default)')
     .action(async () => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-      const skills: Record<string, boolean> = (cfg.skills as Record<string, boolean>) ?? {};
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const disabled = ((domain.get({ path: 'skills.disabled' }) as { value?: unknown }).value ?? []) as string[];
 
-      if (Object.keys(skills).length === 0) {
-        logger.info('No skills configured. Use "agent skill enable <name>" to add one.');
+      if (disabled.length === 0) {
+        logger.info('All skills enabled (skills.disabled is empty).');
         return;
       }
 
-      for (const [name, enabled] of Object.entries(skills)) {
-        const status = enabled ? chalk.green('enabled') : chalk.gray('disabled');
-        process.stdout.write(`${chalk.bold(name)} ${status}\n`);
+      for (const name of disabled) {
+        process.stdout.write(`${chalk.bold(name)} ${chalk.gray('disabled')}\n`);
       }
     });
 
@@ -574,56 +756,325 @@ export async function runCli(): Promise<void> {
 
   toolCmd
     .command('enable <name>')
-    .description('Enable a tool (writes to config, takes effect on next restart)')
+    .description('Enable a tool (removes it from tools.disabled, takes effect on next restart)')
     .action(async (name: string) => {
+      // 协议收口（T8 二批）+ 语义修复：运行时消费 tools.disabled: string[]
+      // 黑名单；旧实现写 cfg.tools[name]=bool 无消费方 → enable 从未生效。
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-
-      const tools: Record<string, boolean> = (cfg.tools as Record<string, boolean>) ?? {};
-      tools[name] = true;
-      cfg.tools = tools;
-      await cm.save(cfg as unknown as Parameters<ConfigManager['save']>[0]);
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const cur = ((domain.get({ path: 'tools.disabled' }) as { value?: unknown }).value ?? []) as string[];
+      const next = cur.filter((x) => x !== name);
+      try {
+        await domain.set({ path: 'tools.disabled', value: next });
+      } catch (err) {
+        logger.error(`Tool enable failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.info('Tool enabled', { name });
       logger.info('Changes will take effect on next restart.');
     });
 
   toolCmd
     .command('disable <name>')
-    .description('Disable a tool (writes to config, takes effect on next restart)')
+    .description('Disable a tool (adds it to tools.disabled, takes effect on next restart)')
     .action(async (name: string) => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-
-      const tools: Record<string, boolean> = (cfg.tools as Record<string, boolean>) ?? {};
-      tools[name] = false;
-      cfg.tools = tools;
-      await cm.save(cfg as unknown as Parameters<ConfigManager['save']>[0]);
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const cur = ((domain.get({ path: 'tools.disabled' }) as { value?: unknown }).value ?? []) as string[];
+      const next = cur.includes(name) ? cur : [...cur, name];
+      try {
+        await domain.set({ path: 'tools.disabled', value: next });
+      } catch (err) {
+        logger.error(`Tool disable failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.info('Tool disabled', { name });
       logger.info('Changes will take effect on next restart.');
     });
 
   toolCmd
     .command('list')
-    .description('List all tools with enabled/disabled status')
+    .description('List disabled tools (tools not listed are enabled by default)')
     .action(async () => {
       const cm = new ConfigManager(process.cwd());
-      const cfg = await cm.load() as unknown as Record<string, unknown>;
-      const tools: Record<string, boolean> = (cfg.tools as Record<string, boolean>) ?? {};
+      const { cc, domain } = createCliConfigDomain();
+      await loadDiskConfigIntoCenter(cc, cm);
+      const disabled = ((domain.get({ path: 'tools.disabled' }) as { value?: unknown }).value ?? []) as string[];
 
-      if (Object.keys(tools).length === 0) {
-        logger.info('No tools configured. Use "agent tool enable <name>" to add one.');
+      if (disabled.length === 0) {
+        logger.info('All tools enabled (tools.disabled is empty).');
         return;
       }
 
-      for (const [name, enabled] of Object.entries(tools)) {
-        const status = enabled ? chalk.green('enabled') : chalk.gray('disabled');
-        process.stdout.write(`${chalk.bold(name)} ${status}\n`);
+      for (const name of disabled) {
+        process.stdout.write(`${chalk.bold(name)} ${chalk.gray('disabled')}\n`);
       }
     });
 
   toolCmd.action(() => {
     toolCmd.outputHelp();
   });
+
+  program
+    .command('supervisor-status')
+    .description('查看 Supervisor 监督状态（重启原因存档 / 标记残留 / git 摘要；进程外诊断）')
+    .action(async () => {
+      const { GitManager } = await import('../evolution/git-manager.js');
+      const {
+        readRestartReason,
+        readMarker,
+        RESTART_SESSION_MARKER,
+        RESTART_CONTINUATION_MARKER,
+        isUnderGuardian,
+      } = await import('../supervisor/protocol.js');
+
+      process.stderr.write('── Supervisor 状态 ──\n');
+      process.stderr.write(`guardian 守护: ${isUnderGuardian() ? '是（重启兜底可用）' : '否（本命令经 --no-guardian 或直接子进程运行）'}\n`);
+
+      const reason = readRestartReason();
+      if (reason) {
+        process.stderr.write(`上次重启: code=${reason.code} source=${reason.source}${reason.detail ? ` detail=${reason.detail}` : ''}\n`);
+      } else {
+        process.stderr.write('上次重启: 无存档（.restart-reason 不存在）\n');
+      }
+
+      for (const [name, desc] of [
+        [RESTART_SESSION_MARKER, '会话快照'],
+        [RESTART_CONTINUATION_MARKER, '续工指令'],
+      ] as const) {
+        const content = readMarker(name);
+        if (content !== null) {
+          process.stderr.write(`标记残留: ${name}（${desc}）— 非对应启动模式时会残留，serve 启动会自动清理\n`);
+        }
+      }
+
+      process.stderr.write('退出码语义: 42=重启 43=更新后重启 44=插件热更新兜底重启\n');
+
+      try {
+        const gitManager = new GitManager(process.cwd());
+        const isRepo = await gitManager.isRepo();
+        if (!isRepo) {
+          process.stderr.write('git: 当前目录不在 git 仓库内\n');
+          return;
+        }
+        const dirty = await gitManager.hasUncommittedChanges();
+        process.stderr.write(`git: 工作区${dirty ? '脏（回合锚点将在回合开始时提交）' : '干净'}\n`);
+        const autoCommits = await gitManager.logGrep('auto:', 5);
+        if (autoCommits.length > 0) {
+          process.stderr.write('最近 auto 提交:\n');
+          for (const c of autoCommits) {
+            process.stderr.write(`  ${c.hash.slice(0, 8)}  ${c.message}\n`);
+          }
+        }
+      } catch (err) {
+        process.stderr.write(`git: 摘要失败（${err instanceof Error ? err.message : String(err)}）\n`);
+      }
+    });
+
+  // ── 架构监督（扩展注册表方案）：进程外诊断，不启动 agent ──
+  const archCmd = program
+    .command('arch')
+    .description('架构监督：可替换点目录 / 扩展名单 / 插件裁决（进程外诊断）');
+
+  archCmd
+    .command('list')
+    .description('一屏可见：全部可替换点 + 名单声明 + 插件当前裁决值')
+    .argument('[kind]', '按种类过滤（slot/service/provider/router/source/adapter/channel/tool/skill/agent/plugin）')
+    .action(async (kind: string | undefined) => {
+      const { REPLACEABLE_POINTS, loadExtensionManifest } = await import('../supervisor/extension-registry.js');
+      const { manifest, errors, paths } = loadExtensionManifest(process.cwd());
+
+      process.stderr.write('── 可替换点目录 ──\n');
+      const points = kind ? REPLACEABLE_POINTS.filter((p) => p.kind === kind) : REPLACEABLE_POINTS;
+      if (points.length === 0) process.stderr.write(`（无 kind=${kind} 的条目）\n`);
+      for (const p of points) {
+        process.stderr.write(`  ${p.id}${p.defaultImpl ? ` = ${p.defaultImpl}` : ''}  # ${p.description}\n`);
+      }
+
+      process.stderr.write('── 名单（extension-registry.json）──\n');
+      process.stderr.write(`  全局: ${paths.globalPath}\n  项目: ${paths.projectPath}\n`);
+      if (errors.length > 0) {
+        process.stderr.write(`  ⚠ 名单校验错误:\n`);
+        for (const e of errors) process.stderr.write(`    - ${e}\n`);
+      }
+      if (manifest.replacements.length === 0 && manifest.plugins.length === 0 && manifest.orders.length === 0) {
+        process.stderr.write('  （空名单 —— 全部走出厂默认）\n');
+      }
+      for (const r of manifest.replacements) {
+        process.stderr.write(`  替换 ${r.point} ← ${r.impl}${r.module ? `（module: ${r.module}）` : ''}\n`);
+      }
+      for (const p of manifest.plugins) {
+        process.stderr.write(`  插件 ${p.id}: enabled=${p.enabled}${p.mountAt ? ` mountAt=${p.mountAt}` : ''}\n`);
+      }
+      for (const o of manifest.orders) {
+        process.stderr.write(`  排序 ${o.point}: ${o.order.join(' > ')}\n`);
+      }
+
+      // 插件裁决值三源折叠预览：名单 > plugins.config.json > manifest.enabledByDefault
+      try {
+        const { PluginLoader } = await import('../plugins/loader.js');
+        const loader = new PluginLoader(process.cwd());
+        const discovered = await loader.discover();
+        const pluginConfig = await loader.loadPluginConfig();
+        if (discovered.length > 0) {
+          process.stderr.write('── 已安装插件（裁决值预览）──\n');
+          for (const m of discovered) {
+            const fromList = manifest.plugins.find((p) => p.id === m.id);
+            const resolved = fromList ? fromList.enabled : (pluginConfig[m.id]?.enabled ?? m.enabledByDefault ?? true);
+            const src = fromList ? '名单' : (pluginConfig[m.id] !== undefined ? 'plugins.config' : 'manifest');
+            process.stderr.write(`  ${m.id}: ${resolved ? '启用' : '停用'}（来源: ${src}）\n`);
+          }
+        }
+      } catch {
+        // 插件目录不可用则跳过预览
+      }
+    });
+
+  archCmd
+    .command('get <point>')
+    .description('单点查询：目录定义 + 名单声明（如 hyacinth arch get provider:main）')
+    .action(async (point: string) => {
+      const { getReplaceablePoint, loadExtensionManifest } = await import('../supervisor/extension-registry.js');
+      const def = getReplaceablePoint(point);
+      if (!def) {
+        process.stderr.write(`未知可替换点: ${point}\n（hyacinth arch list 查看全部）\n`);
+        process.exitCode = 1;
+        return;
+      }
+      process.stderr.write(`点:   ${def.id} [${def.kind}]\n默认: ${def.defaultImpl ?? '（动态族）'}\n说明: ${def.description}\n`);
+      const { manifest } = loadExtensionManifest(process.cwd());
+      const repl = manifest.replacements.find((r) => r.point === point);
+      if (repl) process.stderr.write(`名单: ← ${repl.impl}${repl.module ? `（module: ${repl.module}）` : ''}\n`);
+      const order = manifest.orders.find((o) => o.point === point);
+      if (order) process.stderr.write(`排序: ${order.order.join(' > ')}\n`);
+      if (point.startsWith('plugin:')) {
+        const decl = manifest.plugins.find((p) => p.id === point.slice('plugin:'.length));
+        if (decl) process.stderr.write(`插件裁决: enabled=${decl.enabled}${decl.mountAt ? ` mountAt=${decl.mountAt}` : ''}\n`);
+      }
+      if (!repl && !order) process.stderr.write('名单: （无声明，走出厂默认）\n');
+    });
+
+  archCmd
+    .command('toggle <pluginId> [state]')
+    .description('插件名单裁决翻转：on/off（缺省取反；写项目级名单，serve 运行中由名单 watcher 热生效）')
+    .action(async (pluginId: string, state: string | undefined) => {
+      const { loadExtensionManifest, togglePluginInManifest } = await import('../supervisor/extension-registry.js');
+      const current = loadExtensionManifest(process.cwd()).manifest.plugins.find((p) => p.id === pluginId)?.enabled ?? true;
+      const enabled = state === undefined ? !current : state === 'on' || state === 'true';
+      const result = togglePluginInManifest(process.cwd(), pluginId, enabled);
+      if (!result.ok) {
+        process.stderr.write(`[arch] ❌ ${result.error}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      process.stderr.write(`[arch] ${pluginId}: enabled=${enabled} 已写入项目名单\n`);
+    });
+
+  // ── 插件管理（扩展注册表方案缺口 1）：安装进 .agent/plugins，生效与否由名单裁决 ──
+  const pluginCmd = program
+    .command('plugin')
+    .description('插件管理：安装 / 列出 / 卸载（安装 = 放置文件；生效与否由名单与配置裁决）');
+
+  pluginCmd
+    .command('install <source>')
+    .description('安装插件：本地插件目录路径，或 git 仓库 URL（克隆后识别 plugin.json）')
+    .action(async (source: string) => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const targetRoot = path.join(process.cwd(), '.agent', 'plugins');
+      fs.mkdirSync(targetRoot, { recursive: true });
+      const tmpDir = path.join(targetRoot, `.installing-${Date.now()}`);
+
+      const isGit = /^https?:\/\/|^git@/.test(source);
+      const srcDir = isGit
+        ? await (async () => {
+            const { execFileSync } = await import('node:child_process');
+            process.stderr.write(`[plugin] git clone ${source} ...\n`);
+            execFileSync('git', ['clone', '--depth', '1', source, tmpDir], { stdio: 'inherit' });
+            return tmpDir;
+          })()
+        : path.resolve(source);
+
+      try {
+        const manifestPath = path.join(srcDir, 'plugin.json');
+        if (!fs.existsSync(manifestPath)) {
+          process.stderr.write(`[plugin] ❌ ${srcDir} 下没有 plugin.json\n`);
+          process.exitCode = 1;
+          return;
+        }
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { id?: string };
+        if (!manifest.id) {
+          process.stderr.write('[plugin] ❌ plugin.json 缺少 id 字段\n');
+          process.exitCode = 1;
+          return;
+        }
+        const target = path.join(targetRoot, manifest.id);
+        if (fs.existsSync(target)) {
+          process.stderr.write(`[plugin] ❌ 插件 ${manifest.id} 已存在（${target}）；先 uninstall 再安装\n`);
+          process.exitCode = 1;
+          return;
+        }
+        fs.cpSync(srcDir, target, { recursive: true });
+        process.stderr.write(`[plugin] ✅ ${manifest.id} 已安装到 ${target}\n`);
+        process.stderr.write('提示: 安装不等于生效 —— 默认启用；在名单（.agent/extension-registry.json）中声明 enabled:false 可停用，hyacinth arch toggle <id> off 快捷翻转。\n');
+      } finally {
+        if (isGit) fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+  pluginCmd
+    .command('list')
+    .description('列出已安装插件（目录、版本、入口）')
+    .action(async () => {
+      const { PluginLoader } = await import('../plugins/loader.js');
+      const loader = new PluginLoader(process.cwd());
+      const manifests = await loader.discover();
+      if (manifests.length === 0) {
+        process.stderr.write('（未发现已安装插件）\n');
+        return;
+      }
+      for (const m of manifests) {
+        process.stderr.write(`  ${m.id}@${m.version ?? '?'}  entry=${m.entry}${m.enabledByDefault === false ? '  (enabledByDefault: false)' : ''}\n`);
+      }
+    });
+
+  pluginCmd
+    .command('uninstall <pluginId>')
+    .description('卸载插件：删除 .agent/plugins/<id> 目录（名单/plugins.config 中的声明保留，供重装后延续裁决）')
+    .action(async (pluginId: string) => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const target = path.join(process.cwd(), '.agent', 'plugins', pluginId);
+      if (!fs.existsSync(target)) {
+        process.stderr.write(`[plugin] ❌ ${target} 不存在（builtin plugins/ 目录不受 uninstall 管理）\n`);
+        process.exitCode = 1;
+        return;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+      process.stderr.write(`[plugin] ✅ ${pluginId} 已卸载\n`);
+    });
+
+  program
+    .command('backup')
+    .description('对当前项目工作区做 git bundle + tag 双保险快照（Supervisor 方案 S4）')
+    .argument('[label]', '备份标签（默认 backup；用于区分用途，如 pre-refactor）')
+    .action(async (label: string | undefined) => {
+      const { GitManager, createBackup } = await import('../evolution/index.js');
+      const gitManager = new GitManager(process.cwd());
+      try {
+        const { bundlePath, tag } = await createBackup(gitManager, process.cwd(), label ?? 'backup');
+        process.stderr.write(`[backup] ✅ 快照已创建\n`);
+        process.stderr.write(`   bundle: ${bundlePath}\n   tag:    ${tag}\n`);
+        process.stderr.write(`恢复: git clone <bundle 路径> 恢复全量仓；或 git checkout ${tag}（本仓内）\n`);
+      } catch (err) {
+        process.stderr.write(`[backup] ❌ ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+    });
 
   program
     .command('update')
@@ -671,7 +1122,10 @@ export async function runCli(): Promise<void> {
         const extractedDir = findExtractedDir(tmpDir);
         installUpdate(extractedDir, installDir, msg => process.stderr.write(`[update] ${msg}\n`));
         fsSync.rmSync(tmpDir, { recursive: true, force: true });
-        process.stderr.write(`[update] ✅ 已更新到 v${version.latest}。重开 TUI 即可。\n`);
+        process.stderr.write(`[update] ✅ 已更新到 v${version.latest}。正在自动重启...\n`);
+        // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
+        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${version.latest}` });
+        process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
 
       } else if (sourcePath) {
         // ── 本地 ──
@@ -683,7 +1137,10 @@ export async function runCli(): Promise<void> {
         // 同步 package.json（版本号来源）
         fsSync.cpSync(p.join(sourcePath, 'package.json'), p.join(installDir, 'package.json'));
         const newVer = JSON.parse(fsSync.readFileSync(p.join(sourcePath, 'package.json'), 'utf-8')).version;
-        process.stderr.write(`[update] ✅ 已更新到 v${newVer}。重开 TUI 即可。\n`);
+        process.stderr.write(`[update] ✅ 已更新到 v${newVer}。正在自动重启...\n`);
+        // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
+        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer}` });
+        process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
 
       } else {
         process.stderr.write('请先配置更新源:\n');
@@ -694,11 +1151,11 @@ export async function runCli(): Promise<void> {
     });
 
   // 守护进程（默认启用）：Agent 退出(code 42)时自动重新拉起
-  // 子进程通过 HYACINTH_GUARDIAN_CHILD 环境变量避免递归
+  // 子进程通过 GUARDIAN_ENV 环境变量避免递归
   const noGuardian = process.argv.includes('--no-guardian');
   process.argv = process.argv.filter(a => a !== '--no-guardian');
-  if (!noGuardian && !process.env.HYACINTH_GUARDIAN_CHILD) {
-    const { runGuardian } = await import('./guardian.js');
+  if (!noGuardian && !process.env[GUARDIAN_ENV]) {
+    const { runGuardian } = await import('../supervisor/guardian.js');
     runGuardian(process.argv.slice(2));
     return;
   }
@@ -741,14 +1198,17 @@ async function executeAction(
   // 统一策略：非 TUI 启动（launchChannel 为空）一律不恢复特定 session——
   // 因为 .restart-session 只服务于渠道感知的 TUI 恢复，CLI/服务模式恢复最近即可，
   // 避免把其他渠道（如飞书）的 session 恢复给 CLI 交互。
-  const restartFile = path.join(os.homedir(), '.agent', '.restart-session');
   let restartSessionId: string | undefined;
   let restartContinue = false;
   // 当前启动渠道：TUI 模式为 'tui'，否则不启用渠道恢复
   const launchChannel = options.tui ? 'tui' : undefined;
-  if (fsSync.existsSync(restartFile)) {
-    const content = fsSync.readFileSync(restartFile, 'utf-8').trim();
-    fsSync.unlinkSync(restartFile);
+  // 防陈旧：崩溃残留的 marker 不应让下次正常启动误入旧会话。
+  // 超过 10 分钟的 marker 视为陈旧 → 直接删除并按无 marker 处理。
+  const RESTART_MARKER_MAX_AGE_MS = 10 * 60 * 1000;
+  const content = markerIsFresh(RESTART_SESSION_MARKER, RESTART_MARKER_MAX_AGE_MS)
+    ? consumeMarker(RESTART_SESSION_MARKER)
+    : (removeMarker(RESTART_SESSION_MARKER), null);
+  if (content !== null) {
     restartContinue = true;
     // 非 TUI 模式：忽略特定 session，统一走 shouldContinue（恢复最近）
     if (content && content !== 'true' && launchChannel) {
@@ -877,8 +1337,8 @@ async function executeAction(
 
     // 如果是 local provider，将已启动的模型 URL 和 model 注入
     let localModelProvider: Provider | undefined;
-    if (provider.getProviderType() === 'local' && supervisor.getModelManager().getModels().length > 0) {
-      const modelInfo = supervisor.getModelManager().getModels()[0];
+    if (provider.getProviderType() === 'local' && supervisor.getRunningModels().length > 0) {
+      const modelInfo = supervisor.getRunningModels()[0];
       (provider as LocalProvider).setBaseUrl(modelInfo.baseUrl);
       (provider as LocalProvider).setModel(modelInfo.modelName);
     }
@@ -911,10 +1371,9 @@ async function executeAction(
     if (useTui) {
       // 检测重启续工指令（TUI 模式下需在进入前读取）
       let continuationMessage: string | undefined;
-      const continuationFile = path.join(os.homedir(), '.agent', '.restart-continuation');
-      if (fsSync.existsSync(continuationFile)) {
-        continuationMessage = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
-        fsSync.unlinkSync(continuationFile);
+      const continuationRaw = consumeMarker(RESTART_CONTINUATION_MARKER);
+      if (continuationRaw !== null) {
+        continuationMessage = continuationRaw.trim() || undefined;
       }
       await runTui(
         provider,
@@ -955,10 +1414,9 @@ async function executeAction(
 
     // 检测重启续工指令
     if (!prompt) {
-      const continuationFile = path.join(os.homedir(), '.agent', '.restart-continuation');
-      if (fsSync.existsSync(continuationFile)) {
-        prompt = fsSync.readFileSync(continuationFile, 'utf-8').trim() || undefined;
-        fsSync.unlinkSync(continuationFile);
+      const continuationRaw = consumeMarker(RESTART_CONTINUATION_MARKER);
+      if (continuationRaw !== null) {
+        prompt = continuationRaw.trim() || undefined;
       }
     }
 

@@ -70,7 +70,7 @@ export class CronExpression {
     if (!this.month.includes(mo)) return false;
 
     // 日和周：如果两者都不是 *，则满足任一即可
-    const isDayAll = this.dayOfMonth.length === 60; // 0-59 全覆盖
+    const isDayAll = this.dayOfMonth.length === 31; // 1-31 全覆盖
     const isWeekAll = this.dayOfWeek.length === 7;  // 0-6 全覆盖
 
     if (!isDayAll && !isWeekAll) {

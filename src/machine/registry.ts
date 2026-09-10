@@ -26,6 +26,8 @@ export class MachineRegistry {
   private flows = new Map<string, FlowController>();
   private activeId: string | null = null;
   private persistenceDir: string | null = null;
+  /** 最近一次已完成的 Flow 描述（terminal 时写入，供 getContextInjection 消费后注入完成通知） */
+  private pendingCompletion: { mode: string; task: string; stepsCount: number } | null = null;
 
   /** 注册 Flow */
   register(flow: FlowController): void {
@@ -47,6 +49,39 @@ export class MachineRegistry {
     // 只有当 Flow 的 runner 处于 active 状态时才返回
     if (flow?.runner.status === 'active') return flow;
     return undefined;
+  }
+
+  /** 消费并清空「最近完成的 Flow」描述（一次性，避免重复注入完成通知） */
+  consumePendingCompletion(): { mode: string; task: string; stepsCount: number } | null {
+    const result = this.pendingCompletion;
+    this.pendingCompletion = null;
+    return result;
+  }
+
+  /**
+   * 获取应注入上下文的 Flow 文本。
+   *
+   * 这是 Flow 状态对模型的唯一可见通道：
+   * - 活跃 Flow：返回其步骤提示词（getInjection）
+   * - 无活跃 Flow 但刚完成：返回一条绑定本次 plan 的完成通知
+   *   （否则工具结果被 isFlowTool 排除 + 注入为空，模型会陷入「以为 flow 还在」的认知断层，
+   *    反复调用 flow_complete 造成死循环）
+   * - 其他情况：返回空字符串
+   */
+  getContextInjection(): string {
+    const active = this.getActive();
+    if (active) {
+      return active.getInjection() ?? '';
+    }
+
+    const completion = this.consumePendingCompletion();
+    if (completion) {
+      const taskLabel = completion.task ? `，任务「${completion.task}」` : '';
+      const stepsLabel = completion.stepsCount > 0 ? `的 ${completion.stepsCount} 个步骤` : '';
+      return `[Flow] 本次 ${completion.mode} 流程${taskLabel}${stepsLabel}已全部完成。请停止调用 flow_complete，直接向用户汇报结果。`;
+    }
+
+    return '';
   }
 
   /** 设置持久化目录（factory 在 sessionDir 确定后调用） */
@@ -118,6 +153,11 @@ export class MachineRegistry {
   onAdvanceSucceeded(flowId: string, isTerminal: boolean): void {
     if (isTerminal) {
       logger.info('Flow completed', { id: flowId });
+      // 记录「本次 plan 完成」描述，供 getContextInjection 在下一轮注入完成通知
+      const flow = this.flows.get(flowId);
+      const task = (flow?.runner.context.task as string | undefined) ?? '';
+      const steps = (flow?.runner.context.steps as unknown[] | undefined) ?? [];
+      this.pendingCompletion = { mode: flowId, task, stepsCount: steps.length };
       this.activeId = null;
     }
     this.save().catch(() => {});

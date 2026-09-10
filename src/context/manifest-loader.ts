@@ -104,6 +104,32 @@ export class ManifestLoader {
     return m.zones[name];
   }
 
+  /**
+   * 设置 zone 开关并落盘。zone 不存在 → 报错（防误写）。
+   * 落盘后 watcher（manifest-watcher）监听文件变化自动 reload，
+   * 未跑 watcher 的进程（如 TUI 本地模式）也因内存对象已被修改而即时生效。
+   */
+  setZoneEnabled(zoneName: string, enabled: boolean): void {
+    const m = this.load();
+    const zone = m.zones[zoneName];
+    if (!zone) {
+      throw new Error(`Zone "${zoneName}" not found in context-manifest.json`);
+    }
+    zone.enabled = enabled;
+    this.save();
+  }
+
+  /** 落盘当前 manifest（内存对象序列化到 .agent/context-manifest.json） */
+  private save(): void {
+    if (!this.manifest) return;
+    try {
+      fs.mkdirSync(path.dirname(this.manifestPath), { recursive: true });
+      fs.writeFileSync(this.manifestPath, JSON.stringify(this.manifest, null, 2) + '\n', 'utf-8');
+    } catch (err) {
+      throw new Error(`Failed to save context-manifest.json: ${(err as Error).message}`);
+    }
+  }
+
   getEnabledZones(): Array<[string, ZoneEntry]> {
     const m = this.load();
     return Object.entries(m.zones)
@@ -130,6 +156,7 @@ export class ManifestLoader {
     const m = JSON.parse(JSON.stringify(DEFAULT_CONTEXT_MANIFEST)) as ContextManifest;
 
     try {
+      fs.mkdirSync(path.dirname(this.manifestPath), { recursive: true });
       fs.writeFileSync(this.manifestPath, JSON.stringify(m, null, 2) + '\n', 'utf-8');
       logger.info('Generated default context-manifest.json');
     } catch (err) {

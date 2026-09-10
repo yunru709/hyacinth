@@ -222,8 +222,8 @@ describe('EventStore', () => {
   });
 
   it('append() and readAll() round-trip', async () => {
-    const event1 = { type: 'session_start', session_id: 'test-1', timestamp: new Date().toISOString() };
-    const event2 = { type: 'usage', input_tokens: 10, output_tokens: 20, timestamp: new Date().toISOString() };
+    const event1 = { type: 'session_start' as const, session_id: 'test-1', timestamp: new Date().toISOString() };
+    const event2 = { type: 'usage' as const, input_tokens: 10, output_tokens: 20, timestamp: new Date().toISOString() };
 
     await store.append(sessionDir, event1);
     await store.append(sessionDir, event2);
@@ -278,8 +278,8 @@ describe('SessionManager', () => {
 
     const sessionDir = manager.getSessionDir(session.id);
 
-    // Verify required files exist
-    const files = ['conversation.jsonl', 'events.jsonl', 'stats.json'];
+    // Verify required files exist（conversation.jsonl 惰性：首条消息 append 才创建）
+    const files = ['meta.json', 'events.jsonl', 'stats.json'];
     for (const file of files) {
       const filePath = path.join(sessionDir, file);
       const exists = await fs.access(filePath).then(() => true).catch(() => false);
@@ -310,6 +310,10 @@ describe('SessionManager', () => {
 
   it('cleanup() deletes old sessions', async () => {
     const session = await manager.create();
+
+    // mtime 回拨 1 分钟：消除"刚创建 mtime==now 不满足 age>0"的时序抖动
+    const past = new Date(Date.now() - 60_000);
+    await fs.utimes(manager.getSessionDir(session.id), past, past);
 
     // Cleanup with maxAgeDays=0 should delete all sessions
     const deletedCount = await manager.cleanup(0);

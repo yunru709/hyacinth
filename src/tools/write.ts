@@ -4,7 +4,7 @@ import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
-import { runDiagnostics } from './diagnostics.js';
+import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
 
 /**
@@ -18,6 +18,7 @@ import { autoReferenceCheck } from './symbol-references.js';
  */
 export class WriteTool implements Tool {
   readonly name = 'write';
+  readonly sideEffect = 'write' as const;
   readonly description =
     '创建或覆盖文件。自动创建不存在的父目录。写入后返回文件路径和行数。';
   readonly companionDescription = '写东西喽。';
@@ -107,7 +108,7 @@ export class WriteTool implements Tool {
 
     // ── 自动诊断：修改后运行类型检查/编译检查 ──
     try {
-      const diag = await runDiagnostics(process.cwd(), 15000);
+      const diag = await maybeRunDiagnostics(process.cwd());
       if (diag) result += '\n\n' + diag;
     } catch { /* 诊断失败不影响工具返回值 */ }
 

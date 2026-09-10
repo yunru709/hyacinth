@@ -6,6 +6,7 @@ import type { Tool } from '../tools/interface.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { createLogger } from '../logging/logger.js';
 import { PythonToolBridge } from '../tools/python-bridge/index.js';
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 const logger = createLogger('hot-reload:tool-watcher');
 
@@ -22,8 +23,8 @@ export interface ToolWatcherDeps {
  *   ModuleTool — subdir dist/index.js
  *   PythonTool — flat .py files (PythonToolBridge)
  */
-export function watchTools(deps: ToolWatcherDeps): fs.FSWatcher {
-  const { toolRegistry, cwd, debounceMs } = deps;
+export function watchTools(deps: ToolWatcherDeps): WatcherHandle[] {
+  const { toolRegistry, debounceMs } = deps;
   const toolsDir = path.join(os.homedir(), '.agent', 'tools');
 
   try { fs.mkdirSync(toolsDir, { recursive: true }); } catch { /* ignore */ }
@@ -33,23 +34,15 @@ export function watchTools(deps: ToolWatcherDeps): fs.FSWatcher {
   // 初始扫描不标记 hotAdded — 工具应进入 Zone 2 tool_rules
   scanAndSync(toolsDir, toolRegistry, fileMap, mtimeMap, true);
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  logger.info(`Watching tools directory: ${toolsDir}`);
-
-  const watcher = fs.watch(toolsDir, { recursive: true }, (_eventType, filename) => {
-    if (!filename) return;
-    if (!filename.endsWith('.js') && !filename.endsWith('.py')) return;
-    if (debounceTimer) clearTimeout(debounceTimer);
+  return createWatcher({
+    name: 'tool-watcher',
+    debounceMs,
+    recursive: true,
+    paths: () => [toolsDir],
+    filter: (filename) => filename.endsWith('.js') || filename.endsWith('.py'),
     // 文件变更触发的重新扫描 — 此时才标记 hotAdded，工具进 Zone 5 session-tools
-    debounceTimer = setTimeout(() => scanAndSync(toolsDir, toolRegistry, fileMap, mtimeMap, false), debounceMs);
+    reload: () => scanAndSync(toolsDir, toolRegistry, fileMap, mtimeMap, false),
   });
-
-  watcher.on('error', (err) => {
-    logger.warn(`Tool watcher error: ${err.message}`, { error: err.message });
-  });
-
-  return watcher;
 }
 
 // ── Resolved entry ──────────────────────────────────────────────────

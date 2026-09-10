@@ -1,3 +1,11 @@
+/**
+ * schedule 测试（报告 M3 P1：HeartbeatScheduler 测试此前被整体注释）
+ *
+ * 历史问题（已修复）：旧 HeartbeatScheduler 测试未传 storagePath → addTask
+ * 污染真实 ~/.agent/scheduler/tasks.json；且 afterEach 用 fs.rmSync 被
+ * safe-delete shim 劫持。现在每个用例用独立临时 storagePath + **不删除**
+ * 临时目录（os.tmpdir 自清，遵守 de-flake 教训）。
+ */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +64,32 @@ describe('CronExpression', () => {
     expect(next!.getMinutes()).toBe(0);
   });
 
+  it('parses 0 9 * * 1 (Mondays only — dayOfMonth=* must NOT widen the match)', () => {
+    // 回归：isDayAll 曾错误地比较 dayOfMonth.length === 60（实际 * 产生 31 个值），
+    // 导致 dayOfMonth=* + dayOfWeek 受限时每天都触发，而非仅周一。
+    const cron = new CronExpression('0 9 * * 1');
+    // 2026-09-09 是周三；下一个周一 9 点应是 2026-09-14
+    const now = new Date('2026-09-09T10:00:00');
+    const next = cron.next(now);
+    expect(next).toBeDefined();
+    expect(next!.getDay()).toBe(1); // Monday
+    expect(next!.getDate()).toBe(14);
+    expect(next!.getHours()).toBe(9);
+  });
+
+  it('dayOfMonth and dayOfWeek both restricted → OR semantics', () => {
+    // 经典 cron 语义：日域与周域都受限时，满足任一即触发
+    const cron = new CronExpression('0 0 1 * 1'); // 每月1号 或 每周一
+    const now = new Date('2026-09-09T00:01:00'); // 周三
+    const nexts = cron.nextN(now, 4);
+    // 下一次应是 9-13（下周一）、9-14（下周一……实际 9-13 与 9-14 相邻：13 是周日？以计算为准，只断言日域合法性）
+    for (const n of nexts) {
+      const isMonday = n.getDay() === 1;
+      const isFirstDay = n.getDate() === 1;
+      expect(isMonday || isFirstDay).toBe(true);
+    }
+  });
+
   it('throws on invalid field count', () => {
     expect(() => new CronExpression('* * * *')).toThrow();
     expect(() => new CronExpression('* * * * * *')).toThrow();
@@ -72,27 +106,40 @@ describe('CronExpression', () => {
   });
 });
 
-/* 暂时注释（2026-08-05）：HeartbeatScheduler 测试会 addTask 注册测试性定时任务，
-   曾污染真实 ~/.agent/scheduler/tasks.json（残留 expired/updated-test）。恢复时删掉本注释块。
+// ── HeartbeatScheduler ──────────────────────────────────────────────
+
 describe('HeartbeatScheduler', () => {
-  // 每个测试用独立临时存储路径，避免共享 ~/.agent/scheduler/tasks.json（互相污染 + 污染真实数据）
   let tempStorage: string;
+  let schedulers: HeartbeatScheduler[];
+
   beforeEach(() => {
+    // 每个用例独立临时存储路径，绝不触碰真实 ~/.agent/scheduler/tasks.json
     tempStorage = path.join(os.tmpdir(), `sched-test-${crypto.randomUUID()}`, 'tasks.json');
-  });
-  afterEach(() => {
-    try { fs.rmSync(path.dirname(tempStorage), { recursive: true, force: true }); } catch { // ignore
+    schedulers = [];
   });
 
+  afterEach(async () => {
+    // 停止所有调度器（释放 interval），不删除临时目录（tmpdir 自清）
+    for (const s of schedulers.splice(0)) {
+      try { await s.stop(); } catch { /* ignore */ }
+    }
+  });
+
+  function makeScheduler(over: Record<string, unknown> = {}): HeartbeatScheduler {
+    const s = new HeartbeatScheduler({ storagePath: tempStorage, ...over });
+    schedulers.push(s);
+    return s;
+  }
+
   it('can be created with default config', () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const status = scheduler.getStatus();
     expect(status.running).toBe(false);
     expect(status.taskCount).toBe(0);
   });
 
   it('can add and retrieve a task', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const task = await scheduler.addTask(
       'test-interval',
       'interval',
@@ -117,7 +164,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('can update a task', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const task = await scheduler.addTask(
       'test',
       'interval',
@@ -132,7 +179,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('can delete a task', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const task = await scheduler.addTask(
       'test',
       'cron',
@@ -147,7 +194,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('can enable and disable tasks', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const task = await scheduler.addTask(
       'test',
       'interval',
@@ -165,7 +212,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('start and stop lifecycle', async () => {
-    const scheduler = new HeartbeatScheduler({ heartbeatMs: 1000, storagePath: tempStorage });
+    const scheduler = makeScheduler({ heartbeatMs: 1000 });
     await scheduler.start();
     expect(scheduler.getStatus().running).toBe(true);
     expect(scheduler.getStatus().startedAt).toBeDefined();
@@ -173,15 +220,14 @@ describe('HeartbeatScheduler', () => {
     expect(scheduler.getStatus().running).toBe(false);
   });
 
-  it('executes due tasks via handler', async () => {
+  it('executes due tasks via handler（真实触发）', async () => {
     const executed: string[] = [];
-    const scheduler = new HeartbeatScheduler({ heartbeatMs: 100, storagePath: tempStorage });
+    const scheduler = makeScheduler({ heartbeatMs: 100 });
 
     scheduler.setHandler(async (task) => {
       executed.push(task.name);
     });
 
-    // Add a short-interval task
     await scheduler.addTask(
       'quick-task',
       'interval',
@@ -191,17 +237,116 @@ describe('HeartbeatScheduler', () => {
 
     await scheduler.start();
 
-    // Wait for at least one tick
+    // 等至少一个心跳 tick
     await new Promise(r => setTimeout(r, 300));
-
     await scheduler.stop();
 
     expect(executed.length).toBeGreaterThanOrEqual(1);
     expect(executed).toContain('quick-task');
   }, 10000);
 
+  it('执行后持久化：runCount/lastRunAt 递增 + 执行记录可查', async () => {
+    const scheduler = makeScheduler({ heartbeatMs: 50 });
+    let calls = 0;
+    scheduler.setHandler(async () => { calls++; });
+
+    const task = await scheduler.addTask(
+      'record-task',
+      'interval',
+      { intervalMs: 60 },
+      { type: 'callback', target: 'handler' },
+    );
+
+    await scheduler.start();
+    await new Promise(r => setTimeout(r, 300));
+    await scheduler.stop();
+
+    expect(calls).toBeGreaterThanOrEqual(1);
+    const after = scheduler.getTask(task.id)!;
+    expect(after.runCount).toBeGreaterThanOrEqual(1);
+    expect(after.lastRunAt).toBeTruthy();
+
+    // 执行记录落盘（从磁盘持久化读回）
+    const records = await scheduler.getRecentRecords(10);
+    const mine = records.filter(r => r.taskId === task.id);
+    expect(mine.length).toBeGreaterThanOrEqual(1);
+    expect(mine[0]!.success).toBe(true);
+  }, 10000);
+
+  it('handler 抛错 → 记录 success=false + errorCount 递增，不影响后续 tick', async () => {
+    const scheduler = makeScheduler({ heartbeatMs: 50 });
+    let fail = true;
+    scheduler.setHandler(async () => {
+      if (fail) throw new Error('boom');
+    });
+
+    const task = await scheduler.addTask(
+      'fail-task',
+      'interval',
+      { intervalMs: 60 },
+      { type: 'callback', target: 'handler' },
+    );
+
+    await scheduler.start();
+    await new Promise(r => setTimeout(r, 250));
+    fail = false; // 恢复
+    await new Promise(r => setTimeout(r, 150));
+    await scheduler.stop();
+
+    const after = scheduler.getTask(task.id)!;
+    expect(after.errorCount).toBeGreaterThanOrEqual(1);
+    const records = await scheduler.getRecentRecords(10);
+    const fails = records.filter(r => r.taskId === task.id && !r.success);
+    expect(fails.length).toBeGreaterThanOrEqual(1);
+    expect(fails[0]!.error).toContain('boom');
+  }, 10000);
+
+  it('同名 addTask 更新而非新增', async () => {
+    const scheduler = makeScheduler();
+    const first = await scheduler.addTask(
+      'same-name',
+      'interval',
+      { intervalMs: 60000 },
+      { type: 'callback', target: 'a' },
+    );
+    const second = await scheduler.addTask(
+      'same-name',
+      'interval',
+      { intervalMs: 120000 },
+      { type: 'callback', target: 'b' },
+    );
+
+    expect(second.id).toBe(first.id); // 同一条
+    expect(scheduler.getTasks()).toHaveLength(1);
+    expect(scheduler.getTask(first.id)!.action).toEqual({ type: 'callback', target: 'b' });
+  });
+
+  it('start 时清理过期 fixed-time 任务 + 去重同名任务', async () => {
+    const scheduler = makeScheduler({ heartbeatMs: 1000 });
+    // 过期的一次性任务
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    await scheduler.addTask('expired', 'fixed-time', { runAt: past }, { type: 'callback', target: 'h' });
+    // 同名重复（直接写盘模拟历史残留）
+    const dir = path.dirname(tempStorage);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(tempStorage, JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'dup-1', name: 'dup', scheduleType: 'interval', schedule: { intervalMs: 60000 }, action: { type: 'callback', target: 'a' }, enabled: true, createdAt: '2026-01-01T00:00:00.000Z', lastRunAt: null, nextRunAt: null, runCount: 0, errorCount: 0 },
+        { id: 'dup-2', name: 'dup', scheduleType: 'interval', schedule: { intervalMs: 60000 }, action: { type: 'callback', target: 'b' }, enabled: true, createdAt: '2026-01-02T00:00:00.000Z', lastRunAt: null, nextRunAt: null, runCount: 0, errorCount: 0 },
+      ],
+    }, null, 2));
+
+    await scheduler.start();
+    // 过期任务被清；dup 同名只保留一条
+    expect(scheduler.getTask('dup-1') || scheduler.getTask('dup-2')).toBeTruthy();
+    const dupTasks = scheduler.getTasks().filter(t => t.name === 'dup');
+    expect(dupTasks.length).toBe(1);
+    await scheduler.stop();
+  });
+
   it('calculates daily next run', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const task = await scheduler.addTask(
       'daily-task',
       'daily',
@@ -216,7 +361,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('expired fixed-time task returns null nextRun', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const pastDate = new Date(Date.now() - 86400000).toISOString(); // yesterday
     const task = await scheduler.addTask(
       'expired',
@@ -229,7 +374,7 @@ describe('HeartbeatScheduler', () => {
   });
 
   it('future fixed-time task has valid nextRun', async () => {
-    const scheduler = new HeartbeatScheduler({ storagePath: tempStorage });
+    const scheduler = makeScheduler();
     const futureDate = new Date(Date.now() + 86400000).toISOString(); // tomorrow
     const task = await scheduler.addTask(
       'future',
@@ -241,4 +386,3 @@ describe('HeartbeatScheduler', () => {
     expect(task.nextRunAt).toBeDefined();
   });
 });
-*/

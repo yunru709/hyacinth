@@ -5,7 +5,6 @@ export type { RegistryItem, RegistryEvent, RegistryEventListener } from './base.
 export { ToolRegistry } from './tool.registry.js';
 export { SkillRegistry, createBuiltinSkills } from './skill.registry.js';
 export { AgentRegistry } from './agent.registry.js';
-export { ProviderRegistry } from './provider.registry.js';
-export { ChannelRegistry } from './channel.registry.js';
-export { PluginRegistry } from './plugin.registry.js';
+// ProviderRegistry / ChannelRegistry / PluginRegistry 已废弃（2026-09，P4）——
+// ProviderRouter / ModelChannelRegistry / PluginManager 已分别覆盖全部语义，无消费者。
 // McpRegistry 已移除 — MCP 统一由 MCPSystem 管理，不再需要独立 Registry 包装

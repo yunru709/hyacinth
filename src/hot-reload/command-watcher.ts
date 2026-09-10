@@ -7,59 +7,40 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { createLogger } from '../logging/logger.js';
-
-const logger = createLogger('hot-reload:command-watcher');
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 interface CommandWatcherDeps {
   cwd: string;
   debounceMs?: number;
 }
 
-export function watchCommandsJson(deps: CommandWatcherDeps): fs.FSWatcher {
+async function reloadCommands(): Promise<void> {
+  // 动态 import 避免循环依赖（修复：原 require() 在 ESM 下运行时必然抛错）
+  const { CommandRegistry } = await import('../ui/command-registry.js');
+  CommandRegistry.getInstance().reload();
+}
+
+/**
+ * 监听 commands.json：change 触发 reload；文件被删除/重建（rename）后，
+ * 重建的变更同样进入 reload 路径，reload 前检查文件存在性即可覆盖原
+ * rename 重监听分支的语义。
+ */
+export function watchCommandsJson(deps: CommandWatcherDeps): WatcherHandle[] {
   const filePath = path.join(deps.cwd, 'commands.json');
-  const debounceMs = deps.debounceMs ?? 300;
 
   if (!fs.existsSync(filePath)) {
-    logger.debug('commands.json not found, watcher will activate if created');
+    // commands.json 是模型可写的外部配置，可能尚不存在；watch 单文件
+    // 在 Windows 上对不存在路径会抛错，故监听父目录 + filename 过滤
   }
 
-  const watcher = fs.watch(filePath, { persistent: false }, () => {
-    setTimeout(() => {
-      logger.info('commands.json changed, reloading...');
-      try {
-        // 延迟加载避免循环依赖
-        const { CommandRegistry } = require('../ui/command-registry.js');
-        CommandRegistry.getInstance().reload();
-        logger.info('Slash commands reloaded from commands.json');
-      } catch (err) {
-        logger.warn('Failed to reload commands.json', { error: (err as Error).message });
-      }
-    }, debounceMs);
+  return createWatcher({
+    name: 'command-watcher',
+    debounceMs: deps.debounceMs ?? 300,
+    paths: () => [path.dirname(filePath)],
+    filter: (filename) => filename === 'commands.json',
+    reload: () => {
+      if (!fs.existsSync(filePath)) return; // rename 删除场景：跳过
+      return reloadCommands();
+    },
   });
-
-  watcher.on('error', (err) => {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.warn('Command watcher error', { error: err.message });
-    }
-  });
-
-  watcher.on('rename', () => {
-    // 文件被删除/重命名后重新添加监听
-    setTimeout(() => {
-      if (fs.existsSync(filePath)) {
-        logger.info('commands.json recreated, reloading...');
-        try {
-          const { CommandRegistry } = require('../ui/command-registry.js');
-          CommandRegistry.getInstance().reload();
-        } catch (err) {
-          logger.warn('Failed to reload commands.json', { error: (err as Error).message });
-        }
-      }
-    }, debounceMs);
-  });
-
-  logger.debug(`Watching ${filePath}`);
-
-  return watcher;
 }

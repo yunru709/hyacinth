@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Tool } from './interface.js';
 import type { BackgroundProcessRegistry } from './background-registry.js';
+import { getToolConfig } from './tool-config.js';
+import { classifyCommand } from '../kernel/security/index.js';
 
 /** 沙箱配置接口 — 限制 BashTool 可执行的命令 */
 export interface SandboxConfig {
@@ -133,6 +135,7 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
  */
 export class BashTool implements Tool {
   readonly name = 'bash';
+  readonly sideEffect = 'exec' as const;
   readonly description =
     '执行 Shell 命令并返回 stdout/stderr。Windows 下原生运行在 PowerShell —— 不要加 "powershell -Command" 前缀。Linux/macOS 下运行在 /bin/sh。async=true 时以后台进程方式执行，返回进程句柄，可通过 process_list / process_output / process_kill 管理。';
   readonly inputSchema: Record<string, unknown> = {
@@ -167,8 +170,9 @@ export class BashTool implements Tool {
 
   constructor(cwd?: string, sandboxConfig?: SandboxConfig) {
     this.cwd = cwd ?? process.cwd();
+    // 黑名单优先级：显式编程注入 > tools.bash.blockedCommands 配置（整体替换）> 内置默认
     this.sandboxConfig = sandboxConfig ?? {
-      blockedCommands: DEFAULT_BLOCKED_COMMANDS,
+      blockedCommands: getToolConfig('bash.blockedCommands', DEFAULT_BLOCKED_COMMANDS),
     };
     this.persistentEnv = {};
   }
@@ -222,7 +226,7 @@ export class BashTool implements Tool {
   async execute(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     const command = args.command as string;
     if (!command) return '错误：缺少 command 参数。请提供要执行的命令。';
-    const timeout = (args.timeout as number | undefined) ?? 600;
+    const timeout = (args.timeout as number | undefined) ?? getToolConfig('bash.timeoutSec', 600);
     const callEnv = (args.env as Record<string, string>) ?? {};
     const runAsync = args.async === true;
 
@@ -244,6 +248,14 @@ export class BashTool implements Tool {
       if (pattern.test(command)) {
         throw new Error(`Command blocked by sandbox: contains blocked command "${label}"`);
       }
+    }
+
+    // 安全内核：命令结构分类（kernel/security policy）——硬拒绝模式在此层拦截。
+    // Windows 下命令本体被写进临时 .ps1（内核只能看到 powershell -File argv），
+    // 因此内容级检查必须在工具层完成；Unix 下内核可见原始命令，双保险。
+    const verdict = classifyCommand(command);
+    if (verdict.level === 'blocked') {
+      throw new Error(`Command blocked by security kernel: ${verdict.reasons.join('; ')}`);
     }
 
     // 沙箱路径白名单已废弃 — 不再限制 cd 目标和工作目录，由 LLM 自行约束
@@ -327,7 +339,8 @@ export class BashTool implements Tool {
     // ── 同步执行路径 ──
 
     // 输出截断配置
-    const MAX_OUTPUT_BYTES = this.sandboxConfig.maxOutputBytes ?? 500 * 1024;
+    const MAX_OUTPUT_BYTES =
+      this.sandboxConfig.maxOutputBytes ?? getToolConfig('bash.maxOutputBytes', 500 * 1024);
     const LIMIT_KB = Math.round(MAX_OUTPUT_BYTES / 1024);
     let outputSize = 0;
     let truncated = false;

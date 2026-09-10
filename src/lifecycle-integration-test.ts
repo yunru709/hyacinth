@@ -1,4 +1,4 @@
-import { LifecycleSupervisor } from './lifecycle/index.js';
+import { LifecycleSupervisor } from './supervisor/shutdown.js';
 import { LocalProvider } from './provider/local.js';
 import type { Message } from './types.js';
 

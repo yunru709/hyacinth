@@ -14,10 +14,6 @@ export type {
 // ProcessManager
 export { ProcessManager } from './manager.js';
 
-// LocalModelManager
-export { LocalModelManager, pickModelForProvider } from './local-model.js';
-export type { LoadedModelInfo } from './local-model.js';
-
 // ModelRegistry
 export { ModelRegistry } from '../local-model/model-registry.js';
 export type { ModelEntry, ModelBackend, ModelRegisterOptions } from '../local-model/model-registry.js';
@@ -29,6 +25,3 @@ export type { RunningModelInfo } from '../local-model/model-bridge.js';
 // LocalModelModule
 export { LocalModelModule } from '../local-model/index.js';
 
-// LifecycleSupervisor
-export { LifecycleSupervisor } from './supervisor.js';
-export type { ManagedEntityType } from './supervisor.js';

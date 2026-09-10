@@ -6,7 +6,16 @@ import type { SkillDefinition, MCPConfig } from '../types.js';
 import type { ContextSource } from '../context/interface.js';
 import type { ContextComposer } from '../context/interface.js';
 import type { ChannelHandler, ChannelConfig } from '../channels/interface.js';
-import type { PluginApi, PluginLogger } from './types.js';
+import type {
+  PluginApi,
+  PluginLogger,
+  HostTool,
+  HostContextSource,
+  HostSkillDefinition,
+  HostMcpConfig,
+  HostChannelHandler,
+  HostChannelConfig,
+} from '../plugin-sdk/types.js';
 import { createLogger } from '../logging/logger.js';
 
 /** PluginApi 构造参数 */
@@ -26,6 +35,15 @@ export interface PluginApiOptions {
   onSkillRegister?: (name: string) => void;
   onContextSourceRegister?: (name: string) => void;
   onMcpServerUnregister?: (name: string) => void;
+  /** 主循环钩子桥（PluginHost 注入；未注入时 api.onHook/aroundHook 为 undefined） */
+  hooks?: {
+    onHook(name: string, handler: (payload: unknown) => void | Promise<void>): unknown;
+    aroundHook(name: string, handler: (payload: unknown, next: (p: unknown) => Promise<unknown>) => Promise<unknown>): unknown;
+  };
+  /** 内核服务注册桥（PluginHost 注入；未注入时 api.registerService 抛错） */
+  onServiceRegister?: (key: string, service: unknown) => void;
+  /** 内核服务读取桥（PluginHost 注入；未注入时 api.getService 抛错） */
+  onServiceGet?: (key: string) => unknown | undefined;
 }
 
 /**
@@ -42,6 +60,9 @@ export function createPluginApi(options: PluginApiOptions): PluginApi {
     pendingMcpConfigs,
     onToolRegister, onSkillRegister, onContextSourceRegister,
     onMcpServerUnregister,
+    hooks,
+    onServiceRegister,
+    onServiceGet,
   } = options;
 
   const pluginLogger = createLogger(`plugin:${pluginId}`);
@@ -61,21 +82,36 @@ export function createPluginApi(options: PluginApiOptions): PluginApi {
     pluginId,
     logger,
 
-    registerTool(tool: Tool): void {
-      toolRegistry.register(tool);
+    registerService(key: string, service: unknown): void {
+      if (!onServiceRegister) {
+        throw new Error(`[${pluginId}] registerService requires host-backed activation (kernel PluginContext)`);
+      }
+      onServiceRegister(key, service);
+      logger.debug(`registered service: ${key}`);
+    },
+
+    getService<T = unknown>(key: string): T | undefined {
+      if (!onServiceGet) {
+        throw new Error(`[${pluginId}] getService requires host-backed activation (kernel PluginContext)`);
+      }
+      return onServiceGet(key) as T | undefined;
+    },
+
+    registerTool(tool: HostTool): void {
+      toolRegistry.register(tool as Tool);
       onToolRegister?.(tool.name);
       logger.debug(`registered tool: ${tool.name}`);
     },
 
-    registerSkill(skill: SkillDefinition): void {
-      skillRegistry.register(skill);
+    registerSkill(skill: HostSkillDefinition): void {
+      skillRegistry.register(skill as SkillDefinition);
       onSkillRegister?.(skill.name);
       logger.debug(`registered skill: ${skill.name}`);
     },
 
-    registerContextSource(source: ContextSource): void {
+    registerContextSource(source: HostContextSource): void {
       if (contextComposer.registerSource) {
-        contextComposer.registerSource(source);
+        contextComposer.registerSource(source as ContextSource);
         onContextSourceRegister?.(source.name);
         logger.debug(`registered context source: ${source.name}`);
       } else {
@@ -83,13 +119,13 @@ export function createPluginApi(options: PluginApiOptions): PluginApi {
       }
     },
 
-    registerMcpServer(config: MCPConfig): void {
-      onMcpServerRegister(pluginId, config);
+    registerMcpServer(config: HostMcpConfig): void {
+      onMcpServerRegister(pluginId, config as MCPConfig);
       logger.debug(`registered MCP server config: ${config.name}`);
     },
 
-    registerChannel(handler: ChannelHandler, config?: ChannelConfig): void {
-      onChannelRegister(handler, config);
+    registerChannel(handler: HostChannelHandler, config?: HostChannelConfig): void {
+      onChannelRegister(handler as ChannelHandler, config as ChannelConfig | undefined);
       logger.debug(`registered channel: ${handler.id} (${handler.name})`);
     },
 
@@ -122,6 +158,18 @@ export function createPluginApi(options: PluginApiOptions): PluginApi {
       }
     },
 
+    unregisterChannel(id: string): void {
+      // ChannelManager.unregister 由 onChannelUnregister 回调处理（如果注入了的话）
+      // 此处仅做日志记录；实际注销通过 PluginHost 自动回滚完成
+      logger.debug(`unregistered channel: ${id}`);
+    },
+    onHook: hooks
+      ? (name, handler) => { hooks.onHook(name, handler); }
+      : undefined,
+    aroundHook: hooks
+      ? (name, handler) => { hooks.aroundHook(name, handler); }
+      : undefined,
+
     getConfig<T = Record<string, unknown>>(): T {
       return pluginConfig as T;
     },
@@ -129,3 +177,16 @@ export function createPluginApi(options: PluginApiOptions): PluginApi {
 
   return api;
 }
+
+// ============================================================
+// 同源守卫 —— 内部类型必须始终满足 sdk 窄接口（结构漂移 → 编译失败）
+// ============================================================
+type _SdkGuard =
+  & (Tool extends HostTool ? unknown : never)
+  & (ContextSource extends HostContextSource ? unknown : never)
+  & (SkillDefinition extends HostSkillDefinition ? unknown : never)
+  & (MCPConfig extends HostMcpConfig ? unknown : never)
+  & (ChannelHandler extends HostChannelHandler ? unknown : never);
+
+/** 编译期断言出口：任一守卫失败则 _SdkGuard = never，本赋值报错 */
+export const _sdkTypeGuard: _SdkGuard = {};

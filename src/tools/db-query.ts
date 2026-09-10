@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
 import Database from './sqlite.js';
+import { getToolConfig } from './tool-config.js';
 
 /**
  * DbQueryTool — SQLite 内置支持，参数化查询。
@@ -84,9 +85,10 @@ export class DbQueryTool implements Tool {
           '| ' + columns.map(c => String(row[c] ?? 'NULL')).join(' | ') + ' |',
         );
 
-        const result = [header, separator, ...bodyRows.slice(0, 200)].join('\n');
-        const suffix = rows.length > 200
-          ? `\n\n... (${rows.length - 200} more rows, ${rows.length} total)`
+        const maxRows = getToolConfig('db.maxRows', 200); // tools.db.maxRows
+        const result = [header, separator, ...bodyRows.slice(0, maxRows)].join('\n');
+        const suffix = rows.length > maxRows
+          ? `\n\n... (${rows.length - maxRows} more rows, ${rows.length} total)`
           : `\n\n${rows.length} row(s)`;
 
         return result + suffix;

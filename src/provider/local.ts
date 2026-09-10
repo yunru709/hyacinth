@@ -66,6 +66,7 @@ export class LocalProvider implements Provider {
       maxContextTokens: this.maxTokens,
       isLocal: true,
       vision: true, // Ollama/llama.cpp 均可加载视觉模型，默认开启
+      inputTypes: ['text', 'image'],
     };
   }
 
@@ -250,6 +251,11 @@ export class LocalProvider implements Provider {
             } else {
               textParts.push(`[Image: ${block.source.type === 'base64' ? block.source.media_type : 'url'}]`);
             }
+          } else if (block.type === 'video' || block.type === 'audio') {
+            // 本地模型无视频/音频输入 → 文本占位（抽帧降级在管线层做）
+            const src = block.source;
+            const kind = block.type === 'video' ? 'Video' : 'Audio';
+            textParts.push(src.type === 'file' ? `[${kind} file: ${src.path}]` : `[${kind}: ${src.type === 'base64' ? src.media_type : src.url}]`);
           }
         }
 

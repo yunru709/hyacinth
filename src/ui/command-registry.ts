@@ -525,20 +525,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
-    name: 'precise on',
-    description: '开启精确模式（新建 session，关键词分析）',
-    icon: '\u{1F3AF}',
-    category: 'mode',
-    executeLocal: true,
-  },
-  {
-    name: 'precise off',
-    description: '关闭精确模式（恢复普通模式）',
-    icon: '\u{1F3AF}',
-    category: 'mode',
-    executeLocal: true,
-  },
-  {
     name: 'orchestrator on',
     description: '开启上下文编排旁路Agent（意图识别+记忆维护）',
     icon: '🧠',

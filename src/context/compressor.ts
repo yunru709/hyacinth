@@ -27,10 +27,21 @@ import type { ModelRouter } from '../provider/model-router.js';
 import type { GitManager } from '../evolution/git-manager.js';
 import { SummaryStore } from '../memory/summary.js';
 import { loadPrompt } from '../prompts/loader.js';
+import { createLogger } from '../logging/logger.js';
+import { compressorUserId } from '../provider/user-id.js';
+import {
+  safetyThreshold,
+  targetRatio,
+  clusterBudgetRatio,
+  maxCompressRounds,
+  trimWindow,
+} from './context-config.js';
 
 
 
 // ─── 工具函数 ────────────────────────────────────────────────────────
+
+const logger = createLogger('compressor');
 
 /** 判断 MessageContent 是否为 ToolResultContent */
 function isToolResult(content: MessageContent): content is ToolResultContent {
@@ -465,7 +476,13 @@ export class StructuredSummarizer {
    * @param existingSummary - 已有的摘要（增量压缩时传入）
    * @param recentContext - 近期对话（不压缩，仅供 LLM 判断相关性，优先保留相关信息）
    */
-  async summarize(messages: Message[], existingSummary?: string, recentContext?: Message[]): Promise<string> {
+  async summarize(
+    messages: Message[],
+    existingSummary?: string,
+    recentContext?: Message[],
+    /** KVCache 隔离 ID（session 粒度）；缺省用通道默认 compressorUserId() */
+    userId?: string,
+  ): Promise<string> {
     let prompt: string;
 
     const depthInstruction = this.getDepthInstruction();
@@ -503,7 +520,9 @@ export class StructuredSummarizer {
     ];
 
     let summaryText = '';
-    const provider = this.modelRouter.getProvider('compression');
+    // 按次现建 scoped 实例（session 粒度 user_id 隔离）；通道无配置时降级 null → 用共享实例
+    const provider = this.modelRouter.createScopedProvider('compression', userId ?? compressorUserId())
+      ?? this.modelRouter.getProvider('compression');
     const stream = provider.createStream(summaryMessages);
     for await (const event of stream) {
       if (event.type === 'TEXT') {
@@ -597,11 +616,11 @@ export class CompressorOrchestrator {
     this.tokenizer = tokenizer;
     this.summarizer = summarizer;
     this.maxContextTokens = maxContextTokens;
-    this.trimWindow = options?.trimWindow ?? 6;
-    this.safetyThreshold = options?.safetyThreshold ?? 0.95;
-    this.targetRatio = options?.targetRatio ?? 0.15;
+    this.trimWindow = options?.trimWindow ?? trimWindow();
+    this.safetyThreshold = options?.safetyThreshold ?? safetyThreshold();
+    this.targetRatio = options?.targetRatio ?? targetRatio();
     this.compressThreshold = options?.compressThreshold ?? 0.75;
-    this.maxRounds = options?.maxRounds ?? 3;
+    this.maxRounds = options?.maxRounds ?? maxCompressRounds();
     this.compressDepth = options?.compressDepth ?? 0.5;
   }
 
@@ -626,12 +645,14 @@ export class CompressorOrchestrator {
       gitManager?: GitManager;
       /** 意图簇 key（capability）。提供时：仅压缩该簇，摘要存 clusterSummaries；不提供时全局压缩（方案 3.5） */
       clusterKey?: string;
+      /** KVCache 隔离 ID（session 粒度），透传给摘要 LLM 调用 */
+      userId?: string;
     },
   ): Promise<CompressionResult> {
     // 方案 3.5/决策H：分簇预算 = totalBudget * 0.7（留 30% 给其他 zone）
     const clusterKey = options?.clusterKey;
     this.#historyBudget = clusterKey
-      ? Math.floor(historyBudget * 0.7)
+      ? Math.floor(historyBudget * clusterBudgetRatio())
       : historyBudget;
 
     try {
@@ -678,11 +699,15 @@ export class CompressorOrchestrator {
       }
 
       // ── Phase 2/3: LLM 结构化摘要（作用于 Layer 3）──
+      // summaryOk 标记摘要是否成功。失败时**绝不能丢弃 layer3** —— 否则这批
+      // 最旧、最不可重建的历史会静默消失，表现为"模型莫名失忆"且无法归因。
+      // 降级路径：改用规则裁剪（ToolOutputTrimmer）压缩 layer3 后保留。
+      let summaryOk = true;
       if (layer3.length > 0) {
         try {
           const hadSummary = !!summary;
           const recentContext = [...layer2, ...layer1];
-          summary = await this.summarizer.summarize(layer3, summary, recentContext);
+          summary = await this.summarizer.summarize(layer3, summary, recentContext, options?.userId);
           // 决策 C：被压缩消息不丢弃，标记 _compressed（仅保留最近一次压缩记录，覆盖而非追加）
           const compressedAt = new Date().toISOString();
           const intentTag = clusterKey ?? 'general';
@@ -706,22 +731,35 @@ export class CompressorOrchestrator {
             phasesUsed.push(hadSummary ? 3 : 2);
           }
         } catch (err) {
-          console.warn(
-            '[Compressor] LLM summary failed (round %d), keeping previous result:',
+          summaryOk = false;
+          logger.warn('compress.round.summary_failed', {
             round,
-            err instanceof Error ? err.message : String(err),
-          );
+            layer3Messages: layer3.length,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 
-      // ── 重组：Layer 3 已被摘要替代，Layer 2 + Layer 1 + 保护区保留 ──
-      liveMessages = [...layer2, ...layer1, ...protectedMessages];
+      // ── 重组 ──
+      // 摘要成功：Layer 3 已被摘要替代，Layer 2 + Layer 1 + 保护区保留。
+      // 摘要失败：Layer 3 保留，但降级为规则裁剪（仍然压缩，只是不依赖 LLM）。
+      if (summaryOk) {
+        liveMessages = [...layer2, ...layer1, ...protectedMessages];
+      } else {
+        const trimmer = new ToolOutputTrimmer(Math.max(2, Math.floor(this.trimWindow / 2)));
+        liveMessages = [
+          ...trimmer.trimToolResults(layer3),
+          ...layer2,
+          ...layer1,
+          ...protectedMessages,
+        ];
+      }
       liveMessages = this.ensureNoConsecutiveUserMessages(liveMessages);
 
       // ── 收敛检查 ──
-      // targetRatio 是理想压缩目标（默认 0.15），达到即停
-      // 0.5 是"够用就停"阈值：不必压到理想目标，只要低于 50% 即可接受
-      if (this.getUsageRatio(liveMessages) <= this.targetRatio) break;
+      // 0.5 是"够用就停"阈值：不必压到理想目标，只要低于 50% 即可接受。
+      // 摘要失败的降级轮原则上不再依赖 targetRatio（目标未达成是已知的）。
+      if (summaryOk && this.getUsageRatio(liveMessages) <= this.targetRatio) break;
       if (this.getUsageRatio(liveMessages) <= 0.5) break;
 
       // 未收敛 → 缩小保护区，下一轮压缩更多

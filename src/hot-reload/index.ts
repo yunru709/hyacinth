@@ -1,6 +1,11 @@
 export { HotReloadManager } from './manager.js';
 export type { HotReloadDeps } from './manager.js';
 
+// ── Watcher 统一骨架（P5-7 收敛：spec + createWatcher） ──
+
+export { createWatcher } from './watcher-base.js';
+export type { WatcherSpec, WatcherHandle, WatchTrigger } from './watcher-base.js';
+
 // ── Watcher functions (conditionally loaded by HotReloadManager) ──
 
 export { watchMcpConfig } from './mcp-watcher.js';

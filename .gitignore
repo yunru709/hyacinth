@@ -30,3 +30,8 @@ Thumbs.db
 *.tgz
 # Éú³É²úÎï£¨ÓÃ»§»·¾³ ~/.agent/generation£¬Ô´ÂëÄ¿Â¼²»Ó¦²ĞÁô£©
 /outputs/generation/
+tsconfig.tsbuildinfo
+
+# Training æ•°æ®åº“ï¼ˆæœ¬åœ°è¿è¡Œäº§ç‰©ï¼‰
+*.db
+!docs/**/*.db

@@ -184,6 +184,7 @@ describe('PluginLoader', () => {
 describe('PluginManager', () => {
   const mockToolRegistry = {
     register: vi.fn(),
+    unregister: vi.fn(),
     get: vi.fn(),
     getAll: vi.fn(() => []),
     getToolDefinitions: vi.fn(() => []),
@@ -192,6 +193,7 @@ describe('PluginManager', () => {
 
   const mockSkillRegistry = {
     register: vi.fn(),
+    unregister: vi.fn(),
     get: vi.fn(),
     getAll: vi.fn(() => []),
     getIndex: vi.fn(() => ''),
@@ -215,6 +217,26 @@ describe('PluginManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('setHooks 追加注入：宿主引用不变、已挂插件不丢（P6-1 修复重建宿主缺陷）', async () => {
+    const mgr = createManager('/nonexistent');
+    const h1 = mgr.getHost();
+    // 先直接挂一个内核级插件（不经目录发现）
+    await h1.mount({ id: 'kernel-p1', activate: () => {}, deactivate: () => {} });
+    expect(h1.isMounted('kernel-p1')).toBe(true);
+
+    const { createLoopHookBus } = await import('../orchestrator/loop-hooks.js');
+    mgr.setHooks(createLoopHookBus());
+
+    // 宿主引用稳定（原实现重建宿主 → 此处红）
+    expect(mgr.getHost()).toBe(h1);
+    // 已挂插件保留（原实现重建 → 插件被静默丢弃 → 此处红）
+    expect(h1.list().map((e) => e.id)).toContain('kernel-p1');
+
+    // 卸载仍有效（状态与真实宿主一致，不再脱节）
+    await h1.unmount('kernel-p1');
+    expect(h1.isMounted('kernel-p1')).toBe(false);
   });
 
   it('creates with empty plugin list', () => {
@@ -249,6 +271,105 @@ describe('PluginManager', () => {
     for (const p of activated) {
       expect(p.status).toBe('activated');
     }
+  });
+
+  // ── P2 改造核心：卸载自动回滚（PluginHost DisposableStore） ──
+  it('deactivate auto-rolls-back all registered tools/skills (PluginHost 生命周期)', async () => {
+    const mgr = createManager(); // process.cwd() 含 plugins/example-greeter
+    await mgr.loadAll();
+
+    const greeter = mgr.get('example-greeter');
+    expect(greeter?.status).toBe('activated');
+    expect(mockToolRegistry.register).toHaveBeenCalledWith(expect.objectContaining({ name: 'hello' }));
+    expect(mockSkillRegistry.register).toHaveBeenCalledWith(expect.objectContaining({ name: 'example-greeter-friendly' }));
+
+    // 卸载 → 自动回滚（无需手动追踪注册项）
+    await mgr.deactivate('example-greeter');
+    expect(mockToolRegistry.unregister).toHaveBeenCalledWith('hello');
+    expect(mockSkillRegistry.unregister).toHaveBeenCalledWith('example-greeter-friendly');
+    expect(greeter!.status).toBe('deactivated');
+  });
+
+  it('configSchema 校验：required 缺失时激活失败并标记 error', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-schema-test-'));
+    const pluginDir = path.join(tmp, 'plugins', 'needs-config');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({
+      id: 'needs-config',
+      name: 'Needs Config',
+      description: 'Requires apiKey',
+      entry: './index.js',
+      configSchema: {
+        type: 'object',
+        properties: { apiKey: { type: 'string' } },
+        required: ['apiKey'],
+      },
+    }));
+    fs.writeFileSync(path.join(pluginDir, 'index.js'), `
+      export default {
+        id: 'needs-config',
+        name: 'Needs Config',
+        description: 'Requires apiKey',
+        register: (api) => { api.logger.info('registered'); },
+      };
+    `);
+
+    const mgr = createManager(tmp);
+    await mgr.loadAll(); // 空配置 → apiKey 缺失 → 校验失败
+
+    const plugin = mgr.get('needs-config');
+    expect(plugin?.status).toBe('error');
+    expect(plugin?.error).toContain('apiKey');
+  });
+
+  // ── 缺口补齐：目录插件经 api.onHook 挂主循环钩子（setHooks 注入总线后） ──
+  it('目录插件 api.onHook 挂主循环钩子：setHooks 注入总线后 loadAll 生效', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { createLoopHookBus } = await import('../orchestrator/loop-hooks.js');
+
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-hook-test-'));
+    const pluginDir = path.join(tmp, 'plugins', 'hook-observer');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({
+      id: 'hook-observer',
+      name: 'Hook Observer',
+      description: 'Observes onTurnStart via api.onHook',
+      entry: './index.js',
+    }));
+    fs.writeFileSync(path.join(pluginDir, 'index.js'), [
+      'export default {',
+      "  id: 'hook-observer',",
+      "  name: 'Hook Observer',",
+      "  description: 'Observes onTurnStart',",
+      '  register: (api) => {',
+      "    api.onHook?.('onTurnStart', (payload) => { globalThis.__hookFired = payload.turn; });",
+      '  },',
+      '};',
+    ].join('\n'));
+
+    const bus = createLoopHookBus();
+    const mgr = createManager(tmp);
+    mgr.setHooks(bus); // P6-1：追加注入，宿主不重建；插件 activate 期 onHook 需总线已注入
+    await mgr.loadAll();
+
+    const plugin = mgr.get('hook-observer');
+    expect(plugin?.status).toBe('activated');
+
+    // 触发主循环钩子 → 插件观察者收到
+    await bus.emit('onTurnStart', { turn: 7 });
+    expect((globalThis as Record<string, unknown>).__hookFired).toBe(7);
+    delete (globalThis as Record<string, unknown>).__hookFired;
+
+    // 卸载 → 钩子自动摘除
+    await mgr.deactivate('hook-observer');
+    await bus.emit('onTurnStart', { turn: 8 });
+    expect((globalThis as Record<string, unknown>).__hookFired).toBeUndefined();
   });
 });
 

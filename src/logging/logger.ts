@@ -40,11 +40,35 @@ export interface Logger {
 // ─── Console Logger ────────────────────────────────────────────────
 
 function getMinLevel(): LogLevel {
+  // 已通过 setLogLevel() 显式设置（configCenter 驱动）优先；
+  // 否则回退 LOG_LEVEL env；两者皆无则 info。
+  if (_explicitLogLevel) return _explicitLogLevel;
   const env = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
   if (env === 'debug') return 'debug';
   if (env === 'warn') return 'warn';
   if (env === 'error') return 'error';
   return 'info';
+}
+
+/** 显式日志级别（由 setLogLevel 写入；优先于 LOG_LEVEL env） */
+let _explicitLogLevel: LogLevel | null = null;
+/** setLogLevel('off') 置 true：createLogger 返回 NoopLogger */
+let _loggingOff = false;
+
+/**
+ * 显式设置全局日志级别（优先于 LOG_LEVEL env）。
+ * 由 factory 在 RuntimeConfigCenter 初始化后调用，把配置的
+ * logging.level 同步给 logger——使配置中心成为日志级别的权威来源，
+ * env 仅作启动级兜底。
+ */
+export function setLogLevel(level: LogLevel | 'off'): void {
+  if (level === 'off') {
+    _loggingOff = true;
+    _explicitLogLevel = null;
+    return;
+  }
+  _loggingOff = false;
+  _explicitLogLevel = level;
 }
 
 export class ConsoleLogger implements Logger {
@@ -131,10 +155,12 @@ export class NoopLogger implements Logger {
 
 /**
  * Create a logger for the given module.
- * Use LOG_LEVEL=off environment variable to disable all logging.
+ * Use LOG_LEVEL=off environment variable or setLogLevel('off') to disable all logging.
  */
 export function createLogger(module: string): Logger {
-  if (process.env.LOG_LEVEL === 'off') return new NoopLogger();
+  if (process.env.LOG_LEVEL === 'off' || _loggingOff) {
+    return new NoopLogger();
+  }
   return new ConsoleLogger(module);
 }
 

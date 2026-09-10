@@ -1,9 +1,13 @@
+import { createLogger } from '../logging/logger.js';
+
 /**
  * GenericRegistry<T> — 统一注册表基类
  *
  * 提供所有 Registry 共享的 register/unregister/enable/disable 标准接口。
  * 子类只需继承并选择性重写特定方法即可。
  */
+
+const logger = createLogger('registry');
 
 /** 所有可注册对象的基接口 */
 export interface RegistryItem {
@@ -13,7 +17,6 @@ export interface RegistryItem {
   source?: string;
 }
 
-/** GenericRegistry 上的事件类型 */
 export type RegistryEvent = 'register' | 'unregister' | 'enable' | 'disable' | 'update';
 
 export type RegistryEventListener = (event: RegistryEvent, name: string) => void;
@@ -25,11 +28,25 @@ export abstract class GenericRegistry<T extends RegistryItem> {
   protected _disabled = new Set<string>();
   /** 事件监听器 */
   private listeners: RegistryEventListener[] = [];
+  /**
+   * 同名覆盖守卫：返回 false 拒绝覆盖（安全门禁——防止插件/MCP 热重载
+   * 通过同名注册替换内置工具；子类按需设置，未设置时保持旧行为）。
+   */
+  protected overwriteGuard?: (incoming: T, existing: T) => boolean;
 
   // ── 注册 / 注销 ──────────────────────────────────────────────
 
-  /** 注册一个条目（同名覆盖） */
+  /** 注册一个条目（同名覆盖，受 overwriteGuard 门禁约束） */
   register(item: T): void {
+    const existing = this.items.get(item.name);
+    if (existing && this.overwriteGuard && !this.overwriteGuard(item, existing)) {
+      logger.warn(`overwrite denied by overwriteGuard: "${item.name}"`, {
+        name: item.name,
+        existingSource: existing.source ?? 'core',
+        incomingSource: item.source ?? 'core',
+      });
+      return;
+    }
     this.items.set(item.name, item);
     this.emit('register', item.name);
   }

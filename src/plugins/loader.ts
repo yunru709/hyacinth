@@ -1,9 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { PluginManifest } from './types.js';
+import type { PluginManifest, PluginDefinition } from './types.js';
+import type { HyPlugin } from '../kernel/plugin-host.js';
+import type { LoopHooks } from '../orchestrator/loop-hooks.js';
+import { wrapAsHyPlugin, type PluginAdapterDeps } from './plugin-adapter.js';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('plugin-loader');
+
+/** 破缓存序号：同毫秒内连续重载也能生成不同 URL，避免拿到 ESM 缓存里的旧代码 */
+let bustCacheSeq = 0;
+
+/** 插件配置结构（支持 enabled + config） */
+export interface PluginConfigEntry {
+  /** 是否启用（默认 true，或由 manifest.enabledByDefault 决定） */
+  enabled?: boolean;
+  /** 插件配置对象 */
+  config?: Record<string, unknown>;
+}
 
 /**
  * 插件加载器
@@ -69,18 +83,17 @@ export class PluginLoader {
    * 加载 manifest 指向的入口模块
    * 返回模块的 default export（应为 PluginDefinition）
    */
-  async loadEntryModule<T>(manifest: PluginManifest): Promise<T | null> {
-    // 查找插件目录
+  async loadEntryModule<T>(manifest: PluginManifest, bustCache = false): Promise<T | null> {
     const pluginDir = await this.resolvePluginDir(manifest);
     if (!pluginDir) return null;
 
     const entryPath = path.resolve(pluginDir, manifest.entry);
 
     try {
-      // file:// URL for Windows compatibility with dynamic import
-      // pathToFileURL handles Windows drive letters (C:\) correctly
       const { pathToFileURL } = await import('node:url');
-      const url = pathToFileURL(entryPath).href;
+      let url = pathToFileURL(entryPath).href;
+      // 热重载时加时间戳+序号破坏模块缓存，确保读到最新代码
+      if (bustCache) url += `?t=${Date.now()}-${++bustCacheSeq}`;
       const mod = await import(url);
       return (mod.default ?? mod) as T;
     } catch (error) {
@@ -100,14 +113,57 @@ export class PluginLoader {
   }
 
   /**
-   * 读取插件配置文件（.agent/plugins.config.json）
+   * 目录插件 → HyPlugin 的一体化装载（C 拆出）。
+   *
+   * 完成「发现 → dynamic import 入口 → 适配为 HyPlugin」的全链路，
+   * 产物可直接挂到 PluginHost.mount()。装载失败返回 null。
    */
-  async loadPluginConfig(): Promise<Record<string, Record<string, unknown>>> {
+  async loadHyPlugin(
+    manifest: PluginManifest,
+    deps: PluginAdapterDeps,
+    bustCache = false,
+  ): Promise<HyPlugin<Record<string, unknown>, LoopHooks> | null> {
+    const definition = await this.loadEntryModule<PluginDefinition>(manifest, bustCache);
+    if (!definition) return null;
+    return wrapAsHyPlugin(deps, {
+      manifest,
+      definition,
+      status: 'loaded',
+      mcpServers: [],
+      dir: await this.resolvePluginDir(manifest) ?? '',
+    }, {});
+  }
+
+  /**
+   * 读取插件配置文件（.agent/plugins.config.json）
+   *
+   * 支持两种格式：
+   * 1. 旧格式：{ "plugins": { "id": { ...config } } }
+   * 2. 新格式：{ "plugins": { "id": { "enabled": true, "config": { ... } } } }
+   */
+  async loadPluginConfig(): Promise<Record<string, PluginConfigEntry>> {
     const configPath = path.join(this.projectDir, '.agent', 'plugins.config.json');
     try {
       const content = await fs.readFile(configPath, 'utf-8');
       const parsed = JSON.parse(content);
-      return (parsed?.plugins ?? {}) as Record<string, Record<string, unknown>>;
+      const raw = (parsed?.plugins ?? {}) as Record<string, unknown>;
+      const result: Record<string, PluginConfigEntry> = {};
+      for (const [id, entry] of Object.entries(raw)) {
+        if (entry && typeof entry === 'object' && ('enabled' in entry || 'config' in entry)) {
+          // 新格式：{ enabled, config }
+          result[id] = {
+            enabled: (entry as PluginConfigEntry).enabled ?? true,
+            config: ((entry as PluginConfigEntry).config ?? {}) as Record<string, unknown>,
+          };
+        } else {
+          // 旧格式：直接是 config 对象
+          result[id] = {
+            enabled: true,
+            config: (entry ?? {}) as Record<string, unknown>,
+          };
+        }
+      }
+      return result;
     } catch {
       return {};
     }

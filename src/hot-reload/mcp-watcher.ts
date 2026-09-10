@@ -1,8 +1,6 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type { MCPSystem } from '../mcp/system.js';
-import { createLogger } from '../logging/logger.js';
+import { getMCPConfigPaths } from '../mcp/config.js';
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 interface McpWatcherDeps {
   mcpSystem: MCPSystem;
@@ -13,62 +11,24 @@ interface McpWatcherDeps {
 /**
  * 监听 MCP 配置文件变化，自动增/删/改 MCP Server 连接。
  *
- * 监听两个文件：.agent/mcp.json 和 .mcp.json。
+ * 监听三处来源（顺序即优先级，后者覆盖同名项）：
+ *   ~/.agent/mcp.json、<cwd>/.mcp.json、<cwd>/.agent/mcp.json
  *
- * 使用 fs.watchFile（原因同 provider-watcher）：
- *   .agent/ 目录下文件变更频繁，fs.watch 会产生大量无效回调。
- *   fs.watchFile 以固定间隔 stat 轮询，对极少变更的配置文件开销更低。
+ * 使用 poll 模式（fs.watchFile stat 轮询）：.agent/ 目录下文件变更频繁
+ * （session、SQLite、scheduler），fs.watch 会产生大量无效回调；固定间隔
+ * 轻量 stat，仅在 mtime 变化时触发，对极少变更的配置文件开销更低。
+ * 骨架自带异步 reload 防重入（原 handleLock 语义）。
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function watchMcpConfig(deps: McpWatcherDeps): any[] {
-  const logger = createLogger('hot-reload:mcp');
-  const { mcpSystem, cwd } = deps;
+export function watchMcpConfig(deps: McpWatcherDeps): WatcherHandle[] {
+  // 与 MCPConfigLoader 共用同一份路径定义，避免两边漂移
+  const watchPaths = getMCPConfigPaths(deps.cwd).map((p) => p.file);
 
-  const watchPaths = [
-    path.join(os.homedir(), '.agent', 'mcp.json'),
-    path.join(cwd, '.mcp.json'),
-  ];
-  const POLL_INTERVAL_MS = 5_000; // 5s — 轻量 stat，对性能几乎无影响
-
-  let handleLock = false;
-  const lastMtimes = new Map<string, number>();
-
-  for (const watchPath of watchPaths) {
-    try {
-      const stat = fs.statSync(watchPath);
-      lastMtimes.set(watchPath, stat.mtimeMs);
-    } catch {
-      // 文件不存在
-    }
-  }
-
-  async function handleChange(): Promise<void> {
-    if (handleLock) return;
-    handleLock = true;
-
-    try {
-      await mcpSystem.reload();
-      logger.info('MCP configs reloaded via MCPSystem');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn('failed to reload MCP configs', { error: msg });
-    } finally {
-      handleLock = false;
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const watchers: any[] = [];
-
-  for (const watchPath of watchPaths) {
-    const watcher = fs.watchFile(watchPath, { interval: POLL_INTERVAL_MS }, (curr) => {
-      const prev = lastMtimes.get(watchPath) ?? 0;
-      if (curr.mtimeMs === prev) return;
-      lastMtimes.set(watchPath, curr.mtimeMs);
-      handleChange();
-    });
-    watchers.push(watcher);
-  }
-
-  return watchers;
+  return createWatcher({
+    name: 'mcp',
+    mode: 'poll',
+    paths: () => watchPaths,
+    reload: async () => {
+      await deps.mcpSystem.reload();
+    },
+  });
 }

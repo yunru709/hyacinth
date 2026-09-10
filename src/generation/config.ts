@@ -53,7 +53,9 @@ function readJsonFile(p: string): GenerationConfig | null {
 }
 
 /**
- * 加载生成配置：项目级优先，全局级兜底，字段级合并。
+ * 加载生成配置：项目级文件存在则**整体使用项目级**（全局文件被忽略），
+ * 否则回退全局；两者都没有 → 空配置。
+ * ⚠️ 是文件级择一，不是字段级合并——往项目里加配置时不要写去全局（会被无视）。
  * 返回 { config, source } — source 用于日志/诊断。
  */
 export function loadGenerationConfig(cwd: string): { config: GenerationConfig; source: 'project' | 'global' | 'none' } {

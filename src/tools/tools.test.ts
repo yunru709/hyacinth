@@ -7,7 +7,10 @@ import { WriteTool } from './write.js';
 import { EditTool } from './edit.js';
 import { GlobTool } from './glob.js';
 import { BashTool } from './bash.js';
+import { MultiEditTool } from './multi-edit.js';
+import { recordFileRead } from './file-tracker.js';
 import { ToolRegistry } from './registry.js';
+import { ToolExecutor } from './executor.js';
 import type { Tool } from './interface.js';
 
 // ─── Test helpers ──────────────────────────────────────────────────────
@@ -228,6 +231,86 @@ describe('GlobTool', () => {
   });
 });
 
+// ─── MultiEditTool ─────────────────────────────────────────────────────
+
+describe('MultiEditTool', () => {
+  const tool = new MultiEditTool();
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = makeTempDir();
+    await ensureDir(tempDir);
+    // Create two files with a common placeholder
+    await ensureDir(path.join(tempDir, 'src'));
+    await fs.writeFile(path.join(tempDir, 'src', 'a.ts'), 'const VERSION = "v0";\n', 'utf-8');
+    await fs.writeFile(path.join(tempDir, 'src', 'b.ts'), 'const VERSION = "v0";\n', 'utf-8');
+  });
+
+  afterEach(async () => {
+    await removeDir(tempDir);
+  });
+
+  it('replaces across multiple files matched by glob (regression: missing path arg)', async () => {
+    // read-before-write gate: must mark both files as read first
+    recordFileRead(path.join(tempDir, 'src', 'a.ts'));
+    recordFileRead(path.join(tempDir, 'src', 'b.ts'));
+
+    const result = await tool.execute({
+      glob: 'src/*.ts',
+      path: tempDir,
+      old_string: '"v0"',
+      new_string: '"v1"',
+    });
+
+    expect(result).toContain('Modified 2 file');
+    const a = await fs.readFile(path.join(tempDir, 'src', 'a.ts'), 'utf-8');
+    const b = await fs.readFile(path.join(tempDir, 'src', 'b.ts'), 'utf-8');
+    expect(a).toContain('"v1"');
+    expect(b).toContain('"v1"');
+  });
+
+  it('previews changes with dry_run without writing', async () => {
+    // read-before-write gate runs before the dry_run branch — mark all matched files as read
+    recordFileRead(path.join(tempDir, 'src', 'a.ts'));
+    recordFileRead(path.join(tempDir, 'src', 'b.ts'));
+
+    const result = await tool.execute({
+      glob: 'src/*.ts',
+      path: tempDir,
+      old_string: '"v0"',
+      new_string: '"v1"',
+      dry_run: true,
+    });
+
+    expect(result).toContain('Preview');
+    const a = await fs.readFile(path.join(tempDir, 'src', 'a.ts'), 'utf-8');
+    expect(a).toContain('"v0"'); // unchanged
+  });
+
+  it('rejects editing a file that was never read (read-before-write gate)', async () => {
+    const result = await tool.execute({
+      glob: 'src/*.ts',
+      path: tempDir,
+      old_string: '"v0"',
+      new_string: '"v1"',
+    });
+
+    expect(result).toContain('You must read');
+    const a = await fs.readFile(path.join(tempDir, 'src', 'a.ts'), 'utf-8');
+    expect(a).toContain('"v0"'); // unchanged
+  });
+
+  it('returns "No files matched" for an unmatched pattern', async () => {
+    const result = await tool.execute({
+      glob: 'src/*.py',
+      path: tempDir,
+      old_string: '"v0"',
+      new_string: '"v1"',
+    });
+    expect(result).toContain('No files matched');
+  });
+});
+
 // ─── BashTool ──────────────────────────────────────────────────────────
 
 describe('BashTool', () => {
@@ -252,7 +335,7 @@ describe('BashTool', () => {
     const tool = new BashTool(tempDir);
     await expect(
       tool.execute({ command: 'rm -rf /' }),
-    ).rejects.toThrow(/Command blocked by sandbox/);
+    ).rejects.toThrow(/Command blocked by (security kernel|sandbox)/);
   });
 
   it('custom blocked commands are enforced', async () => {
@@ -357,5 +440,72 @@ describe('ToolRegistry', () => {
 
     expect(registry.get('tool')?.description).toBe('v2');
     expect(registry.getAll()).toHaveLength(1);
+  });
+});
+
+// ─── ToolExecutor ──────────────────────────────────────────────────────
+
+describe('ToolExecutor', () => {
+  function makeExecutor(overrides: { timeoutMs?: number; tools?: Tool[] } = {}) {
+    const registry = new ToolRegistry();
+    for (const t of overrides.tools ?? []) registry.register(t);
+    return new ToolExecutor(registry, overrides.timeoutMs ?? 300_000);
+  }
+
+  it('executes a tool and returns its result', async () => {
+    const tool: Tool = { name: 'echo', description: '', inputSchema: {}, execute: async (a) => `got:${a.value}` };
+    const executor = makeExecutor({ tools: [tool] });
+
+    const result = await executor.execute({ id: 'c1', name: 'echo', input: { value: 'hi' } } as never);
+    expect(result.content).toBe('got:hi');
+    expect(result.is_error).toBeFalsy();
+  });
+
+  it('returns error for unknown tool', async () => {
+    const executor = makeExecutor();
+    const result = await executor.execute({ id: 'c1', name: 'nope', input: {} } as never);
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain('Unknown tool');
+  });
+
+  it('aborts the tool signal on timeout (no orphaned work)', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const slowTool: Tool = {
+      name: 'slow',
+      description: '',
+      inputSchema: {},
+      execute: (_args, signal) => {
+        receivedSignal = signal;
+        return new Promise<string>((resolve) => {
+          // Simulates a tool that ignores abort but would otherwise run forever
+          const interval = setInterval(() => resolve('done-late'), 5000);
+          signal?.addEventListener('abort', () => {
+            clearInterval(interval);
+            // eslint-disable-next-line no-restricted-syntax
+            resolve('aborted-cleanly');
+          }, { once: true });
+        });
+      },
+    };
+    const executor = makeExecutor({ timeoutMs: 50, tools: [slowTool] });
+
+    const result = await executor.execute({ id: 'c1', name: 'slow', input: {} } as never);
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain('timed out');
+  });
+
+  it('propagates tool error as is_error', async () => {
+    const failingTool: Tool = {
+      name: 'fail',
+      description: '',
+      inputSchema: {},
+      execute: async () => { throw new Error('boom'); },
+    };
+    const executor = makeExecutor({ tools: [failingTool] });
+
+    const result = await executor.execute({ id: 'c1', name: 'fail', input: {} } as never);
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain('boom');
   });
 });

@@ -5,8 +5,7 @@ import type { SkillDefinition } from '../types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import { loadSkillFile, scanSkillsDir } from '../skills/loader.js';
 import { createLogger } from '../logging/logger.js';
-
-const logger = createLogger('hot-reload:skill-watcher');
+import { createWatcher, type WatcherHandle, type WatchTrigger } from './watcher-base.js';
 
 export interface SkillWatcherDeps {
   skillRegistry: SkillRegistry;
@@ -17,23 +16,15 @@ export interface SkillWatcherDeps {
 }
 
 /**
- * 监视 skills 目录（用户级 + 项目级）的 .md 文件变更，自动重新加载 skill
- *
- * 监视目录：
- * - ~/.agent/skills/
- * - <cwd>/.agent/skills/（如果提供了 cwd）
+ * 监视 skills 目录（用户级 + 项目级）的 .md 文件变更，自动重新加载 skill：
+ * 文件存在 → loadSkillFile 重载；文件已删除 → unregister。
  */
-export function watchSkills(deps: SkillWatcherDeps): fs.FSWatcher[] {
-  const { skillRegistry, cwd, debounceMs } = deps;
+export function watchSkills(deps: SkillWatcherDeps): WatcherHandle[] {
+  const logger = createLogger('hot-reload:skill-watcher');
+  const { skillRegistry } = deps;
 
-  const dirs: string[] = [];
-  const userSkillsDir = path.join(homedir(), '.agent', 'skills');
-  dirs.push(userSkillsDir);
-
-  if (cwd) {
-    const projectSkillsDir = path.join(cwd, '.agent', 'skills');
-    dirs.push(projectSkillsDir);
-  }
+  const dirs = [path.join(homedir(), '.agent', 'skills')];
+  if (deps.cwd) dirs.push(path.join(deps.cwd, '.agent', 'skills'));
 
   // 先做一次初始扫描
   for (const dir of dirs) {
@@ -50,52 +41,34 @@ export function watchSkills(deps: SkillWatcherDeps): fs.FSWatcher[] {
     }
   }
 
-  const watchers: fs.FSWatcher[] = [];
-
-  for (const dir of dirs) {
+  function reloadSkill({ filename, dir }: WatchTrigger): void {
+    if (!filename) return;
+    const filePath = path.join(dir, filename);
+    const skillName = filename.replace(/\.md$/, '');
     try {
-      // 静默跳过，目录不存在时 fs.watch 会抛出异常
-    } catch { /* 忽略 */ }
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    logger.info(`Watching skills directory: ${dir}`);
-
-    const watcher = fs.watch(dir, { recursive: false }, (_eventType, filename) => {
-      if (!filename || !filename.endsWith('.md')) return;
-
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const filePath = path.join(dir, filename!);
-        const skillName = filename!.replace(/\.md$/, '');
-
-        try {
-          fs.accessSync(filePath);
-          // 文件存在 → 重新加载
-          const skill = loadSkillFile(filePath);
-          if (skill) {
-            if (skillRegistry.has(skill.name)) {
-              skillRegistry.unregister(skill.name);
-            }
-            skillRegistry.register(skill);
-            deps.onSkillLoaded?.(skill);
-            logger.info(`Skill reloaded: ${skill.name} (from ${filename})`);
-          }
-        } catch {
-          if (skillRegistry.has(skillName)) {
-            skillRegistry.unregister(skillName);
-            logger.info(`Skill unregistered: ${skillName} (file removed)`);
-          }
+      fs.accessSync(filePath);
+      // 文件存在 → 重新加载
+      const skill = loadSkillFile(filePath);
+      if (skill) {
+        if (skillRegistry.has(skill.name)) {
+          skillRegistry.unregister(skill.name);
         }
-      }, debounceMs);
-    });
-
-    watcher.on('error', (err) => {
-      logger.warn(`Skill watcher error on ${dir}: ${err.message}`, { error: err.message });
-    });
-
-    watchers.push(watcher);
+        skillRegistry.register(skill);
+        deps.onSkillLoaded?.(skill);
+      }
+    } catch {
+      if (skillRegistry.has(skillName)) {
+        skillRegistry.unregister(skillName);
+        logger.info(`Skill unregistered: ${skillName} (file removed)`);
+      }
+    }
   }
 
-  return watchers;
+  return createWatcher({
+    name: 'skill-watcher',
+    debounceMs: deps.debounceMs,
+    paths: () => dirs,
+    filter: (filename) => filename.endsWith('.md'),
+    reload: reloadSkill,
+  });
 }

@@ -1,10 +1,11 @@
-import { MCPConfigLoader } from './config.js';
+import { MCPConfigLoader, type MCPConfigEntry } from './config.js';
 import { MCPServerManager } from './lifecycle.js';
 import { MCPBridge } from './bridge.js';
 import { MCPInstallManager } from './install-manager.js';
+import { sweepOrphanedMcpProcesses } from './orphan-sweeper.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { LayeredContextComposer } from '../context/composer.js';
-import type { LifecycleSupervisor } from '../lifecycle/supervisor.js';
+import type { LifecycleSupervisor } from '../supervisor/shutdown.js';
 import type { MCPConfig } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 
@@ -22,6 +23,19 @@ export interface MCPSystemDeps {
 interface MCPServerStatus {
   name: string;
   connected: boolean;
+}
+
+/** 配置文件中声明的 Server 视图（供 UI 展示与启停，包含被 _disabled 的条目） */
+export interface MCPConfigView {
+  name: string;
+  /** 是否被 _disabled 关闭。false 的条目不会真正连接。 */
+  enabled: boolean;
+  /** 声明它的配置文件路径 */
+  file: string;
+  /** 配置作用域：全局 / 项目根 .mcp.json / 项目 .agent/mcp.json */
+  scope: MCPConfigEntry['scope'];
+  command?: string;
+  url?: string;
 }
 
 /**
@@ -61,6 +75,15 @@ export class MCPSystem {
   /** 启动所有 MCP Server */
   async start(): Promise<void> {
     this.currentConfigs = await this.configLoader.load(this.cwd);
+
+    // 连接前清扫上次异常退出遗留的孤儿 MCP 子进程树（失败不影响启动）
+    try {
+      await sweepOrphanedMcpProcesses(this.currentConfigs);
+    } catch (err) {
+      this.logger.warn('orphan sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     for (const config of this.currentConfigs) {
       await this.addServer(config);
@@ -158,6 +181,32 @@ export class MCPSystem {
       name: m.getName(),
       connected: m.isConnected(),
     }));
+  }
+
+  /**
+   * 列出配置文件中声明的全部 Server（含被 _disabled 的），
+   * 供 UI 展示「有哪些 + 启用状态 + 来自哪个文件」。
+   */
+  async getConfigView(): Promise<MCPConfigView[]> {
+    const entries = await this.configLoader.listEntries(this.cwd);
+    return entries.map(e => ({
+      name: e.name,
+      enabled: e.enabled,
+      file: e.file,
+      scope: e.scope,
+      command: typeof e.raw.command === 'string' ? e.raw.command : undefined,
+      url: typeof e.raw.url === 'string' ? e.raw.url : undefined,
+    }));
+  }
+
+  /**
+   * 启用/禁用某个 Server：在声明它的配置文件里写 `_disabled`，然后热重载。
+   * 返回受影响的文件路径。
+   */
+  async setServerEnabled(name: string, enabled: boolean): Promise<string> {
+    const file = await this.configLoader.setEnabled(this.cwd, name, enabled);
+    await this.reload();
+    return file;
   }
 
   /** 注册状态变更回调 */

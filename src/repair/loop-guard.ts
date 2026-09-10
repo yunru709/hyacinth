@@ -9,6 +9,7 @@
  */
 
 import type { ToolCall } from '../types.js';
+import { isMutatingTool } from '../tools/side-effect.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -18,8 +19,6 @@ const TEXT_WINDOW = 6;
 const TEXT_THRESHOLD = 3;
 const TEXT_MIN_LENGTH = 30;       // 短于 30 字符不检测
 const TEXT_SIMILARITY = 0.90;     // Jaccard 相似度阈值（LLM 循环时输出高度一致）
-
-const MUTATING_TOOLS = new Set(['write', 'edit', 'bash', 'delete', 'multi_edit']);
 
 const MCP_SIDE_EFFECT_KEYWORDS = new Set([
   'navigate', 'create', 'delete', 'open', 'write', 'execute',
@@ -67,7 +66,7 @@ export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
 // ── Helpers ────────────────────────────────────────────────────────────
 
 export function isMutating(name: string): boolean {
-  if (MUTATING_TOOLS.has(name)) return true;
+  if (isMutatingTool(name)) return true;
   if (name.startsWith('mcp__')) {
     const toolName = name.split('__')[2];
     if (toolName) {

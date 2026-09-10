@@ -6,6 +6,17 @@ export class ConversationStore {
   private readonly maxMessages: number;
   private readonly conversationFile: string;
 
+  /**
+   * 追加热路径专用的消息计数缓存。
+   *
+   * count()/countFull() 都是「读整个文件再数行数」，而 append() 每条消息都会
+   * 调用一次（还叠加 appendFull 的第二次），会话长度 n 时总开销是 O(n²) ——
+   * 长会话会明显变卡。这里缓存计数，只在裁剪后失效重建。
+   *
+   * 仅供 append() 内部使用；对外暴露的 count()/countFull() 始终返回精确值。
+   */
+  private readonly countCache = new Map<string, number>();
+
   /** 全量存档文件名（永远追加，永不压缩，行号稳定） */
   static readonly FULL_FILE = 'conversation_full.jsonl';
 
@@ -39,14 +50,33 @@ export class ConversationStore {
     const line = JSON.stringify(message) + '\n';
     await fs.appendFile(filePath, line, 'utf-8');
 
-    // 检查是否需要截断旧消息
-    const count = await this.count(sessionDir);
+    // 检查是否需要截断旧消息（走缓存计数，避免每次 append 整文件读取）
+    const count = await this.appendCount(sessionDir);
     if (count > this.maxMessages) {
-      await this.truncate(sessionDir, count - this.maxMessages);
+      const removeCount = count - this.maxMessages;
+      await this.truncate(sessionDir, removeCount);
+      // 裁剪后缓存失效：精确值 = maxMessages
+      this.countCache.set(sessionDir, this.maxMessages);
     }
 
     // 同步写入全量存档（不受压缩器影响，行号稳定）
     await this.appendFull(sessionDir, message);
+  }
+
+  /**
+   * 追加热路径专用计数：缓存命中 O(1)，未命中时精确读一次并缓存。
+   * 调用方须在 append 文件之后调用，返回值为追加后的总条数。
+   */
+  private async appendCount(sessionDir: string): Promise<number> {
+    const cached = this.countCache.get(sessionDir);
+    if (cached !== undefined) {
+      const next = cached + 1;
+      this.countCache.set(sessionDir, next);
+      return next;
+    }
+    const exact = await this.count(sessionDir);
+    this.countCache.set(sessionDir, exact);
+    return exact;
   }
 
   /**
@@ -104,24 +134,31 @@ export class ConversationStore {
       // 原文件不存在，忽略
     }
     await fs.rename(tmpPath, filePath);
+    // 压缩写回会改变消息总数，必须让 append() 的计数缓存失效，
+    // 否则后续 append 会基于过期的大计数触发 truncate，切掉真实近况对话。
+    this.countCache.delete(sessionDir);
   }
 
   // ── 全量存档（conversation_full.jsonl）──
 
   /**
    * 追加消息到全量存档 conversation_full.jsonl。
-   * 永远追加，不受压缩器影响。行号稳定（仅追加，不删中间行）。
+   *
+   * **只追加，绝不删除或重写任何行。**
+   *
+   * 这是意图簇压缩赖以成立的地基：簇索引持久化的是相对本文件的绝对行号
+   * （`orchestrator/loop-cluster.ts` 的 line_start/line_end，
+   * 回放时 `fullMsgs.slice(lineStart - 1, lineEnd)`）。一旦从头部删行，所有
+   * 历史簇的行号就整体偏移 K 位 —— 压缩会摘要到隔壁意图簇的内容，静默且无法归因。
+   *
+   * 因此本文件不受 maxMessages 约束。磁盘增长交给会话级清理
+   * （SessionManager.cleanup 的 maxAgeDays）处理，而不是在这里截断。
    */
   async appendFull(sessionDir: string, message: Message): Promise<void> {
     const filePath = this.getFullFilePath(sessionDir);
     await ensureDir(sessionDir);
     const line = JSON.stringify(message) + '\n';
     await fs.appendFile(filePath, line, 'utf-8');
-
-    const count = await this.countFull(sessionDir);
-    if (count > this.maxMessages) {
-      await this.truncateFull(sessionDir, count - this.maxMessages);
-    }
   }
 
   /** 读取全量存档全部消息 */
@@ -133,15 +170,6 @@ export class ConversationStore {
   async countFull(sessionDir: string): Promise<number> {
     const all = await this.readFull(sessionDir);
     return all.length;
-  }
-
-  /** 截断全量存档旧消息 */
-  private async truncateFull(sessionDir: string, removeCount: number): Promise<void> {
-    const filePath = this.getFullFilePath(sessionDir);
-    const lines = await this.readFull(sessionDir);
-    const kept = lines.slice(removeCount);
-    const content = kept.map((m) => JSON.stringify(m)).join('\n') + '\n';
-    await fs.writeFile(filePath, content, 'utf-8');
   }
 
   /**

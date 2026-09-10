@@ -30,13 +30,39 @@ export type ImageSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string };
 
+/**
+ * 泛化媒体源（多模态视频/音频输入）。
+ * ImageSource 兼容：同构 + file 本地引用分支（大媒体：发送时由管线解析为内联/抽帧）。
+ */
+export type MediaSource =
+  | { type: 'base64'; media_type: string; data: string }
+  | { type: 'url'; url: string }
+  | { type: 'file'; path: string };
+
 export interface ImageContent {
   type: 'image';
   source: ImageSource;
   cache_control?: { type: 'ephemeral' };
 }
 
-export type MessageContent = TextContent | ThinkingContent | ToolUseContent | ToolResultContent | ImageContent;
+/** 视频内容块（模型支持 video 输入时发送；sampling 为请求提示，非硬约束） */
+export interface VideoContent {
+  type: 'video';
+  source: MediaSource;
+  media_type: string;
+  sampling?: { fps?: number; max_frames?: number; max_long_side_pixel?: number };
+  cache_control?: { type: 'ephemeral' };
+}
+
+/** 音频内容块 */
+export interface AudioContent {
+  type: 'audio';
+  source: MediaSource;
+  media_type: string;
+  cache_control?: { type: 'ephemeral' };
+}
+
+export type MessageContent = TextContent | ThinkingContent | ToolUseContent | ToolResultContent | ImageContent | VideoContent | AudioContent;
 
 export interface Message {
   role: MessageRole;
@@ -114,26 +140,16 @@ export interface SessionStats {
 }
 
 // === Provider 相关 ===
-export type ProviderType =
-  | 'anthropic'
-  | 'openai'
-  | 'deepseek'
-  | 'local'
-  | 'llamacpp'
-  | 'ollama'
-  | 'groq'
-  | 'xai'
-  | 'mistral'
-  | 'openrouter'
-  | 'gemini'
-  | 'moonshot'
-  | 'qwen'
-  | 'zhipu'
-  | 'minimax'
-  | 'mimo';
+// ProviderType 由 factory-registry 注册表键派生（P5-15，方案 C）——
+// 手写 16 值联合已删除，新增厂商只改注册表一处，类型自动收敛。
+// import + re-export 均为 type-only，不引入运行时依赖（本文件保持纯类型中立层）。
+import type { ProviderType } from './provider/factory-registry.js';
+export type { ProviderType } from './provider/factory-registry.js';
 
 export interface ProviderConfig {
-  type: ProviderType;
+  // type 放宽为 string：B-3 后运行时 registerProviderFactory 可注册内置 ProviderType
+  // 之外的厂商（内置厂商仍由 ProviderType 联合 + Record 注解编译期守卫）
+  type: string;
   apiKey: string;
   baseUrl?: string;
   model: string;
@@ -206,7 +222,6 @@ export interface SkillDefinition {
 }
 
 // === Sub-Agent 相关 ===
-export type CollaborationMode = 'delegate' | 'adversarial' | 'parallel';
 
 export interface AgentDefinition {
   /** 唯一标识符 */
@@ -223,8 +238,6 @@ export interface AgentDefinition {
   modelPreference?: string;
   /** 该子 Agent 的最大执行轮次 */
   maxTurns: number;
-  /** 协作模式 */
-  collaborationMode: CollaborationMode;
   /** 输出格式（默认 text） */
   outputFormat?: 'text' | 'json';
   /** JSON 模式的输出 schema */

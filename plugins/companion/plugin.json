@@ -1,0 +1,19 @@
+{
+  "id": "companion",
+  "name": "陪伴模式",
+  "description": "陪伴模式聚合插件：世界引擎 + 陪伴旁路 agent 配置 + 角色 Router 恢复。经插件表（.agent/plugins.config.json / extension-registry.json）注册即启用陪伴模式，卸载即回归普通会话。",
+  "entry": "./index.js",
+  "deps": ["bypass"],
+  "enabledByDefault": true,
+  "priority": 100,
+  "architecture": {
+    "source:companion_memory": { "impl": "companion:memory", "module": "./mods/memory.js" }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "characterName": { "type": "string", "description": "陪伴角色名（缺省读 ~/.agent/companion/.last-character）" },
+      "autoActivate": { "type": "boolean", "description": "启用时自动切入陪伴模式（默认 true）" }
+    }
+  }
+}

@@ -72,6 +72,8 @@ export interface GenerationRequest {
 
   // 音频参数
   voice?: string;
+  /** 情感描述/向量（TTS 类；透传给支持情感的适配器，如 IndexTTS2） */
+  emotion?: string;
   speed?: number;
 
   // 控制
@@ -245,6 +247,10 @@ export interface GenerationProviderConfig {
   apiKeyEnv?: string;
   /** API 基础 URL */
   baseUrl?: string;
+  /** 默认音色（TTS 类任务；req.voice 优先） */
+  voice?: string;
+  /** 音频输出格式（openai-compatible TTS 用：mp3/wav/opus/flac，默认 mp3） */
+  responseFormat?: string;
   /** 描述 */
   description?: string;
 }

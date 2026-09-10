@@ -6,9 +6,16 @@ import { ModelCatalogLoader } from './model-catalog-loader.js';
 import type { ModelCatalogEntry } from './model-types.js';
 
 // ─── 隔离 home 目录：所有测试读写 TEMP home，不碰真实 ~/.agent ───
-const TEST_HOME = process.cwd() + '/.tmp-agent-catalog-test';
-const AGENT_DIR = path.join(TEST_HOME, '.agent');
-const PROV_PATH = path.join(AGENT_DIR, 'providers.json');
+// 每用例新建唯一目录（tmpdir 下），不删除——避免 WorkBuddy safe-delete shim
+// 把 rmSync 转成回收站 trash（满载时 genie-trash spawn ETIMEDOUT，de-flake）。
+let TEST_HOME: string;
+let AGENT_DIR: string;
+let PROV_PATH: string;
+function newHome(): void {
+  TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-catalog-'));
+  AGENT_DIR = path.join(TEST_HOME, '.agent');
+  PROV_PATH = path.join(AGENT_DIR, 'providers.json');
+}
 
 function writeProviders(providers: Record<string, unknown>): void {
   fs.mkdirSync(AGENT_DIR, { recursive: true });
@@ -28,10 +35,7 @@ function makeEntry(overrides: Partial<ModelCatalogEntry> & { id: string; provide
 
 describe('DEFAULT_PROVIDERS 数据自洽（黄金主测试）', () => {
   beforeEach(() => {
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
-  });
-  afterEach(() => {
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
+    newHome();
   });
 
   it('每个 provider：defaultModel ∈ models、无 __default__、provider 字段匹配、字段完整', async () => {
@@ -71,10 +75,7 @@ describe('DEFAULT_PROVIDERS 数据自洽（黄金主测试）', () => {
 
 describe('ModelCatalogLoader 行为契约', () => {
   beforeEach(() => {
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
-  });
-  afterEach(() => {
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
+    newHome();
   });
 
   it('providers.json 不存在 → 回退内置 MODEL_CATALOG（覆盖全部内置 provider）', () => {
@@ -164,13 +165,12 @@ describe('ModelCatalogLoader 行为契约', () => {
 
 describe('setup 与 provider 层一致性（黄金主测试）', () => {
   beforeEach(() => {
-    // spy homedir → 所有后续创建的 loader/modelCatalog 单例读 TEST_HOME
+    // spy homedir → 后续创建的 loader/modelCatalog 单例读新 TEST_HOME
+    newHome();
     vi.spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
   it('每个 provider 的 defaultModel：出现在 PROVIDER_MODELS 中且 getModelInfo 可查', async () => {

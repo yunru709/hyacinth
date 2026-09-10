@@ -82,6 +82,7 @@ export class OpenAIProvider implements Provider {
       maxContextTokens: info?.contextWindow ?? 128000,
       isLocal: false,
       vision: info?.capabilities.vision ?? false,
+      inputTypes: info?.capabilities.inputTypes ?? (info?.capabilities.vision ? ['text', 'image'] : ['text']),
     };
   }
 

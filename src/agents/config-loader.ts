@@ -15,7 +15,6 @@ interface AgentConfigEntry {
   promptFile: string;
   allowedTools: string[];
   maxTurns: number;
-  collaborationMode: 'delegate' | 'adversarial' | 'parallel';
   modelPreference?: string;
   sessionTtlMinutes?: number;
 }
@@ -78,7 +77,6 @@ export async function loadAgentConfigs(cwd: string, configOverride?: AgentsConfi
       systemPrompt,
       allowedTools: override?.allowedTools ?? entry.allowedTools,
       maxTurns: override?.maxTurns ?? entry.maxTurns,
-      collaborationMode: override?.collaborationMode ?? entry.collaborationMode,
       modelPreference: entry.modelPreference,
       sessionTtlMinutes: override?.sessionTtlMinutes ?? entry.sessionTtlMinutes,
     });

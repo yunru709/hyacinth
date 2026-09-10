@@ -20,6 +20,13 @@ export class MCPServerManager {
   private _connected = false;
   private reconnectAttempt = 0;
   private maxReconnectBackoff = 30000;
+  /**
+   * stdio/SSE 重连次数上限。到达后放弃重连并收割子进程树。
+   * 注：ProcessManager 的 autoRestart=false / maxRestarts=5 只约束
+   * ProcessManager 自己的自动重启（此处关闭），真正在重启的是本类
+   * 的 handleCrash 循环 —— 上限必须在这里执行。
+   */
+  private maxReconnectAttempts = 5;
   private logger: ReturnType<typeof createLogger>;
 
   constructor(private config: MCPConfig) {
@@ -140,6 +147,9 @@ export class MCPServerManager {
         await this.client.connect(transport);
         if (!this.client.isConnected()) {
           this._connected = false;
+          // 连接失败：收割刚拉起的子进程树，防止孤儿进程累积
+          await this.client.disconnect().catch(() => {});
+          await this.processManager.stop().catch(() => {});
           return;
         }
         this._connected = true;
@@ -147,6 +157,10 @@ export class MCPServerManager {
         // 工具注册由 MCPSystem 统一管理
       } catch {
         this._connected = false;
+        // 连接失败（如 30s 握手超时，npx @latest 联网解析时很常见）：
+        // 必须收割刚 spawn 的进程树 —— 否则每次失败泄漏一棵子进程树
+        await this.client.disconnect().catch(() => {});
+        await this.processManager.stop().catch(() => {});
       }
     }
   }
@@ -154,13 +168,23 @@ export class MCPServerManager {
   /** 处理崩溃 — 自动重连 + 重新注册工具 */
   private async handleCrash(): Promise<void> {
     this._connected = false;
+    this.reconnectAttempt++;
+
+    // 重连次数上限：到达后放弃（否则 stdio 每 2s 无限重启 spawn）
+    if (this.reconnectAttempt > this.maxReconnectAttempts) {
+      this.logger.warn(
+        `reconnect attempts exhausted (${this.maxReconnectAttempts}) for ${this.config.name}, giving up`,
+      );
+      // 防御性收割：万一还有残留子进程
+      await this.processManager.stop().catch(() => {});
+      return;
+    }
 
     // 根据传输类型计算重连延迟
     let delay: number;
     if (this.config.url) {
       // SSE 传输：指数退避
-      delay = Math.min(2000 * Math.pow(2, this.reconnectAttempt), this.maxReconnectBackoff);
-      this.reconnectAttempt++;
+      delay = Math.min(2000 * Math.pow(2, this.reconnectAttempt - 1), this.maxReconnectBackoff);
     } else {
       // stdio 传输：固定延迟
       delay = 2000;

@@ -12,24 +12,39 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ConversationStore } from '../memory/conversation.js';
 
 import type { EventStore } from '../memory/events.js';
-import { appendEvent } from '../event-store.js';
+import { appendEvent } from '../memory/events.js';
 import type { StatsManager } from '../memory/stats.js';
 import type { SummaryStore } from '../memory/summary.js';
 import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent } from '../types.js';
-import { OutputRouter } from '../parser/router.js';
 import { LLMOrchestrator } from './planner.js';
 import type { Plan } from './plan-store.js';
-import { formatPlanAsText } from './plan-store.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { MCPBridge } from '../mcp/bridge.js';
 import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { AgentRegistry } from '../agents/registry.js';
-import type { LifecycleSupervisor } from '../lifecycle/supervisor.js';
+import type { LifecycleSupervisor } from '../supervisor/shutdown.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { ImageStore, buildUserContentWithImages, buildUserContentWithInlineImages, createViewImageTool } from '../multimodal/index.js';
+import { UI_EVENT, type CompanionSayEvent } from '../events.js';
+import { nextSayId } from '../tools/companion-say.js';
+import { getSayHistoryStore } from '../companion/say-history.js';
+import { ImageStore, buildUserContentWithMedia, buildUserContentWithInlineImages, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
+import { createLoopHookBus, type LoopHookBus, type LoopHooks } from './loop-hooks.js';
+import { type ToolExecContext } from './loop-tools.js';
+import { removeLastRoundFromJsonl, cleanCompanionJsonl, removeTriggerFromJsonl } from './loop-session.js';
+import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
+import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
+import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
+import { Pipeline, type SlotSpec } from '../kernel/pipeline.js';
+import { createKernel, DEFAULT_PIPELINE_SLOTS, type KernelComponents } from './create-kernel.js';
+import { StageServiceMap, StageServiceKey, KernelStageContext } from './stage-services.js';
+import { createToolService, type ToolService } from './tool-service.js';
+import { createClusterService, type ClusterService, type DeepCompressState } from './cluster-service.js';
+import { recycleProcessedImages as recycleImagesFromHistory } from './loop-image.js';
+import { PluginHost, type HyPlugin } from '../kernel/plugin-host.js';
+import type { Disposable } from '../kernel/types.js';
 import { createLogger } from '../logging/logger.js';
 import type { MachineRegistry } from '../machine/registry.js';
 import { isFlowTool } from '../tools/flow.js';
@@ -41,72 +56,17 @@ import { getModelContextWindow } from '../setup/model-defaults.js';
 import type { SafetyConfig } from '../setup/config.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { LoopGuard, isMutating, ToolGuard } from '../repair/loop-guard.js';
-import { scavengeToolCalls } from '../repair/scavenge.js';
+import { deriveDangerousTools } from '../tools/side-effect.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
-import type { ComposeStrategy } from '../context/precision/index.js';
-import { getActiveProfile, getActiveRouter, type ContextProfile } from '../context/profiles.js';
+import { getActiveRouter, type ContextProfile } from '../context/profiles.js';
 import type { IContextRouter } from '../context/router.js';
 import { NormalRouter } from '../context/router.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { GitManager } from '../evolution/git-manager.js';
-import { extractTextContent } from '../utils/misc.js';
+import { extractTextContent, hasTextContent, hasToolUseContent, formatTimestamp, computeProtectCount } from '../utils/misc.js';
 import type { TurnRecorder } from '../rollback/turn-recorder.js';
-import * as sessionAllowlist from '../memory/session-allowlist.js';
-
-/** Format a Date as YYYY-MM-DD HH:mm (cache-friendly, minute precision) */
-function formatTimestamp(date: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const y = date.getFullYear();
-  const m = pad(date.getMonth() + 1);
-  const d = pad(date.getDate());
-  const h = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  return `${y}-${m}-${d} ${h}:${min}`;
-}
-
-/** 从末尾累加消息，直到累计 token 数超过 budget，返回保护条数 */
-function computeProtectCount(messages: Message[], tokenBudget: number): number {
-  // 使用简化的 char/4 估算
-  let tokens = 0;
-  let count = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const rawContent = messages[i].content;
-    const text: string = typeof rawContent === 'string'
-      ? rawContent
-      : JSON.stringify(rawContent);
-    tokens += Math.ceil(text.length / 4) + 4; // +4 for role/overhead
-    count++;
-    if (tokens >= tokenBudget) break;
-  }
-  return Math.max(2, count); // 至少保护 2 条
-}
-
-/** 判断两条消息是否具有相同的 role 和 text content */
-function isSameTextMessage(a: Message, b: Message): boolean {
-  if (a.role !== b.role) return false;
-  const aContents = Array.isArray(a.content) ? a.content : [a.content];
-  const bContents = Array.isArray(b.content) ? b.content : [b.content];
-  if (aContents.length !== bContents.length) return false;
-  for (let i = 0; i < aContents.length; i++) {
-    const ac = aContents[i];
-    const bc = bContents[i];
-    if (ac.type !== bc.type) return false;
-    if (ac.type === 'text') {
-      if ((ac as any).text !== (bc as any).text) return false;
-    } else if (ac.type === 'image') {
-      const aSrc = (ac as any).source;
-      const bSrc = (bc as any).source;
-      if (aSrc?.type !== bSrc?.type) return false;
-      if (aSrc?.type === 'base64' && aSrc?.data !== bSrc?.data) return false;
-      if (aSrc?.type === 'url' && aSrc?.url !== bSrc?.url) return false;
-    } else {
-      // For other types (tool_use, tool_result, thinking), compare serialized
-      if (JSON.stringify(ac) !== JSON.stringify(bc)) return false;
-    }
-  }
-  return true;
-}
+import * as sessionAllowlist from '../tools/session-allowlist.js';
 
 // ─── Output handler interface ───────────────────────────────────────
 
@@ -122,11 +82,13 @@ export interface OutputHandler {
   onFlush?(): void;
   /** 用户中断：清理动画和临时状态 */
   onInterrupt?(): void;
-  /** Request user permission for dangerous tool execution. Returns 'yes' (once), 'no' (deny), 'always' (add to allowlist), or 'aor' (unrestricted — skip all future checks). */
+  /** Request user permission for dangerous tool execution. Returns 'yes' (once), 'no' (deny), 'always' (tool allowlisted — session-scoped), or 'aor' (all tools unrestricted — session-scoped). Persistent allowlisting goes through the allow_tool tool (global config). */
   onPermissionRequest?(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always' | 'aor'>;
   /** Ask the user structured questions with options. Each question supports multi-select and custom input.
    *  Returns a JSON string mapping question index → selected answers. */
   onAskUser?(questions: AskUserQuestion[]): Promise<string>;
+  /** 通用事件通道（陪伴语音等非 message 正文的后端推送；协议层转发给 UI） */
+  onEvent?(type: string, payload?: unknown): void;
 }
 
 /** A single question for ask_user */
@@ -136,17 +98,6 @@ export interface AskUserQuestion {
   options?: string[];
   multiSelect?: boolean;
   customInput?: boolean;
-}
-
-/** Per-turn cache hit statistics */
-export interface CacheTurnRecord {
-  turn: number;
-  timestamp: string;
-  inputTokens: number;
-  outputTokens: number;
-  hitTokens: number;
-  missTokens: number;
-  hitRate: number;
 }
 
 /** Info available to output handlers after each turn */
@@ -221,6 +172,73 @@ export async function imageToAscii(imagePath: string, maxWidth = 60): Promise<{ 
 // ─── AgentLoop ───────────────────────────────────────────────────────
 
 /**
+ * P1 M3 内置默认管道槽位（与 runtime/defaults.ts 的 kernel.pipeline 骨架一致）。
+ * configCenter 注入时优先读配置；未注入（delegate-tool 等路径）时用此默认。
+ * 已迁移到 src/orchestrator/create-kernel.ts（DEFAULT_PIPELINE_SLOTS）。
+ * 此处保留 re-export 供外部引用。
+ */
+// re-export from create-kernel for backward compatibility
+
+
+/**
+ * AgentLoop 装配服务表（P6-2：拆两层 —— 服务 / 配置）。
+ *
+ * P6-2 判据「新增一个内核服务不再改 AgentLoop 签名」：服务一律进本表，
+ * 构造签名固定为 `constructor(services: AgentLoopServices, opts?: AgentLoopConfigOptions)`。
+ * 新增服务 = 本接口加键 + 装配方（factory / delegate-tool）提供，构造器不感知；
+ * 阶段要消费它时再同步到 StageServiceMap（P6-3 整合）。
+ *
+ * 继承自旧 AgentLoopOptions（P1 遗留项 2a：位置参数 → 具名对象）的服务部分。
+ */
+export interface AgentLoopServices {
+  provider: Provider;
+  contextComposer: LayeredContextComposer;
+  compressor: CompressorOrchestrator;
+  orchestrator: LLMOrchestrator;
+  toolExecutor: ToolExecutor;
+  toolRegistry: ToolRegistry;
+  conversationStore: ConversationStore;
+  eventStore: EventStore;
+  statsManager: StatsManager;
+  summaryStore: SummaryStore;
+  outputHandler?: OutputHandler | null;
+  skillRegistry?: SkillRegistry;
+  mcpBridge?: MCPBridge;
+  dependencyAnalyzer?: DependencyAnalyzer;
+  agentRegistry?: AgentRegistry;
+  flowRegistry?: MachineRegistry;
+  providerRouter?: ProviderRouter;
+  configCenter?: RuntimeConfigCenter;
+  modelRouter?: ModelRouter;
+  turnRecorder?: TurnRecorder;
+}
+
+/**
+ * AgentLoop 装配配置（字面量/策略集合 —— 不服务化，与服务表分离）。
+ * loopHooks 属装配时序对象，一并放配置层。
+ */
+export interface AgentLoopConfigOptions {
+  sessionDir: string;
+  maxTurns?: number;
+  maxContextTokens?: number;
+  personaDir?: string;
+  dangerousTools?: Set<string>;
+  allowlistTools?: Set<string>;
+  loopHooks?: LoopHookBus;
+  /**
+   * 循环级验证门信号（plan_execute 预测落空时置位，repair.verification 消费）。
+   * 装配层创建并注入同一引用 —— 工具侧写、循环侧读。
+   */
+  planHandoff?: { pending: string | null };
+  /**
+   * 外部注入的插件宿主（统一宿主）：传入 PluginManager 的宿主，
+   * 使 loop 挂载的内核插件与目录插件共享同一 PluginHost（deps/getService 互通）。
+   * 缺省由 createKernel 内部创建。
+   */
+  pluginHost?: PluginHost<Record<string, unknown>, LoopHooks>;
+}
+
+/**
  * AgentLoop — 串联所有模块的完整 Agent 主循环
  *
  * 核心流程：compose -> LLM -> parse -> tool -> compose 的循环
@@ -230,6 +248,46 @@ export async function imageToAscii(imagePath: string, maxWidth = 60): Promise<{ 
  * - 传实现 → 输出到 TUI / CLI / 日志 等任意目标
  */
 export class AgentLoop {
+  // ── 构造注入依赖（P6-2：服务表 + 配置两层，签名不再逐字段列举） ──
+  private provider: Provider;
+  private contextComposer: LayeredContextComposer;
+  private compressor: CompressorOrchestrator;
+  private toolExecutor: ToolExecutor;
+  private toolRegistry: ToolRegistry;
+  private conversationStore: ConversationStore;
+  private eventStore: EventStore;
+  private statsManager: StatsManager;
+  private sessionDir: string;
+  private summaryStore: SummaryStore;
+  private maxTurns: number;
+  private maxContextTokens: number;
+  private skillRegistry?: SkillRegistry;
+  private mcpBridge?: MCPBridge;
+  private dependencyAnalyzer?: DependencyAnalyzer;
+  private personaDir?: string;
+  private providerRouter?: ProviderRouter;
+  private modelRouter?: ModelRouter;
+  private turnRecorder?: TurnRecorder;
+  /** 循环级验证门信号：plan_execute 预测落空时置位，迭代结束时按 repair.verification 消费 */
+  private planHandoff: { pending: string | null };
+  /** 验证证据账本（P1-B）：本轮产生的验证证据数与是否发生修改（turn-end 证据门消费） */
+  private turnEvidenceCount = 0;
+  private turnHadMutation = false;
+
+  /**
+   * 本轮失败描述（P2-2 恢复审查）：供旁路恢复监督者判断主Agent是否在正确应对失败。
+   * 复用既有状态（plan_execute 预测落空 / 证据门条件），无新管道。
+   */
+  private describeTurnFailure(): string | undefined {
+    if (this.planHandoff.pending) {
+      return `plan_execute 预测落空：${this.planHandoff.pending}`;
+    }
+    if (this.turnHadMutation && this.turnEvidenceCount === 0) {
+      return '本轮修改了文件但没有产生任何验证证据（测试/编译/lint），不能直接结束';
+    }
+    return undefined;
+  }
+
   private abortController: AbortController | null = null;
   private interrupted = false;
   /** 串行化锁：确保 run() 不会并发执行 */
@@ -240,6 +298,9 @@ export class AgentLoop {
   private activePlan: Plan | undefined;
   private agentRegistry?: AgentRegistry;
   private outputHandler: OutputHandler | null;
+  /** ask_user 工具的交互 handler（按 loop 实例注入：构造时取 outputHandler.onAskUser，
+   *  多路 UI 并发时各 loop 各自应答，不再覆盖进程内唯一全局 handler） */
+  private askUserHandler: ((questions: AskUserQuestion[]) => Promise<string>) | null = null;
   private compressCount = 0;
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
@@ -258,6 +319,32 @@ export class AgentLoop {
   bypassManager?: import('../bypass/manager.js').BypassManager;
   /** 本轮用户消息的旁路注入缓存（preTurn 首轮产出，后续迭代复用） */
   private _bypassInjections?: import('../bypass/types.js').Injection[];
+  /**
+   * 陪伴模式台词 TTS 钩子（factory 在 companion.tts.enabled 时装配）。
+   * postTurn 后台调用，实现方自行排队与降级，绝不阻塞回合。
+   */
+  companionVoice?: {
+    onTurnEnd(
+      text: string,
+      character: string,
+      notify: (type: string, payload?: unknown) => void,
+      overrides?: { voice?: string; voiceId?: string; tone?: string; sayId?: string },
+    ): void;
+  };
+
+  /** 本轮通过 companion_say 的表达（turn-scoped；postTurn 时旁路用它维护世界） */
+  companionExpressions: Array<{ text: string; as: 'speak' | 'think'; tone?: string }> = [];
+
+  /** companion_say 工具执行时捕获表达 */
+  recordCompanionExpression(e: { text: string; as: 'speak' | 'think'; tone?: string }): void {
+    this.companionExpressions.push(e);
+  }
+
+  /** 工具层向 UI 推送协议事件（companion.say / companion.voice 等） */
+  emitUiEvent(type: string, payload?: unknown): void {
+    this.outputHandler?.onEvent?.(type, payload);
+  }
+
   /** 当前轮识别出的意图（orchestrator preTurn 产出，供 compose 和 postTurn 消费） */
   private _currentIntent: string | null = null;
   private activeProvider?: Provider;
@@ -275,14 +362,14 @@ export class AgentLoop {
   readonly imageStore = new ImageStore();
   /** 待注入图片队列（view_image 工具填充，下次 compose 前消费） */
   readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string }> = [];
+  /** 原生视频/音频待注入（view_media 产出；context 阶段按 inputTypes 门控注入） */
+  readonly pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string }> = [];
   /** 渠道预取图片（渠道层在 run() 前写入，_runInternal 一次性消费） */
   channelImages: Array<{ data: string; media_type: string }> | null = null;
   /** Fallback 通知（onFallback 回调写入，runTurn 一次性消费后清空） */
   pendingFallbackInfo: string | null = null;
   /** 降级链恢复主 Provider 通知（onRecover 回调写入，runTurn 一次性消费后清空） */
   pendingRecoverInfo: string | null = null;
-  /** 上下文组装策略（精确模式切换用，deprecated：新代码使用 activeRouter） */
-  composeStrategy: ComposeStrategy | null = null;
   /** 当前激活的上下文路由器，初始化为 NormalRouter，首次 syncRouter() 时同步到全局状态 */
   activeRouter: IContextRouter = new NormalRouter();
   /** Whether any tools were executed inline during the current stream */
@@ -304,13 +391,14 @@ export class AgentLoop {
   private bundleRegistry?: ToolBundleRegistry;
   private gitManager: GitManager;
   private switchingProvider = false;
-  private bypassProvider?: Provider;
   private lastContextTokens = 0;
-  private needsCompression = false;
+  /** 公开只读访问器 — 供 UI 协议层（state.get）读取当前上下文 token 占用 */
+  get contextTokensUsed(): number { return this.lastContextTokens; }
   private pendingCompression: Promise<CompressionResult | null> | null = null;
-  // deep compression: 临时替换 summary.md 后的恢复标记
-  private _deepCompressOriginal: string | null = null;
-  private _deepCompressRestore = false;
+
+  // ── 内核服务（闭包触手正规化：旧 5 个裸闭包收敛为两个具名服务） ──
+  private readonly toolService: ToolService;
+  private readonly clusterService: ClusterService;
 
   private lifecycleSupervisor: LifecycleSupervisor | null = null;
   private previousProviderWasLocal = false;
@@ -318,45 +406,95 @@ export class AgentLoop {
   private thinkingEnabled: boolean = false;
   private thinkingEffort: string | number | undefined = undefined;
 
-  constructor(
-    private provider: Provider,
-    private contextComposer: LayeredContextComposer,
-    private compressor: CompressorOrchestrator,
-    orchestrator: LLMOrchestrator,
-    private toolExecutor: ToolExecutor,
-    private toolRegistry: ToolRegistry,
-    private conversationStore: ConversationStore,
-    private eventStore: EventStore,
-    private statsManager: StatsManager,
-    private sessionDir: string,
-    private summaryStore: SummaryStore,
-    private maxTurns: number = getDefaultConfig().session.maxTurns,
-    private maxContextTokens: number,
-    outputHandler?: OutputHandler | null,
-    private skillRegistry?: SkillRegistry,
-    private mcpBridge?: MCPBridge,
-    private dependencyAnalyzer?: DependencyAnalyzer,
-    agentRegistry?: AgentRegistry,
-    private personaDir?: string,
-    flowRegistry?: MachineRegistry,
-    private providerRouter?: ProviderRouter,
-    dangerousTools?: Set<string>,
-    allowlistTools?: Set<string>,
-    configCenter?: RuntimeConfigCenter,
-    private modelRouter?: ModelRouter,
-    private turnRecorder?: TurnRecorder,
-  ) {
+  /**
+   * 主循环钩子总线（P1 M2）—— 10 个钩子点在 runTurn/_runInternal 上挂载，
+   * 插件经 PluginHost 的 ctx.onHook/aroundHook 接入（可短路/包裹）。
+   * 无订阅者时 emit 走快路径，零开销。
+   */
+  readonly loopHooks: LoopHookBus;
+
+  /**
+   * 插件宿主（P1 M7）—— 挂载面即主循环钩子总线（loopHooks）。
+   * 插件经 ctx.onHook/aroundHook 观察/拦截 10 个主循环钩子点（如 beforeToolExecute 权限链）。
+   * 与旧 PluginManager（plugins/index.js）并存：前者是内核原语只管生命周期与回滚，
+   * 后者保留发现与装载职责（P2 改造为构建于 PluginHost 之上）。
+   * 空宿主零开销：不挂插件不影响任何逻辑。
+   */
+  readonly pluginHost: PluginHost<Record<string, unknown>, LoopHooks>;
+
+  /**
+   * P1 M3 内核管道 —— 配置驱动、模块可替换的执行链。
+   * 当前仅 input/finalize 槽位启用（真实执行），其余槽位 M4-M6 逐步点亮。
+   * 槽位本身是接缝：插件可经 PluginHost 的 aroundHook 拦截/短路单个槽位。
+   */
+  private readonly pipeline: Pipeline<TurnState, Record<string, unknown>, StageServiceMap>;
+
+
+  /** 阶段模块的内核服务表（conversationStore / turnRecorder / sessionDir …） */
+  private readonly stageServices = new Map<StageServiceKey, unknown>();
+
+  constructor(services: AgentLoopServices, opts: AgentLoopConfigOptions) {
+    // 服务表（AgentLoopServices）：业务对象
+    const {
+      provider, contextComposer, compressor, orchestrator, toolExecutor, toolRegistry,
+      conversationStore, eventStore, statsManager, summaryStore,
+      outputHandler, skillRegistry, mcpBridge,
+      dependencyAnalyzer, agentRegistry, flowRegistry, providerRouter,
+      configCenter, modelRouter, turnRecorder,
+    } = services;
+    // 配置层（AgentLoopConfigOptions）：字面量/策略集合
+    const { sessionDir, maxTurns, maxContextTokens, personaDir, dangerousTools, allowlistTools, loopHooks, pluginHost, planHandoff } = opts;
+    // ── 依赖注入（显式赋值，替代旧位置参数属性） ──
+    this.provider = provider;
+    this.contextComposer = contextComposer;
+    this.compressor = compressor;
+    this.toolExecutor = toolExecutor;
+    this.toolRegistry = toolRegistry;
+    this.conversationStore = conversationStore;
+    this.eventStore = eventStore;
+    this.statsManager = statsManager;
+    this.sessionDir = sessionDir;
+    this.summaryStore = summaryStore;
+    this.maxTurns = maxTurns ?? getDefaultConfig().session.maxTurns;
+    this.skillRegistry = skillRegistry;
+    this.mcpBridge = mcpBridge;
+    this.dependencyAnalyzer = dependencyAnalyzer;
+    this.personaDir = personaDir;
+    this.providerRouter = providerRouter;
+    this.modelRouter = modelRouter;
+    this.turnRecorder = turnRecorder;
+    this.planHandoff = planHandoff ?? { pending: null };
+
+    this.loopHooks = loopHooks ?? createLoopHookBus();
+    // ── P1 M7：插件宿主 + P1 收官：createKernel() 统一装配 ──
+    const kernel: KernelComponents = createKernel({
+      configCenter,
+      loopHooks: this.loopHooks,
+      pluginHost,
+    });
+    this.pluginHost = kernel.pluginHost;
+    // ── 阶段服务表（供 makeStageCtx 注入到管道上下文） ──
+    this.stageServices.set('conversationStore', conversationStore);
+    this.stageServices.set('configCenter', configCenter);
+    this.stageServices.set('compressor', compressor);
+    this.stageServices.set('turnRecorder', turnRecorder);
+    this.stageServices.set('sessionDir', sessionDir);
+    this.pipeline = kernel.pipeline;
     this.orchestrator = orchestrator;
     this.outputHandler = outputHandler ?? null;
+    this.askUserHandler = (outputHandler?.onAskUser as ((questions: AskUserQuestion[]) => Promise<string>) | undefined) ?? null;
     this.agentRegistry = agentRegistry;
     // MachineRegistry 由 factory.ts 注入，不创建默认实例（空注册表无实际作用）
     this.flowRegistry = flowRegistry!;
-    this.dangerousTools = dangerousTools ?? new Set(['write', 'bash']);
+    this.dangerousTools = dangerousTools ?? new Set(deriveDangerousTools(() => this.toolRegistry.getAll()));
     this.allowlistTools = allowlistTools ?? new Set();
     this.configCenter = configCenter;
+    // 优先级：configCenter（配置为权威）→ opts.maxContextTokens（调用方显式传入）
+    // → DEFAULT。修复：原实现忽略 opts.maxContextTokens 且 configCenter 未配时
+    // 返回 undefined（无兜底）→ context 阶段阈值 NaN 永不触发压缩。
     this.maxContextTokens = configCenter
-      ? configCenter.get<number>('session.maxContext')
-      : DEFAULT_MAX_CONTEXT_TOKENS;
+      ? (configCenter.get<number>('session.maxContext') ?? maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS)
+      : (maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS);
     this.requestId = crypto.randomUUID();
     this.logger = createLogger('AgentLoop').child('request', { requestId: this.requestId });
     this.gitManager = new GitManager(process.cwd());
@@ -415,11 +553,12 @@ export class AgentLoop {
         this.allowedCommands = new Set(persistedAllowedCommands);
       }
 
-      // Restore dangerousTools
+      // Restore dangerousTools：配置显式名单为加性覆盖（在 sideEffect 推导集之上追加）
       const persistedDangerousTools = this.configCenter.get('safety.dangerousTools') as unknown as string[] | undefined;
-      if (Array.isArray(persistedDangerousTools)) {
-        this.dangerousTools = new Set(persistedDangerousTools);
-      }
+      this.dangerousTools = new Set([
+        ...deriveDangerousTools(() => this.toolRegistry.getAll()),
+        ...(Array.isArray(persistedDangerousTools) ? persistedDangerousTools : []),
+      ]);
 
       // 用户未显式关闭时才从模型目录自动开启思考
       const thinkingCfg = this.configCenter?.get('provider.enableThinking');
@@ -446,7 +585,8 @@ export class AgentLoop {
     if (this.configCenter) {
       // Subscribe to dangerous tools changes
       this.configCenter.watch('safety.dangerousTools', (event) => {
-        this.dangerousTools = new Set(event.newValue as string[]);
+        const list = Array.isArray(event.newValue) ? (event.newValue as string[]) : [];
+        this.dangerousTools = new Set([...deriveDangerousTools(() => this.toolRegistry.getAll()), ...list]);
       });
 
       // Subscribe to allowed commands (bash glob patterns)
@@ -463,10 +603,44 @@ export class AgentLoop {
       // 运行时通过 /model thinking <on|off|high|max> 临时覆盖
     }
 
-    // ── 注册 view_image 工具（依赖 ImageStore） ──
+    // ── 注册 view_image / view_media 工具（依赖 ImageStore + 注入队列） ──
     this.toolRegistry.register(
       createViewImageTool(this.imageStore, this.pendingImageInjections),
     );
+    this.toolRegistry.register(
+      createViewMediaTool(this.imageStore, this.pendingImageInjections, this.pendingMediaInjections, {
+        getInputTypes: () => this.getActiveProvider().getCapabilities?.()?.inputTypes,
+        getVideoInlineMaxBytes: () => this.configCenter?.get('multimodal.videoInlineMaxBytes') as number | undefined,
+        getVideoMaxFrames: () => this.configCenter?.get('multimodal.videoMaxFrames') as number | undefined,
+        getAudioInlineMaxBytes: () => this.configCenter?.get('multimodal.audioInlineMaxBytes') as number | undefined,
+      }),
+    );
+
+    // ── P1 M4：context 阶段服务注册（值型服务放构造末尾，确保字段赋值完成） ──
+    this.stageServices.set('toolRegistry', this.toolRegistry);
+    this.stageServices.set('contextComposer', this.contextComposer);
+    this.stageServices.set('summaryStore', this.summaryStore);
+    this.stageServices.set('statsManager', this.statsManager);
+    this.stageServices.set('gitManager', this.gitManager);
+    this.stageServices.set('outputHandler', this.outputHandler);
+    this.stageServices.set('maxContextTokens', this.maxContextTokens);
+    this.stageServices.set('personaDir', this.personaDir);
+    this.stageServices.set('bundleRegistry', this.bundleRegistry);
+    this.stageServices.set('kbState', this.kbState);
+    this.stageServices.set('loopHooks', this.loopHooks);
+    // 惰性闭包：activeRouter 是 getter（随 companion 模式切换）
+    this.stageServices.set('getRouter', () => this.activeRouter);
+    // ── P1 M5：llm/tools 阶段服务注册 ──
+    this.stageServices.set('eventStore', this.eventStore);
+    this.stageServices.set('orchestrator', orchestrator);
+    // ── 闭包触手正规化：旧 5 个裸闭包（clusterTransform/deepCompressRestore/
+    //    executeSingleInline/flushInline/executeTools）收敛为两个具名服务 ──
+    this.toolService = createToolService(() => this.makeToolExecContext());
+    this.clusterService = createClusterService(() => this.makeClusterDeps());
+    this.stageServices.set('toolService', this.toolService);
+    this.stageServices.set('clusterService', this.clusterService);
+    // ── P1 M6：bypass 阶段服务注册（bypassManager 由 factory 构造后注入 → 惰性闭包） ──
+    this.stageServices.set('bypassManager', () => this.bypassManager);
   }
 
   /**
@@ -523,8 +697,7 @@ export class AgentLoop {
     this.pendingImpactInfo = null;
     this.pendingTaskNotifications = [];
     this.pendingCompression = null;
-    this._deepCompressOriginal = null;
-    this._deepCompressRestore = false;
+    this.clusterService.setDeepCompressState({ original: null, restore: false });
     this.lastContextTokens = 0;
     // 重载摘要
     try {
@@ -544,195 +717,39 @@ export class AgentLoop {
   }
 
   /**
-   * 陪伴模式：从 JSONL 中移除本轮工具调用完整回合。
-   * 找到最后一条 user 文本消息，从它开始截断文件——
-   * 整个工具调用回合（user → tool_use → tool_result → 跟进文本）都不留痕迹。
+   * 组装单个 Zone 的预览文本（供设置页展示真实内容，如 zone1 锚点区）。
+   * 复用真实 composer 实例与其已注册的 ContextSource（skills/agents/mcp/memory），
+   * 保证预览与线上组装一致。Zone 不存在或未启用 → 返回 null。
    */
+  async previewContextZone(
+    zoneKey: string,
+  ): Promise<{ zone: string; text: string; tokens: number } | null> {
+    return this.contextComposer.previewZone(zoneKey, {
+      sessionDir: this.sessionDir,
+      cwd: process.cwd(),
+      timestamp: formatTimestamp(),
+      maxContextTokens: this.maxContextTokens,
+      tools: [],
+      history: [],
+      userInput: '',
+    });
+  }
+
+  /** 陪伴模式：从 JSONL 移除本轮工具调用完整回合（B2 拆出至 loop-session.ts） */
   private async removeLastRoundFromJsonl(): Promise<void> {
-    try {
-      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
-      const fsSync = await import('node:fs');
-      if (!fsSync.existsSync(jsonlPath)) return;
-
-      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
-      const lines = content.split('\n').filter(l => l.trim());
-      if (lines.length === 0) return;
-
-      // 从末尾往前找本轮第一个 tool_use assistant 消息
-      let firstToolUse = -1;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          if (msg.role === 'assistant' && Array.isArray(msg.content) &&
-              msg.content.some((b: any) => b.type === 'tool_use')) {
-            firstToolUse = i;
-          } else if (firstToolUse !== -1) {
-            break; // 遇到非 tool_use 消息，本轮的 tool 区域结束
-          }
-        } catch { /* skip */ }
-      }
-
-      if (firstToolUse === -1) return;
-
-      // 从 tool_use 往前找到触发它的 user 文本消息（排除 tool_result）
-      let cutIndex = firstToolUse;
-      for (let i = firstToolUse - 1; i >= 0; i--) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          if (msg.role === 'user') {
-            const c = msg.content;
-            if (!Array.isArray(c) || !c.some((b: any) => b.type === 'tool_result')) {
-              cutIndex = i;
-              break;
-            }
-          }
-        } catch { /* skip */ }
-      }
-
-      // 截断：保留 cutIndex 之前的所有行
-      const kept = lines.slice(0, cutIndex);
-      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
-      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
-    } catch { /* 文件操作失败不阻塞 */ }
+    return removeLastRoundFromJsonl(this.sessionDir);
   }
 
-  /**
-   * 陪伴模式工具调用清理：
-   * - companion_mode 切换 → 剥离工具痕迹，保留 LLM 文本
-   * - 其他工具 → 整轮砍掉（原有行为）
-   * - 找不到触发消息（跨 session） → 处理整个文件
-   */
+  /** 陪伴模式工具调用清理（B2 拆出至 loop-session.ts） */
   private async cleanCompanionJsonl(): Promise<void> {
-    try {
-      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
-      const fsSync = await import('node:fs');
-      if (!fsSync.existsSync(jsonlPath)) return;
-
-      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
-      const lines = content.split('\n').filter(l => l.trim());
-      if (lines.length === 0) return;
-
-      // 从末尾往前找最后一条纯文本 user 消息
-      let triggerIdx = -1;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          if (msg.role !== 'user') continue;
-          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-          if (blocks.every((b: any) => b.type === 'tool_result')) continue;
-          triggerIdx = i;
-          break;
-        } catch { /* skip */ }
-      }
-
-      // 检查是否有 companion_mode 工具（跨 session 时从 0 开始扫描）
-      let hasCompanionModeTool = false;
-      const scanFrom = triggerIdx === -1 ? 0 : triggerIdx;
-      for (let i = scanFrom; i < lines.length; i++) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          if (msg.role !== 'assistant') continue;
-          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-          if (blocks.some((b: any) => b.type === 'tool_use' && b.name === 'companion_mode')) {
-            hasCompanionModeTool = true;
-            break;
-          }
-        } catch { /* skip */ }
-      }
-
-      // companion_mode 切换：剥离 tool 痕迹，保留 LLM 文本
-      if (hasCompanionModeTool) {
-        const processFrom = triggerIdx === -1 ? 0 : triggerIdx + 1;
-        const kept: string[] = [];
-        for (let i = 0; i < processFrom; i++) kept.push(lines[i]);
-        for (let i = processFrom; i < lines.length; i++) {
-          try {
-            const msg = JSON.parse(lines[i]);
-            if (msg.role === 'user') {
-              const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-              if (blocks.some((b: any) => b.type === 'tool_result')) continue;
-              kept.push(lines[i]);
-              continue;
-            }
-            if (msg.role === 'assistant') {
-              const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-              // 跳过包含 companion_mode tool_use 的消息（确认语如 "好的，进入陪伴模式。"）
-              if (blocks.some((b: any) => b.type === 'tool_use' && b.name === 'companion_mode')) continue;
-              const textBlocks = blocks.filter((b: any) => b.type === 'text');
-              if (textBlocks.length === 0) continue;
-              kept.push(JSON.stringify({
-                role: 'assistant',
-                content: textBlocks.length === 1 ? textBlocks[0] : textBlocks,
-              }));
-              continue;
-            }
-            kept.push(lines[i]);
-          } catch { /* skip */ }
-        }
-        fsSync.writeFileSync(jsonlPath, kept.join('\n') + (kept.length ? '\n' : ''), 'utf-8');
-        return;
-      }
-
-      // 普通工具：整轮砍掉
-      if (triggerIdx !== -1) {
-        const kept = lines.slice(0, triggerIdx);
-        fsSync.writeFileSync(jsonlPath, kept.length ? kept.join('\n') + '\n' : '', 'utf-8');
-      }
-    } catch { /* 文件操作失败不阻塞 */ }
+    return cleanCompanionJsonl(this.sessionDir);
   }
 
-  /**
-   * 陪伴模式定时任务专用：只移除触发提示词和工具链，保留模型自然回复。
-   * 效果：模型看起来像是"主动"搭话，而非响应系统指令。
-   */
-  private async removeTriggerFromJsonl(): Promise<void> {
-    try {
-      const jsonlPath = path.join(this.sessionDir, 'conversation.jsonl');
-      const fsSync = await import('node:fs');
-      if (!fsSync.existsSync(jsonlPath)) return;
-
-      const content = fsSync.readFileSync(jsonlPath, 'utf-8');
-      const lines = content.split('\n').filter(l => l.trim());
-      if (lines.length === 0) return;
-
-      // 从末尾找最后一条 user 文本消息（触发提示词）
-      let triggerIdx = -1;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          if (msg.role !== 'user') continue;
-          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-          if (blocks.every((b: any) => b.type === 'tool_result')) continue;
-          triggerIdx = i;
-          break;
-        } catch { /* skip */ }
-      }
-
-      if (triggerIdx === -1) return;
-
-      // 收集要移除的索引：触发词 + 之后所有的 tool_use / tool_result
-      const removeIndices = new Set<number>();
-      removeIndices.add(triggerIdx);
-
-      for (let i = triggerIdx + 1; i < lines.length; i++) {
-        try {
-          const msg = JSON.parse(lines[i]);
-          const blocks: any[] = Array.isArray(msg.content) ? msg.content : [msg.content];
-
-          if (msg.role === 'assistant' && blocks.some((b: any) => b.type === 'tool_use')) {
-            removeIndices.add(i);
-          }
-          if (msg.role === 'user' && blocks.every((b: any) => b.type === 'tool_result')) {
-            removeIndices.add(i);
-          }
-        } catch { /* skip */ }
-      }
-
-      const kept = lines.filter((_, i) => !removeIndices.has(i));
-      const newContent = kept.length > 0 ? kept.join('\n') + '\n' : '';
-      fsSync.writeFileSync(jsonlPath, newContent, 'utf-8');
-    } catch { /* 文件操作失败不阻塞 */ }
+  /** 陪伴模式定时任务：移除触发词与工具链，保留模型自然回复（B2 拆出至 loop-session.ts） */
+  async removeTriggerFromJsonl(): Promise<void> {
+    return removeTriggerFromJsonl(this.sessionDir);
   }
+
 
   /**
    * 同步全局 Router 到当前 loop。
@@ -779,9 +796,15 @@ export class AgentLoop {
     this.bundleRegistry = registry;
   }
 
-  /** 运行时替换 outputHandler（用于 server 模式按请求切换流式输出） */
+  /** 运行时替换 outputHandler（用于 server 模式按请求切换流式输出）；askUserHandler 同步跟随 */
   setOutputHandler(handler: OutputHandler): void {
     this.outputHandler = handler;
+    this.askUserHandler = (handler.onAskUser as ((questions: AskUserQuestion[]) => Promise<string>) | undefined) ?? null;
+  }
+
+  /** 当前 loop 的用户交互 handler（ask_user 工具注入点：按实例而非全局单例） */
+  getAskUserHandler(): ((questions: AskUserQuestion[]) => Promise<string>) | null {
+    return this.askUserHandler;
   }
 
   /** 获取当前 active Provider（考虑 Router 路由） */
@@ -795,403 +818,102 @@ export class AgentLoop {
     provider.setUserId?.(userId);
   }
 
-  /** 由 factory 注入：旁路Agent 共享的 Provider 实例 */
-  setBypassProvider(provider: Provider): void {
-    this.bypassProvider = provider;
-  }
-
   /** 获取当前意图簇 capability（用于簇摘要读取与历史过滤）。无意图时返回 'general'。 */
   getCurrentIntentCapability(): string {
     if (!this._currentIntent) return 'general';
     return this._currentIntent.match(/^\[(\w+)\]/)?.[1] ?? 'general';
   }
 
-  /** 运行时切换旁路Agent 的 KVCache 隔离 ID（与主Agent 同步切换） */
-  setBypassUserId(userId: string): void {
-    this.bypassProvider?.setUserId?.(userId);
+  // ── Provider 路由族（B4 拆出至 loop-provider.ts）──────────────────
+
+  /** 构造 Provider 路由族依赖快照（可变状态经访问器现取当前值） */
+  private makeProviderDeps() {
+    return {
+      providerRouter: this.providerRouter,
+      modelRouter: this.modelRouter,
+      lifecycleSupervisor: this.lifecycleSupervisor,
+      configCenter: this.configCenter,
+      outputHandler: this.outputHandler,
+      getProvider: () => this.provider,
+      getActiveProvider: () => this.getActiveProvider(),
+      getLastContextTokens: () => this.lastContextTokens,
+      getCurrentMaxContextTokens: () => this.maxContextTokens,
+      getSessionDir: () => this.sessionDir,
+    };
   }
 
-  /** 切换 Provider 路由模式 */
+  /** 切换 Provider 路由模式（B4 拆出至 loop-provider.ts） */
   toggleProvider(): void {
-    if (!this.providerRouter) return;
-    const info = this.providerRouter.getRoutingInfo();
-    if (info.mode === 'manual') {
-      this.providerRouter.clearDefault();
-    } else {
-      const localProviders = this.providerRouter.list().filter(name => {
-        const p = this.providerRouter?.get(name);
-        const t = p?.getProviderType();
-        return t === 'llamacpp' || t === 'local' || t === 'ollama';
-      });
-      const onlineProviders = this.providerRouter.list().filter(name => {
-        const p = this.providerRouter?.get(name);
-        const t = p?.getProviderType();
-        return t !== 'llamacpp' && t !== 'local' && t !== 'ollama';
-      });
-      if (info.isLocal && onlineProviders.length > 0) {
-        this.providerRouter.setDefault(onlineProviders[0]);
-        // 从本地切走 → 停止本地模型
-        if (this.lifecycleSupervisor) {
-          const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
-          this.lifecycleSupervisor.stopModel(modelKey).catch(() => {});
-        }
-        this.previousProviderWasLocal = false;
-      } else if (!info.isLocal && localProviders.length > 0) {
-        this.providerRouter.setDefault(localProviders[0]);
-        if (this.lifecycleSupervisor) {
-          const existingBaseUrl = this.configCenter?.get('provider.local.baseUrl') as string;
-          if (!existingBaseUrl) {
-            const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
-            this.lifecycleSupervisor.startModelOnDemand(process.cwd(), modelKey)
-              .then((modelInfo) => {
-                if (modelInfo) {
-                  this.lifecycleSupervisor?.getModelManager().getModels();
-                }
-              })
-              .catch(() => {});
-          }
-        }
-        this.previousProviderWasLocal = true;
-      }
+    const r = toggleProvider(this.makeProviderDeps());
+    if (r?.previousProviderWasLocal !== undefined) {
+      this.previousProviderWasLocal = r.previousProviderWasLocal;
     }
   }
 
-  /** 切换到指定名称的 Provider */
   /** 注册新 Provider（用于 switch_provider 工具带 api_key 动态注册） */
   registerProvider(name: string, provider: Provider): void {
     this.providerRouter?.register(name, provider);
   }
 
+  /** 切换到指定名称的 Provider（B4 拆出至 loop-provider.ts） */
   async switchProvider(providerName: string): Promise<void> {
     if (this.switchingProvider) return;
-    if (!this.providerRouter) {
-      throw new Error('ProviderRouter not available');
-    }
-
     this.switchingProvider = true;
     try {
-
-    let newProvider = this.providerRouter.get(providerName);
-
-    if (!newProvider && this.configCenter) {
-      // 本地模型：跳过 configCenter，始终自动检测
-      if (providerName === 'local' || providerName === 'llamacpp' || providerName === 'ollama') {
-        const { getLocalProviderConfigLoader, detectLocalBackend } = await import('../provider/local-config.js');
-        const localCfg = getLocalProviderConfigLoader();
-        let detected = await detectLocalBackend();
-
-        // 未检测到运行中的服务 → 尝试自动拉起（通过 lifecycle supervisor 管理进程）
-        if (!detected && this.lifecycleSupervisor) {
-          // 先试 Ollama
-          const ollamaInfo = await this.lifecycleSupervisor.startOllamaOnDemand(process.cwd());
-          if (ollamaInfo) {
-            detected = { backend: 'ollama', baseUrl: ollamaInfo.baseUrl, port: ollamaInfo.port ?? 11434 };
-          } else {
-            // 再试 llama.cpp
-            const { getLocalProviderConfigLoader: getCfg } = await import('../provider/local-config.js');
-            const cfg = getCfg();
-            const modelKey = (this.configCenter?.get('provider.local.modelKey') as string)
-              || cfg?.defaultModel || 'local';
-            try {
-              const info = await this.lifecycleSupervisor.startModelOnDemand(process.cwd(), modelKey);
-              if (info) {
-                detected = { backend: 'llamacpp', baseUrl: info.baseUrl, port: info.port ?? 8080 };
-              }
-            } catch { /* 启动失败 */ }
-          }
-        }
-
-        if (!detected && !localCfg?.defaultModel) {
-          throw new Error(
-            '本地模型服务未配置。请安装 Ollama 或 llama.cpp，并确保服务正在运行。',
-          );
-        }
-
-        // 检测到的优先，否则 fallback 到默认配置
-        const baseUrl = detected?.baseUrl || localCfg?.baseUrl || 'http://127.0.0.1:11434/v1';
-        const backend = detected?.backend || localCfg?.backend;
-
-        // 模型名解析优先级：
-        //   1. Ollama 后端 → 查询 /api/tags 获取真实模型列表，匹配配置或取第一个
-        //   2. RuntimeConfigCenter 中已有的 provider.local.model（TUI /model 命令写入）
-        //   3. 硬编码兜底 llama3.2
-        let model: string;
-        if (backend === 'ollama') {
-          const { fetchOllamaModels, pickBestOllamaModel } = await import('../provider/local-config.js');
-          const ollamaModels = await fetchOllamaModels();
-          // 优先匹配运行时配置中的 model（TUI 切换时写入）或 localCfg 的 defaultModel
-          const preferred = (this.configCenter?.get('provider.local.model') as string)
-            || localCfg?.defaultModel
-            || null;
-          const best = pickBestOllamaModel(ollamaModels, preferred);
-          if (best) {
-            model = best;
-          } else {
-            // Ollama 在运行但没有任何模型 → 给出明确错误
-            throw new Error(
-              'Ollama is running but no models found. ' +
-              'Run "ollama pull <model>" to download a model first.',
-            );
-          }
-        } else {
-          model = (this.configCenter?.get('provider.local.model') as string)
-            || localCfg?.defaultModel
-            || 'llama3.2';
-        }
-
-        try {
-          newProvider = new LocalProvider({ baseUrl, model, backend });
-          if (newProvider) {
-            this.providerRouter.register(providerName, newProvider);
-          }
-        } catch {
-          // fallback failed
-        }
-      } else {
-        const created = this.tryCreateProviderFromConfig(providerName);
-        if (created) {
-          newProvider = created;
-          this.providerRouter.register(providerName, created);
-        }
+      const r = await switchProvider(this.makeProviderDeps(), providerName);
+      // 回写可变状态
+      this.provider = r.provider;
+      this.activeProvider = undefined;
+      this.orchestrator?.setProvider(r.provider);
+      this.providerRouter?.setDefault(providerName);
+      if (r.previousProviderWasLocal !== undefined) {
+        this.previousProviderWasLocal = r.previousProviderWasLocal;
       }
-    }
-
-    if (!newProvider) {
-      const available = this.providerRouter.list().join(', ');
-      throw new Error(
-        `Provider "${providerName}" not found. Available in router: ${available}. ` +
-        `Use list_providers to see all options.`,
-      );
-    }
-
-    const newType = newProvider.getProviderType();
-    const isLocal = newType === 'local' || newType === 'llamacpp' || newType === 'ollama';
-
-    // 如果切换到本地模型，启动服务；如果从本地模型切走，停止服务
-    if (this.lifecycleSupervisor) {
-      const prevProvider = this.provider;
-      const prevType = prevProvider.getProviderType();
-      const prevWasLocal = prevType === 'local' || prevType === 'llamacpp' || prevType === 'ollama';
-
-      if (isLocal && !prevWasLocal) {
-        const existingBaseUrl = this.configCenter?.get('provider.local.baseUrl') as string;
-        if (existingBaseUrl) {
-          // 模型已通过外部（如 tui 面板 /model/local_*）启动并写入配置
-        } else {
-          const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
-          try {
-            const modelInfo = await this.lifecycleSupervisor?.startModelOnDemand(
-              process.cwd(), modelKey,
-            );
-            if (modelInfo && newProvider && 'setBaseUrl' in newProvider && 'setModel' in newProvider) {
-              (newProvider as any).setBaseUrl(modelInfo.baseUrl);
-              (newProvider as any).setModel(modelInfo.modelName);
-            }
-          } catch {
-            // 模型启动失败，仍然尝试切换（可能服务已在外部运行）
-          }
-        }
-      } else if (!isLocal && prevWasLocal) {
-        const modelKey = this.configCenter?.get('provider.local.modelKey') as string || '';
-        this.lifecycleSupervisor.stopModel(modelKey).catch(() => {});
+      if (r.maxContextTokens !== undefined) {
+        this.maxContextTokens = r.maxContextTokens;
       }
-
-      this.previousProviderWasLocal = isLocal;
-    }
-
-    this.provider = newProvider;
-    this.activeProvider = undefined;
-    this.orchestrator?.setProvider(newProvider);
-    this.providerRouter.setDefault(providerName);
-
-    // 同步主通道到 ModelRouter，确保 registry 中 main 通道持有最新 Provider
-    this.modelRouter?.setMainProvider(newProvider, providerName);
-
-    // 自动裁剪上下文到新模型上限
-    const modelLimit = getModelContextWindow(
-      newProvider.getProviderType(),
-      newProvider.getModel(),
-    );
-
-    // 1. 如果当前上下文已经超过新模型上限 → 触发压缩
-    if (this.lastContextTokens > modelLimit) {
-      this.maxContextTokens = modelLimit;
-      this.needsCompression = true;
-      if (this.configCenter) {
-        // 仅内存更新，不持久化——避免覆盖用户自定义值
-        this.configCenter.set('session.maxContext', modelLimit);
+      if (r.needsCompression !== undefined) {
+        this.clusterService.setNeedsCompression(r.needsCompression);
       }
-      this.outputHandler?.onStatus?.(
-        `Context (${this.lastContextTokens.toLocaleString()}) exceeds new model limit (${modelLimit.toLocaleString()}), will force compression on next turn`,
-        'warn',
-      );
-    }
-    // 2. 当前上下文没超，但 maxContextTokens 设置得比新模型上限高 → 只裁剪上限
-    else if (this.maxContextTokens > modelLimit) {
-      this.maxContextTokens = modelLimit;
-      if (this.configCenter) {
-        // 仅内存更新，不持久化——避免覆盖用户自定义值
-        this.configCenter.set('session.maxContext', modelLimit);
-      }
-      this.outputHandler?.onStatus?.(
-        `maxContextTokens updated: ${modelLimit.toLocaleString()} (model: ${newProvider.getModel()})`,
-        'info',
-      );
-    }
-    // 3. 当前上下文和新模型上限都够用 → 无需操作
-
-    // 注意：不再在此处写 configCenter.set('provider.active') + save()，
-    // 避免共享同一 RuntimeConfigCenter 单例的其他 AgentLoop 被迫切换 provider。
-    // 持久化由调用方（如 TUI /model 命令）显式负责。
-    this.outputHandler?.onStatus?.(
-      `Provider switched to ${providerName} (${newProvider.getProviderType()}/${newProvider.getModel()})`,
-      'info',
-    );
     } finally {
       this.switchingProvider = false;
     }
   }
 
-  /** 从 RuntimeConfigCenter 中的配置 + 环境变量动态创建 Provider */
+  /** 从 RuntimeConfigCenter 中的配置 + 环境变量动态创建 Provider（B4 拆出） */
   private tryCreateProviderFromConfig(providerName: string): Provider | undefined {
-    if (!this.configCenter) return undefined;
-
-    const section = this.configCenter.get(`provider.${providerName}`);
-    if (!section || typeof section !== 'object') return undefined;
-
-    const { model, apiKeyEnv, baseUrl } = section as { model?: string; apiKeyEnv?: string; baseUrl?: string };
-    const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
-    const isLocal = providerName === 'local' || providerName === 'llamacpp' || providerName === 'ollama';
-
-    if (!apiKey && !isLocal) return undefined;
-
-    try {
-      return ProviderManager.createProviderFromConfig({
-        type: providerName as import('../types.js').ProviderType,
-        apiKey: apiKey ?? '',
-        model: model ?? '',
-        baseUrl,
-        userId: this.sessionDir ? mainUserId(path.basename(this.sessionDir)) : undefined,
-      });
-    } catch {
-      return undefined;
-    }
+    return tryCreateProviderFromConfig(this.makeProviderDeps(), providerName);
   }
 
-  /** 订阅 RuntimeConfigCenter 变更，让 update_config 即时生效 */
+  /** 订阅 RuntimeConfigCenter 变更，让 update_config 即时生效（B4 拆出） */
   subscribeConfig(): void {
-    if (!this.configCenter) return;
-
-    // provider.active 变更 → 自动切换 provider
-    this.configCenter.watch('provider.active', (event) => {
-      const name = event.newValue as string;
-      if (!name || typeof name !== 'string') return;
-      // 守卫：如果与当前 provider 相同，跳过，避免重复切换
-      const currentType = this.getActiveProvider().getProviderType();
-      if (name === currentType) return;
-      if (this.providerRouter?.get(name)) {
-        this.switchProvider(name).catch(() => {
-          this.outputHandler?.onStatus?.(`Config changed provider to "${name}" but switch failed`, 'error');
-        });
-      }
-    });
-
-    // provider.<name>.model 变更 → 如果当前 active provider 匹配，重新创建 provider 并切换
-    this.configCenter.watch('provider.*.model', (event) => {
-      const newModel = event.newValue as string;
-      if (!newModel || typeof newModel !== 'string') return;
-      if (!this.providerRouter || !this.configCenter) return;
-      const activeName = this.configCenter.get<string>('provider.active');
-      if (!activeName) return;
-
-      // 解析路径 provider.X.model → 提取 X
-      const watchPath = event.path as string;
-      const parts = watchPath.split('.');
-      if (parts.length < 3 || parts[0] !== 'provider' || parts[2] !== 'model') return;
-      const changedProvider = parts[1];
-
-      // 只响应当前 active provider 的 model 变更
-      if (changedProvider !== activeName) return;
-
-      // 注销旧的 provider，用新 model 重建
-      this.providerRouter.unregister(activeName);
-      const created = this.tryCreateProviderFromConfig(activeName);
-      if (created) {
-        this.providerRouter.register(activeName, created);
-      }
-
-      this.switchProvider(activeName).catch(() => {
-        this.outputHandler?.onStatus?.(`Config changed model for "${activeName}" but switch failed`, 'error');
-      });
-    });
-
-    // session.maxTurns 变更 → 即时更新
-    this.configCenter.watch('session.maxTurns', (event) => {
-      if (typeof event.newValue === 'number' && event.newValue > 0) {
-        this.maxTurns = event.newValue;
-        this.outputHandler?.onStatus?.(`maxTurns updated to ${event.newValue}`, 'info');
-      }
-    });
-
-    // session.maxContext 变更 → 即时更新（裁剪到当前模型上限）
-    this.configCenter.watch('session.maxContext', (event) => {
-      if (typeof event.newValue === 'number' && event.newValue > 0) {
-        const activeP = this.getActiveProvider();
-        const modelLimit = getModelContextWindow(
-          activeP.getProviderType(),
-          activeP.getModel(),
-        );
-        const clamped = Math.min(event.newValue, modelLimit);
-        this.maxContextTokens = clamped;
-        if (clamped < event.newValue) {
-          this.outputHandler?.onStatus?.(
-            `maxContextTokens capped to ${clamped} (model limit: ${modelLimit})`,
-            'warn',
-          );
-        } else {
-          this.outputHandler?.onStatus?.(`maxContextTokens updated to ${clamped}`, 'info');
-        }
-      }
+    subscribeConfig(this.makeProviderDeps(), {
+      switchProvider: (name) => this.switchProvider(name),
+      setMaxTurns: (n) => { this.maxTurns = n; },
+      setMaxContextTokens: (n) => { this.maxContextTokens = n; },
     });
   }
 
-  /** 切换回自动路由模式 */
+  /** 切换回自动路由模式（B4 拆出至 loop-provider.ts） */
   switchToAutoRoute(): void {
-    this.providerRouter?.clearDefault();
-    this.outputHandler?.onStatus?.('Switched to auto route mode', 'info');
+    switchToAutoRoute(this.makeProviderDeps());
   }
 
-  /** 获取 Provider 路由信息 */
+  /** 获取 Provider 路由信息（B4 拆出至 loop-provider.ts） */
   getProviderRoutingInfo(): { providerLabel: string; isLocal: boolean; mode: string } | null {
-    if (!this.providerRouter) return null;
-    const info = this.providerRouter.getRoutingInfo();
-    return {
-      providerLabel: info.providerName,
-      isLocal: info.isLocal,
-      mode: info.mode,
-    };
+    return getProviderRoutingInfo(this.makeProviderDeps());
   }
 
+  /** 运行时切换模型来源（B4 拆出至 loop-provider.ts） */
   setModelSource(role: ModelRole, source: 'main' | 'local'): void {
-    if (!this.modelRouter || !this.configCenter) return;
-    const currentModels = this.configCenter.get('models') as any;
-    if (currentModels) {
-      currentModels[role] = { ...currentModels[role], source };
-      this.configCenter.set('models', currentModels);
-      this.configCenter.save().catch(() => {});
-    }
+    setModelSource(this.makeProviderDeps(), role, source);
   }
 
+  /** 读取模型来源配置（B4 拆出至 loop-provider.ts） */
   getModelSources(): Record<ModelRole, 'main' | 'local'> | null {
-    if (!this.modelRouter || !this.configCenter) return null;
-    const models = this.configCenter.get('models') as any;
-    if (!models) return null;
-    return {
-      assessment: models.assessment?.source ?? 'main',
-      planning: models.planning?.source ?? 'main',
-      compression: models.compression?.source ?? 'main',
-    };
+    return getModelSources(this.makeProviderDeps());
   }
+
 
   /** 定时任务触发时唤醒 Agent，自动发起一轮对话 */
   async notifyTaskFired(taskName: string): Promise<void> {
@@ -1221,13 +943,49 @@ export class AgentLoop {
   }
 
   /**
+   * 惰性会话物化（幂等）：boot() 新建分支只生成 session id 不落盘，
+   * 用户首次输入到这里才补写 meta.json / session_start / stats。
+   * meta.json 已存在（恢复旧 session / 已物化）则跳过。
+   */
+  private async materializeSessionIfNeeded(): Promise<void> {
+    try {
+      const pathMod = await import('node:path');
+      const sid = pathMod.basename(this.sessionDir);
+      // 渠道从 session id 前缀推断（与 SessionManager.resume 自动建分支同规则）
+      let channel: string | undefined;
+      if (sid.startsWith('feishu_')) channel = 'feishu';
+      else if (sid.startsWith('webui_') || sid.startsWith('ui_')) channel = 'webui';
+      else if (sid.startsWith('tui_')) channel = 'tui';
+      const { materializeLazySession } = await import('../memory/session.js');
+      await materializeLazySession(this.sessionDir, {
+        id: sid,
+        projectKey: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        type: 'normal',
+        channel,
+      });
+    } catch (err) {
+      this.logger.warn('session materialize failed', { error: (err as Error).message });
+    }
+  }
+
+  /**
    * run() 的内部实现，由串行化锁保护
    */
   private async _runInternal(userInput: string): Promise<void> {
+    // ── 惰性会话物化（首条消息）：补齐 meta.json / session_start / stats ──
+    // boot() 新建分支只生成 session id 不落盘；用户首次输入到这里才物化。
+    // conversation.jsonl 由下方 append 自动创建；幂等（meta 已存在则跳过）。
+    await this.materializeSessionIfNeeded();
+
     this.interrupted = false;
     this.abortController = new AbortController();
-    // 每次用户输入重置防重复检测窗口
+    // 每次用户输入重置防重复检测窗口与本轮表达缓冲
     this.loopGuard.reset();
+    this.companionExpressions = [];
+    // 钩子事件用的回合计数（在 try 外声明，catch 里 onTurnError 也能读到）
+    let turnCount = 0;
 
     // 启动调度器
     if (this.scheduler && !this.schedulerInitialized) {
@@ -1275,16 +1033,28 @@ export class AgentLoop {
         } catch { /* 旁白处理失败则按原输入继续 */ }
       }
 
-      // 1. 将用户输入追加到 conversation（视觉模型自动检测图片路径或渠道预取图片）
+      // 1. 将用户输入追加到 conversation（多模态：图片/视频/音频路径检测 + 渠道预取图片）
       const activeP = this.getActiveProvider();
       const hasVision = activeP.getCapabilities?.()?.vision ?? false;
+      const inputTypes = activeP.getCapabilities?.()?.inputTypes;
+      const hasMediaCap = hasVision
+        || (inputTypes?.includes('video') ?? false)
+        || (inputTypes?.includes('audio') ?? false);
       let userContent: MessageContent | MessageContent[];
       if (hasVision && this.channelImages && this.channelImages.length > 0) {
         // 渠道预取图片（飞书/HTTP 等已下载为 base64）
         userContent = buildUserContentWithInlineImages(userInput, this.channelImages, this.imageStore);
         this.channelImages = null; // 一次性消费
-      } else if (hasVision) {
-        userContent = await buildUserContentWithImages(userInput, this.imageStore);
+      } else if (hasMediaCap) {
+        // 多模态统一管线：图片/视频/音频路径检测 → 原生或抽帧降级
+        userContent = await buildUserContentWithMedia(userInput, {
+          imageStore: this.imageStore,
+          supportsVideo: inputTypes?.includes('video') ?? false,
+          supportsAudio: inputTypes?.includes('audio') ?? false,
+          videoInlineMaxBytes: this.configCenter?.get('multimodal.videoInlineMaxBytes') as number | undefined,
+          videoMaxFrames: this.configCenter?.get('multimodal.videoMaxFrames') as number | undefined,
+          audioInlineMaxBytes: this.configCenter?.get('multimodal.audioInlineMaxBytes') as number | undefined,
+        });
       } else {
         userContent = { type: 'text' as const, text: userInput };
       }
@@ -1307,10 +1077,11 @@ export class AgentLoop {
       }
 
       // 2. 主循环：compose -> LLM -> parse -> tool -> compose
-      // 不设总轮次上限 — 超长开发任务可能需要数百轮。
+      // 总轮次上限由 session.maxTurns 控制（UI 显示为硬上限，这里兑现该语义；
+      // 超长任务可经配置调高 maxTurns）。
       // LoopGuard 跟踪连续触发次数，超过上限后强制停止以防止死循环。
-      let turnCount = 0;
       let toolWasCalled = false;
+      let lastResult: { stop: boolean; stopReason?: string } = { stop: false };
       while (true) {
         if (this.interrupted) {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
@@ -1319,7 +1090,14 @@ export class AgentLoop {
 
         const result = await this.runTurn();
         turnCount++;
+        lastResult = result;
         if (result.toolCalled) toolWasCalled = true;
+        // ── 钩子：迭代结束（异步子Agent注入 / stats / loopGuard 可在此挂载） ──
+        await this.loopHooks.emit('onIterationEnd', {
+          turn: turnCount,
+          stop: result.stop,
+          stopReason: result.stopReason,
+        });
 
         // ── 异步子Agent 结果回合内注入 ─────────────────────────
         // delegate-tool 中异步任务完成后会将结果推送到此队列。
@@ -1360,12 +1138,22 @@ export class AgentLoop {
               history: [],
               toolCallsThisTurn: this.recentToolNames ?? [],
               isLastIteration: false, // 仍在 loop 中
+              failure: this.describeTurnFailure(),
             };
             this.bypassManager.postTurn(iterCtx).catch(() => {});
           } catch { /* ignore */ }
         }
 
         if (result.stop) {
+          break;
+        }
+
+        // 总轮次上限（session.maxTurns）：兑现 UI/配置声明的硬上限语义
+        if (turnCount >= this.maxTurns) {
+          this.outputHandler?.onStatus?.(
+            `Reached max turns (${this.maxTurns}). Stopping to honor the configured limit.`,
+            'warn',
+          );
           break;
         }
 
@@ -1380,6 +1168,12 @@ export class AgentLoop {
       }
 
       // ── Post-turn cleanup（由 Router 控制）────────────────────
+      // ── 钩子：回合结束（最终 postTurn / 簇消费 / 图片回收可在此挂载） ──
+      await this.loopHooks.emit('onTurnEnd', {
+        turn: turnCount,
+        tokensUsed: this.lastContextTokens,
+        stopReason: lastResult.stopReason,
+      });
       if (this.activeRouter.onPostTurn) {
         await this.activeRouter.onPostTurn(this, this.pendingTaskName, toolWasCalled);
       }
@@ -1415,10 +1209,52 @@ export class AgentLoop {
           isLastIteration: true,
           sessionId: path.basename(this.sessionDir),
           fullArchiveLineCount: fullLineCount,
+          failure: this.describeTurnFailure(),
         };
         this.outputHandler?.onStatus?.('bypass-start', 'info');
         await this.bypassManager.postTurn(postCtx);
         this.outputHandler?.onStatus?.('bypass-end', 'info');
+        // ── 陪伴表达契约：companion_say 说出的话才是"表达"；
+        // 普通 text 是内心独白，不驱动世界、不再自动 TTS ──
+        if (this.companionExpressions.length > 0) {
+          const spoken = this.companionExpressions.filter((e) => e.as === 'speak');
+          postAssistantOutput = spoken.map((e) => e.text).join('\n');
+        }
+        // ── 表达兜底：模型未按契约调用 companion_say 时（部分模型对
+        // 工具化表达依从性弱，尤其在历史全是纯文本角色扮演时），
+        // 把它的普通文本当作台词呈现，保证陪伴 UI 不会沉默。
+        // 合规模型（已调用工具且含 speak 表达）不受影响。 ──
+        if (
+          this.activeRouter?.name === 'companion' &&
+          postAssistantOutput &&
+          !this.companionExpressions.some((e) => e.as === 'speak')
+        ) {
+          // 兜底与工具路径一致：带 sayId（前端时序守卫依赖），事件名走协议层常量
+          const sayId = nextSayId();
+          this.emitUiEvent(UI_EVENT.COMPANION_SAY, {
+            mode: 'speak',
+            text: postAssistantOutput,
+            tone: '',
+            at: new Date().toISOString(),
+            sayId,
+          } satisfies CompanionSayEvent);
+          // 兜底路径同样落盘台词历史（companion.sayHistory 数据源；与工具路径共用 sayId）
+          getSayHistoryStore().append({
+            sayId,
+            character: (this.activeRouter as { activeCompanionName?: string }).activeCompanionName || '',
+            mode: 'speak',
+            text: postAssistantOutput,
+            at: new Date().toISOString(),
+          });
+          this.companionVoice?.onTurnEnd(
+            postAssistantOutput,
+            (this.activeRouter as { activeCompanionName?: string }).activeCompanionName || '',
+            (type, payload) => this.outputHandler?.onEvent?.(type, payload),
+            // overrides（第 4 参）：sayId 贯穿事件，供前端时序守卫；
+            // cfg 由 factory 装配的包装层每回合现读，无需在此传入
+            { sayId },
+          );
+        }
         // 清除本轮的旁路注入缓存和意图，下一轮用户消息重新 preTurn
         this._bypassInjections = undefined;
         this._currentIntent = null;
@@ -1506,6 +1342,11 @@ export class AgentLoop {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      // ── 钩子：回合异常（管道/LLM 抛错兜底通知） ──
+      await this.loopHooks.emit('onTurnError', {
+        turn: turnCount,
+        error: error instanceof Error ? error : new Error(message),
+      }).catch(() => {});
       this.outputHandler?.onStatus?.(
         `Agent error: ${message}`,
         'error',
@@ -1519,10 +1360,72 @@ export class AgentLoop {
   }
 
   /**
+   * 挂载插件到主循环（P1 M7）。返回 disposer：dispose() = 卸载。
+   * 插件可通过 ctx.aroundHook('beforeToolExecute', ...) 拦截工具执行（权限链形态）、
+   * ctx.onHook('onTurnStart', ...) 观察回合，卸载时钩子随生命周期账本自动摘除。
+   */
+  mountPlugin(
+    plugin: HyPlugin<Record<string, unknown>, LoopHooks>,
+    config?: Record<string, unknown>,
+  ): Promise<Disposable> {
+    return this.pluginHost.mount(plugin, config).then((disposer) => {
+      // 安全内核 canary：每次插件挂载后核验守卫在位（防热重载/插件拆改）
+      import('../kernel/security/index.js').then(({ verifySecurityIntegrity }) => {
+        verifySecurityIntegrity();
+      }).catch(() => {});
+      return disposer;
+    });
+  }
+
+  /**
+   * 运行时替换阶段服务（扩展注册表 service:* 替换点的落点）。
+   * 阶段模块经 ctx.get/require 读到的服务即此表；返回 disposer 恢复注册前值。
+   */
+  setStageService<K extends StageServiceKey>(key: K, value: StageServiceMap[K]): Disposable {
+    const had = this.stageServices.has(key);
+    const previous = this.stageServices.get(key);
+    this.stageServices.set(key, value);
+    return {
+      dispose: () => {
+        if (had) this.stageServices.set(key, previous);
+        else this.stageServices.delete(key);
+      },
+    };
+  }
+
+  /**
+   * 构造阶段执行上下文（每轮新建：iteration/signal/sessionDir 取当前值）。
+   * get/require 从 stageServices 服务表读取；服务键与返回值类型受
+   * StageServiceMap 编译期保护（拼错键 / 取错类型立即报错）。
+   */
+  private makeStageCtx(): KernelStageContext {
+    return {
+      iteration: this.currentTurn,
+      signal: this.abortController?.signal,
+      get: <K extends StageServiceKey>(key: K) =>
+        this.stageServices.get(key) as StageServiceMap[K] | undefined,
+      require: <K extends StageServiceKey>(key: K) => {
+        const v = this.stageServices.get(key);
+        if (v === undefined) {
+          throw new Error(`[pipeline] missing stage service "${key}"`);
+        }
+        return v as StageServiceMap[K];
+      },
+      config: <T = Record<string, unknown>>() => ({}) as T,
+      logger: this.logger,
+    };
+  }
+
+  /**
    * 内部方法：执行一轮 LLM 调用
    */
   private async runTurn(): Promise<{ stop: boolean; stopReason?: string; toolCalled?: boolean }> {
     this.currentTurn++;
+    // ── 钩子：回合开始 ──────────────────────────────────────────
+    await this.loopHooks.emit('onTurnStart', { turn: this.currentTurn });
+    // ── 验证证据账本：本轮复位（P1-B） ──
+    this.turnEvidenceCount = 0;
+    this.turnHadMutation = false;
     // ── 回合回滚：记录回合开始前状态 ──
     if (this.turnRecorder) {
       this.turnRecorder.startTurn(this.currentTurn).catch(err => {
@@ -1534,50 +1437,33 @@ export class AgentLoop {
     // 自动切换当前 loop 的 sessionDir 和上下文行为。
     await this.syncRouter();
 
-    // 从 conversation 读取历史
-    const history = await this.conversationStore.readAll(this.sessionDir);
-
-    // 组装上下文 — 按当前 Router 过滤工具定义
-    const ctxRouter = this.activeRouter;
-    const profile = getActiveProfile();  // 保留向后兼容
-    let toolDefinitions = this.toolRegistry.getToolDefinitions(ctxRouter.name === 'companion');
-
-    // Router 指定工具白名单时，使用 Router 过滤
-    if (ctxRouter.toolAllowlist.length > 0) {
-      const allowed = new Set(ctxRouter.toolAllowlist);
-      toolDefinitions = toolDefinitions.filter(t => allowed.has(t.name));
-    } else if (this.bundleRegistry) {
-      // 工具包展开：激活时触发激进压缩 + pendingBundleSummary，下轮注入 summary 段（Zone 3）
-      const allowed = this.bundleRegistry.getActiveToolNames();
-      if (allowed.length > 0) {
-        const allowedSet = new Set(allowed);
-        toolDefinitions = toolDefinitions.filter(t => allowedSet.has(t.name));
-      }
+    // ── P1 M3：input 阶段（历史读入 + 输入归一化，经内核管道执行） ──
+    const initState = createTurnState({
+      turn: this.currentTurn,
+      history: [],
+      userInput: '',
+      session: {
+        sessionDir: this.sessionDir,
+        currentSummary: this.currentSummary,
+        recentToolNames: this.recentToolNames,
+        activePlan: this.activePlan,
+      } as SessionState,
+    });
+    initState.ephemeralInput = this.activeRouter.ephemeralInput ?? null;
+    initState.companionMode = this.activeRouter.name === 'companion';
+    this.stageServices.set('sessionDir', this.sessionDir);
+    const st = await this.pipeline.runSlot('input', initState, this.makeStageCtx());
+    const history = st.history;
+    let userInputText = st.userInput;
+    let stateRef: TurnState = st;
+    // 纯旁白轮：模块已将瞬态输入并进 userInput 并置 null → 清空 router 上的残留
+    if (st.ephemeralInput === null && initState.ephemeralInput !== null) {
+      this.activeRouter.ephemeralInput = null;
     }
 
-    // 黑名单过滤：始终生效，优先级高于白名单
-    if (ctxRouter.toolBlacklist.length > 0) {
-      const blocked = new Set(ctxRouter.toolBlacklist);
-      toolDefinitions = toolDefinitions.filter(t => !blocked.has(t.name));
-    }
-
-    // 获取最后一条 user 消息作为 userInput
-    // 排除纯 tool_result 的 user 消息（避免误删工具结果）
-    const lastUserTextMsg = [...history].reverse().find(
-      (m) => m.role === 'user' && hasTextContent(m.content),
-    );
-    let userInputText = lastUserTextMsg
-      ? extractTextContent(lastUserTextMsg.content)
-      : '';
-
-    // 陪伴模式纯旁白轮：本轮 input 来自旁路 LLM 的瞬态产出（未落盘、不在 history 中），仅本轮注入
-    const ephemeralUserInput = this.activeRouter.ephemeralInput ?? null;
-
-    // 判断是否是工具执行后的续轮（history 中有 tool_use）
-    const hasPendingToolCalls = history.some(
-      (m) => m.role === 'assistant' && hasToolUseContent(m.content),
-    );
-
+    // 输入归一化（userInput 提取 / 续轮判定 / 剥离 lastUser / 旁白覆盖 / 表达文本化）
+    // 已下沉至 input 阶段模块，产物经 st 回传。此处保留 input 段的两个副作用：
+    // 配置热更新应用 + 强制重压缩警告。
     // Apply runtime config changes if context is dirty
     if (this.configCenter && this.contextDirty) {
       const newThreshold = this.configCenter.get<number>('context.compressThreshold');
@@ -1592,39 +1478,11 @@ export class AgentLoop {
     }
 
     // 切换到大窗口→小窗口模型后，强制全量重压缩
-    if (this.needsCompression) {
+    if (this.clusterService.getNeedsCompression()) {
       this.outputHandler?.onStatus?.(
         `Forcing full context recompression to fit new model limit (${this.maxContextTokens.toLocaleString()})`,
         'warn',
       );
-    }
-
-    let uncompressedMsgs = history;
-
-    let historySummary = this.currentSummary;
-
-    // 从 history 中排除最后一条 user 文本消息（compose 会重新添加）
-    // 工具执行续轮时保留在历史中供上下文参考，但不清除 userInput 以避免重复注入
-    // 瞬态旁白轮：当前 input 不在 history 中，不剥离任何历史 user 消息
-    const historyWithoutLastUser = hasPendingToolCalls || ephemeralUserInput
-      ? history
-      : lastUserTextMsg
-        ? history.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
-        : history;
-
-    // 续轮时清空 userInput，防止同一条用户消息被重新注入为"新输入"
-    // 判断依据：历史最末尾不是用户新文本（而是 tool_result），说明是续轮
-    // 如果末尾是用户文本消息（如新的"好了停吧"），则保留 userInput
-    const lastMsg = history[history.length - 1];
-    const hasFreshUserInput = lastMsg?.role === 'user' && hasTextContent(lastMsg.content);
-    if (!hasFreshUserInput) {
-      userInputText = '';
-    }
-
-    // 纯旁白轮：用旁路瞬态产出覆盖本轮 userInput，并消费一次（续轮/下一轮不再注入）
-    if (ephemeralUserInput) {
-      userInputText = ephemeralUserInput;
-      this.activeRouter.ephemeralInput = null;
     }
 
     // 确定本轮实际使用的 Provider（路由决策前置，确保 compose 看到正确的 providerType）
@@ -1652,657 +1510,109 @@ export class AgentLoop {
       this.pendingRecoverInfo = null;
     }
 
-    // 精确模式/陪伴模式：应用策略
-    let effectiveHistory = historyWithoutLastUser;
-    let effectivePersonaDir = this.personaDir;
-    // Router 处理历史过滤（陪伴模式的 tool 轮次剥离等）
-    effectiveHistory = hasPendingToolCalls
-      ? historyWithoutLastUser
-      : this.activeRouter.filterHistory(historyWithoutLastUser);
-    // 精确模式（ComposeStrategy）：叠加关键词过滤 + analyzeTurn
-    if (this.composeStrategy) {
-      const opts = this.composeStrategy.prepareCompose(this.personaDir);
-      effectivePersonaDir = opts.personaDir;
-      if (this.composeStrategy.name === 'precise') {
-        effectiveHistory = this.composeStrategy.filterHistory(effectiveHistory);
-      }
-      if (opts.preciseMode) {
-        this.contextComposer.activeConditions.add('precise_mode');
-      } else {
-        this.contextComposer.activeConditions.delete('precise_mode');
-      }
-    }
-
-    // 处理待注入图片队列（仅视觉模型）
-    if (this.pendingImageInjections.length > 0 && (activeProvider.getCapabilities?.()?.vision ?? false)) {
-      for (const pi of this.pendingImageInjections) {
-        const imgMsg: Message = {
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: pi.media_type, data: pi.data } },
-            { type: 'text', text: `[Re-examining Image #${pi.imgId}]` },
-          ],
-        };
-        await this.conversationStore.append(this.sessionDir, imgMsg);
-        effectiveHistory = [...effectiveHistory, imgMsg];
-      }
-      this.pendingImageInjections.length = 0;
-    }
-
-    // 更新知识库检索查询（必须在 compose 之前，确保 Zone 4 读到当前轮提问）
-    if (this.kbState) {
-      this.kbState.lastQuery = userInputText;
-    }
-
-    // ── 旁路Agent preTurn：仅在首轮迭代运行，后续复用缓存 ───
-    if (this._bypassInjections === undefined && this.bypassManager) {
-      const preTurnCtx: import('../bypass/types.js').PreTurnContext = {
-        userInput: userInputText,
-        recentHistory: (history ?? []).slice(-20),
-        contextBudget: { used: this.lastContextTokens, total: this.maxContextTokens },
-        recentToolCalls: this.recentToolNames ?? [],
-        sessionId: path.basename(this.sessionDir),
-      };
-      this.outputHandler?.onStatus?.('bypass-start', 'info');
-      const preTurnResult = await this.bypassManager.preTurn(preTurnCtx);
-      this.outputHandler?.onStatus?.('bypass-end', 'info');
-      if (preTurnResult.transformedInput !== undefined) {
-        userInputText = preTurnResult.transformedInput;
-      }
-      this._bypassInjections = preTurnResult.injections;
-      // 消费 orchestrator 意图（用于意图簇过滤）
-      if (preTurnResult.intent) {
-        const cap = preTurnResult.intent.capability;
-        this._currentIntent = `[${cap}] ${userInputText.slice(0, 80)}`;
-        // 写入 bypass_intent 事件
-        try {
-          await this.eventStore.append(this.sessionDir, {
-            type: 'bypass_intent',
-            capability: cap,
-            confidence: preTurnResult.intent.confidence,
-            sessionId: path.basename(this.sessionDir),
-            timestamp: new Date().toISOString(),
-          });
-        } catch { /* 非关键 */ }
-      }
-    }
-    // 合并 preTurn 产出 + postTurn 运行时注入（如纠正）
-    const runtimeInjections = this.bypassManager?.consumeInjections() ?? [];
-    const bypassInjections = [
-      ...(this._bypassInjections ?? []),
-      ...runtimeInjections,
-    ];
-    // 运行时注入消费后即清空，不带到下一轮
-    if (runtimeInjections.length > 0) {
-      // 不修改 _bypassInjections，只在本轮使用合并结果
-    }
-
-    // ── 意图簇：构建历史过滤钩子 ──
-    const historyTransform = await this.buildClusterHistoryTransform().catch(() => null);
-
-    // Compose with layered options
-    const layeredResult = await this.contextComposer.compose({
-      sessionDir: this.sessionDir,
-      providerType: activeProvider.getProviderType(),
-      maxContextTokens: this.maxContextTokens,
-      cwd: process.cwd(),
-      timestamp: formatTimestamp(),
-      tools: toolDefinitions,
-      history: effectiveHistory,
+    // ── P1 M6：bypass 阶段（preTurn 注入 / 意图消费 / 注入合并，经内核管道执行） ──
+    stateRef = {
+      ...stateRef,
       userInput: userInputText,
-      historySummary,
-      currentPlan: this.activePlan ? formatPlanAsText(this.activePlan) : undefined,
-      zone3Hashes: undefined,
-      impactInfo: this.pendingImpactInfo ?? undefined,
-      fullHistory: history,
-      personaDir: effectivePersonaDir,
-      gitManager: this.gitManager,
-      profile,
-      bypassInjections,
-      historyTransform,
-    });
-    this.pendingImpactInfo = null; // 清除已使用的影响面信息
-    const messages = layeredResult.messages;
-    // Flow 注入在 Zone 5（flow_injection），由 manifest 统一管理
-
-
-    // 更新 current_context_tokens 到 Stats
-    this.lastContextTokens = layeredResult.zoneBreakdown.total;
-
-    // ── 压缩触发：compose 后检测 Zone 总 token 是否超过阈值 ──
-    const compressThreshold = this.configCenter
-      ? (this.configCenter.get('context.compressThreshold') as number) ?? 0.75
-      : 0.75;
-    const emergencyThreshold = this.configCenter
-      ? (this.configCenter.get('context.emergencyThreshold') as number) ?? 0.92
-      : 0.92;
-
-    // Step 1: 消费上一轮的后台压缩结果
-    if (this.pendingCompression) {
-      const compressionResult = await this.pendingCompression;
-      this.pendingCompression = null;
-
-      if (compressionResult) {
-        const compressedHistory = compressionResult.messages;
-        historySummary = compressionResult.summary || this.currentSummary;
-
-        await this.conversationStore.replace(this.sessionDir, compressedHistory);
-
-        // 更新 uncompressedMsgs 为压缩后的消息，避免 Step 2 用旧数据再次压缩
-        uncompressedMsgs = compressedHistory;
-
-        if (compressionResult.summary) {
-          this.currentSummary = compressionResult.summary;
-          if (compressionResult.summary !== this.lastSavedSummary) {
-            await this.summaryStore.save(this.sessionDir, compressionResult.summary);
-            this.lastSavedSummary = compressionResult.summary;
-          }
-        }
-
-        if (compressionResult.phasesUsed.length > 0) {
-          this.compressCount++;
-          await this.statsManager.increment(this.sessionDir, 'compact_count', 1);
-        }
-
-        // 重新 compose（用压缩后的 history）
-        const compressedHistoryWithoutLastUser = hasPendingToolCalls
-          ? compressedHistory
-          : lastUserTextMsg
-            ? compressedHistory.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
-            : compressedHistory;
-
-        const reLayeredResult = await this.contextComposer.compose({
-          sessionDir: this.sessionDir,
-          providerType: activeProvider.getProviderType(),
-          maxContextTokens: this.maxContextTokens,
-          cwd: process.cwd(),
-          timestamp: formatTimestamp(),
-          tools: toolDefinitions,
-          history: compressedHistoryWithoutLastUser,
-          userInput: userInputText,
-          historySummary,
-          currentPlan: this.activePlan ? formatPlanAsText(this.activePlan) : undefined,
-          zone3Hashes: undefined,
-          impactInfo: this.pendingImpactInfo ?? undefined,
-          fullHistory: history,
-          personaDir: this.personaDir,
-          gitManager: this.gitManager,
-          profile,
-          bypassInjections,
-          historyTransform,
-        });
-
-        layeredResult.messages.length = 0;
-        layeredResult.messages.push(...reLayeredResult.messages);
-        layeredResult.zoneBreakdown = reLayeredResult.zoneBreakdown;
-
-        // 更新 lastContextTokens 为压缩后的实际值
-        const preCompressTokens = this.lastContextTokens;
-        this.lastContextTokens = reLayeredResult.zoneBreakdown.total;
-
-        // 输出压缩结果（使用实际 token 数）
-        if (compressionResult.phasesUsed.length > 0) {
-          this.outputHandler?.onStatus?.(
-            `compress-result:${preCompressTokens}:${this.lastContextTokens}`,
-            'info',
-          );
-        }
-
-        // 激进压缩兜底检测：常规压缩后仍超标
-        if (reLayeredResult.zoneBreakdown.total > this.maxContextTokens * compressThreshold) {
-          if (!this.needsAggressiveCompress) {
-            this.needsAggressiveCompress = true;
-            this.outputHandler?.onStatus?.(
-              `Compression insufficient (${reLayeredResult.zoneBreakdown.total.toLocaleString()} > ${Math.floor(this.maxContextTokens * compressThreshold).toLocaleString()}), will unprotect recent messages next turn`,
-              'warn',
-            );
-          } else {
-            this.logger.error(
-              `Compressor failed to reduce context below safety threshold: ${reLayeredResult.zoneBreakdown.total}/${this.maxContextTokens}`,
-            );
-            this.needsAggressiveCompress = false;
-            this.outputHandler?.onStatus?.(
-              `Compressor failed after aggressive compression, continuing with ${reLayeredResult.zoneBreakdown.total.toLocaleString()} tokens`,
-              'error',
-            );
-          }
-        } else if (this.needsAggressiveCompress) {
-          this.needsAggressiveCompress = false;
-        }
-      }
-      // Step 1 消费完毕 → 恢复 deep 压缩临时模板
-      this._maybeRestoreSummary();
-    }
-
-    // Step 2: 当前轮次超标 → 异步或同步压缩
-    const currentTokens = layeredResult.zoneBreakdown.total;
-
-    // 压缩条件：token 超阈值，或 trigger_compression 主动要求
-    if (currentTokens > this.maxContextTokens * compressThreshold || this.needsCompression) {
-      this.needsCompression = false;
-      const zone5TailBudget = Math.floor(this.maxContextTokens * 0.15);
-      const protectCount = this.needsAggressiveCompress
-        ? 0
-        : computeProtectCount(uncompressedMsgs, zone5TailBudget);
-
-      // 紧急阈值：上下文接近爆满 → 同步压缩，停主对话等结果
-      if (currentTokens > this.maxContextTokens * emergencyThreshold) {
-        this.outputHandler?.onStatus?.(
-          `⚠ Emergency: ${currentTokens.toLocaleString()} tokens (${Math.round(currentTokens / this.maxContextTokens * 100)}%) — compressing synchronously to prevent overflow`,
-          'warn',
-        );
-
-        if (uncompressedMsgs && uncompressedMsgs.length > 0) {
-          this.outputHandler?.onStatus?.('compress-start', 'info');
-          try {
-            const emergencyResult = await this.compressor.compress(
-              uncompressedMsgs,
-              this.currentSummary,
-              0, // 不保护最近消息
-              this.maxContextTokens,
-              undefined,
-            );
-
-            if (emergencyResult) {
-              const compressedHistory = emergencyResult.messages;
-              historySummary = emergencyResult.summary || this.currentSummary;
-              await this.conversationStore.replace(this.sessionDir, compressedHistory);
-              uncompressedMsgs = compressedHistory;
-
-              if (emergencyResult.summary) {
-                this.currentSummary = emergencyResult.summary;
-                if (emergencyResult.summary !== this.lastSavedSummary) {
-                  await this.summaryStore.save(this.sessionDir, emergencyResult.summary);
-                  this.lastSavedSummary = emergencyResult.summary;
-                }
-              }
-
-              if (emergencyResult.phasesUsed.length > 0) {
-                this.compressCount++;
-                await this.statsManager.increment(this.sessionDir, 'compact_count', 1);
-              }
-
-              // 重新 compose
-              const emergencyHistory = hasPendingToolCalls
-                ? compressedHistory
-                : lastUserTextMsg
-                  ? compressedHistory.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
-                  : compressedHistory;
-
-              const reLayeredResult = await this.contextComposer.compose({
-                sessionDir: this.sessionDir,
-                providerType: activeProvider.getProviderType(),
-                maxContextTokens: this.maxContextTokens,
-                cwd: process.cwd(),
-                timestamp: formatTimestamp(),
-                tools: toolDefinitions,
-                history: emergencyHistory,
-                userInput: userInputText,
-                historySummary,
-                currentPlan: this.activePlan ? formatPlanAsText(this.activePlan) : undefined,
-                zone3Hashes: undefined,
-                impactInfo: this.pendingImpactInfo ?? undefined,
-                fullHistory: history,
-                personaDir: this.personaDir,
-                gitManager: this.gitManager,
-                profile,
-                bypassInjections,
-              });
-
-              layeredResult.messages.length = 0;
-              layeredResult.messages.push(...reLayeredResult.messages);
-              layeredResult.zoneBreakdown = reLayeredResult.zoneBreakdown;
-
-              const preTokens = this.lastContextTokens;
-              this.lastContextTokens = reLayeredResult.zoneBreakdown.total;
-              this.outputHandler?.onStatus?.(
-                `compress-result:${preTokens}:${this.lastContextTokens}`,
-                'info',
-              );
-            }
-          } catch (err) {
-            this.logger.warn('Emergency compression failed', { error: (err as Error)?.message ?? String(err) });
-          } finally {
-            this.outputHandler?.onStatus?.('compress-end', 'info');
-            // 紧急同步压缩完成 → 恢复 deep 压缩临时模板
-            this._maybeRestoreSummary();
-          }
-        }
-      } else {
-        // 正常阈值：异步后台压缩（不阻塞 LLM 调用）
-        this.outputHandler?.onStatus?.(
-          `Context ${currentTokens.toLocaleString()} > ${Math.floor(this.maxContextTokens * compressThreshold).toLocaleString()} → compressing in background${this.needsAggressiveCompress ? ' (recent messages unprotected)' : ''} (protect: ${protectCount} msgs)`,
-          'warn',
-        );
-
-        if (uncompressedMsgs && uncompressedMsgs.length > 0) {
-          this.outputHandler?.onStatus?.('compress-start', 'info');
-          this.pendingCompression = this.compressor.compress(
-            uncompressedMsgs,
-            this.currentSummary,
-            protectCount,
-            this.maxContextTokens,
-            undefined,
-          ).catch((err) => {
-            this.logger.warn('Background compression failed', err);
-            return null;
-          }).finally(() => {
-            this.outputHandler?.onStatus?.('compress-end', 'info');
-            // 后台异步压缩完成 → 恢复 deep 压缩临时模板
-            this._maybeRestoreSummary();
-          });
-        }
-      }
-    }
-
-    await this.statsManager.update(this.sessionDir, {
-      current_context_tokens: layeredResult.zoneBreakdown.total,
-    });
-
-    // 调用 provider 流式请求 LLM
-    // 动态读取 thinking 配置（TUI /think 命令可运行时切换）
-    const thinkingEnabled = (this.configCenter?.get('provider.enableThinking') as boolean) ?? false;
-    const thinkingEffort = thinkingEnabled
-      ? getModelInfo(this.provider.getProviderType(), this.provider.getModel())?.reasoningEffort
-      : undefined;
-    this.getActiveProvider().setThinking?.(thinkingEnabled, thinkingEffort);
-    const stream = activeProvider.createStream(messages, toolDefinitions, this.abortController?.signal);
-
-    // 使用 OutputRouter 解析流式输出
-    const router = new OutputRouter();
-
-    // 累积 assistant 回复内容
-    const textParts: string[] = [];
-    const thinkingParts: string[] = [];
-    const toolCalls: ToolCall[] = [];
-    let usageInput = 0;
-    let usageOutput = 0;
-    let stopReason: string | undefined;
-
-    const oh = this.outputHandler;
-    oh?.onTurnStart?.();
-
-    router.onText = (content: string) => {
-      oh?.onText?.(content);
-      textParts.push(content);
-      // Write event (fire-and-forget)
-      appendEvent(this.sessionDir, {
-        type: 'text',
-        content,
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
+      bypassInjectionsCache: this._bypassInjections,
+      intentLabel: this._currentIntent,
+      lastContextTokens: this.lastContextTokens,
+      recentToolNames: this.recentToolNames,
     };
+    const bt = await this.pipeline.runSlot('bypass', stateRef, this.makeStageCtx());
+    // 回读 bypass 产物与副作用
+    userInputText = bt.userInput;
+    this._bypassInjections = bt.bypassInjectionsCache;
+    this._currentIntent = bt.intentLabel;
+    stateRef = bt;
 
-    router.onThinking = (content: string) => {
-      oh?.onThinking?.(content);
-      thinkingParts.push(content);
-      appendEvent(this.sessionDir, {
-        type: 'thinking',
-        content,
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
+    // ── P1 M4：context 阶段（工具过滤 / effectiveHistory / 图片注入 / kb / cluster /
+    //    compose / 压缩消费与触发，经内核管道执行；bypass preTurn 注入已在上面归位） ──
+    stateRef = {
+      ...stateRef,
+      userInput: userInputText,
+      summary: this.currentSummary,
+      impactInfo: this.pendingImpactInfo,
+      needsCompression: this.clusterService.getNeedsCompression(),
+      needsAggressiveCompress: this.needsAggressiveCompress,
+      pendingCompression: this.pendingCompression,
+      compressCount: this.compressCount,
+      lastSavedSummary: this.lastSavedSummary,
+      lastContextTokens: this.lastContextTokens,
+      activeProvider,
+      bypassInjections: bt.bypassInjections,
+      activePlan: this.activePlan,
+      pendingImageInjections: this.pendingImageInjections,
+      pendingMediaInjections: this.pendingMediaInjections,
     };
+    this.stageServices.set('sessionDir', this.sessionDir);
+    const ct = await this.pipeline.runSlot('context', stateRef, this.makeStageCtx());
+    // 回读 context 产物与副作用（压缩/摘要/激进压缩标记等由模块写入 state）
+    const messages = ct.messages;
+    const toolDefinitions = ct.toolDefinitions;
+    this.lastContextTokens = ct.lastContextTokens;
+    this.clusterService.setNeedsCompression(ct.needsCompression);
+    this.needsAggressiveCompress = ct.needsAggressiveCompress;
+    this.pendingCompression = ct.pendingCompression;
+    this.compressCount = ct.compressCount;
+    this.currentSummary = ct.summary;
+    this.lastSavedSummary = ct.lastSavedSummary;
+    this.pendingImpactInfo = ct.impactInfo; // 已消费 → null
+    this.activeProvider = activeProvider;
+    // 图片/媒体注入消费：原地清空（view_image/view_media 工具持有原数组引用，重赋值会断引用）
+    this.pendingImageInjections.length = 0;
+    this.pendingMediaInjections.length = 0;
+    stateRef = ct;
 
-    router.onToolUse = (id: string, name: string, input: Record<string, unknown>) => {
-      const inputSummary = summarizeToolInput(input);
-      oh?.onToolUse?.(name, inputSummary, id);
-      toolCalls.push({ id, name, input });
-      appendEvent(this.sessionDir, {
-        type: 'tool_call',
-        id,
-        name,
-        input,
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
+    // ── P1 M5：llm 阶段（thinking / createStream / 流消费 / 去重 / scavenge / stats /
+    //    assistant 落盘，经内核管道执行；中断判定用 ctx.signal） ──
+    stateRef = {
+      ...stateRef,
+      streamText: '',
+      toolCalls: [],
+      stopReason: undefined,
+      cacheStats: {
+        hitTokens: 0,
+        missTokens: 0,
+        turns: [...this.cacheTurns],
+        logHits: this.logCacheHits,
+      },
+      inlineToolExecuted: false,
+      inlineToolResults: this.inlineToolResults,
     };
-
-    router.onUsage = (inputTokens: number, outputTokens: number, hit?: number, miss?: number, anthroRead?: number, anthroCreation?: number) => {
-      usageInput = inputTokens;
-      usageOutput = outputTokens;
-
-      // 归一化：DeepSeek/OpenAI 用 cache_hit_tokens/cache_miss_tokens，
-      // Anthropic 用 cache_read_input_tokens（命中）/ cache_creation_input_tokens（新建）。
-      // 优先使用 DeepSeek 格式，否则从 Anthropic 字段推导。
-      let effectiveHit: number | undefined;
-      let effectiveMiss: number | undefined;
-
-      if (hit !== undefined && miss !== undefined) {
-        // DeepSeek / OpenAI 格式：直接使用
-        effectiveHit = hit;
-        effectiveMiss = miss;
-      } else if (anthroRead !== undefined && inputTokens > 0) {
-        // Anthropic 格式：cache_read 是命中量，未命中 = 总量 - 命中
-        effectiveHit = anthroRead;
-        effectiveMiss = Math.max(0, inputTokens - anthroRead);
-      }
-
-      if (effectiveHit !== undefined && effectiveMiss !== undefined) {
-        this.cacheHitTokens = effectiveHit;
-        this.cacheMissTokens = effectiveMiss;
-
-        if (this.logCacheHits) {
-          const total = effectiveHit + effectiveMiss;
-          const hitRate = total > 0 ? (effectiveHit / total) * 100 : 0;
-
-          const record: CacheTurnRecord = {
-            turn: this.currentTurn,
-            timestamp: new Date().toISOString(),
-            inputTokens,
-            outputTokens,
-            hitTokens: effectiveHit,
-            missTokens: effectiveMiss,
-            hitRate: Math.round(hitRate * 100) / 100,
-          };
-          this.cacheTurns.push(record);
-        }
-      }
-    };
-
-    router.onStop = (reason: string) => {
-      stopReason = reason;
-    };
-
-    // 消费流 (inline tool execution: dispatch tools immediately when TOOL_USE arrives)
-    const inlineToolPromises: Promise<void>[] = [];
-
-    try {
-      for await (const event of stream) {
-        if (this.interrupted) break;
-        router.route(event);
-
-        // Inline tool execution: execute immediately when TOOL_USE arrives in the stream
-        if (event.type === 'TOOL_USE') {
-          const { id, name, input } = event;
-          if (id && name) {
-            this.inlineToolExecuted = true;
-            inlineToolPromises.push(this.executeSingleToolInline(id, name, input));
-          }
-        }
-      }
-    } catch (err) {
-      const name = (err instanceof Error) ? err.name : '';
-      if (name === 'AbortError' || name === 'APIUserAbortError') {
-        // 用户中断，正常退出
-      } else {
-        throw err;
-      }
-    }
-
-    // Wait for all inline tool executions to complete before proceeding
-    if (inlineToolPromises.length > 0) {
-      await Promise.allSettled(inlineToolPromises);
-    }
-
-    // 去重: ResilientProvider 重试流时可能累积重复的 toolCalls，
-    // 保留 last-wins（成功重试的那份），清理孤儿 inlineToolResults
-    if (toolCalls.length > 0) {
-      const seen = new Map<string, number>();
-      for (let i = 0; i < toolCalls.length; i++) {
-        const key = `${toolCalls[i].name}|${JSON.stringify(toolCalls[i].input)}`;
-        seen.set(key, i);
-      }
-      const deduped = new Set(seen.values());
-      const orphanIds = new Set<string>();
-      for (let i = 0; i < toolCalls.length; i++) {
-        if (!deduped.has(i)) {
-          orphanIds.add(toolCalls[i].id);
-        }
-      }
-      if (orphanIds.size > 0) {
-        this.logger.debug(`Deduped ${orphanIds.size} orphan tool call(s) from stream retry`);
-        for (const id of orphanIds) {
-          this.inlineToolResults.delete(id);
-        }
-        const kept = toolCalls.filter((_, i) => deduped.has(i));
-        toolCalls.length = 0;
-        toolCalls.push(...kept);
-      }
-    }
-
-    // Scavenge: recover tool calls from thinking/text content that the model forgot to declare
-    const scavengeEnabled = this.configCenter
-      ? (this.configCenter.get('repair.scavenge.enabled') as boolean)
-      : true;
-
-    if (scavengeEnabled !== false && toolCalls.length === 0 && thinkingParts.length > 0) {
-      const scavenged = scavengeToolCalls(thinkingParts, textParts, toolCalls);
-      if (scavenged.length > toolCalls.length) {
-        const newCalls = scavenged.filter(c => c.id.startsWith('scvg_'));
-        this.logger.debug(`Scavenged ${newCalls.length} tool(s) from thinking: ${newCalls.map(c => c.name).join(', ')}`);
-        newCalls.forEach(c => {
-          this.outputHandler?.onToolUse?.(c.name, JSON.stringify(c.input).slice(0, 80), c.id);
-        });
-        toolCalls.length = 0;
-        toolCalls.push(...scavenged);
-      }
-    }
-
-    // thinking-only 模型兜底：thinking 有内容但 text 为空时，提升 thinking 为 text
-    // （如 Qwen3.5 thinking 模式只输出 reasoning_content，不输出 content）
-    if (textParts.length === 0 && thinkingParts.length > 0) {
-      const thinkingText = thinkingParts.join('');
-      textParts.push(thinkingText);
-      // 通过 outputHandler 让 TUI 显示这段内容
-      oh?.onText?.(thinkingText);
-    }
-
-    // 输出刷新
-    if (textParts.length > 0 || thinkingParts.length > 0) {
-      oh?.onFlush?.();
-    }
-
-    // 更新 stats
-    const currentStats = await this.statsManager.get(this.sessionDir);
-    const statsUpdate: Parameters<typeof this.statsManager.update>[1] = {
-      input_tokens: currentStats.input_tokens + usageInput,
-      output_tokens: currentStats.output_tokens + usageOutput,
-    };
-    if (this.logCacheHits) {
-      statsUpdate.cache_turns = this.cacheTurns.length > 0 ? this.cacheTurns : currentStats.cache_turns;
-    }
-    await this.statsManager.update(this.sessionDir, statsUpdate);
-
-    // 记录 usage 事件
-    if (usageInput > 0 || usageOutput > 0) {
-      await this.eventStore.append(this.sessionDir, {
-        type: 'usage',
-        input_tokens: usageInput,
-        output_tokens: usageOutput,
-        timestamp: formatTimestamp(),
-      });
-    }
-
-    // 工作流完成检测在工具执行后进行（工具可能完成最后一步）
-
-    // 异步分析本轮对话（精确模式关键词提取）
-    if (this.composeStrategy && this.composeStrategy.name === 'precise') {
-      const allMsgs = await this.conversationStore.readAll(this.sessionDir);
-      this.composeStrategy.analyzeTurn(allMsgs, activeProvider).catch(() => {});
-    }
-
-    // 构建 assistant 消息内容
-    const assistantContent: (ThinkingContent | TextContent | ToolUseContent)[] = [];
-
-    // thinking 作为独立内容块
-    if (thinkingParts.length > 0) {
-      assistantContent.push({ type: 'thinking', thinking: thinkingParts.join('') });
-    }
-
-    // text 作为独立内容块
-    if (textParts.length > 0) {
-      assistantContent.push({ type: 'text', text: textParts.join('') });
-    }
-
-    // 添加工具调用（Flow 工具不记入历史，只记事件）
-    for (const tc of toolCalls) {
-      if (!isFlowTool(tc.name)) {
-        assistantContent.push({
-          type: 'tool_use',
-          id: tc.id,
-          name: tc.name,
-          input: tc.input,
-        });
-      }
-
-      // 事件记录保留全部（含 Flow 工具），用于诊断
-      await this.eventStore.append(this.sessionDir, {
-        type: 'tool_call',
-        tool_name: tc.name,
-        tool_use_id: tc.id,
-        timestamp: formatTimestamp(),
-      });
-    }
-
-    // 追加 assistant 消息到 conversation
-    if (assistantContent.length > 0) {
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: assistantContent,
-      };
-      await this.conversationStore.append(this.sessionDir, assistantMessage);
-    }
+    const lt = await this.pipeline.runSlot('llm', stateRef, this.makeStageCtx());
+    // 回读 llm 产物与副作用
+    const textParts = lt.streamText ? [lt.streamText] : [];
+    const toolCalls = lt.toolCalls;
+    this.cacheHitTokens = lt.cacheStats.hitTokens;
+    this.cacheMissTokens = lt.cacheStats.missTokens;
+    this.cacheTurns = lt.cacheStats.turns;
+    this.logCacheHits = lt.cacheStats.logHits;
+    this.inlineToolExecuted = lt.inlineToolExecuted;
+    stateRef = lt;
 
     // 如果有工具调用，执行工具并将结果追加到 conversation
     if (toolCalls.length > 0) {
-      // 更新 recentToolNames 用于模式检测
-      this.recentToolNames = toolCalls.map(tc => tc.name);
-
-      // Update plan progress based on tool calls
-      if (this.activePlan && toolCalls.length > 0) {
-        const updatedPlan = this.orchestrator.updatePlanProgress(this.activePlan, toolCalls[0].name);
-        this.activePlan = updatedPlan;
-      }
-
-
-      if (this.inlineToolExecuted) {
-        // Tools were executed inline during the stream — flush results to conversation
-        await this.flushInlineToolResults(toolCalls);
-        this.inlineToolExecuted = false;
-        this.inlineToolResults.clear();
-      } else {
-        // Fallback: execute tools after stream (for providers that don't emit TOOL_USE events mid-stream)
-        await this.executeTools(toolCalls);
-      }
-
-      // ── Flow 步骤完成检测 ──
-      // flow_complete 工具内部已执行 advance() + guard 检查，
-      // 此处仅做 post-advance 清理（terminal → deactivate 已在工具内处理）
-      if (toolCalls.some(tc => tc.name === 'flow_complete')) {
-        const active = this.flowRegistry.getActive();
-        if (!active) {
-          // Flow 已在工具内完成并清理，无需额外处理
-        }
-      }
+      // ── P1 M5：tools 阶段（钩子 / recentToolNames / plan 更新 / inline flush 或 executeTools） ──
+      const tt = await this.pipeline.runSlot('tools', stateRef, this.makeStageCtx());
+      // 回读 tools 副作用
+      this.recentToolNames = tt.recentToolNames;
+      this.activePlan = tt.activePlan;
+      this.inlineToolExecuted = tt.inlineToolExecuted;
+      this.inlineToolResults = tt.inlineToolResults;
+      stateRef = tt;
 
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
-      // ── 回合回滚：回合结束记录 ──
-      if (this.turnRecorder) {
-        this.turnRecorder.endTurn().catch(err => {
-          this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
-        });
-      }
-      return { stop: false, toolCalled: true };
+      // ── P1 M3：finalize 阶段（endTurn + stop 判定，经内核管道执行） ──
+      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true }, this.makeStageCtx());
+      // ── 钩子：迭代结束（stop 判定已出） ──
+      await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finA.stop, stopReason: finA.stopReason });
+      // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
+      const gatedA = await this.applyVerificationGate(finA.stop, finA.stopReason);
+      // ── 证据门（P1-B）：改了却不验证，不许直接结束 ──
+      const gatedA2 = await this.applyEvidenceGate(gatedA.stop, gatedA.stopReason);
+      return { stop: gatedA2.stop, stopReason: gatedA2.stopReason, toolCalled: finA.toolCalled };
     }
 
     // 没有 tool_calls —— 先检查 Flow 状态机是否仍在运行。
@@ -2310,22 +1620,15 @@ export class AgentLoop {
     // 下一轮 Zone 5 注入 flow 状态，引导 LLM 继续推进。
     const flowStillActive = this.flowRegistry.getActive();
     await this.checkTextLoop(textParts);
-    // ── 回合回滚：回合结束记录 ──
-    if (this.turnRecorder) {
-      this.turnRecorder.endTurn().catch(err => {
-        this.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
-      });
-    }
-    if (flowStillActive) {
-      // Flow 仍在运行 → 继续 loop（不写 stop 事件；死循环由 LoopGuard 兜底）
-      return { stop: false, toolCalled: false };
-    }
-    appendEvent(this.sessionDir, {
-      type: 'stop',
-      reason: stopReason || 'end_turn',
-      timestamp: new Date().toISOString(),
-    }).catch(() => {});
-    return { stop: true, stopReason: stopReason ?? 'end_turn' };
+    // ── P1 M3：finalize 阶段（endTurn + stop 判定；flow 活跃时不写 stop 事件） ──
+    const finB = await this.pipeline.runSlot('finalize', { ...stateRef, flowStillActive: !!flowStillActive }, this.makeStageCtx());
+    // ── 钩子：迭代结束（stop 判定已出） ──
+    await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finB.stop, stopReason: finB.stopReason });
+    // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
+    const gatedB = await this.applyVerificationGate(finB.stop, finB.stopReason);
+    // ── 证据门（P1-B）：改了却不验证，不许直接结束 ──
+    const gatedB2 = await this.applyEvidenceGate(gatedB.stop, gatedB.stopReason);
+    return { stop: gatedB2.stop, stopReason: gatedB2.stopReason, toolCalled: finB.toolCalled };
   }
 
   /**
@@ -2353,384 +1656,99 @@ export class AgentLoop {
     }
   }
 
-  /** Check if a bash command matches any allowedCommands glob pattern */
-  private isCommandAllowed(command?: string): boolean {
-    if (!command) return false;
-    const trimmed = command.trim();
-    for (const pattern of this.allowedCommands) {
-      if (trimmed === pattern) return true;
-      if (pattern.includes('*')) {
-        const re = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-        if (re.test(trimmed)) return true;
-      }
+  /**
+   * 循环级验证门（P0-3）：plan_execute 预测落空后，模型不应在未修复时直接结束。
+   * 由 repair.verification.mode 控制：
+   *  - 'off'（默认）：不干预
+   *  - 'soft'：注入失败消息到对话（下一轮模型可见），不强制
+   *  - 'hard'：注入失败消息并强制继续（stop=false），直到不再产生 handoff
+   */
+  private async applyVerificationGate(
+    stop: boolean,
+    stopReason?: string,
+  ): Promise<{ stop: boolean; stopReason?: string }> {
+    const mode = this.configCenter?.get('repair.verification.mode') as 'off' | 'soft' | 'hard' | undefined;
+    if (!mode || mode === 'off') return { stop, stopReason };
+    if (!this.planHandoff.pending) return { stop, stopReason };
+
+    const reason = this.planHandoff.pending;
+    const verificationMsg: Message = {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `[Verification] 上一步 plan_execute 的预测落空（已交回主流程）：${reason}\n验证模式 ${mode}：请先修复该步的断言失败，不要直接宣布完成。`,
+      },
+    };
+    await this.conversationStore.append(this.sessionDir, verificationMsg);
+    this.outputHandler?.onStatus?.('Verification gate: plan_execute prediction failed, injected failure message', 'warn');
+    this.planHandoff.pending = null; // 消费一次；hard 模式下新的 handoff 会再次置位
+
+    if (mode === 'hard') {
+      return { stop: false, stopReason: 'verification_pending' };
     }
-    return false;
+    return { stop, stopReason }; // soft：仅注入消息，不强制
   }
 
   /**
-   * 内部方法：执行工具调用并写回结果
+   * 验证证据门（P1-B）：本轮修改了文件但没有任何验证证据（测试/编译/lint/typecheck）时，
+   * 不允许直接结束。repair.evidenceGate：off=不干预；soft=注入消息；
+   * hard=注入并强制继续。验证证据 = bash 跑过验证类命令（tools/evidence.ts）。
    */
-  private async executeTools(toolCalls: ToolCall[]): Promise<void> {
-    const permittedCalls: ToolCall[] = [];
+  private async applyEvidenceGate(
+    stop: boolean,
+    stopReason?: string,
+  ): Promise<{ stop: boolean; stopReason?: string }> {
+    const mode = this.configCenter?.get('repair.evidenceGate.mode') as 'off' | 'soft' | 'hard' | undefined;
+    if (!mode || mode === 'off') return { stop, stopReason };
+    if (!this.turnHadMutation || this.turnEvidenceCount > 0) return { stop, stopReason };
+    if (!stop) return { stop, stopReason };
 
-    for (const tc of toolCalls) {
-      if (this.dangerousTools.has(tc.name) && this.outputHandler?.onPermissionRequest) {
-        // Step 0: AOR — unrestricted mode, skip all permissions
-        if (this.unrestrictedTools) {
-          permittedCalls.push(tc);
-          continue;
-        }
-        // Step 1: check session allowlist
-        if (this.allowlistTools.has(tc.name)) {
-          permittedCalls.push(tc);
-          continue;
-        }
-        // Step 2: check allowedCommands glob (bash only)
-        if (tc.name === 'bash' && this.isCommandAllowed(tc.input?.command as string)) {
-          permittedCalls.push(tc);
-          continue;
-        }
-        // Step 3: pop permission
-        const result = await this.outputHandler.onPermissionRequest(tc.name, tc.input);
-        if (result === 'no') {
-          // Permission denied — add error result directly to conversation
-          const deniedMessage: Message = {
-            role: 'user',
-            content: {
-              type: 'tool_result',
-              tool_use_id: tc.id,
-              content: 'Permission denied by user',
-              is_error: true,
-            } as ToolResultContent,
-          };
-          await this.conversationStore.append(this.sessionDir, deniedMessage);
-          this.outputHandler?.onToolResult?.('Permission denied by user', true, tc.id);
-          continue;
-        }
-        if (result === 'aor') {
-          this.unrestrictedTools = true;
-          this.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
-        }
-        // 'yes', 'always', or 'aor' — allow this call
-        if (result === 'always') {
-          this.allowlistTools.add(tc.name);
-          sessionAllowlist.addTool(this.sessionDir, tc.name).catch(() => {});
-          if (tc.name === 'bash' && tc.input?.command) {
-            sessionAllowlist.addCommand(this.sessionDir, tc.input.command as string).catch(() => {});
-          }
-        }
-      }
-      permittedCalls.push(tc);
+    const evidenceMsg: Message = {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: '[Evidence] 本轮修改了文件但没有产生任何验证证据（测试/编译/lint/typecheck）。请先运行验证（如 npm test / tsc --noEmit / cargo test），确认改动正确后再结束。',
+      },
+    };
+    await this.conversationStore.append(this.sessionDir, evidenceMsg);
+    this.outputHandler?.onStatus?.('Evidence gate: mutation without verification, injected evidence message', 'warn');
+
+    if (mode === 'hard') {
+      return { stop: false, stopReason: 'evidence_pending' };
     }
-
-    if (permittedCalls.length === 0) return;
-
-    // LoopGuard tool check: detect and suppress repeated identical tool calls
-    const stormEnabled = this.configCenter
-      ? (this.configCenter.get('repair.storm.enabled') as boolean)
-      : true;
-
-    let executableCalls: ToolCall[] = permittedCalls;
-
-    if (stormEnabled !== false) {
-      const { suppressed, reflections } = this.loopGuard.checkToolCalls(permittedCalls);
-      const suppressedCalls: ToolCall[] = [];
-      executableCalls = [];
-
-      for (const tc of permittedCalls) {
-        if (suppressed.has(tc.id)) {
-          suppressedCalls.push(tc);
-        } else {
-          executableCalls.push(tc);
-        }
-      }
-
-      // Inject reflection for suppressed calls
-      for (const tc of suppressedCalls) {
-        const reflectionText = reflections.get(tc.id) ?? ToolGuard.reflectionPrompt(tc);
-        const reflectionMsg: Message = {
-          role: 'user',
-          content: {
-            type: 'tool_result',
-            tool_use_id: tc.id,
-            content: `[Storm suppressed] ${reflectionText}`,
-            is_error: true,
-          } as ToolResultContent,
-        };
-        await this.conversationStore.append(this.sessionDir, reflectionMsg);
-        this.outputHandler?.onToolResult?.(`Storm suppressed: ${tc.name}`, true, tc.id);
-      }
-    }
-
-    if (executableCalls.length === 0) return;
-
-    // ── 回合回滚：记录写操作的前置状态 ──
-    if (this.turnRecorder) {
-      const projectDir = this.gitManager.getRepoPath();
-      for (const tc of executableCalls) {
-        if (['write', 'edit', 'multi_edit'].includes(tc.name)) {
-          const filePath = tc.input.file_path as string;
-          if (filePath) {
-            this.turnRecorder.recordPreState(path.resolve(projectDir, filePath));
-          }
-        }
-      }
-    }
-
-    // Execute permitted tools
-    const results = await this.toolExecutor.executeParallel(executableCalls);
-
-    // ── 回合回滚：记录 bash 命令 ──
-    if (this.turnRecorder) {
-      for (const tc of executableCalls) {
-        if (tc.name === 'bash') {
-          const cmd = tc.input.command as string;
-          if (cmd) this.turnRecorder.recordCommand(cmd);
-        }
-      }
-    }
-
-    // 影响面分析：检查是否有 edit 或 write 工具被调用
-    if (this.dependencyAnalyzer && permittedCalls.some(tc => tc.name === 'edit' || tc.name === 'write')) {
-      const editedFiles = permittedCalls
-        .filter(tc => tc.name === 'edit' || tc.name === 'write')
-        .map(tc => tc.input.file_path as string)
-        .filter(Boolean);
-      if (editedFiles.length > 0) {
-        // 先增量更新依赖图
-        await this.dependencyAnalyzer.incrementalUpdate(editedFiles, this.gitManager);
-        // 再查询影响面
-        const impacts = editedFiles.map(f => this.dependencyAnalyzer!.getImpact(f));
-        const impactLines = impacts
-          .filter(i => i.allImpacts.length > 0)
-          .map(i => `[Dependency Impact] ${i.sourceFile} → affects: ${i.allImpacts.join(', ')}`);
-        if (impactLines.length > 0) {
-          this.pendingImpactInfo = impactLines.join('\n');
-        }
-      }
-    }
-
-    // 将工具结果追加到 conversation（过大的结果先缓冲到磁盘）
-    // 但读缓冲文件本身的结果不再二次缓冲（避免递归缓冲）
-    const bufferDir = this.resultBuffer.getBufferDir();
-    for (const result of results) {
-      const call = executableCalls.find(c => c.id === result.tool_use_id);
-
-      // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
-      if (call?.name && isFlowTool(call.name)) continue;
-
-      const sanitized = sanitizeToolResult(result.content);
-      const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
-        call.input.file_path.startsWith(bufferDir);
-      const content = skipBuffer ? sanitized : this.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
-      const toolResultMessage: Message = {
-        role: 'user',
-        content: {
-          type: 'tool_result',
-          tool_use_id: result.tool_use_id,
-          content,
-          is_error: result.is_error,
-        } as ToolResultContent,
-      };
-      await this.conversationStore.append(this.sessionDir, toolResultMessage);
-
-      // 显示工具结果摘要
-      this.outputHandler?.onToolResult?.(content, result.is_error ?? false, result.tool_use_id);
-      // 消费 diff 通道
-      const { popDiff: popD2 } = await import('../tools/diff-channel.js');
-      const diffData = popD2(result.tool_use_id);
-      if (diffData) this.outputHandler?.onDiff?.(result.tool_use_id, diffData.filePath, diffData.lines);
-    }
-
+    return { stop, stopReason }; // soft：仅注入消息，不强制
   }
 
-  /**
-   * Execute a single tool inline during the SSE stream.
-   * Stores the result for later conversation append; fires onToolResult for real-time feedback.
-   */
-  private async executeSingleToolInline(
-    id: string,
-    name: string,
-    input: Record<string, unknown>,
-  ): Promise<void> {
-    const tool = this.toolRegistry.get(name);
-    if (!tool) {
-      const errContent = `Unknown tool: ${name}`;
-      this.outputHandler?.onToolResult?.(errContent, true, id);
-      this.inlineToolResults.set(id, { content: errContent, isError: true });
-      appendEvent(this.sessionDir, {
-        type: 'tool_result',
-        tool_use_id: id,
-        name,
-        content: errContent,
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
-      return;
-    }
-
-    // Permission check for dangerous tools
-    if (this.dangerousTools.has(name) && this.outputHandler?.onPermissionRequest) {
-      // Step 0: AOR — unrestricted mode, skip all permissions
-      if (!this.unrestrictedTools) {
-        // Step 1: check session allowlist
-        if (this.allowlistTools.has(name)) {
-          // allowed, proceed
-        } else if (name === 'bash' && this.isCommandAllowed(input?.command as string)) {
-          // Step 2: check allowedCommands glob
-          // allowed, proceed
-        } else {
-          // Step 3: pop permission
-          const result = await this.outputHandler.onPermissionRequest(name, input);
-          if (result === 'no') {
-          const deniedMsg = 'Permission denied by user';
-          this.outputHandler?.onToolResult?.(deniedMsg, true, id);
-          this.inlineToolResults.set(id, { content: deniedMsg, isError: true });
-          appendEvent(this.sessionDir, {
-            type: 'tool_result',
-            tool_use_id: id,
-            name,
-            content: deniedMsg,
-            timestamp: new Date().toISOString(),
-          }).catch(() => {});
-          return;
-        }
-        if (result === 'aor') {
-          this.unrestrictedTools = true;
-          this.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
-        }
-        if (result === 'always') {
-          this.allowlistTools.add(name);
-          sessionAllowlist.addTool(this.sessionDir, name).catch(() => {});
-          if (name === 'bash' && input?.command) {
-            sessionAllowlist.addCommand(this.sessionDir, input.command as string).catch(() => {});
-          }
-        }
-        }
-      }
-    }
-
-    // LoopGuard tool check for inline execution
-    const stormEnabled = this.configCenter
-      ? (this.configCenter.get('repair.storm.enabled') as boolean)
-      : true;
-
-    const STORM_EXEMPT = ['read', 'glob', 'grep'];
-    if (stormEnabled !== false && !isMutating(name) && !STORM_EXEMPT.includes(name) && !isFlowTool(name)) {
-      const { suppressed } = this.loopGuard.checkToolCalls([{ id, name, input }]);
-      if (suppressed.has(id)) {
-        const stormMsg = `[Storm suppressed] ${ToolGuard.reflectionPrompt({ id, name, input })}`;
-        this.outputHandler?.onToolResult?.(stormMsg, true, id);
-        this.inlineToolResults.set(id, { content: stormMsg, isError: true });
-        appendEvent(this.sessionDir, {
-          type: 'tool_result',
-          tool_use_id: id,
-          name,
-          content: stormMsg,
-          timestamp: new Date().toISOString(),
-        }).catch(() => {});
-        return;
-      }
-    }
-
-    // ── 回合回滚：记录写操作前置状态 ──
-    if (this.turnRecorder) {
-      if (['write', 'edit', 'multi_edit'].includes(name)) {
-        const filePath = input.file_path as string;
-        if (filePath) {
-          this.turnRecorder.recordPreState(path.resolve(this.gitManager.getRepoPath(), filePath));
-        }
-      } else if (name === 'bash') {
-        const cmd = input.command as string;
-        if (cmd) this.turnRecorder.recordCommand(cmd);
-      }
-    }
-
-    // Execute tool directly
-    try {
-      const rawResult = await tool.execute(input, this.abortController?.signal ?? undefined);
-      // 读缓冲文件本身的结果不再二次缓冲（避免递归缓冲）
-      const isBufferedRead = name === 'read' && typeof (input as Record<string, unknown>).file_path === 'string' &&
-        ((input as Record<string, unknown>).file_path as string).startsWith(this.resultBuffer.getBufferDir());
-      const result = isBufferedRead
-        ? sanitizeToolResult(rawResult)
-        : this.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
-      this.outputHandler?.onToolResult?.(result, false, id);
-      // 消费 diff 通道（edit/write 按 filePath 写入）
-      if (name === 'edit' || name === 'write' || name === 'multi_edit') {
-        const { popDiff: popD } = await import('../tools/diff-channel.js');
-        const fp = (input as Record<string, unknown>)?.file_path as string;
-        if (fp) {
-          const diffData = popD(fp);
-          if (diffData) this.outputHandler?.onDiff?.(id, diffData.filePath, diffData.lines);
-        }
-      }
-      this.inlineToolResults.set(id, { content: result, isError: false });
-      appendEvent(this.sessionDir, {
-        type: 'tool_result',
-        tool_use_id: id,
-        name,
-        content: result.slice(0, 1000), // truncate long results in events log
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.outputHandler?.onToolResult?.(`Error: ${errMsg}`, true, id);
-      this.inlineToolResults.set(id, { content: `Error: ${errMsg}`, isError: true });
-      appendEvent(this.sessionDir, {
-        type: 'tool_result',
-        tool_use_id: id,
-        name,
-        content: `Error: ${errMsg}`,
-        timestamp: new Date().toISOString(),
-      }).catch(() => {});
-    }
-  }
-
-  /**
-   * Flush inline tool results to the conversation store and run dependency analysis.
-   * Called after the assistant message has been appended to maintain correct message ordering.
-   */
-  private async flushInlineToolResults(toolCalls: ToolCall[]): Promise<void> {
-    // Dependency impact analysis (same logic as executeTools)
-    if (this.dependencyAnalyzer && toolCalls.some(tc => tc.name === 'edit' || tc.name === 'write')) {
-      const editedFiles = toolCalls
-        .filter(tc => tc.name === 'edit' || tc.name === 'write')
-        .map(tc => tc.input.file_path as string)
-        .filter(Boolean);
-      if (editedFiles.length > 0) {
-        await this.dependencyAnalyzer.incrementalUpdate(editedFiles, this.gitManager);
-        const impacts = editedFiles.map(f => this.dependencyAnalyzer!.getImpact(f));
-        const impactLines = impacts
-          .filter(i => i.allImpacts.length > 0)
-          .map(i => `[Dependency Impact] ${i.sourceFile} -> affects: ${i.allImpacts.join(', ')}`);
-        if (impactLines.length > 0) {
-          this.pendingImpactInfo = impactLines.join('\n');
-        }
-      }
-    }
-
-    // Append stored inline results to conversation
-    for (const tc of toolCalls) {
-      // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
-      if (isFlowTool(tc.name)) continue;
-
-      const stored = this.inlineToolResults.get(tc.id);
-      if (!stored) {
-        // Tool wasn't executed inline (e.g., filtered out) — skip
-        continue;
-      }
-      const toolResultMessage: Message = {
-        role: 'user',
-        content: {
-          type: 'tool_result',
-          tool_use_id: tc.id,
-          content: stored.content,
-          is_error: stored.isError,
-        } as ToolResultContent,
-      };
-      await this.conversationStore.append(this.sessionDir, toolResultMessage);
-    }
-
+  /** 构造工具执行上下文（B1：每轮取当前值；可变状态经访问器读写） */
+  private makeToolExecContext(): ToolExecContext {
+    return {
+      outputHandler: this.outputHandler,
+      sessionDir: this.sessionDir,
+      turn: this.currentTurn,
+      loopHooks: this.loopHooks,
+      turnRecorder: this.turnRecorder,
+      dependencyAnalyzer: this.dependencyAnalyzer,
+      gitManager: this.gitManager,
+      conversationStore: this.conversationStore,
+      configCenter: this.configCenter,
+      toolExecutor: this.toolExecutor,
+      toolRegistry: this.toolRegistry,
+      resultBuffer: this.resultBuffer,
+      abortController: this.abortController,
+      dangerousTools: this.dangerousTools,
+      allowlistTools: this.allowlistTools,
+      allowedCommands: this.allowedCommands,
+      loopGuard: this.loopGuard,
+      getUnrestricted: () => this.unrestrictedTools,
+      setUnrestricted: (v) => { this.unrestrictedTools = v; },
+      getPendingImpact: () => this.pendingImpactInfo,
+      setPendingImpact: (v) => { this.pendingImpactInfo = v; },
+      markMutation: () => { this.turnHadMutation = true; },
+      hadMutation: () => this.turnHadMutation,
+      addEvidence: () => { this.turnEvidenceCount += 1; },
+      evidenceCount: () => this.turnEvidenceCount,
+      inlineToolResults: this.inlineToolResults,
+    };
   }
 
   /**
@@ -2741,104 +1759,13 @@ export class AgentLoop {
    * - 无模型描述时 → 用元信息占位符
    * - 替换后的占位符包含 img_id，模型可通过 view_image 重新查看
    */
+  /** 回收已处理图片：替换为可回溯文本占位符（B5 拆出至 loop-image.ts） */
   async recycleProcessedImages(): Promise<void> {
-    try {
-      const history = await this.conversationStore.readAll(this.sessionDir);
-      if (history.length === 0) return;
-
-      // 找到最后一条真正的 user 消息（跳过 tool_result，它们 role 也是 user）
-      let lastUserIdx = -1;
-      for (let i = history.length - 1; i >= 0; i--) {
-        const m = history[i]!;
-        if (m.role === 'user') {
-          const items = Array.isArray(m.content) ? m.content : [m.content];
-          // 跳过纯 tool_result 消息
-          if (items.every(c => c.type === 'tool_result')) continue;
-          lastUserIdx = i; break;
-        }
-      }
-      if (lastUserIdx < 0) return;
-
-      let modified = false;
-      const cleaned = history.map((msg, idx) => {
-        // 保留最后一条 user 消息中的图片
-        if (idx === lastUserIdx) return msg;
-
-        const items = Array.isArray(msg.content) ? msg.content : [msg.content];
-        let changed = false;
-        const newItems = items.map((item, itemIdx) => {
-          if (item.type !== 'image') return item;
-          changed = true;
-          modified = true;
-
-          // 1) 从相邻 text 块提取 img_id
-          let imgId = '';
-          if (itemIdx + 1 < items.length && items[itemIdx + 1]!.type === 'text') {
-            const m = (items[itemIdx + 1] as any).text.match(/\[Image indexed as #(img_\d{3})/);
-            if (m) imgId = m[1];
-          }
-          if (!imgId) {
-            for (const ti of items) {
-              if (ti.type !== 'text') continue;
-              const m = (ti as any).text.match(/\[Image indexed as #(img_\d{3})/);
-              if (m) { imgId = m[1]; break; }
-            }
-          }
-          // 无已有索引 → 存入 ImageStore
-          const src = item.source as { type: string; media_type?: string; data?: string; url?: string };
-          if (!imgId && src.type === 'base64' && src.data) {
-            imgId = this.imageStore.store(
-              src.data, src.media_type || 'image/png', '',
-            );
-          }
-
-          // 2) 从后续 assistant 回复中提取模型对图片的描述
-          let description = '';
-          for (let j = idx + 1; j < Math.min(history.length, idx + 4); j++) {
-            const nextMsg = history[j];
-            if (nextMsg?.role !== 'assistant') continue;
-            const nextItems = Array.isArray(nextMsg.content) ? nextMsg.content : [nextMsg.content];
-            for (const ni of nextItems) {
-              if (ni.type === 'text' && ni.text.trim().length > 10) {
-                description = ni.text.replace(/^#{1,4}\s+/gm, '').trim().slice(0, 250);
-                break;
-              }
-            }
-            if (description) break;
-          }
-
-          // 3) 回存描述到 ImageStore
-          if (description && imgId) {
-            this.imageStore.setDescription(imgId, description);
-          }
-
-          // 4) 返回占位符
-          if (description) {
-            return { type: 'text' as const, text: `[Image #${imgId}: ${description} — view_image("${imgId}") to re-examine]` };
-          }
-          // fallback: 元信息
-          const mime = src.media_type || 'image/unknown';
-          const ext = mime.split('/')[1] || 'unknown';
-          const decodedBytes = src.data ? Math.ceil(src.data.length * 0.75) : 0;
-          const sizeStr = decodedBytes < 1024 ? `${decodedBytes}B` : `${(decodedBytes / 1024).toFixed(1)}KB`;
-          return { type: 'text' as const, text: `[Image #${imgId || '?'}: ${ext.toUpperCase()}, ${sizeStr} — view_image("${imgId || '?'}") to re-examine]` };
-        });
-
-        if (!changed) return msg;
-        // 过滤冗余的 [Image indexed as #...] 文本块
-        const filtered = newItems.filter(it => {
-          if (it.type === 'text' && /^\[Image indexed as #img_\d{3}:/.test((it as any).text)) return false;
-          return true;
-        });
-        return { ...msg, content: filtered.length === 1 ? filtered[0] : filtered };
-      });
-
-      if (modified) {
-        await this.conversationStore.replace(this.sessionDir, cleaned);
-      }
-    } catch {
-      // 回收失败不影响主流程
-    }
+    return recycleImagesFromHistory({
+      getConversationStore: () => this.conversationStore,
+      getSessionDir: () => this.sessionDir,
+      getImageStore: () => this.imageStore,
+    });
   }
 
   /** 释放资源：停路由器（含 WorldEngine）+ 停调度器 */
@@ -2847,240 +1774,51 @@ export class AgentLoop {
     await this.scheduler?.stop();
   }
 
-  // ── 意图簇：分簇压缩 ──────────────────────────────────────
+  // ── 意图簇 + deep 压缩模板恢复（B3 拆出至 loop-cluster.ts；
+  //    状态与消费入口已收敛为 clusterService，此处仅保留 deps 快照构造） ──
 
-
-  // ── deep 压缩模板恢复 ────────────────────────────────────────
-
-  /** 恢复被 trigger_compression(level=deep) 临时替换的 summary.md */
-  private _maybeRestoreSummary(): void {
-    if (!this._deepCompressRestore) return;
-    this._deepCompressRestore = false;
-    const summaryPath = path.join(os.homedir(), '.agent', 'prompts', 'summary.md');
-    try {
-      if (this._deepCompressOriginal !== null) {
-        fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
-        fs.writeFileSync(summaryPath, this._deepCompressOriginal, 'utf-8');
-      } else {
-        // 原本没有自定义模板 → 删除临时文件，回退到内置默认
-        try { fs.unlinkSync(summaryPath); } catch {}
-      }
-    } catch {
-      // 恢复失败不阻塞主流程
-    }
-    this._deepCompressOriginal = null;
+  /** 构造簇压缩族依赖快照（每轮现取当前值，mutable 字段实时读取） */
+  private makeClusterDeps() {
+    return {
+      sessionDir: this.sessionDir,
+      compressor: this.compressor,
+      conversationStore: this.conversationStore,
+      eventStore: this.eventStore,
+      summaryStore: this.summaryStore,
+      configCenter: this.configCenter,
+      maxContextTokens: this.maxContextTokens,
+      getCurrentIntentCapability: () => this.getCurrentIntentCapability(),
+      logger: this.logger,
+    };
   }
 
-  /**
-   * 检查指定簇是否超限，超限则从全量存档提取消息并压缩。
-   * 压缩结果存入 summaries/cluster_X.md。
-   * 触发阈值沿用现有全局压缩阈值（context.compressThreshold），不为簇独立设计。
-   */
+  /** 簇级压缩：检查指定簇是否超限，超限则压缩并存簇摘要（B3 拆出） */
   private async maybeCompressCluster(
     clusterId: string,
     lineStart: number,
     lineEnd: number,
     capability: string,
   ): Promise<void> {
-    try {
-      const fullMsgs = await this.conversationStore.readFull(this.sessionDir);
-      const clusterMsgs = fullMsgs.slice(lineStart - 1, lineEnd); // 行号从 1 开始
-      if (clusterMsgs.length === 0) return;
-
-      const tokenCount = this.compressor
-        ? this.compressor.getCompressionStats(clusterMsgs).totalTokens
-        : clusterMsgs.length * 50; // 回退估算
-
-      // 沿用全局压缩阈值（与主流程一致），预算 = 总上限 × 全局阈值
-      const compressThreshold = this.configCenter
-        ? (this.configCenter.get('context.compressThreshold') as number) ?? 0.75
-        : 0.75;
-      const budget = this.maxContextTokens * compressThreshold;
-      if (tokenCount < budget) return;
-
-      if (!this.compressor) {
-        this.logger?.info?.(`[cluster] compress skipped for ${clusterId}: no compressor available`);
-        return;
-      }
-
-      this.logger?.info?.(
-        `[cluster] compressing cluster "${clusterId}" (${capability}): ` +
-        `${clusterMsgs.length} msgs, ${tokenCount} tokens > ${budget} budget`,
-      );
-
-      // 加载已有簇摘要做增量压缩
-      const existingSummary = await this.summaryStore.load(this.sessionDir, clusterId);
-      const result = await this.compressor.compress(
-        clusterMsgs,
-        existingSummary ?? undefined,
-        0,         // protectLast = 0（簇内不加保护）
-        budget,
-        // 方案 3.5：指定 clusterKey 按簇压缩——预算 ×0.7、摘要入 clusterSummaries 分桶、收集 compressedMessages
-        { clusterKey: capability },
-      );
-
-      if (result.summary) {
-        // 簇级摘要（cluster_{clusterId}.md）——factory 读取端依赖此路径（Step 4 对齐）
-        await this.summaryStore.save(this.sessionDir, result.summary, clusterId);
-        // 方案 G：capability 分桶（summary.{capability}.md），渐进式新增包装层
-        try {
-          await this.compressor.saveClusterSummary(this.sessionDir, capability);
-        } catch { /* 分桶写入失败不阻塞 */ }
-        // 决策 C：被压缩消息写回 _compressed 标记（仅保留最近一次压缩记录，覆盖而非追加）
-        if (result.compressedCount && result.compressedCount > 0) {
-          const marker = result.compressedMessages?.[0]?._compressed ?? {
-            intent: capability,
-            summary_hash: '',
-            compressed_at: new Date().toISOString(),
-          };
-          await this.conversationStore.markCompressed(
-            this.sessionDir,
-            lineStart,
-            result.compressedCount,
-            marker,
-          );
-        }
-        this.logger?.info?.(
-          `[cluster] compressed "${clusterId}" (${capability}): ${result.compressedCount ?? 0} msgs → summary saved + _compressed marked`,
-        );
-      }
-    } catch (err) {
-      this.logger?.warn?.(
-        `[cluster] compress failed for "${clusterId}": ${(err as Error).message}`,
-      );
-    }
+    return maybeCompressCluster(this.makeClusterDeps(), clusterId, lineStart, lineEnd, capability);
   }
 
-  // ── 意图簇：Composer 过滤钩子 ─────────────────────────────
-
-  /**
-   * 构建 historyTransform 函数供 Composer 使用。
-   * 启用条件：conversation_full.jsonl 文件大小 > 5MB 且存在匹配当前意图的簇。
-   * 过滤基于全量归档（conversation_full.jsonl，含 _cluster_id 标记）：
-   *   保留「当前意图簇的消息 + 最近 N 轮保底」，其余丢弃。
-   * 未启用时返回 null（全量注入，和现在一样）。
-   */
-  private async buildClusterHistoryTransform(): Promise<((msgs: Message[]) => Message[]) | null> {
-    // 阈值检查
-    try {
-      const fullPath = path.join(this.sessionDir, 'conversation_full.jsonl');
-      const stat = await fs.promises.stat(fullPath);
-      if (stat.size < 5 * 1024 * 1024) return null; // < 5MB，不过滤
-    } catch {
-      return null; // 文件不存在
-    }
-
-    // 读取簇索引（从 events.jsonl 回放）
-    const clusters = await this.loadClusterIndex();
-    if (clusters.length === 0) return null;
-
-    const currentCapability = this.getCurrentIntentCapability();
-    // 当前意图对应的簇 ID 集合（capability 匹配）
-    const targetClusterIds = new Set(
-      clusters.filter((c) => c.capability === currentCapability).map((c) => c.cluster_id),
-    );
-    if (targetClusterIds.size === 0) {
-      this.logger?.info?.(
-        `[cluster] filter skipped: capability=${currentCapability} 无匹配簇，回退全量注入`,
-      );
-      return null;
-    }
-
-    const recentCount = 10; // 最近 N 轮保底（与压缩器 protect 量级一致）
-
-    this.logger?.info?.(
-      `[cluster] filter enabled: capability=${currentCapability}, ` +
-      `targetClusters=${[...targetClusterIds].join(',')}, ` +
-      `recent=${recentCount}`,
-    );
-
-    // 预取全量归档并预筛（全量归档含 _cluster_id 标记，conversation.jsonl 没有）
-    // 闭包内同步返回，避免 composer 的同步 historyTransform 阻塞。
-    const fullMsgs = await this.conversationStore.readFull(this.sessionDir);
-    if (fullMsgs.length === 0) return null;
-    const recentMsgs = fullMsgs.slice(-recentCount);
-    const olderMsgs = fullMsgs.slice(0, -recentCount);
-    const keptOlder = olderMsgs.filter(
-      (m) => m._cluster_id && targetClusterIds.has(m._cluster_id),
-    );
-    const filteredFull = [...keptOlder, ...recentMsgs];
-
-    return (_msgs: Message[]): Message[] => {
-      // 若过滤结果为空，回退调用方传入的历史（防御）
-      if (filteredFull.length === 0) return _msgs;
-      // 全量归档远大于 conversation 历史时（压缩已发生），以 conversation 为准
-      // 避免压缩后的精简历史被全量原始消息绕过
-      if (filteredFull.length > _msgs.length * 3) return _msgs;
-      return filteredFull;
-    };
-  }
-
-  /**
-   * 从 events.jsonl 回放 cluster_assign 事件，重建簇索引。
-   */
+  /** 从 events.jsonl 回放 cluster_assign 事件，重建簇索引（B3 拆出） */
   private async loadClusterIndex(): Promise<Array<{
     cluster_id: string; capability: string; summary: string;
     line_start: number; line_end: number;
   }>> {
-    try {
-      const events = await this.eventStore.readAll(this.sessionDir);
-      const clusters: Array<{
-        cluster_id: string; capability: string; summary: string;
-        line_start: number; line_end: number;
-      }> = [];
-      for (const evt of events) {
-        if (evt.type === 'cluster_assign') {
-          clusters.push({
-            cluster_id: evt.cluster_id as string,
-            capability: evt.capability as string,
-            summary: evt.summary as string,
-            line_start: evt.line_start as number,
-            line_end: evt.line_end as number,
-          });
-        }
-      }
-      return clusters;
-    } catch {
-      return [];
-    }
+    return loadClusterIndex(this.makeClusterDeps());
   }
 
-}
+  // ── trigger_compression 工具入口（闭包触手正规化：工具层不再 as any 写私有字段） ──
 
-/**
- * 判断消息是否包含文本内容（而非纯 tool_result）
- */
-function hasTextContent(content: Message['content']): boolean {
-  if (typeof content === 'string') return true;
-  if (Array.isArray(content)) {
-    return content.some((c) => c.type === 'text');
+  /** 写入 deep 压缩临时模板状态（level=deep 时工具调用） */
+  setDeepCompressState(state: DeepCompressState): void {
+    this.clusterService.setDeepCompressState(state);
   }
-  return content.type === 'text';
-}
 
-/**
- * 判断消息是否包含 tool_use 内容
- */
-function hasToolUseContent(content: Message['content']): boolean {
-  if (typeof content === 'string') return false;
-  if (Array.isArray(content)) {
-    return content.some((c) => c.type === 'tool_use');
+  /** 置位/复位强制重压缩标记（压缩完成后自动复位） */
+  setNeedsCompression(v: boolean): void {
+    this.clusterService.setNeedsCompression(v);
   }
-  return content.type === 'tool_use';
-}
-
-/**
- * 生成工具输入的摘要字符串
- */
-function summarizeToolInput(input: Record<string, unknown>): string {
-  const entries = Object.entries(input);
-  if (entries.length === 0) return '{}';
-
-  const parts = entries.map(([key, value]) => {
-    const str = typeof value === 'string' ? value : JSON.stringify(value);
-    const truncated = str.length > 80 ? str.slice(0, 77) + '...' : str;
-    return `${key}=${truncated}`;
-  });
-
-  return parts.join(', ');
 }

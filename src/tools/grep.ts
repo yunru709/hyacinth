@@ -1,9 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
-
-const MAX_FILE_SIZE = 1024 * 1024;
-const DEFAULT_HEAD_LIMIT = 2000; // ToolResultBuffer handles context protection
+import { getToolConfig } from './tool-config.js';
 
 export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 
@@ -73,7 +71,8 @@ export class GrepTool implements Tool {
     const showLineNumbers = (args['-n'] as boolean | undefined) ?? true;
     const contextAfter = (args['-A'] as number | undefined) ?? (args['-C'] as number | undefined) ?? 0;
     const contextBefore = (args['-B'] as number | undefined) ?? (args['-C'] as number | undefined) ?? 0;
-    const headLimit = (args.head_limit as number | undefined) ?? DEFAULT_HEAD_LIMIT;
+    // ToolResultBuffer handles context protection（tools.grep.headLimit，默认 2000）
+    const headLimit = (args.head_limit as number | undefined) ?? getToolConfig('grep.headLimit', 2000);
     const multiline = (args.multiline as boolean | undefined) ?? false;
 
     let flags = 'g';
@@ -116,7 +115,7 @@ export class GrepTool implements Tool {
 
       try {
         const fileStat = await fs.stat(fullPath);
-        if (!fileStat.isFile() || fileStat.size > MAX_FILE_SIZE) continue;
+        if (!fileStat.isFile() || fileStat.size > getToolConfig('grep.maxFileSizeBytes', 1024 * 1024)) continue;
       } catch {
         continue;
       }

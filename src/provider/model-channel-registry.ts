@@ -26,6 +26,10 @@ export interface ChannelConfig {
   apiKeyEnv?: string;
   /** API 基础 URL（可选，覆盖 Provider 默认值） */
   baseUrl?: string;
+  /** DeepSeek KVCache 隔离 ID（通道级默认；scoped 调用可按次覆盖） */
+  userId?: string;
+  /** 是否禁用 thinking（压缩器/旁路等辅助角色置 false） */
+  thinking?: boolean;
   /** 通道描述 */
   description?: string;
 }
@@ -167,7 +171,8 @@ export class ModelChannelRegistry {
         try {
           localCfg = this.legacyLocalConfig ?? getLocalProviderConfigLoader();
         } catch {
-          localCfg = { baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: '' };
+          // getLocalProviderConfigLoader 内部有 try/catch 兜底默认值，此分支仅为防御
+          localCfg = { ...getLocalProviderConfigLoader(), defaultModel: '' };
         }
       }
       for (const [role, cfg] of Object.entries(this.legacyModelsConfig)) {
@@ -258,6 +263,16 @@ export class ModelChannelRegistry {
    */
   getMainProvider(): Provider | null {
     return this.mainProvider;
+  }
+
+  /** 当前主通道 provider 类型（无主通道时返回 'unknown'） */
+  getProviderType(): string {
+    return this.mainProvider?.getProviderType() ?? 'unknown';
+  }
+
+  /** 当前主通道模型名（无主通道时返回空串） */
+  getModel(): string {
+    return this.mainProvider?.getModel() ?? '';
   }
 
   /** 列出所有通道名 */
@@ -423,15 +438,44 @@ export class ModelChannelRegistry {
         apiKey,
         model: cfg.model ?? meta?.defaultModel ?? 'unknown',
         baseUrl: cfg.baseUrl ?? meta?.baseUrl,
+        userId: cfg.userId,
       };
 
       const provider = ProviderManager.createProviderFromConfig(providerConfig);
+      if (cfg.thinking === false) provider.setThinking?.(false);
       logger.info(`Channel provider created: ${name} (${cfg.provider}/${provider.getModel()})`);
       return provider;
     } catch (err) {
       logger.warn(`Failed to create provider for channel "${name}": ${(err as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * 按角色现建一个带独立 userId 的短命 Provider 实例（不写入通道实例表）。
+   *
+   * 用途：独立于主 loop 的 LLM 调用方（压缩器/子 Agent/旁路等）按调用现场
+   * 取 provider，实现 DeepSeek user_id 的 session/实例级 KVCache 隔离。
+   *
+   * 与 getProvider 的区别：getProvider 返回通道内的**长驻共享实例**
+   * （userId 固定为通道默认）；本方法每次现建新实例（通道配置相同、
+   * userId 按调用者提供），调用方自行持有，用后即弃。
+   *
+   * 解析顺序：role → 通道（roles 映射，无映射用同名通道）→ 通道配置
+   * （无则用 main 配置）。key/model/baseUrl 解析与降级链同常规通道。
+   * 返回 null：通道配置不存在或实例创建失败（无 key 等）——调用方决定降级。
+   */
+  createScopedProvider(role: string, userId: string): Provider | null {
+    const channelName = this.config.roles[role] ?? role;
+    const cfg = this.config.channels[channelName] ?? this.config.channels['main'];
+    if (!cfg) {
+      logger.warn(`createScopedProvider: no channel config for role "${role}"`);
+      return null;
+    }
+    const instance = this.createChannelProviderFromConfig(`scoped:${role}`, { ...cfg, userId });
+    if (!instance) return null;
+    // 与常规通道一致：非 main 通道包弹性层（重试+熔断）
+    return channelName === 'main' ? instance : new ResilientProvider(instance);
   }
 
   // ── Internal ─────────────────────────────────────────────────────

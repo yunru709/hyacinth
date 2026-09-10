@@ -61,6 +61,15 @@ export class LocalModelModule {
   }
 
   /**
+   * 启动所有 enabled 的已注册模型（D3：supervisor.loadAndStartModels 用）。
+   *
+   * @returns 成功启动的模型信息数组
+   */
+  async startAll(): Promise<RunningModelInfo[]> {
+    return this.bridge.startAll();
+  }
+
+  /**
    * 停止指定模型。
    *
    * @param modelName - 模型名称
@@ -97,6 +106,19 @@ export class LocalModelModule {
    */
   getActive(): string | null {
     return this.bridge.getActiveModel();
+  }
+
+  /**
+   * 派生传给 LocalProvider 的 model 名（D3：替代 LocalModelManager 的 preset.modelName）。
+   *
+   * llama.cpp 类：modelFile 去 .gguf 扩展名（如 Qwen3.5-0.8B-IQ4_XS.gguf → Qwen3.5-0.8B-IQ4_XS）；
+   * ollama 类：modelFile 即模型名。未注册返回 null。
+   */
+  getModelName(modelName: string): string | null {
+    const entry = this.registry.find(modelName);
+    if (!entry) return null;
+    if (entry.backend === 'ollama') return entry.modelFile;
+    return entry.modelFile.replace(/\.(gguf|gguf\.safetensors|bin)$/i, '');
   }
 
   // ── 配置 ──

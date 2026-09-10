@@ -14,6 +14,12 @@ import { DEFAULT_USER_ID } from './user-id.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 
+/** media_type → OpenAI input_audio format（仅支持 wav/mp3，其余归 wav） */
+function audioInputFormat(mediaType: string): 'wav' | 'mp3' {
+  const m = mediaType.toLowerCase().split('/')[1];
+  return m === 'mp3' ? 'mp3' : 'wav';
+}
+
 /** OpenAICompatibleProvider 构造选项 */
 export interface OpenAICompatibleOptions {
   /** API key */
@@ -107,6 +113,7 @@ export class OpenAICompatibleProvider implements Provider {
       maxContextTokens: info?.contextWindow ?? 128000,
       isLocal: false,
       vision: info?.capabilities.vision ?? false,
+      inputTypes: info?.capabilities.inputTypes ?? (info?.capabilities.vision ? ['text', 'image'] : ['text']),
     };
   }
 
@@ -284,6 +291,9 @@ export class OpenAICompatibleProvider implements Provider {
         const textParts: string[] = [];
         const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
         const imageParts: OpenAI.ChatCompletionContentPartImage[] = [];
+        // 多模态视频/音频（OpenAI 兼容系 video_url / input_audio；SDK 类型滞后用 never 桥接）
+        const videoParts: OpenAI.ChatCompletionContentPart[] = [];
+        const audioParts: OpenAI.ChatCompletionContentPart[] = [];
 
         for (const block of blocks) {
           if (block.type === 'text') {
@@ -308,15 +318,50 @@ export class OpenAICompatibleProvider implements Provider {
                 : block.source.url;
               imageParts.push({ type: 'image_url', image_url: { url } });
             }
+          } else if (block.type === 'video') {
+            const supportsVideo = this.getCapabilities().inputTypes?.includes('video') ?? false;
+            const url = block.source.type === 'base64'
+              ? `data:${block.media_type};base64,${block.source.data}`
+              : block.source.type === 'url' ? block.source.url : null;
+            if (!supportsVideo || url === null) {
+              const label = block.source.type === 'file'
+                ? `[Video file: ${block.source.path} — 需先抽帧/内联再发送]`
+                : block.source.type === 'base64' ? `[Video: ${block.media_type}]` : `[Video URL: ${block.source.url}]`;
+              textParts.push(label);
+            } else {
+              videoParts.push({
+                type: 'video_url',
+                video_url: {
+                  url,
+                  ...(block.sampling?.fps !== undefined ? { fps: block.sampling.fps } : {}),
+                  ...(block.sampling?.max_frames !== undefined ? { max_frames: block.sampling.max_frames } : {}),
+                },
+              } as never);
+            }
+          } else if (block.type === 'audio') {
+            const supportsAudio = this.getCapabilities().inputTypes?.includes('audio') ?? false;
+            if (!supportsAudio || block.source.type !== 'base64') {
+              const label = block.source.type === 'file'
+                ? `[Audio file: ${block.source.path}]`
+                : block.source.type === 'base64' ? `[Audio: ${block.media_type}]` : `[Audio URL: ${block.source.url}]`;
+              textParts.push(label);
+            } else {
+              audioParts.push({
+                type: 'input_audio',
+                input_audio: { data: block.source.data, format: audioInputFormat(block.media_type) },
+              } as never);
+            }
           }
         }
 
         // tool_result 必须先于 user content
         result.push(...toolResults);
-        if (imageParts.length > 0) {
-          // 有图片时使用数组格式
+        if (imageParts.length > 0 || videoParts.length > 0 || audioParts.length > 0) {
+          // 有多模态内容时使用数组格式
           const content: OpenAI.ChatCompletionContentPart[] = [
             ...imageParts,
+            ...videoParts,
+            ...audioParts,
             ...(textParts.length > 0 ? [{ type: 'text' as const, text: textParts.join('') }] : []),
           ];
           result.push({ role: 'user', content });

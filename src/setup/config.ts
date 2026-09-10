@@ -20,6 +20,7 @@ import os from 'node:os';
 import { getLocalProviderConfigLoader } from '../provider/local-config.js';
 import { DEFAULT_PROVIDERS } from '../provider/config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
+import { registerSecretKeys } from '../kernel/security/index.js';
 
 /** 安全配置 */
 export interface SafetyConfig {
@@ -29,6 +30,8 @@ export interface SafetyConfig {
   allowedTools: string[];
   /** 白名单命令模式（仅对 bash 工具生效，支持 glob 匹配如 "git *""npm test"） */
   allowedCommands: string[];
+  /** 绝对禁止执行的工具名（插件层强制，独立于内置权限；permission-chain 插件消费） */
+  denyTools?: string[];
 }
 
 /** 上下文管理配置 */
@@ -59,8 +62,6 @@ export interface AgentOverrideConfig {
   maxTurns?: number;
   /** 允许使用的工具列表 */
   allowedTools?: string[];
-  /** 协作模式 */
-  collaborationMode?: 'delegate' | 'adversarial' | 'parallel';
   /** 会话 TTL（分钟），超时未调用则自动清理 */
   sessionTtlMinutes?: number;
 }
@@ -185,6 +186,14 @@ export interface AgentConfig {
     /** 是否默认启用 */
     enabled?: boolean;
   };
+  /**
+   * UI 用户偏好（跨项目共享，save() 时始终写入全局配置，不随项目级配置走）。
+   * 新增字段记得同步 src/runtime/config-schema.ts 的 FullConfig 与 defaults.ts。
+   */
+  ui?: {
+    /** WebUI 主题：hyacinth(琥珀金深色,默认) / midnight(冷蓝) / forest(青绿) / rose(粉紫) / light(浅色) */
+    theme?: 'hyacinth' | 'midnight' | 'forest' | 'rose' | 'light';
+  };
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -193,7 +202,9 @@ const DEFAULT_CONFIG: AgentConfig = {
   maxTurns: getDefaultConfig().session.maxTurns,
   maxContext: 200000,
   safety: {
-    dangerousTools: ['write', 'bash'],
+    // 空数组 = 默认按工具 sideEffect 自动推导：'write'/'exec' 需审批，'read' 放行。
+    // 显式给出名单 = 加性覆盖（在推导集之上追加）；要豁免某工具请用 allowedTools。
+    dangerousTools: [],
     allowedTools: [],
     allowedCommands: [],
   },
@@ -254,6 +265,8 @@ export const API_KEY_MAP: Record<string, string> = Object.fromEntries(
 export class ConfigManager {
   private configDir: string;
   private projectDir: string | undefined;
+  /** 本进程从 .env 文件加载的键名集合（供安全内核注册，值不外传） */
+  private loadedEnvKeyNames = new Set<string>();
 
   constructor(projectDir?: string) {
     this.configDir = path.join(os.homedir(), '.agent');
@@ -330,21 +343,43 @@ export class ConfigManager {
    */
   async save(config: AgentConfig): Promise<void> {
     await this.ensureDir();
+    // ui 是用户偏好（主题等），不随项目级配置走：剥离出来单独写全局
+    const { ui, ...businessConfig } = config;
+    if (ui !== undefined) {
+      await this.saveUserSection({ ui } as Partial<AgentConfig>);
+    }
     const projectConfigPath = this.getProjectConfigPath();
     if (projectConfigPath) {
       // 检查项目级配置文件是否存在
       try {
         await fs.access(projectConfigPath);
-        // 项目级配置存在 → 写入项目级
+        // 项目级配置存在 → 写入项目级（不含 ui 用户偏好）
         const dir = path.dirname(projectConfigPath);
         await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(projectConfigPath, JSON.stringify(config, null, 2), 'utf-8');
+        await fs.writeFile(projectConfigPath, JSON.stringify(businessConfig, null, 2), 'utf-8');
         return;
       } catch {
         // 项目级配置不存在，回退到全局
       }
     }
-    await fs.writeFile(this.getConfigPath(), JSON.stringify(config, null, 2), 'utf-8');
+    await fs.writeFile(this.getConfigPath(), JSON.stringify(businessConfig, null, 2), 'utf-8');
+  }
+
+  /**
+   * 合并写入全局配置的用户偏好节（如 ui.theme）。
+   * 只覆盖传入的顶层键，不影响全局配置里的其他字段。
+   */
+  async saveUserSection(partial: Partial<AgentConfig>): Promise<void> {
+    await this.ensureDir();
+    const globalPath = this.getConfigPath();
+    let current: Record<string, unknown> = {};
+    try {
+      current = JSON.parse(await fs.readFile(globalPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      // 全局配置不存在或损坏 → 从空对象开始
+    }
+    const merged = { ...current, ...(partial as Record<string, unknown>) };
+    await fs.writeFile(globalPath, JSON.stringify(merged, null, 2), 'utf-8');
   }
 
   /** 保存配置到项目级配置文件 */
@@ -367,6 +402,10 @@ export class ConfigManager {
     if (projectEnvPath) {
       await this.loadEnvFile(projectEnvPath);
     }
+
+    // 3. 向安全内核注册秘密键名（只注册键名，值不经过内核）——
+    //    内核在 spawn/exec 边界剥离这些键，防止 .env 密钥泄入子进程
+    registerSecretKeys(Object.keys(process.env).filter((k) => this.loadedEnvKeyNames.has(k)));
   }
 
   /** 从指定 .env 文件加载 Key */
@@ -382,6 +421,7 @@ export class ConfigManager {
         const value = trimmed.slice(eqIndex + 1).trim();
         // 项目级 .env 覆盖全局（总是设置，不检查 process.env 是否已有）
         process.env[key] = value;
+        this.loadedEnvKeyNames.add(key);
       }
     } catch {
       // .env 不存在，忽略

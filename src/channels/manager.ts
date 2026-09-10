@@ -43,6 +43,13 @@ export class ChannelManager {
     logger.info('channel registered', { id: handler.id, name: handler.name });
   }
 
+  /** 取消注册一个渠道（插件卸载时调用） */
+  unregister(id: string): boolean {
+    const existed = this.channels.delete(id);
+    if (existed) logger.info('channel unregistered', { id });
+    return existed;
+  }
+
   /** 批量注册 */
   registerAll(entries: Array<{ handler: ChannelHandler; config?: ChannelConfig }>): void {
     for (const { handler, config } of entries) {

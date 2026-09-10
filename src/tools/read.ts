@@ -2,6 +2,7 @@ import { createReadStream, promises as fs, type Stats } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Tool } from './interface.js';
 import { recordFileRead } from './file-tracker.js';
+import { getToolConfig } from './tool-config.js';
 
 /** 图片处理器 — 将 read 工具输出的图片注入到 ImageStore */
 export interface ImageHandler {
@@ -11,10 +12,13 @@ export interface ImageHandler {
 
 // ── 常量 ────────────────────────────────────────────────────────
 
-const DEFAULT_LIMIT = 2000;
-const MAX_LIMIT = 2000;
 const BINARY_SNIFF_BYTES = 512;
 const TEXT_HINT_THRESHOLD = 10 * 1024 * 1024; // 10MB
+
+/** 单次最大/默认读取行数（tools.read.maxLines，默认 2000） */
+function maxLines(): number {
+  return getToolConfig('read.maxLines', 2000);
+}
 
 const IMAGE_SIGNATURES: Array<{ ext: string; mime: string; bytes: number[]; offset: number }> = [
   { ext: 'png',  mime: 'image/png',  bytes: [0x89, 0x50, 0x4E, 0x47], offset: 0 },
@@ -136,7 +140,7 @@ function formatFileSize(bytes: number | bigint): string {
 // ── 流式文本读取 ────────────────────────────────────────────────
 
 async function readTextLines(filePath: string, offset: number, limit: number, fileSize: number | bigint): Promise<string> {
-  const safeLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
+  const safeLimit = Math.max(1, Math.min(limit, maxLines()));
   const startLine = Math.max(1, offset);
   const endLine = startLine + safeLimit - 1;
 
@@ -255,7 +259,7 @@ export class ReadTool implements Tool {
     const filePath = args.file_path as string;
     if (!filePath) return '错误：缺少 file_path 参数。请提供文件的绝对路径。';
     const offset = Math.max(1, (args.offset as number | undefined) ?? 1);
-    const limit  = Math.max(1, Math.min((args.limit as number | undefined) ?? DEFAULT_LIMIT, MAX_LIMIT));
+    const limit  = Math.max(1, Math.min((args.limit as number | undefined) ?? maxLines(), maxLines()));
 
     let stat: Stats;
     try {

@@ -5,8 +5,6 @@ export type ScheduleType = 'interval' | 'cron' | 'daily' | 'fixed-time' | 'rando
 export interface IntervalConfig {
   /** 间隔毫秒数 */
   intervalMs: number;
-  /** 首次执行前等待时间（可选），默认立即执行 */
-  delayFirst?: boolean;
 }
 
 /** Cron 调度配置（5 字段标准 cron） */
@@ -19,8 +17,6 @@ export interface CronConfig {
 export interface DailyConfig {
   /** 执行时间，格式 HH:mm（24 小时制） */
   time: string;
-  /** 时区，默认 local */
-  timezone?: string;
 }
 
 /** 固定时间调度配置（一次性任务） */
@@ -178,7 +174,7 @@ export interface SchedulerConfig {
   /**
    * 全局默认渠道降级链。
    * 当任务的 channel 离线且未配置 fallback 时，按此顺序尝试。
-   * 默认：["tui"] — 只有在 TUI 存活时才降级，否则丢弃。
+   * 默认：["feishu"]（后端可脱离任何渠道独立运行，飞书作为持久消息渠道兜底）。
    */
   channelFallback?: string[];
 }

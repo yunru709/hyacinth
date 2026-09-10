@@ -233,7 +233,9 @@ export class ProcessManager {
     if (!this.config.healthCheck) {
       // 无健康检查：给进程一点时间启动，然后直接标记 running
       await sleep(1000);
-      if (this.state !== 'stopping') {
+      // 进程若在等待期间已退出（exit 事件已把状态置为 crashed），
+      // 不得再覆盖为 running —— 否则短命进程会被误报为存活
+      if (this.state !== 'stopping' && this.state !== 'crashed' && this.proc !== null) {
         this.transitionTo('running');
       }
       return;

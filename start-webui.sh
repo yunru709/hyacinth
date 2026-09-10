@@ -10,18 +10,8 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Step 1: Install frontend dependencies (if needed)
-if [ ! -d "webui/node_modules" ]; then
-    echo "[1/2] Installing frontend dependencies..."
-    cd webui && npm install && cd ..
-else
-    echo "[1/2] Frontend dependencies OK"
-fi
-
-# Step 2: Build and start
-echo "[2/2] Starting Hyacinth WebUI..."
+# WebUI 为纯静态页面（webui/ 目录，无 npm 依赖），直接启动 serve
+echo "Starting Hyacinth WebUI → http://localhost:3100"
 echo ""
 
 npx hyacinth serve --webui --webui-port 3100
-
-

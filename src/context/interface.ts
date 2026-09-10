@@ -1,4 +1,5 @@
 import type { Message, ToolDefinition } from '../types.js';
+import type { LayeredComposeOptions, LayeredContext } from './composer.js';
 
 export interface ComposeOptions {
   systemPrompt: string;
@@ -12,6 +13,20 @@ export interface ComposeOptions {
 
 export interface ContextComposer {
   compose(options: ComposeOptions): Message[] | Promise<Message[]>;
+}
+
+/**
+ * 上下文组装器最小接口（阶段 B 收窄：内核阶段/插件不再依赖 LayeredContextComposer
+ * 具体类，只用本接口消费 —— 解 §5.2 插件反向依赖具体类）。
+ * LayeredContextComposer 天然兼容（implements）。
+ */
+export interface ContextComposerLike {
+  /** 分层组装（内置 context 阶段与可替换模块使用） */
+  compose(options: LayeredComposeOptions): Promise<LayeredContext>;
+  /** 平面组装（旧 ComposeOptions 路径） */
+  compose(options: ComposeOptions): Promise<Message[]>;
+  /** 条件开关（如 zone4_enabled / precise_mode） */
+  activeConditions: Set<string>;
 }
 
 // Re-export new types from composer.ts for centralized access

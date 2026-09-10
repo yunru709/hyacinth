@@ -11,6 +11,7 @@ import type { Tool } from './interface.js';
  */
 export class JsonEditTool implements Tool {
   readonly name = 'json_edit';
+  readonly sideEffect = 'write' as const;
   readonly description =
     '读取或修改 JSON / YAML / TOML 文件中指定路径的键值。路径使用点号分隔（如 "compilerOptions.target"）。只传路径不传 value=读取当前值；传 value=写入并保持原格式。支持嵌套对象、数组元素和深层路径。';
   readonly inputSchema: Record<string, unknown> = {

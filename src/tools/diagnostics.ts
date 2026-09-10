@@ -14,8 +14,38 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
+import { RuntimeConfigCenter } from '../runtime/config-center.js';
+import { getDefaultConfig } from '../runtime/defaults.js';
 
 const execFileAsync = promisify(execFile);
+
+// ── 配置读取 ───────────────────────────────────────────────
+//
+// diagnostics.enabled / diagnostics.timeout 之前虽然在 config-schema 与
+// defaults 里定义了，却没有任何代码读取 —— 三个调用点全部硬编码 15000，
+// 导致配置成了装饰品：enabled=false 也照样跑，每次 edit 最多阻塞 15 秒。
+//
+// RuntimeConfigCenter 本身是进程级单例（getInstance()），工具层读取它
+// 与 tools/config.ts 的既有做法一致，也未被 verify-layers 的任何规则禁止。
+
+interface DiagnosticsSettings {
+  enabled: boolean;
+  timeout: number;
+}
+
+function readDiagnosticsSettings(): DiagnosticsSettings {
+  const fallback = getDefaultConfig().diagnostics;
+  let enabled = fallback?.enabled ?? true;
+  let timeout = fallback?.timeout ?? 15000;
+  try {
+    const cfg = RuntimeConfigCenter.getInstance();
+    enabled = (cfg.get('diagnostics.enabled') as boolean | undefined) ?? enabled;
+    timeout = (cfg.get('diagnostics.timeout') as number | undefined) ?? timeout;
+  } catch {
+    // 配置中心尚未初始化（如单测环境）→ 回落默认值，不阻断工具流
+  }
+  return { enabled, timeout };
+}
 
 // ── 项目类型检测 ─────────────────────────────────────────────
 
@@ -130,5 +160,22 @@ function typeLabel(type: ProjectType): string {
     case 'go': return 'Go (go build)';
     case 'rust': return 'Rust (cargo check)';
     case 'python': return 'Python (py_compile)';
+  }
+}
+
+/**
+ * 配置感知的诊断入口 —— write/edit/multi_edit 应调用本函数而非 runDiagnostics。
+ *
+ * - diagnostics.enabled === false 时直接跳过（不再无条件阻塞最长 15 秒）
+ * - 超时取自 diagnostics.timeout，不再硬编码 15000
+ * - 任何异常都不影响工具返回值
+ */
+export async function maybeRunDiagnostics(cwd: string): Promise<string | null> {
+  const { enabled, timeout } = readDiagnosticsSettings();
+  if (!enabled) return null;
+  try {
+    return await runDiagnostics(cwd, timeout);
+  } catch {
+    return null;
   }
 }

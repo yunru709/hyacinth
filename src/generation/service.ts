@@ -26,9 +26,11 @@ import type {
   GenerationProvider,
 } from './interface.js';
 
-const DEFAULT_POLL_INTERVAL_MS = 3000;
-const VIDEO_POLL_INTERVAL_MS = 15000;
-const MAX_POLL_ATTEMPTS = 600; // 15s * 600 = 2.5h 上限（视频长任务）
+import {
+  pollIntervalMs,
+  videoPollIntervalMs,
+  maxPollAttempts,
+} from './generation-config.js';
 
 export interface GenerateOptions {
   /** 轮询间隔（毫秒），不传则按任务类型自动选择 */
@@ -104,9 +106,9 @@ export class GenerationService {
     opts: GenerateOptions,
   ): Promise<NonNullable<Awaited<ReturnType<GenerationProvider['getTaskStatus']>>>> {
     const interval = opts.pollIntervalMs ?? (req.taskType.startsWith('text_to_video') || req.taskType.startsWith('image_to_video') || req.taskType.startsWith('reference_to_video')
-      ? VIDEO_POLL_INTERVAL_MS
-      : DEFAULT_POLL_INTERVAL_MS);
-    const maxAttempts = opts.maxAttempts ?? MAX_POLL_ATTEMPTS;
+      ? videoPollIntervalMs()
+      : pollIntervalMs());
+    const maxAttempts = opts.maxAttempts ?? maxPollAttempts();
 
     for (let i = 0; i < maxAttempts; i++) {
       // 支持中断

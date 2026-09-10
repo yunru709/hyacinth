@@ -10,14 +10,12 @@ export type { AskUserQuestion } from '../orchestrator/loop.js';
 /** 工具依赖：调用 OutputHandler.onAskUser 的函数 */
 export type AskUserFn = (questions: AskUserQuestion[]) => Promise<string>;
 
-let askUserHandler: AskUserFn | null = null;
-
-/** TUI 启动后由 tui.ts 调用，将 onAskUser 的实现注入到工具中 */
-export function setAskUserHandler(handler: AskUserFn): void {
-  askUserHandler = handler;
-}
-
-export function createAskUserTool(): Tool {
+/**
+ * 创建 ask_user 工具。交互 handler 按 loop 实例注入（getHandler 惰性读取）：
+ * 每个 AgentLoop 构造时绑定自己的 outputHandler.onAskUser，多路 UI 并发时
+ * 各 loop 各自应答，不再依赖进程内唯一全局 handler（原 setAskUserHandler 已移除）。
+ */
+export function createAskUserTool(getHandler: () => AskUserFn | null): Tool {
   return {
     name: 'ask_user',
     description:
@@ -46,7 +44,7 @@ export function createAskUserTool(): Tool {
               },
               multiSelect: {
                 type: 'boolean',
-                description: 'Allow selecting multiple options (default: false = single choice)',
+                description: 'Allow selecting multiple answers (default: false = single choice)',
               },
               customInput: {
                 type: 'boolean',
@@ -64,10 +62,11 @@ export function createAskUserTool(): Tool {
       if (!questions || questions.length === 0) {
         return JSON.stringify({ error: 'No questions provided.' });
       }
-      if (!askUserHandler) {
-        return JSON.stringify({ error: 'Ask user handler not connected (TUI not active).' });
+      const handler = getHandler();
+      if (!handler) {
+        return JSON.stringify({ error: 'Ask user handler not connected (UI not active).' });
       }
-      return askUserHandler(questions);
+      return handler(questions);
     },
   };
 }

@@ -1,21 +1,7 @@
 import type { ProviderType, ProviderConfig } from '../types.js';
 import type { Provider } from './interface.js';
-import { AnthropicProvider } from './anthropic.js';
-import { OpenAIProvider } from './openai.js';
-import { createDeepSeekProvider, createDeepSeekFromConfig } from './deepseek.js';
 import { LocalProvider } from './local.js';
-import {
-  createGroqProvider,
-  createXAIProvider,
-  createMistralProvider,
-  createOpenRouterProvider,
-  createMoonshotProvider,
-} from './compatible.js';
-import { GeminiProvider } from './gemini.js';
-import { createQwenProvider, createQwenFromConfig } from './qwen.js';
-import { createZhipuProvider, createZhipuFromConfig } from './zhipu.js';
-import { createMiniMaxProvider, createMiniMaxFromConfig } from './minimax.js';
-import { createMiMoProvider, createMiMoFromConfig } from './mimo.js';
+import { getProviderFactory, listProviderFactories } from './factory-registry.js';
 import { ResilientProvider } from './resilient.js';
 import type { RetryConfig, CircuitBreakerConfig } from './resilient.js';
 import { FallbackProviderChain } from './fallback.js';
@@ -133,8 +119,10 @@ export class ProviderManager {
   private buildFallbackProviders(types: ProviderType[]): Provider[] {
     const result: Provider[] = [];
     for (const type of types) {
-      // 本地模型：读取配置
-      if (type === 'local' || type === 'llamacpp' || type === 'ollama') {
+      const factory = getProviderFactory(type);
+      if (!factory) continue;
+      // 本地模型三态：读取 local-config（显式配置 fallback 用）
+      if (factory.local) {
         try {
           const localCfg = getLocalProviderConfigLoader();
           if (localCfg?.defaultModel) {
@@ -149,13 +137,15 @@ export class ProviderManager {
         continue;
       }
 
-      const envKey = getProviderConfigLoader().getProvider(type)?.envKey;
+      // 在线厂商：meta 动态读取（尊重 providers.json 用户自定义 envKey/defaultModel）
+      const meta = getProviderConfigLoader().getProvider(type);
+      const envKey = meta?.envKey;
       const apiKey = envKey ? process.env[envKey] : undefined;
       if (apiKey) {
-        const provider = ProviderManager.createProviderFromConfig({
+        const provider = factory.create({
           type,
           apiKey,
-          model: getProviderConfigLoader().getProvider(type)?.defaultModel ?? 'unknown',
+          model: meta?.defaultModel ?? 'unknown',
         });
         result.push(provider);
       }
@@ -202,168 +192,43 @@ export class ProviderManager {
     this.provider = this.wrapProvider(primary);
   }
 
+  /**
+   * 从配置创建 Provider 实例 —— 注册表驱动（P5-15，方案 C）。
+   * 原 15 个硬编码 switch case 已收敛至注册表（getProviderFactory 合并查询：内置 + 运行时扩展）。
+   */
   static createProviderFromConfig(config: ProviderConfig): Provider {
-    switch (config.type) {
-      case 'anthropic':
-        return new AnthropicProvider({
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-          model: config.model,
-        });
-
-      case 'openai':
-        return new OpenAIProvider({
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-          model: config.model,
-          userId: config.userId,
-        });
-
-      case 'deepseek':
-        return createDeepSeekFromConfig(config);
-
-      case 'local':
-      case 'ollama':
-        return new LocalProvider({
-          baseUrl: config.baseUrl,
-          model: config.model,
-          backend: config.type === 'ollama' ? 'ollama' : undefined,
-        });
-
-      case 'groq':
-        return createGroqProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
-
-      case 'xai':
-        return createXAIProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
-
-      case 'mistral':
-        return createMistralProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
-
-      case 'openrouter':
-        return createOpenRouterProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
-
-      case 'gemini':
-        return new GeminiProvider({ apiKey: config.apiKey, model: config.model });
-
-      case 'moonshot':
-        return createMoonshotProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId });
-
-      case 'qwen':
-        return createQwenFromConfig(config);
-
-      case 'zhipu':
-        return createZhipuFromConfig(config);
-
-      case 'minimax':
-        return createMiniMaxFromConfig(config);
-
-      case 'mimo':
-        return createMiMoFromConfig(config);
-
-      default:
-        throw new Error(`Unknown provider type: ${(config as ProviderConfig).type}`);
+    const factory = getProviderFactory(config.type);
+    if (!factory) {
+      throw new Error(`Unknown provider type: ${config.type}`);
     }
+    return factory.create(config);
   }
 
+  /**
+   * 从环境变量自动检测 Provider —— 遍历注册表（键序即优先级）。
+   * 原 13 个 if 链已收敛：createFromEnv 缺省（本地 ollama/llamacpp）自动跳过。
+   */
   static detectFromEnv(): Provider | null {
-    if (process.env.ANTHROPIC_API_KEY) {
-      return new AnthropicProvider({
-        apiKey: process.env.ANTHROPIC_API_KEY,
-        baseUrl: process.env.ANTHROPIC_BASE_URL,
-      });
+    for (const [, factory] of listProviderFactories()) {
+      const provider = factory.createFromEnv?.();
+      if (provider) return provider;
     }
-
-    if (process.env.OPENAI_API_KEY) {
-      return new OpenAIProvider({
-        apiKey: process.env.OPENAI_API_KEY,
-        baseUrl: process.env.OPENAI_BASE_URL,
-      });
-    }
-
-    if (process.env.DEEPSEEK_API_KEY) {
-      return createDeepSeekProvider({
-        apiKey: process.env.DEEPSEEK_API_KEY,
-        baseUrl: process.env.DEEPSEEK_BASE_URL,
-      });
-    }
-
-    if (process.env.GROQ_API_KEY) {
-      return createGroqProvider();
-    }
-
-    if (process.env.XAI_API_KEY) {
-      return createXAIProvider();
-    }
-
-    if (process.env.MISTRAL_API_KEY) {
-      return createMistralProvider();
-    }
-
-    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
-      return new GeminiProvider();
-    }
-
-    if (process.env.OPENROUTER_API_KEY) {
-      return createOpenRouterProvider();
-    }
-
-    if (process.env.MOONSHOT_API_KEY) {
-      return createMoonshotProvider();
-    }
-
-    if (process.env.DASHSCOPE_API_KEY) {
-      return createQwenProvider();
-    }
-
-    if (process.env.ZHIPU_API_KEY) {
-      return createZhipuProvider();
-    }
-
-    if (process.env.MINIMAX_API_KEY) {
-      return createMiniMaxProvider();
-    }
-
-    if (process.env.MIMO_API_KEY) {
-      return createMiMoProvider();
-    }
-
-    // 本地模型：检查是否已配置
-    try {
-      const localCfg = getLocalProviderConfigLoader();
-      if (localCfg?.defaultModel) {
-        return new LocalProvider({
-          baseUrl: localCfg.baseUrl,
-          model: localCfg.defaultModel,
-        });
-      }
-    } catch { /* local config not available */ }
-
     return null;
   }
 
+  /**
+   * 列出当前可用的 Provider 类型 —— 遍历注册表（键序即优先级）。
+   * 可用性判定：envKeys（或缺省 meta.envKey）任一存在；local 三态走 checkAvailability。
+   */
   static getAvailableProviders(): ProviderType[] {
     const available: ProviderType[] = [];
-    if (process.env.ANTHROPIC_API_KEY) available.push('anthropic');
-    if (process.env.OPENAI_API_KEY) available.push('openai');
-    if (process.env.DEEPSEEK_API_KEY) available.push('deepseek');
-    if (process.env.GROQ_API_KEY) available.push('groq');
-    if (process.env.XAI_API_KEY) available.push('xai');
-    if (process.env.MISTRAL_API_KEY) available.push('mistral');
-    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) available.push('gemini');
-    if (process.env.OPENROUTER_API_KEY) available.push('openrouter');
-    if (process.env.MOONSHOT_API_KEY) available.push('moonshot');
-    if (process.env.DASHSCOPE_API_KEY) available.push('qwen');
-    if (process.env.ZHIPU_API_KEY) available.push('zhipu');
-    if (process.env.MINIMAX_API_KEY) available.push('minimax');
-    if (process.env.MIMO_API_KEY) available.push('mimo');
-    // 本地模型兜底：检测是否已配置
-    try {
-      const localCfg = getLocalProviderConfigLoader();
-      if (localCfg?.defaultModel) {
-        available.push('local');
+    for (const [type, factory] of listProviderFactories()) {
+      const isAvailable = factory.checkAvailability
+        ?? (() => (factory.envKeys ?? (factory.meta ? [factory.meta.envKey] : []))
+          .some((k) => k && process.env[k]));
+      if (isAvailable()) {
+        available.push(type as ProviderType);
       }
-    } catch {
-      // 配置不存在或无法加载，跳过
     }
     return available;
   }

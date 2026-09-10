@@ -18,10 +18,11 @@ import * as os from 'os';
 import type { Message } from '../types.js';
 import type { SectionEntry } from './manifest-types.js';
 import type { ResolverContext } from './section-resolver.js';
-import { filterToolRounds } from './precision/companion.js';
+import { filterToolRounds } from './companion-filter.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
-import { parseNarration, WorldEngine } from '../bypass/agents/companion/index.js';
-import { companionUserId, mainUserId, narrationUserId, orchestratorUserId } from '../provider/user-id.js';
+import { parseNarration } from '../world-engine/agent.js';
+import type { WorldEngine } from '../world-engine/agent.js';
+import { companionUserId, mainUserId } from '../provider/user-id.js';
 
 // ── SourceOverride ──────────────────────────────────────────
 
@@ -147,7 +148,7 @@ export class NormalRouter implements IContextRouter {
 // 行为等价于 COMPANION_PROFILE + CompanionStrategy + 硬编码 companion 判断。
 
 const COMPANION_TOOL_ALLOWLIST = [
-  'companion_mode', 'reset_companion_session',
+  'companion_say', 'companion_mode', 'reset_companion_session',
   'add_task', 'list_tasks', 'remove_task', 'toggle_task',
   'read', 'write', 'edit',
 ] as const;
@@ -162,6 +163,10 @@ const COMPANION_SKIP_RUNTIME_SOURCES = [
 ] as const;
 
 const COMPANION_TOOL_PROMPT =
+  '【表达】你的话都要通过 companion_say 说出（直接输出的文字他听不到）。像这样：\n' +
+  'companion_say {"text":"回来啦？今天过得怎么样？","tone":"惊喜","think":"终于等到他了","action":"放下书抬头"}\n' +
+  'companion_say {"text":"早点睡吧，晚安。","tone":"温柔","action":"帮他掖好被角"}\n' +
+  'text 是说出口的话（口语化）；think 是心声、action 是动作，只展示不朗读。\n' +
   '有些事，你可以这样去做：' +
   '他离开了，道个别（companion_mode deactivate）。' +
   '这样可以和他重新聊聊了（reset_companion_session）。' +
@@ -353,17 +358,20 @@ export class CompanionRouter implements IContextRouter {
 
     // 切换到陪伴模式的 KVCache 隔离 ID（主Agent + 旁路）
     loop.setActiveUserId(companionUserId(name));
-    loop.setBypassUserId(narrationUserId());
 
     // 通过 BypassManager 激活世界引擎旁路Agent
     const bypassMgr = loop.bypassManager;
     if (bypassMgr) {
-      // 确保 WorldEngine 使用正确的角色名
+      // 确保 WorldEngine 使用正确的角色名：经插件服务拿工厂（world-engine 插件未挂载时跳过，
+      // 卸载后角色切换不再复活世界功能——「卸载 → 功能消失」）
       const existing = bypassMgr.getAgent('world-engine') as WorldEngine | undefined;
       if (existing) {
-        // 更新角色名并重新注册
-        const { WorldEngine } = await import('../bypass/agents/companion/index.js');
-        bypassMgr.register(new WorldEngine(name));
+        const createAgent = loop.pluginHost?.get('world-engine.createAgent') as
+          | ((name: string) => WorldEngine)
+          | undefined;
+        if (createAgent) {
+          bypassMgr.register(createAgent(name));
+        }
       }
       // 激活陪伴模式的旁路Agent
       await bypassMgr.activateForMode('companion');
@@ -392,7 +400,6 @@ export class CompanionRouter implements IContextRouter {
 
     // 恢复到普通模式的 KVCache 隔离 ID（主Agent + 旁路）
     loop.setActiveUserId(mainUserId(path.basename(normalDir)));
-    loop.setBypassUserId(orchestratorUserId());
 
     // 通知 TUI session 已切换，触发界面刷新
     (loop as any)._sessionSwitched = normalDir;

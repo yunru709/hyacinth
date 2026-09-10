@@ -25,6 +25,7 @@ import type { Injection } from '../bypass/types.js';
 import { loadPrompt, renderPrompt } from '../prompts/loader.js';
 import { loadProjectContext } from './prompt-builder.js';
 import { Retriever } from './retriever.js';
+import { zone4BudgetRatio, poolMinHistory } from './context-config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getGlobalPersonaDir } from '../setup/persona-bootstrap.js';
@@ -241,17 +242,17 @@ async function resolveRuntime(
 
   // 会话临时工具：hot-reload 热添加的工具不进 Zone 2 tool_rules，而在 Zone 5 session_tools 展示
   if (src === 'runtime:tools_live') {
-    return resolveContextSourceContent('session-tools', ctx);
+    return await resolveContextSourceContent('session-tools', ctx);
   }
 
   // MCP 状态变更通知：从 ContextSource 读取并消费，注入后自动清空
   if (src === 'runtime:mcp_status') {
-    return resolveContextSourceContent('mcp-status', ctx);
+    return await resolveContextSourceContent('mcp-status', ctx);
   }
 
   // 工具包索引（Zone 2）：所有 bundle 的名称 + 简介
   if (src === 'runtime:tool_bundles') {
-    return resolveContextSourceContent('tool-bundles', ctx);
+    return await resolveContextSourceContent('tool-bundles', ctx);
   }
 
   // 模式注入（Zone 5）：plan/spec 激活时注入提示词
@@ -313,7 +314,8 @@ async function resolveRetrieval(
   }
 
   if (src === 'runtime:pool' || src === 'runtime:git') {
-    if (!ctx.fullHistory || ctx.fullHistory.length === 0) return undefined;
+    // 门控：工作历史不足 poolMinHistory 条时不召回（短会话召回纯属浪费 token）
+    if (!ctx.fullHistory || ctx.fullHistory.length < poolMinHistory()) return undefined;
 
     const retriever = new Retriever();
     const result = await retriever.retrieve({
@@ -321,7 +323,7 @@ async function resolveRetrieval(
       excludeLast: 1,
       excludeHashes: ctx.zone3Hashes,
       userInput: ctx.userInput,
-      maxTokens: Math.floor(ctx.maxContextTokens * 0.50),
+      maxTokens: Math.floor(ctx.maxContextTokens * zone4BudgetRatio()),
       tokenCounter: ctx.tokenCounter,
       gitManager: ctx.gitManager,
       cwd: ctx.cwd,
@@ -416,14 +418,16 @@ function extractTextContent(message: Message): string | null {
 }
 
 /** 从指定名称的 ContextSource 读取内容 */
-function resolveContextSourceContent(
+async function resolveContextSourceContent(
   sourceName: string,
   ctx: ResolverContext,
-): string | undefined {
+): Promise<string | undefined> {
   if (!ctx.sources) return undefined;
   const source = ctx.sources.get(sourceName);
   if (!source?.getContent) return undefined;
-  const content = source.getContent();
+  // getContent 可能是 async（ContextSource 接口允许 Promise），必须 await
+  // 否则 Promise 会因 typeof !== 'string' 被静默丢弃（内容丢失）
+  const content = await source.getContent();
   const text = typeof content === 'string' ? content : '';
   return text || undefined;
 }

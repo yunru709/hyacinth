@@ -7,6 +7,8 @@ import type {
   ToolUseContent,
   ToolResultContent,
   ImageContent,
+  VideoContent,
+  AudioContent,
 } from '../types.js';
 import type { ContextConfig } from '../setup/config.js';
 
@@ -86,6 +88,18 @@ export class TokenCounter {
         if (img.source.type === 'url') return 1000;  // 远程 URL，保守估算
         // base64: decoded ≈ data.length * 0.75 bytes, ~1 token per 4 bytes
         return Math.max(1, Math.ceil(img.source.data.length * 0.75 / 4)) + 4;
+      }
+      case 'video': {
+        const v = content as VideoContent;
+        if (v.source.type === 'file') return 200; // 文件引用占位
+        if (v.source.type === 'url') return 2000; // 远程视频粗估
+        return Math.max(1, Math.ceil(v.source.data.length * 0.75 / 4)) + 4;
+      }
+      case 'audio': {
+        const a = content as AudioContent;
+        if (a.source.type === 'file') return 200; // 文件引用占位
+        if (a.source.type === 'url') return 1500; // 远程音频粗估
+        return Math.max(1, Math.ceil(a.source.data.length * 0.75 / 4)) + 4;
       }
       default: {
         // Unknown content type — best-effort: stringify and count

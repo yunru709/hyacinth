@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import type { Session } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 import { toProjectKey } from '../utils/misc.js';
+import { withSessionDirLock } from './session-lock.js';
 
 const logger = createLogger('session');
 
@@ -24,6 +25,51 @@ export function generateSessionId(channel?: string): string {
 
   if (channel && channel.length > 0) return `${channel}_${baseId}`;
   return baseId;
+}
+
+/**
+ * 幂等物化惰性会话：meta.json 已存在 → 直接返回（不重复写）。
+ * 否则补写 meta.json + session_start 事件 + stats.json。
+ * conversation.jsonl 由 ConversationStore 首写时自动创建（惰性）。
+ */
+export async function materializeLazySession(sessionDir: string, session: Session): Promise<void> {
+  // 跨进程互斥（TUI 与 WebUI 共享 sessions 目录）：锁内二次检查防双进程同时物化
+  await withSessionDirLock(sessionDir, async () => {
+    const metaPath = path.join(sessionDir, 'meta.json');
+    try {
+      await fs.access(metaPath);
+      return; // 已物化
+    } catch {
+      // 未物化，继续补齐
+    }
+
+    await ensureDir(sessionDir);
+    const now = session.createdAt ?? new Date().toISOString();
+    await fs.writeFile(
+      metaPath,
+      JSON.stringify({
+        type: session.type ?? 'normal',
+        createdAt: now,
+        projectKey: session.projectKey,
+        channel: session.channel,
+      }),
+      'utf-8',
+    );
+
+    // 写入 session_start 事件
+    const { EventStore } = await import('./events.js');
+    const eventStore = new EventStore();
+    await eventStore.append(sessionDir, {
+      type: 'session_start',
+      session_id: session.id,
+      timestamp: now,
+    });
+
+    // 初始化 stats
+    const { StatsManager } = await import('./stats.js');
+    const statsManager = new StatsManager();
+    await statsManager.init(sessionDir);
+  });
 }
 
 /**
@@ -69,52 +115,33 @@ export class SessionManager {
   }
 
   /**
-   * 创建新 session
+   * 惰性新建（零副作用）：只生成 session id（含渠道前缀）与 Session 对象，
+   * **不创建目录、不写任何文件、不触发 cleanup**。
+   * 目录与文件由首条消息到达时的 materializeLazySession 物化——
+   * 用户启动后直接 switch_session 切旧会话时，不产生任何空 session 残留。
    */
-  async create(type: 'normal' | 'precise' = 'normal', channel?: string): Promise<Session> {
-    // 清理过期 session
-    await this.cleanup();
-
-    const id = generateSessionId(channel);
+  createLazy(channel?: string): Session {
     const now = new Date().toISOString();
-    const session: Session = {
-      id,
+    return {
+      id: generateSessionId(channel),
       projectKey: this.projectKey,
       createdAt: now,
       updatedAt: now,
-      type,
+      type: 'normal',
       channel,
     };
+  }
 
-    const sessionDir = path.join(this.sessionsRoot, id);
-    await ensureDir(sessionDir);
+  /**
+   * 创建新 session（含物化写入）
+   */
+  async create(type: 'normal' | 'precise' | 'companion' = 'normal', channel?: string): Promise<Session> {
+    // 清理过期 session
+    await this.cleanup();
 
-    // 创建 session 必需的文件
-    await ensureFile(path.join(sessionDir, 'conversation.jsonl'));
-    await ensureFile(path.join(sessionDir, 'events.jsonl'));
-    await ensureFile(path.join(sessionDir, 'stats.json'));
-
-    // 持久化 session 元信息（type、projectKey、channel 等）
-    await fs.writeFile(
-      path.join(sessionDir, 'meta.json'),
-      JSON.stringify({ type, createdAt: now, projectKey: this.projectKey, channel }),
-      'utf-8',
-    );
-
-    // 写入 session_start 事件
-    const { EventStore } = await import('./events.js');
-    const eventStore = new EventStore();
-    await eventStore.append(sessionDir, {
-      type: 'session_start',
-      session_id: id,
-      timestamp: now,
-    });
-
-    // 初始化 stats
-    const { StatsManager } = await import('./stats.js');
-    const statsManager = new StatsManager();
-    await statsManager.init(sessionDir);
-
+    const session = this.createLazy(channel);
+    session.type = type;
+    await materializeLazySession(path.join(this.sessionsRoot, session.id), session);
     return session;
   }
 
@@ -128,50 +155,52 @@ export class SessionManager {
     if (sessionId) {
       const sessionDir = path.join(this.sessionsRoot, sessionId);
 
-      // 目录不存在 → 自动创建（首次调用或重启后重建）
+      // 目录不存在 → 自动创建（首次调用或重启后重建）。
+      // 跨进程互斥：TUI 与 WebUI 共享 sessions 目录，双进程同时建同一 session
+      // 会并发写 meta/events/stats。锁内二次检查 + 递归读回（meta 分支在下方）。
       try {
         await fs.access(sessionDir);
       } catch {
-        await ensureDir(sessionDir);
-        await ensureFile(path.join(sessionDir, 'conversation.jsonl'));
-        await ensureFile(path.join(sessionDir, 'events.jsonl'));
-        await ensureFile(path.join(sessionDir, 'stats.json'));
+        return withSessionDirLock(sessionDir, async () => {
+          try {
+            await fs.access(sessionDir);
+          } catch {
+            await ensureDir(sessionDir);
+            await ensureFile(path.join(sessionDir, 'conversation.jsonl'));
+            await ensureFile(path.join(sessionDir, 'events.jsonl'));
+            await ensureFile(path.join(sessionDir, 'stats.json'));
 
-        const now = new Date().toISOString();
-        // 检测 sessionId 前缀判断渠道来源
-        let channel: string | undefined;
-        if (sessionId.startsWith('feishu_')) channel = 'feishu';
-        else if (sessionId.startsWith('webui_')) channel = 'webui';
-        else if (sessionId.startsWith('tui_')) channel = 'tui';
-        await fs.writeFile(
-          path.join(sessionDir, 'meta.json'),
-          JSON.stringify({ type: 'normal', createdAt: now, channel, projectKey: this.projectKey }),
-          'utf-8',
-        );
+            const now = new Date().toISOString();
+            // 检测 sessionId 前缀判断渠道来源
+            let channel: string | undefined;
+            if (sessionId.startsWith('feishu_')) channel = 'feishu';
+            else if (sessionId.startsWith('webui_') || sessionId.startsWith('ui_')) channel = 'webui'; // ui_ 为旧版 /ui 前缀（兼容存量）
+            else if (sessionId.startsWith('tui_')) channel = 'tui';
+            await fs.writeFile(
+              path.join(sessionDir, 'meta.json'),
+              JSON.stringify({ type: 'normal', createdAt: now, channel, projectKey: this.projectKey }),
+              'utf-8',
+            );
 
-        // 写入 session_start 事件
-        const { EventStore } = await import('./events.js');
-        const eventStore = new EventStore();
-        await eventStore.append(sessionDir, {
-          type: 'session_start',
-          session_id: sessionId,
-          timestamp: now,
+            // 写入 session_start 事件
+            const { EventStore } = await import('./events.js');
+            const eventStore = new EventStore();
+            await eventStore.append(sessionDir, {
+              type: 'session_start',
+              session_id: sessionId,
+              timestamp: now,
+            });
+
+            // 初始化 stats
+            const { StatsManager } = await import('./stats.js');
+            const statsManager = new StatsManager();
+            await statsManager.init(sessionDir);
+
+            logger.info('Auto-created session', { sessionId, channel });
+          }
+          // 读回已创建/已存在的 session（走下方 meta 分支）
+          return this.resume(sessionId);
         });
-
-        // 初始化 stats
-        const { StatsManager } = await import('./stats.js');
-        const statsManager = new StatsManager();
-        await statsManager.init(sessionDir);
-
-        const session: Session = {
-          id: sessionId,
-          projectKey: this.projectKey,
-          createdAt: now,
-          updatedAt: now,
-          type: 'normal',
-        };
-        logger.info('Auto-created session', { sessionId, channel });
-        return session;
       }
 
       // 目录已存在 → 读取 meta.json

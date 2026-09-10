@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginApi } from './types.js';
+import type { PluginDefinition, PluginApi } from '../plugin-sdk/types.js';
 
 export type DefinePluginOptions = {
   id: string;

@@ -1,11 +1,10 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
 import type { Tool } from './interface.js';
-
-const RESTART_EXIT_CODE = 42;
-const RESTART_FILE = '.agent/.restart-session';
-const CONTINUATION_FILE = '.agent/.restart-continuation';
+import {
+  RESTART_EXIT_CODE,
+  RESTART_CONTINUATION_MARKER,
+  writeMarker,
+  prepareShellRestart,
+} from '../supervisor/protocol.js';
 
 export class RestartTool implements Tool {
   readonly name = 'restart';
@@ -28,38 +27,19 @@ export class RestartTool implements Tool {
   ) {}
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const agentDir = join(homedir(), '.agent');
     try {
-      mkdirSync(agentDir, { recursive: true });
-      // 标记文件告诉 guardian 使用 --continue。
-      // 格式：优先读取全局渠道 Session 注册表（__channelSessionRegistry），
-      // 注册表存的是「getter」，调用它获取各渠道当前的 sessionId（实时反映切换），
-      // 把「渠道 → sessionId」映射序列化为 JSON 写入，重启后按启动渠道恢复各自 session，
-      // 避免多渠道共享进程时（TUI + 飞书）重启串 session。
-      // 若无注册表/为空，退化为 'true'（继续最近）。
-      const sessionRegistry = (globalThis as any).__channelSessionRegistry as Map<string, () => string> | undefined;
-      let marker = 'true';
-      if (sessionRegistry && sessionRegistry.size > 0) {
-        const snapshot: Record<string, string> = {};
-        for (const [channel, getter] of sessionRegistry) {
-          try {
-            const sid = getter();
-            // 过滤伪 session（'__shared__' / 'feishu_default' 等无真实目录的虚拟会话）
-            if (channel && sid && sid !== '__shared__' && !sid.endsWith('_default')) {
-              snapshot[channel] = sid;
-            }
-          } catch { /* 单渠道 getter 失败不影响整体快照 */ }
-        }
-        if (Object.keys(snapshot).length > 0) {
-          marker = JSON.stringify(snapshot);
-        }
-      }
-      writeFileSync(join(agentDir, '.restart-session'), marker, 'utf-8');
+      // 会话快照 + 重启原因存档走协议层 prepareShellRestart —— 与壳层兜底
+      // 重启（插件热更新失败 44）同一封装，保证各重启路径恢复行为一致。
+      const message = args.message as string | undefined;
+      prepareShellRestart({
+        code: RESTART_EXIT_CODE,
+        source: 'restart-tool',
+        ...(message ? { detail: message.slice(0, 120) } : {}),
+      });
 
       // 如果传了 message，保存续工指令
-      const message = args.message as string | undefined;
       if (message) {
-        writeFileSync(join(agentDir, '.restart-continuation'), message, 'utf-8');
+        writeMarker(RESTART_CONTINUATION_MARKER, message);
       }
     } catch {}
 

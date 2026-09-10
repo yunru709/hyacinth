@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Content } from '@google/genai';
+import crypto from 'node:crypto';
 import type {
   Message,
   StreamEvent,
@@ -56,6 +57,7 @@ export class GeminiProvider implements Provider {
       maxContextTokens: info?.contextWindow ?? 1048576,
       isLocal: false,
       vision: info?.capabilities.vision ?? true, // Gemini models all support vision
+      inputTypes: info?.capabilities.inputTypes ?? (info?.capabilities.vision ? ['text', 'image'] : ['text']),
     };
   }
 
@@ -92,12 +94,35 @@ export class GeminiProvider implements Provider {
         const parts = candidate.content?.parts ?? [];
 
         for (const part of parts) {
+          // 工具调用：Gemini 经 part.functionCall 返回，必须显式 yield TOOL_USE，
+          // 否则主循环永远拿不到工具调用请求（工具能力对该 Provider 失效）。
+          if (part.functionCall?.name) {
+            yield {
+              type: 'TOOL_USE',
+              id: part.functionCall.id ?? crypto.randomUUID(),
+              name: part.functionCall.name,
+              input: (part.functionCall.args ?? {}) as Record<string, unknown>,
+            };
+            continue;
+          }
           if (part.text) {
-            yield { type: 'TEXT', content: part.text };
+            // thought 是布尔标记（非文本内容）：思考文本仍在 part.text 里
+            if (part.thought) {
+              yield { type: 'THINKING', content: part.text };
+            } else {
+              yield { type: 'TEXT', content: part.text };
+            }
           }
-          if (part.thought) {
-            yield { type: 'THINKING', content: String(part.thought) };
-          }
+        }
+
+        // usage 通常只在最后一个 chunk 出现
+        const um = chunk.usageMetadata;
+        if (um && (um.promptTokenCount !== undefined || um.candidatesTokenCount !== undefined)) {
+          yield {
+            type: 'USAGE',
+            input_tokens: um.promptTokenCount ?? 0,
+            output_tokens: um.candidatesTokenCount ?? 0,
+          };
         }
       }
 
@@ -114,12 +139,14 @@ export class GeminiProvider implements Provider {
     systemInstruction?: string;
     history: Content[];
     userMessage: string;
-    userParts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+    userParts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; functionResponse?: { name: string; response: Record<string, unknown> } }>;
   } {
     const systemParts: string[] = [];
     const history: Content[] = [];
     let userMessage = '';
-    let userParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> | undefined;
+    let userParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; fileData?: { fileUri: string }; functionResponse?: { name: string; response: Record<string, unknown> } }> | undefined;
+    // tool_use id → 函数名映射：把后续 tool_result 转成结构化 functionResponse
+    const toolUseNames = new Map<string, string>();
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
@@ -133,10 +160,14 @@ export class GeminiProvider implements Provider {
       }
 
       if (msg.role === 'assistant') {
-        const parts: Array<{ text?: string }> = [];
+        const parts: Array<Record<string, unknown>> = [];
         for (const b of blocks) {
           if (b.type === 'text') parts.push({ text: sanitizeText(b.text) });
-          else if (b.type === 'tool_use') parts.push({ text: `[Tool: ${b.name}]` });
+          else if (b.type === 'thinking') parts.push({ text: b.thinking, thought: true });
+          else if (b.type === 'tool_use') {
+            toolUseNames.set(b.id, b.name);
+            parts.push({ functionCall: { name: b.name, args: b.input, id: b.id } });
+          }
         }
         if (parts.length > 0) {
           history.push({ role: 'model', parts: parts as Content['parts'] });
@@ -147,35 +178,73 @@ export class GeminiProvider implements Provider {
       if (msg.role === 'user') {
         const textParts: string[] = [];
         const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+        const responseParts: Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = [];
+        // 多模态视频/音频（Gemini inlineData / fileData）
+        const mediaParts: Array<{ inlineData?: { mimeType: string; data: string }; fileData?: { fileUri: string } }> = [];
 
         for (const b of blocks) {
           if (b.type === 'text') textParts.push(sanitizeText(b.text));
-          else if (b.type === 'tool_result') textParts.push(`[Tool result: ${sanitizeText(b.content.substring(0, 200))}]`);
-          else if (b.type === 'image' && b.source.type === 'base64') {
+          else if (b.type === 'tool_result') {
+            const fnName = toolUseNames.get(b.tool_use_id);
+            if (fnName) {
+              // 结构化 functionResponse：与上一条 functionCall 配对，保证工具调用闭环
+              responseParts.push({
+                functionResponse: {
+                  name: fnName,
+                  response: b.is_error ? { error: sanitizeText(b.content) } : { output: sanitizeText(b.content) },
+                },
+              });
+            } else {
+              // 找不到对应 tool_use（异常场景）：降级为文本，避免 API 报 400
+              textParts.push(`[Tool result: ${sanitizeText(b.content.substring(0, 200))}]`);
+            }
+          } else if (b.type === 'image' && b.source.type === 'base64') {
             imageParts.push({ inlineData: { mimeType: b.source.media_type, data: b.source.data } });
           } else if (b.type === 'image' && b.source.type === 'url') {
             // Gemini 也支持 fileData 引用远程图片
             imageParts.push({ inlineData: { mimeType: 'image/unknown', data: b.source.url } });
+          } else if (b.type === 'video') {
+            const supportsVideo = this.getCapabilities().inputTypes?.includes('video') ?? false;
+            if (!supportsVideo) {
+              textParts.push(`[Video: ${b.source.type === 'file' ? b.source.path : b.source.type === 'url' ? b.source.url : b.source.media_type}]`);
+            } else if (b.source.type === 'base64') {
+              mediaParts.push({ inlineData: { mimeType: b.media_type, data: b.source.data } });
+            } else if (b.source.type === 'url') {
+              mediaParts.push({ inlineData: { mimeType: b.media_type, data: b.source.url } });
+            } else {
+              mediaParts.push({ fileData: { fileUri: `file://${b.source.path}` } });
+            }
+          } else if (b.type === 'audio') {
+            const supportsAudio = this.getCapabilities().inputTypes?.includes('audio') ?? false;
+            if (!supportsAudio) {
+              textParts.push(`[Audio: ${b.source.type === 'file' ? b.source.path : b.source.type === 'url' ? b.source.url : b.source.media_type}]`);
+            } else if (b.source.type === 'base64') {
+              mediaParts.push({ inlineData: { mimeType: b.media_type, data: b.source.data } });
+            } else {
+              textParts.push(`[Audio: ${b.source.type === 'url' ? b.source.url : b.source.path}]`);
+            }
           }
         }
 
+        const text = textParts.join('\n\n');
+        const combinedParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; fileData?: { fileUri: string }; functionResponse?: { name: string; response: Record<string, unknown> } }> = [
+          ...(text ? [{ text }] : []),
+          ...imageParts,
+          ...mediaParts,
+          ...responseParts,
+        ];
+
         const isLast = i === messages.length - 1;
-        if (isLast && imageParts.length > 0) {
-          userParts = [
-            ...(textParts.length > 0 ? [{ text: textParts.join('\n\n') }] : []),
-            ...imageParts,
-          ];
-          userMessage = textParts.join('\n\n');  // fallback
-        } else if (isLast) {
-          userMessage = textParts.join('\n\n');
+        if (isLast) {
+          if (combinedParts.length > 0) {
+            userParts = combinedParts;
+            userMessage = text;
+          } else {
+            userMessage = text || 'Hello';
+          }
         } else {
-          const text = textParts.join('\n\n');
-          if (text || imageParts.length > 0) {
-            const hParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
-              ...(text ? [{ text }] : []),
-              ...imageParts,
-            ];
-            history.push({ role: 'user', parts: hParts as Content['parts'] });
+          if (combinedParts.length > 0) {
+            history.push({ role: 'user', parts: combinedParts as Content['parts'] });
           }
         }
       }

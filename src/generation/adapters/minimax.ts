@@ -31,6 +31,7 @@ import type {
   GenerationTask,
   MediaInput,
 } from '../interface.js';
+import { minimaxDefaultVoiceId, minimaxAudioFormat } from '../generation-config.js';
 
 const DEFAULT_BASE_URL = 'https://api.minimaxi.com';
 const DEFAULT_IMAGE_MODEL = 'image-01';
@@ -572,11 +573,11 @@ export class MiniMaxProvider implements GenerationProvider {
       model: this.resolveModel(req, DEFAULT_AUDIO_MODEL),
       text: req.prompt || '',
       voice_setting: {
-        voice_id: req.voice || 'moss_audio_ce44fc67-7ce3-11f0-8de5-96e35d26fb85',
+        voice_id: req.voice || minimaxDefaultVoiceId(),
       },
     };
     if (req.speed !== undefined && req.speed > 0) body.voice_setting.speed = req.speed;
-    body.audio_setting = { format: 'mp3' };
+    body.audio_setting = { format: minimaxAudioFormat() };
     return body;
   }
 

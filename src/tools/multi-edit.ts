@@ -2,10 +2,11 @@ import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { GlobTool } from './glob.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
-import { runDiagnostics } from './diagnostics.js';
+import { maybeRunDiagnostics } from './diagnostics.js';
 
 export class MultiEditTool implements Tool {
   readonly name = 'multi_edit';
+  readonly sideEffect = 'write' as const;
   readonly description =
     '跨多个文件执行搜索替换，通过 glob 模式匹配目标文件。支持 dry_run 预览模式（仅显示变更内容不写入）。默认最多匹配 10 个文件。replace_all=true 时允许单文件内多次替换。';
   readonly inputSchema: Record<string, unknown> = {
@@ -14,6 +15,10 @@ export class MultiEditTool implements Tool {
       glob: {
         type: 'string',
         description: 'File matching pattern (e.g., "src/**/*.ts")',
+      },
+      path: {
+        type: 'string',
+        description: 'The directory to search in. Defaults to the current working directory.',
       },
       old_string: {
         type: 'string',
@@ -41,6 +46,7 @@ export class MultiEditTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const pattern = args.glob as string;
+    const searchPath = (args.path as string | undefined) || process.cwd();
     const oldString = args.old_string as string;
     const newString = args.new_string as string;
     const maxFiles = (args.max_files as number | undefined) ?? 10;
@@ -48,7 +54,12 @@ export class MultiEditTool implements Tool {
     const replaceAll = (args.replace_all as boolean | undefined) ?? false;
 
     const globTool = new GlobTool();
-    const globResult = await globTool.execute({ pattern });
+    const globResult = await globTool.execute({ pattern, path: searchPath });
+
+    // GlobTool 无匹配时返回错误串而非路径列表——识别并直接返回，避免把错误文本当文件路径
+    if (globResult.trim() === 'No files matched the pattern') {
+      return `No files matched the pattern "${pattern}".`;
+    }
 
     const filePaths = globResult
       .split('\n')
@@ -84,7 +95,9 @@ export class MultiEditTool implements Tool {
       }
       try {
         const stat = await fs.stat(filePath);
-        if (stat.mtimeMs > lastRead) {
+        // 与 write/edit 一致的 50ms 容差：stat.mtimeMs 是高精度（带小数），
+        // Date.now() 是整数毫秒，同一毫秒内 read 后 edit 会误判为"外部修改"
+        if (stat.mtimeMs > lastRead + 50) {
           return `Error: "${filePath}" has been modified on disk since it was last read. Please re-read it first.`;
         }
       } catch {}
@@ -145,7 +158,7 @@ export class MultiEditTool implements Tool {
 
     // ── 自动诊断：修改后运行类型检查/编译检查 ──
     try {
-      const diag = await runDiagnostics(process.cwd(), 15000);
+      const diag = await maybeRunDiagnostics(process.cwd());
       if (diag) result += '\n\n' + diag;
     } catch { /* 诊断失败不影响工具返回值 */ }
 

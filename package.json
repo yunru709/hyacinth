@@ -1,6 +1,6 @@
 {
   "name": "hyacinth-ai",
-  "version": "0.9.42",
+  "version": "0.9.43",
   "description": "Hyacinth 🪻 — multi-provider AI agent with tool system and context management",
   "type": "module",
   "main": "dist/index.js",
@@ -8,13 +8,16 @@
     "hyacinth": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-prompts.cjs && node scripts/clean-tests.cjs && node scripts/clean-maps.cjs",
+    "build": "tsc && node scripts/copy-prompts.cjs && node scripts/copy-webui.cjs && node scripts/clean-tests.cjs && node scripts/clean-maps.cjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "start:win": "chcp 65001 > nul && node dist/index.js",
     "test": "vitest run",
+    "smoke": "node scripts/smoke-assembly.mjs",
     "test:watch": "vitest",
-    "setup:llamacpp": "powershell -ExecutionPolicy Bypass -File scripts/setup-llamacpp.ps1"
+    "verify:layers": "node scripts/verify-layers.mjs",
+    "setup:llamacpp": "powershell -ExecutionPolicy Bypass -File scripts/setup-llamacpp.ps1",
+    "webui": "node dist/index.js webui"
   },
   "keywords": [
     "ai",

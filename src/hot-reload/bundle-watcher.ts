@@ -1,10 +1,7 @@
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import os from 'node:os';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
-import { createLogger } from '../logging/logger.js';
-
-const logger = createLogger('hot-reload:bundle-watcher');
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 export interface BundleWatcherDeps {
   registry: ToolBundleRegistry;
@@ -14,33 +11,19 @@ export interface BundleWatcherDeps {
 
 /**
  * 监听 .agent/tool-bundles.json 变更 → registry.reload()
+ *
+ * 监听父目录（跨平台比监听单文件可靠），按 filename 过滤。
  */
-export function watchBundles(deps: BundleWatcherDeps): fs.FSWatcher {
-  const { registry, cwd, debounceMs } = deps;
+export function watchBundles(deps: BundleWatcherDeps): WatcherHandle[] {
   const filePath = path.join(os.homedir(), '.agent', 'tool-bundles.json');
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  logger.info(`Watching bundle config: ${filePath}`);
-
-  // Use fs.watch on the directory (more reliable cross-platform than watching a single file)
-  const watcher = fs.watch(path.dirname(filePath), (_eventType, filename) => {
-    if (filename !== 'tool-bundles.json') return;
-
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      try {
-        registry.reload();
-        logger.info('Bundle config reloaded');
-      } catch (err) {
-        logger.warn(`Bundle reload failed: ${(err as Error).message}`);
-      }
-    }, debounceMs);
+  return createWatcher({
+    name: 'bundle-watcher',
+    debounceMs: deps.debounceMs,
+    paths: () => [path.dirname(filePath)],
+    filter: (filename) => filename === 'tool-bundles.json',
+    reload: () => {
+      deps.registry.reload();
+    },
   });
-
-  watcher.on('error', (err) => {
-    logger.warn(`Bundle watcher error: ${err.message}`);
-  });
-
-  return watcher;
 }

@@ -9,6 +9,12 @@ export interface ProviderCapabilities {
   isLocal: boolean;
   /** 是否支持视觉/多模态（图片输入） */
   vision: boolean;
+  /**
+   * 模型输入类型白名单（唯一权威）：'text'|'image'|'document'|'audio'|'video'。
+   * 缺省回退 = vision ? ['text','image'] : ['text']。
+   * video/audio 输入门控统一查本字段。
+   */
+  inputTypes?: string[];
 }
 
 /**
@@ -34,6 +40,15 @@ export interface Provider {
 
   /** 返回当前 Provider 使用的模型名称 */
   getModel(): string;
+
+  /**
+   * 运行时切换 KVCache 隔离 ID（DeepSeek user_id / OpenAI user 字段）。
+   * 可选能力：仅支持的 API 实现（deepseek/openai 及 compatible 族）；
+   * anthropic/gemini/local 等无此参数的 API 不实现，调用方以 ?. 调用。
+   * 长驻共享实例切换时注意并发互斥；按调用隔离请用
+   * ModelChannelRegistry.createScopedProvider 现建实例。
+   */
+  setUserId?(userId: string): void;
 
   /**
    * 动态加载 LoRA Adapter（仅本地 Provider 支持）。

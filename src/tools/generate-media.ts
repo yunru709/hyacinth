@@ -272,7 +272,10 @@ export class GenerateMediaTool implements Tool {
         `Provider: ${artifact.provider} | Size: ${artifact.byteSize} bytes | Media: ${artifact.mediaType}\n` +
         (artifact.width && artifact.height ? `Dimensions: ${artifact.width}x${artifact.height}\n` : '') +
         (artifact.duration ? `Duration: ${artifact.duration}s\n` : '') +
-        `Source URL: ${artifact.sourceUrl}`
+        `Source URL: ${artifact.sourceUrl}` +
+        (modality === 'image'
+          ? `\n可调用 view_image 传入 ${artifact.localPath} 回看生成结果。`
+          : '')
       );
     } catch (err) {
       return `Error generating ${modality}: ${(err as Error).message}`;

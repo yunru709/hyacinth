@@ -1,9 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { ManifestLoader } from '../context/manifest-loader.js';
-import { createLogger } from '../logging/logger.js';
-
-const logger = createLogger('hot-reload:manifest-watcher');
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 const loaderInstances = new Map<string, ManifestLoader>();
 
@@ -22,31 +19,19 @@ export interface ManifestWatcherDeps {
   debounceMs: number;
 }
 
-export function watchContextManifest(deps: ManifestWatcherDeps): fs.FSWatcher[] {
-  const manifestPath = path.join(deps.cwd, '.agent', 'context-manifest.json');
+/**
+ * 监听 .agent/context-manifest.json 变更 → loader.reload()。
+ */
+export function watchContextManifest(deps: ManifestWatcherDeps): WatcherHandle[] {
   const loader = getManifestLoader(deps.cwd);
   loader.load();
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const handleChange = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      try {
-        loader.reload();
-        logger.info('context-manifest.json reloaded');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn('Failed to reload context-manifest.json', { error: msg });
-      }
-    }, deps.debounceMs);
-  };
-
-  const watcher = fs.watch(manifestPath, handleChange);
-  watcher.on('error', (err) => {
-    logger.warn(`Manifest watcher error: ${err.message}`);
+  return createWatcher({
+    name: 'manifest-watcher',
+    debounceMs: deps.debounceMs,
+    paths: () => [path.join(deps.cwd, '.agent', 'context-manifest.json')],
+    reload: () => {
+      loader.reload();
+    },
   });
-
-  logger.info(`Watching context manifest: ${manifestPath}`);
-  return [watcher];
 }

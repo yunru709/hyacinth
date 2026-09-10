@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" width="900" height="540">
+  <defs>
+    <linearGradient id="rbg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1d24"/>
+      <stop offset="100%" stop-color="#0d0e11"/>
+    </linearGradient>
+    <radialGradient id="rglow" cx="30%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#f6c453" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#f6c453" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="900" height="540" fill="url(#rbg)"/>
+  <rect width="900" height="540" fill="url(#rglow)"/>
+  <!-- Large window -->
+  <rect x="60" y="60" width="420" height="280" rx="8" fill="#20242c" stroke="#3c414b" stroke-width="2"/>
+  <line x1="270" y1="60" x2="270" y2="340" stroke="#3c414b" stroke-width="2"/>
+  <line x1="60" y1="200" x2="480" y2="200" stroke="#3c414b" stroke-width="2"/>
+  <!-- Rain -->
+  <g stroke="#5a6170" stroke-width="1" opacity="0.35">
+    <line x1="100" y1="80" x2="90" y2="120"/>
+    <line x1="140" y1="100" x2="130" y2="140"/>
+    <line x1="180" y1="75" x2="170" y2="115"/>
+    <line x1="220" y1="95" x2="210" y2="135"/>
+    <line x1="310" y1="85" x2="300" y2="125"/>
+    <line x1="350" y1="105" x2="340" y2="145"/>
+    <line x1="390" y1="75" x2="380" y2="115"/>
+    <line x1="430" y1="95" x2="420" y2="135"/>
+    <line x1="110" y1="220" x2="100" y2="260"/>
+    <line x1="160" y1="240" x2="150" y2="280"/>
+    <line x1="210" y1="225" x2="200" y2="265"/>
+    <line x1="320" y1="230" x2="310" y2="270"/>
+    <line x1="370" y1="245" x2="360" y2="285"/>
+    <line x1="420" y1="225" x2="410" y2="265"/>
+  </g>
+  <!-- Desk -->
+  <rect x="0" y="400" width="900" height="140" fill="#20242c"/>
+  <rect x="0" y="400" width="900" height="4" fill="#333842"/>
+  <!-- Lamp -->
+  <circle cx="720" cy="380" r="80" fill="#f6c453" opacity="0.1"/>
+  <rect x="700" y="280" width="40" height="10" rx="2" fill="#333842"/>
+  <line x1="720" y1="290" x2="720" y2="400" stroke="#333842" stroke-width="3"/>
+  <!-- Books stack -->
+  <rect x="560" y="370" width="100" height="10" rx="2" fill="#5c4516"/>
+  <rect x="550" y="380" width="110" height="10" rx="2" fill="#7f5f1f"/>
+  <rect x="570" y="390" width="90" height="10" rx="2" fill="#3d2e0f"/>
+  <!-- Tea cup -->
+  <ellipse cx="180" cy="410" rx="28" ry="7" fill="#333842"/>
+  <rect x="154" y="385" width="52" height="25" rx="4" fill="#2b2f36" stroke="#3c414b" stroke-width="1"/>
+  <ellipse cx="180" cy="385" rx="26" ry="6" fill="#5c4516" opacity="0.5"/>
+  <!-- Steam -->
+  <g stroke="#7b7f87" stroke-width="1.5" fill="none" opacity="0.4">
+    <path d="M170 375 Q173 365 170 355"/>
+    <path d="M182 372 Q186 360 180 348"/>
+    <path d="M192 375 Q195 367 192 357"/>
+  </g>
+  <!-- Label -->
+  <text x="450" y="510" text-anchor="middle" fill="#5a6170" font-family="monospace" font-size="13">rainy-study.png · 1280 × 720 · 298 KB</text>
+</svg>

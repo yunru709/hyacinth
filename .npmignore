@@ -28,6 +28,10 @@ adapters/
 .env
 .env.*
 
+# 本地运行产物（数据库 / TS 增量编译缓存）
+*.db
+tsconfig.tsbuildinfo
+
 # Per-user config (auto-generated)
 .agent/
 

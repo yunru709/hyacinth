@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
+import { getToolConfig } from './tool-config.js';
 
 /**
  * GlobTool — 使用 glob 模式匹配文件路径
@@ -75,8 +76,8 @@ export class GlobTool implements Tool {
     // 按修改时间降序排列（最新的在前）
     withStats.sort((a, b) => b.mtime - a.mtime);
 
-    // 限制返回数量
-    const limited = withStats.slice(0, 1000);
+    // 限制返回数量（tools.glob.maxResults，默认 1000）
+    const limited = withStats.slice(0, getToolConfig('glob.maxResults', 1000));
 
     return limited.map((item) => item.path).join('\n');
   }

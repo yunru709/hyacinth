@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { AgentRegistry } from '../agents/registry.js';
@@ -6,6 +5,7 @@ import type { LayeredContextComposer } from '../context/composer.js';
 import type { AgentDefinition } from '../types.js';
 import { loadAgentConfigs } from '../agents/config-loader.js';
 import { createLogger } from '../logging/logger.js';
+import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 interface AgentWatcherDeps {
   agentRegistry: AgentRegistry;
@@ -23,7 +23,6 @@ function isSameConfig(a: AgentDefinition, b: AgentDefinition): boolean {
     a.description === b.description &&
     a.systemPrompt === b.systemPrompt &&
     a.maxTurns === b.maxTurns &&
-    a.collaborationMode === b.collaborationMode &&
     a.modelPreference === b.modelPreference &&
     arraysEqual(a.allowedTools, b.allowedTools)
   );
@@ -40,74 +39,34 @@ function arraysEqual(a: string[], b: string[]): boolean {
 /**
  * 监听 agents.json 配置文件变化，自动重载 Agent 定义。
  *
- * 监听路径（按优先级）：
- *   1. process.env.AGENTS_CONFIG_PATH
- *   2. <cwd>/.agent/agents.json
- *   3. ~/.agent/agents.json
- *
- * 任一文件变化时，debounce 后：
- *   - 重新加载配置
- *   - 对比新旧列表，增量注册/注销/更新
+ * 监听路径（按优先级）：AGENTS_CONFIG_PATH 环境变量 > 项目 > 全局。
+ * 变更时重新加载配置并 diff：增量注册/注销/更新（added/removed/changed）。
  */
-export function watchAgentsJson(deps: AgentWatcherDeps): fs.FSWatcher[] {
-  const logger = createLogger('hot-reload:agents');
-  const watchPaths: string[] = [];
-
-  // 收集所有需要监听的文件路径
-  const globalPath = path.join(os.homedir(), '.agent', 'agents.json');
-  const projectPath = path.join(deps.cwd, '.agent', 'agents.json');
-  const envPath = process.env['AGENTS_CONFIG_PATH'];
-
-  if (envPath) watchPaths.push(path.resolve(envPath));
-  watchPaths.push(projectPath);
-  watchPaths.push(globalPath);
-
-  // 去重
-  const uniquePaths = [...new Set(watchPaths)];
-
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const watchers: fs.FSWatcher[] = [];
-
-  for (const watchPath of uniquePaths) {
-    // 确保父目录存在
-    const dir = path.dirname(watchPath);
-    try {
-      // 静默跳过，目录不存在时 fs.watch 会抛出异常
-    } catch {
-      // 忽略
-    }
-
-    try {
-      const watcher = fs.watch(watchPath, (_event) => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(async () => {
-          try {
-            logger.info('agents.json changed, reloading...');
-            await reloadAgents(deps, logger);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            logger.warn('agent reload failed', { error: msg });
-          }
-        }, deps.debounceMs);
-      });
-      watchers.push(watcher);
-    } catch {
-      // 文件不存在或无法监听，静默跳过（watch 会在第一次文件创建时失效）
-    }
-  }
-
-  return watchers;
+export function watchAgentsJson(deps: AgentWatcherDeps): WatcherHandle[] {
+  return createWatcher({
+    name: 'agents',
+    debounceMs: deps.debounceMs,
+    paths: () => {
+      const watchPaths: string[] = [];
+      const envPath = process.env['AGENTS_CONFIG_PATH'];
+      if (envPath) watchPaths.push(path.resolve(envPath));
+      watchPaths.push(path.join(deps.cwd, '.agent', 'agents.json'));
+      watchPaths.push(path.join(os.homedir(), '.agent', 'agents.json'));
+      return [...new Set(watchPaths)];
+    },
+    reload: () => reloadAgents(deps),
+  });
 }
 
-async function reloadAgents(deps: AgentWatcherDeps, logger: ReturnType<typeof createLogger>): Promise<void> {
+async function reloadAgents(deps: AgentWatcherDeps): Promise<void> {
+  const logger = createLogger('hot-reload:agents');
+
   // 1. 重新加载配置
   const newAgents = await loadAgentConfigs(deps.cwd);
 
   // 2. 获取当前已注册的 Agent（按 name 建立索引）
-  const oldAgents = deps.agentRegistry.getAll();
   const oldMap = new Map<string, AgentDefinition>();
-  for (const a of oldAgents) {
+  for (const a of deps.agentRegistry.getAll()) {
     oldMap.set(a.name, a);
   }
   const newMap = new Map<string, AgentDefinition>();

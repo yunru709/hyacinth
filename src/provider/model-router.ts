@@ -83,6 +83,18 @@ export class ModelRouter {
   }
 
   /**
+   * 按角色现建一个带独立 userId 的短命 Provider（不写入通道实例表）。
+   *
+   * 用途：独立于主 loop 的 LLM 调用方（压缩器/子 Agent 等）实现
+   * DeepSeek user_id 的 session/实例级 KVCache 隔离——调用方每次
+   * 现取，用后即弃；通道配置（provider/model/key）仍由角色表统一管理。
+   * 角色无可用通道时返回 null（调用方决定降级）。
+   */
+  createScopedProvider(role: ModelRole, userId: string): Provider | null {
+    return this.registry.createScopedProvider(role, userId);
+  }
+
+  /**
    * 热重载配置：尝试从 model-channels.json 重载，
    * 若无文件则从 legacy config 重建。
    */

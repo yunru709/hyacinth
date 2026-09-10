@@ -131,6 +131,11 @@ export class LayeredContextComposer implements ContextComposer {
     return this.sources.get(name);
   }
 
+  /** 已注册源名清单（架构监督基线上报用） */
+  listSourceNames(): string[] {
+    return [...this.sources.keys()];
+  }
+
   registerPromptSection(section: SystemPromptSection): void {
     this.persistentSections.push(section);
   }
@@ -172,6 +177,46 @@ export class LayeredContextComposer implements ContextComposer {
 
   async composeLegacy(options: ComposeOptions): Promise<Message[]> {
     return this.compose(options);
+  }
+
+  /**
+   * 组装单个 Zone 的预览文本（供设置页展示真实内容，如 zone1 锚点区）。
+   * 复用本实例已注册的 ContextSource（skills/agents/mcp/memory 等），
+   * 保证预览内容与线上组装一致。Zone 不存在或未启用 → 返回 null。
+   */
+  async previewZone(
+    zoneKey: string,
+    options: LayeredComposeOptions,
+  ): Promise<{ zone: string; text: string; tokens: number } | null> {
+    this.cwd = options.cwd ?? process.cwd();
+    this.promptBuilder = new SystemPromptBuilder();
+    for (const section of this.persistentSections) {
+      this.promptBuilder.registerSection(section);
+    }
+    const manifestLoader = getManifestLoader(this.cwd);
+    const zone = manifestLoader.getZone(zoneKey);
+    if (!zone || !zone.enabled) return null;
+    const ctx = this.buildResolverContext(options);
+    const result = await this.assembleZone(zoneKey, options, ctx);
+    // 消息 content 可能是 string / {type:'text',text} / 块数组，统一提取文本
+    const text = result.messages
+      .map((m) => {
+        const c = m.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) {
+          return c
+            .filter((x) => x.type === 'text')
+            .map((x) => (x as { text: string }).text)
+            .join('\n');
+        }
+        if (c && typeof c === 'object' && 'text' in c) return (c as { text: string }).text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    // 还原 promptBuilder 状态，避免本 Zone 的 section 泄漏到下一次 compose
+    this.clearPromptBuilder();
+    return { zone: zoneKey, text, tokens: result.tokens };
   }
 
   private buildResolverContext(options: LayeredComposeOptions): ResolverContext {

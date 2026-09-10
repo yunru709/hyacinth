@@ -109,6 +109,10 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       sections: [
         { name: 'project_context', source: 'runtime:projectContext', priority: 0, type: 'retrieval', description: '项目上下文文件 (.agent.md / AGENTS.md / CLAUDE.md)' },
         { name: 'history_summary',  source: 'runtime:summary',        priority: 1, type: 'runtime',  description: '上下文压缩摘要' },
+        // pool_context：全量存档关键词召回（压缩-存档-召回闭环的最后一根线）。
+        // 仅当工作历史达到 context.poolMinHistory（默认 200）条时才读存档检索，
+        // 预算 4%（zone4BudgetRatio），补回压缩丢掉的细节。
+        { name: 'pool_context',     source: 'runtime:pool',           priority: 2, type: 'retrieval', description: '全量存档关键词召回（长会话才启用）' },
         { name: 'history',          source: 'runtime:history',        priority: 3, type: 'runtime',  description: '对话历史消息（含边界标记）' },
       ],
     },

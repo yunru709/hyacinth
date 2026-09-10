@@ -4,7 +4,7 @@ import { loadPrompt } from '../prompts/loader.js';
 
 /**
  * 创建内置子 Agent 定义（fallback 用）
- * @param config 可选的 Agent 配置覆写，用于覆盖默认的 maxTurns、allowedTools、collaborationMode
+ * @param config 可选的 Agent 配置覆写，用于覆盖默认的 maxTurns、allowedTools
  */
 export function createBuiltinAgents(config?: AgentsConfig): AgentDefinition[] {
   const defaults: AgentDefinition[] = [
@@ -14,7 +14,6 @@ export function createBuiltinAgents(config?: AgentsConfig): AgentDefinition[] {
       systemPrompt: loadPrompt('agents/code-reviewer'),
       allowedTools: ['read', 'glob', 'grep'],
       maxTurns: 10,
-      collaborationMode: 'adversarial',
       sessionTtlMinutes: 10,
     },
     {
@@ -23,7 +22,6 @@ export function createBuiltinAgents(config?: AgentsConfig): AgentDefinition[] {
       systemPrompt: loadPrompt('agents/security-auditor'),
       allowedTools: ['read', 'glob', 'grep'],
       maxTurns: 10,
-      collaborationMode: 'adversarial',
       sessionTtlMinutes: 10,
     },
     {
@@ -32,7 +30,6 @@ export function createBuiltinAgents(config?: AgentsConfig): AgentDefinition[] {
       systemPrompt: loadPrompt('agents/test-writer'),
       allowedTools: ['read', 'write', 'glob', 'grep', 'bash'],
       maxTurns: 15,
-      collaborationMode: 'delegate',
       sessionTtlMinutes: 10,
     },
   ];
@@ -44,7 +41,6 @@ export function createBuiltinAgents(config?: AgentsConfig): AgentDefinition[] {
     const merged = { ...agent };
     if (override.maxTurns !== undefined) merged.maxTurns = override.maxTurns;
     if (override.allowedTools !== undefined) merged.allowedTools = override.allowedTools;
-    if (override.collaborationMode !== undefined) merged.collaborationMode = override.collaborationMode;
 
     return merged;
   });

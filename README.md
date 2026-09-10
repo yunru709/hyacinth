@@ -1,193 +1,116 @@
-# 🪻 Hyacinth (风信子)
+# Hyacinth
 
-**多 Provider AI Agent 框架** — 可编程、可扩展、运行在本地的终端智能助手。
+> npm v0.9.42 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 16 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
 
-> TypeScript 6.0 · Node.js · 36 模块 · 80+ 工具 · v0.9.40
->
-> 📦 npm: [`hyacinth-ai`](https://www.npmjs.com/package/hyacinth-ai) · 🐙 源码: [github.com/yunru709/hyacinth](https://github.com/yunru709/hyacinth)
+**Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在飞书 / 微信 / WebUI 等渠道之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
 
----
+***
 
-## 一句话
+## 目录
 
-Hyacinth 是一个跑在终端里的 AI Agent。它可以**读写文件、执行命令、搜索代码、调用 API、分析依赖、运行本地模型**——像一个有完全上下文感知能力的编程伙伴。它跑在你的机器上、记得你的项目、能跨渠道主动联系你。
+- [简介](#简介)
 
----
+- [特性](#特性)
 
-## 架构一览
+- [安装](#安装)
 
-```
-用户输入 (TUI / CLI / 飞书 / 微信 / WebUI / HTTP API)
-  │
-  ▼
-AgentLoop ── 主循环（每轮对话的核心引擎）
-  │
-  ├─ BypassManager.preTurn  ── 旁路Agent前置注入（意图识别、纠偏、世界引擎）
-  ├─ ContextComposer         ── 5-Zone分层上下文组装（结构→历史→知识→时间→输入）
-  │                            └─ precision 精确模式 / 意图簇摘要
-  ├─ Provider.callLLM        ── 多Provider适配（Anthropic/OpenAI/DeepSeek等14+ + 本地模型）
-  ├─ ToolExecutor            ── 工具执行（安全审查→执行→结果回传）
-  └─ BypassManager.postTurn  ── 旁路Agent后置观察（记忆维护、簇归类、偏差审查）
-```
+- [快速开始](#快速开始)
 
-**核心设计原则：**
+- [使用](#使用)
 
-- **模块分层清晰** — 接口层 / 核心执行层 / Provider 层 / 工具层 / 基础设施层，依赖方向单向
-- **上下文 5-Zone 体系** — Zone1 稳定锚点（persona/工具规则/技能/MCP/记忆）→ Zone3 对话历史 → Zone4 知识库 → Zone5 实时输入，按变化频率分离缓存；Zone2(Manifest) 供需独立缓存断点的 Provider 使用
-- **旁路 Agent = 系统元认知层** — 独立运行、异常隔离、工具白名单极窄（只给专一化工具，不给通用工具），直接注入主 Agent 上下文
-- **7 种上下文变更机制各司其职** — manifest 管结构、Router 管模式、Injection 管动态注入、Compressor 管预算保护、ContextSource 管数据供应、activeConditions 管条件开关、filterHistory 管消息过滤
-- **渠道即能力，会话即入口** — 消息可在任意已连接渠道间借道分发（飞书 → TUI → WebUI），不再受"请求-回复"限制
+- [架构](#架构)
 
----
+- [项目结构](#项目结构)
 
-## 能力
+- [文档](#文档)
 
-### 🛠 完整工具系统
+- [参与贡献](#参与贡献)
 
-| 层 | 来源 | 示例 |
-|---|---|---|
-| **内置工具** | 启动即注册 | `read` `write` `edit` `bash` `glob` `grep` `http_request` `git` `db_query` `archive` `disk_usage` `diff_files` `multi_edit` `json_edit` `system_info` |
-| **运行时控制** | AgentLoop 注入 | `switch_provider` `spawn_sub_agent` `toggle_tool` `add_task` `new_session` `send_channel_message` `flow_start` `restart` |
-| **MCP 工具** | 动态桥接 | 第三方工具通过 MCP 协议接入，自动注册为可用工具 |
-| **工具包 (Bundle)** | 运行时组合 | `create_bundle` 自定义工具包，按需激活限制工具面 |
+- [许可证](#许可证)
 
-安全模型：危险工具（write/bash/http）需用户确认，支持白名单机制。
+***
 
-### 🤝 子 Agent 编排
+## 简介
 
-三种协作模式 + 异步后台执行：
+Hyacinth 是一个可编程、可扩展的智能体框架。它把 Agent 的每个环节——工具、上下文、Provider、渠道、记忆、规划、插件——都抽象成可替换的模块，通过注册表装配而非硬编码。核心设计取舍：
 
-| 模式 | 说明 |
-|---|---|
-| **委托 (delegate)** | 主 Agent 将任务分发给子 Agent，子 Agent 独立完成并返回结果 |
-| **对抗 (adversarial)** | 两个子 Agent 从不同角度交叉审查同一任务 |
-| **并行 (parallel)** | 同时启动多个子 Agent，各自处理不同子任务 |
-| **异步 (async=true)** | 子 Agent 后台运行，主 Agent 立即拿到句柄继续干活，结果两种方式回收：回合内自动注入 / `get_sub_agent_result` 跨轮次手动获取 |
+- **内核零业务**：kernel 只提供管道 / 钩子总线 / 插件宿主 + 安全内核，业务能力全部以插件形式挂载
 
-每个子 Agent 拥有独立工具白名单、独立上下文、独立会话，会话在 TTL 窗口内持久化可复用。主 Agent 负责规划和验收。`spawn_sub_agent` 可克隆多份实例并行调度同一类任务。
+- **注册而非硬编码**：分层约束由 `verify-layers.mjs` 机器校验
 
-### 🔀 多渠道 + 跨渠道分发
+- **旁路 Agent 元认知层**：独立的意图识别 / 纠偏 / 记忆维护进程，异常隔离、工具白名单极窄
 
-| 通道 | 说明 | 状态 |
-|---|---|---|
-| **TUI** | 全屏终端界面，支持多面板、实时流式输出、斜杠命令、Markdown 渲染、OSC8 超链接 | ✅ 稳定 |
-| **CLI** | 命令行交互模式 + 单次执行 | ✅ 稳定 |
-| **HTTP API** | Fastify Server（`hyacinth serve`），RESTful 接口 | ✅ 可用 |
-| **飞书** | 飞书机器人，私聊/群聊 + 图片发送，chatId 持久化可主动推送 | ✅ 稳定 |
-| **ClawBot** | 微信 AI 助手插件，二维码授权 | ✅ 可用 |
+- **渠道即能力**：消息可在任意已连接渠道间借道分发
 
-**跨渠道消息分发**：Agent 可从任意会话借用任意已连接渠道的发送能力——比如在 TUI 里让飞书给你推个消息、在飞书会话里操作 WebUI。彻底打破"渠道 = 单一对话线"的限制。
+***
 
-### 🧠 交叉引用与依赖分析
+## 特性
 
-内置 AST 级代码分析器（`xref_build` / `xref_query` / `xref_graph`），把项目建成 SQLite 符号索引后：
+### 工具系统（93+ 静态注册）
 
-- **符号查询** — 谁引用了它、定义在哪、谁调用了它、它调用了什么（支持深度遍历）
-- **依赖图谱** — 文件依赖关系、反向依赖、符号搜索、影响面分析（改 X 会影响哪些文件）
-- **数据流** — 变量在文件内的声明/赋值/读取跟踪
-- 输出支持文本树 / Mermaid / Graphviz 三种格式，可直接进文档
+- **基础文件/命令**：`read` / `write` / `edit` / `multi_edit` / `bash` / `glob` / `grep` / `diff_files` / `json_edit` / `git` / `http_request` / `db_query` 等 17 个
 
-### 🖥 本地模型
+- **子 Agent 编排**：`delegate_to_agent` / `spawn_sub_agent` / `create_sub_agent`，支持委托、并行、异步三种协作模式
 
-不依赖云端的推理能力（`setup:llamacpp` 一键配置）：
+- **运行时控制**：`switch_provider` / `new_session` / `create_bundle` / `add_task` / `rollback` / `flow_start` / `ask_user` / `interrupt` 等一套自管理工具
 
-- **Provider 层** — `local` 通过 OpenAI 兼容协议对接 llama.cpp / Ollama / vLLM / LM Studio，自动按端口推断后端
-- **模型托管** — 注册表管理模型条目、下载管理器拉取模型、桥接层负责启动/停止/热切换（`switch`）
-- **生命周期集成** — 本地模型进程由 ProcessManager 托管，异常自动拉起，与 Provider 自动路由协同
-- 适合离线环境、隐私敏感场景，或作为多 Provider 路由中的一环
+- **可扩展**：MCP（`mcp__{server}__{tool}`）、Python 桥接、目录插件（world\_\* 等）动态注册
 
-### 🖼 多模态图片管线
+- **大结果不塞爆上下文**：超阈值自动写磁盘缓冲，回传指针消息引导模型分段读取
 
-用户输入的图片走完整管线：**检测 → 压缩 → 会话级索引（base64 + 哈希去重）→ 供视觉模型读取 → 回收**。`view_image` 可随时重看已索引图片。
+### 多 Provider（16 种类型）
 
-### 🔄 Flow 工作流
+anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / groq / xai / mistral / openrouter / moonshot / local（llama.cpp、Ollama、vLLM 三态）/ ollama / llamacpp。弹性链：重试 + 熔断 + 降级 + 工具参数自动恢复，运行时可 `registerProviderFactory()` 外置扩展厂商。
 
-内置状态机引擎驱动结构化任务：
+### 多渠道
 
-- **Todo 模式** — 任务拆解 → 步骤定义 → 逐个执行 → 完成验收
-- **Spec 模式** — 需求规格撰写 → 任务清单 → 检查清单，三阶段推进
+TUI / CLI / HTTP API（Fastify）/ WebUI，以及飞书（WebSocket 长连接）与微信 ClawBot（http-polling）两个插件渠道，经统一 ui-protocol（19 个业务域）连接。
 
-Flow 状态持久化：活跃 Flow 自动保存到 `flow-state.json`，进程崩溃/重启后自动恢复，不丢进度。
+### 可观测与自管理
 
-### 🧠 上下文智能
+- **安全内核**：命令 / 进程 / 网络三裁决 + 环境变量密钥防护 + 审计日志
 
-- **precision 精确模式** — 免检索的按相关性选历史：LLM 异步分析对话 → 提取全局关键词 + 每 turn 摘要 → 下次组装只保留相关旧消息，省 Token 不丢上下文
-- **意图簇摘要** — 旁路 Agent 识别当前意图（coding/chat/tool_use/...），按簇注入对应摘要，替代通用 historySummary
-- **trigger_compression deep 模式** — 需要激进释放空间时，用内置极度精简模板压缩，完成后自动恢复
-- **OutputRouter 输出路由** — 流式事件（TEXT/THINKING/TOOL_USE/USAGE/STOP）按类型路由到对应处理器，输出层与核心解耦
+- **回滚**：逐回合 git 锚点，支持 `rollback` / `rollback_status`
 
-### 🔌 可扩展性
+- **自修复**：文本循环检测（滑动窗口 Jaccard）、工具风暴抑制、会话垃圾清理
 
-| 扩展方式 | 说明 |
-|---|---|
-| **Plugin** | `plugin.json` 声明 + PluginApi，可注册工具/Skill/MCP/渠道 |
-| **MCP** | 标准 MCP 协议，stdio/SSE 双传输，崩溃自动重连，危险命令黑名单 |
-| **Skill** | 可插拔的提示词模板，通过 `use_skill` 按需注入上下文 |
-| **ContextSource** | 运行时注册数据源，runtime section 自动获取内容 |
-| **注册表体系** | Agent/Channel/MCP/Plugin/Provider/Skill/Tool 统一注册表，配合热重载即改即生效 |
-| **训练系统** | Python LoRA 微调管线（Unsloth + SQLite），把真实会话数据清洗成训练样本，微调结果可被本地模型热加载 |
+- **热重载**：13+ Watcher，配置 / 插件 / 工具 / 技能 / MCP 等修改即生效
 
-### 🏗 基础设施
+- **定时调度**：Cron / Daily / Interval / Fixed-time，支持跨渠道主动推送
 
-| 子系统 | 说明 |
-|---|---|
-| **上下文压缩** | 四阶段差分压缩（工具输出裁剪→结构化摘要→增量更新→保护区兜底），Token 预算保护 |
-| **知识库** | SQLite FTS5 全文检索 + CJK bigram 分词 + Tag IDF 语义匹配（Node 内置 node:sqlite，零编译） |
-| **会话记忆** | 跨会话项目记忆，旁路 Agent 自动维护；`conversation_full.jsonl` 全量存档永不压缩，供意图簇标记 |
-| **回滚** | TurnRecorder 逐回合自动记录文件变更（git 锚点 + 工具拦截），支持 `rollback` / `rollback_status` |
-| **自修复** | Loop 死循环检测、风暴抑制、会话垃圾清理 |
-| **生命周期管理** | ProcessManager 托管子进程（llama.cpp/MCP 等），异常自动拉起，健康检查 |
-| **热重载** | 13 个 Watcher：MCP/Plugin/Prompt/Agent/Config/Tool/Skill/Command/Provider/ModelCatalog/Channel/Manifest/Bundle，修改即生效 |
-| **定时调度** | Interval / Cron / Daily / Fixed-time / Random 五种策略；Random 支持时间窗口、可变次数（U 形分布）、概率权重；多实例共享任务文件 |
-| **自更新** | GitHub Release / 本地编译两种路径 |
-| **守护进程** | 子进程异常退出自动拉起 |
+- **记忆**：会话四存储 + 跨会话项目记忆 + 5-Zone 分层上下文 + 四阶段压缩
 
-### 🧰 CLI 工具集
+***
 
-```
-hyacinth setup        # 交互式配置向导（含 persona 初始化）
-hyacinth doctor       # 系统诊断 + 自动修复（环境/依赖/知识库/API Key 等 7 项检查，--fix 自动修复）
-hyacinth tui          # 全屏终端界面
-hyacinth serve        # 启动 HTTP API Server
-hyacinth session      # 会话管理：list / delete / export
-hyacinth config       # 配置管理：get / set / schema / reset
-hyacinth model        # 模型管理：switch / info
-hyacinth skill        # Skill 管理：enable / disable
-hyacinth tool         # 工具管理：update
-hyacinth "提问"        # 直接对话
+## 安装
+
+### npm（全局）
+
+```bash
+npm install -g hyacinth-ai
 ```
 
----
+要求 Node.js（ESM，未强制声明最低版本）。
+
+### 从源码构建
+
+```bash
+git clone https://github.com/yunru709/hyacinth
+cd hyacinth
+pnpm install
+pnpm build
+```
+
+***
 
 ## 快速开始
 
 ```bash
-# 安装
-npm install -g hyacinth-ai
-
-# 首次配置（交互式向导）
-hyacinth setup
-
-# 系统诊断（可选，检查环境是否就绪）
-hyacinth doctor
-
-# 启动 TUI
-hyacinth tui
-
-# 或直接对话
+hyacinth setup     # 交互式配置向导（含 persona 初始化）
+hyacinth doctor    # 系统诊断（--fix 自动修复）
+hyacinth tui       # 全屏 TUI
 hyacinth "帮我看看这个项目是做什么的"
 ```
-
-### 终端要求（Windows）
-
-TUI 界面渲染依赖 Unicode 字符（emoji、框线、进度符号）。Windows 上**推荐使用 [Windows Terminal](https://github.com/microsoft/terminal)**：
-
-- Windows 11 已自带，无需安装
-- Windows 10 或旧系统：`winget install Microsoft.WindowsTerminal` 或 Microsoft Store 搜索 "Windows Terminal"
-
-如果用**旧版控制台**（cmd 直接打开、经典 conhost）运行，emoji 和特殊符号可能显示成方块/乱码。启动时如果检测到旧终端，Hyacinth 会打印提示。也可通过 `start:win`（`chcp 65001` + UTF-8）缓解部分编码问题。
-
-> 其他平台（macOS 的 Terminal/iTerm、Linux 各终端）一般无此问题，均开箱即用。
 
 ### 配置 API Key
 
@@ -199,88 +122,170 @@ OPENAI_API_KEY=sk-...
 DEEPSEEK_API_KEY=sk-...
 ```
 
-### 使用本地模型（可选）
+### 本地模型（可选）
 
 ```bash
-pnpm run setup:llamacpp   # 一键配置 llama.cpp 本地推理
+pnpm run setup:llamacpp   # 一键编译 llama.cpp
+hyacinth -p local --start-model --model "qwen2.5-coder:7b"
 ```
 
----
+### 终端要求（Windows）
 
-## 开发
+TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microsoft/terminal)（Win11 自带）。旧控制台（cmd/conhost）下 emoji 和框线可能乱码，可用 `start:win` 缓解。macOS / Linux 各终端开箱即用。
+
+***
+
+## 使用
+
+### CLI 命令
+
+| 命令                                                    | 说明                                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `hyacinth [prompt]`                                   | 单次执行或进入交互（`-i` 交互、`--session <id>` 恢复、`-p/--provider` 指定厂商）                    |
+| `hyacinth setup` / `setup-generation`                 | 配置向导 / 生成能力向导（图 / 视频 / 音频厂商）                                                   |
+| `hyacinth doctor [--fix]`                             | 7 项系统诊断 + 自动修复                                                                 |
+| `hyacinth tui`                                        | 全屏终端界面（`--guardian` 守护开关）                                                      |
+| `hyacinth serve`                                      | HTTP API（`--port 3000`、`--api-key`、`--webui`、`--webui-port 3100`，绑定 127.0.0.1） |
+| `hyacinth webui`                                      | 等价 `serve --webui`，自动开浏览器                                                      |
+| `hyacinth session list/delete/export`                 | 会话管理                                                                           |
+| `hyacinth config get/set/schema/reset`                | 配置管理（dot-path）                                                                 |
+| `hyacinth model switch/list/info`                     | Provider 与模型管理                                                                 |
+| `hyacinth skill enable/disable` `tool enable/disable` | 技能 / 工具开关（黑名单机制）                                                               |
+| `hyacinth arch list/get/toggle`                       | 可替换点目录与插件启停（serve 运行中热生效）                                                      |
+| `hyacinth plugin install/list/uninstall`              | 插件管理（本地目录或 git URL → `.agent/plugins/`）                                        |
+| `hyacinth supervisor-status`                          | Guardian 状态 / 重启存档 / 残留诊断                                                      |
+| `hyacinth backup [label]`                             | git bundle + tag 双保险快照                                                         |
+| `hyacinth update`                                     | GitHub Release / 本地源更新                                                         |
+
+隐藏旗标 `--no-guardian` 跳过守护进程直接运行主进程。
+
+### 配置体系
+
+- **全局** **`~/.agent/`** — `config.json`（主配置）、`.env`（密钥）、`extension-registry.json`（扩展名单）、`providers.json`、`model-channels.json`、`agents.json`、`tool-bundles.json`、`mcp.json`、`prompts/`、`skills/`、`tools/`、`plugins/`、`sessions/`、`media/`、`knowledge/` 等
+
+- **项目** **`<cwd>/.agent/`** — 同名文件项目级覆盖，另有 `context-manifest.json`、`models.json`、`specs/`、`backups/`
+
+- 项目根 `commands.json` — 斜杠命令，模型可经 write/edit 修改并热重载
+
+***
+
+## 架构
+
+### 启动链
+
+```
+src/index.ts
+  ├─ bootstrapSecurity()      # 安全内核先于一切业务模块（守卫 child_process/http/fetch，canary 校验）
+  └─ 动态 import runCli()     # ESM 具名导入在守卫变异之后创建
+       └─ executeAction()
+            ├─ Provider 创建 → AgentLoop 装配（gateway/agent-assembly.ts）
+            │    ├─ boot()                  # 配置加载 + 会话恢复三分支
+            │    ├─ 贡献批依序装配            # base → infra → channel → arch替换 → context →
+            │    │                           # 工具 → orchestrator → core → 插件 → loop → 服务替换
+            │    └─ new AgentLoop(...)       # provider:main 替换必须在 Loop 构造前完成
+            └─ Guardian 守护（默认启用）      # 退出码 42=重启 43=更新 44=插件热更新兜底
+```
+
+### 主循环：六槽管道
+
+一轮 turn 的执行顺序（`orchestrator/loop.ts` 的 `runTurn()`）：
+
+```
+onTurnStart → TurnRecorder 回滚锚点 → Router 同步
+  → slot:input    历史读入 + 输入归一化
+  → slot:bypass   旁路 Agent 前置注入（意图识别、Zone5 动态注入）
+  → slot:context  5-Zone 组装 + 压缩触发
+  → slot:llm      Provider 调用（流式消费、fallback、stats 落盘）
+  → slot:tools    工具执行（并行 + 权限门 + 结果缓冲）
+  → slot:finalize Flow 状态机推进 + 文本循环检测
+每轮迭代后：bypass postTurn 后台观察（不阻塞）
+turn 结束后：簇归类消费 → 历史回填 → 图片回收
+```
+
+### 上下文：5-Zone 分层
+
+按变化频率分离缓存（定义于 `context/manifest-defaults.ts`，可用 `.agent/context-manifest.json` 覆盖）：
+
+| Zone           | 内容                                                                                 | 特征                  |
+| -------------- | ---------------------------------------------------------------------------------- | ------------------- |
+| **1 Anchor**   | persona / tool\_rules / tool\_bundles / skills / agents / mcp / memory / attention | 稳定锚点                |
+| **2 Manifest** | （默认关闭）                                                                             | 供需要独立缓存断点的 Provider |
+| **3 History**  | project\_context（.agent.md/AGENTS.md）/ history\_summary / history                  | 对话历史                |
+| **4 Context**  | kb\_context 知识库检索结果                                                                | 可关闭省 token          |
+| **5 Live**     | flow / channel\_context / timestamp / user\_input / orchestrator\_hint             | 每轮变化                |
+
+### 监督与替换：架构注册表
+
+`supervisor/extension-registry.ts` 维护 11 类可替换点（`REPLACEABLE_POINTS`）：6 个 pipeline 槽位、22 个 service、`provider:main`、2 个 router、9 个 context source，以及 `adapter:*` / `channel:*` / `tool:*` / `skill:*` / `agent:*` / `plugin:*` 动态族。
+
+裁决链：**用户配置 > 插件 priority > 插件 ID > 内置基线**。替换在 `gateway/arch-assembly.ts` 应用（动态 import + 形状校验 + 记录生效/失败），名单文件 `.agent/extension-registry.json` 支持 serve 运行中热生效。
+
+> 完整的逐文件拆解见 [docs/architecture.md](docs/architecture.md)。
+
+***
+
+## 项目结构
+
+`src/` 下 44 个模块目录按域分组：
+
+| 域            | 模块                                                  | 职责                                                                                         |
+| ------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **启动与监督**    | `gateway/`                                          | 装配层：cli/tui/server 入口 + factory + agent-assembly + arch-assembly + 16 个贡献批                 |
+| <br />       | `supervisor/`                                       | 架构监督：assembly-registry 出厂图、extension-registry 名单裁决、guardian 守护、protocol 重启协议、shutdown 优雅关闭 |
+| <br />       | `kernel/`                                           | 内核三件套（pipeline / hook-bus / plugin-host）+ security/ 安全内核                                   |
+| <br />       | `update/` `diagnostics/`                            | 自更新；doctor 诊断 + 自动修复                                                                       |
+| <br />       | `setup/` `env/`                                     | 首启向导（含 persona 初始化）；环境采集                                                                   |
+| **内核执行链**    | `orchestrator/`                                     | AgentLoop 主循环 + 6 阶段 stages/ + TurnState + planner + plan-store                            |
+| <br />       | `provider/`                                         | 16 种 Provider 适配、路由、弹性链、模型目录                                                               |
+| <br />       | `context/`                                          | 5-Zone、manifest、composer、compressor、router、cache-strategy、tokenizer                        |
+| <br />       | `tools/`                                            | 内置工具 + 运行时控制工具族 + 注册表 / 执行器 / 沙箱 / 结果缓冲                                                    |
+| <br />       | `registry/`                                         | GenericRegistry 基座 + Tool / Skill / Agent 三注册表                                             |
+| <br />       | `parser/`                                           | 流式事件输出路由（TEXT/THINKING/TOOL\_USE/USAGE/STOP）                                               |
+| <br />       | `prompts/`                                          | 提示词模板库（加载链：.agent/prompts > \~/.agent/prompts > dist/prompts）                              |
+| **记忆与进化**    | `memory/`                                           | 会话存储族 + 跨会话记忆 + 摘要                                                                         |
+| <br />       | `knowledge/`                                        | 知识库（FTS5 + 结构化库 + watcher）                                                                 |
+| <br />       | `evolution/`                                        | GitManager 原语 + AutoGit 策略 + bundle/tag 备份                                                 |
+| <br />       | `rollback/` `repair/`                               | 逐回合回滚账本；死循环检测 / 风暴抑制 / 垃圾清理                                                                |
+| **能力域（插件化）** | `plugins/`                                          | 插件运行时（loader/manager/adapter + 内核插件：bypass/permission/knowledge/xref/generation）           |
+| <br />       | `plugin-sdk/`                                       | 插件契约面（自包含零内部 import）                                                                       |
+| <br />       | `bypass/`                                           | 旁路 Agent 基座：BypassManager + ContextOrchestrator                                            |
+| <br />       | `agents/`                                           | 子 Agent 定义 / 注册 / delegate 工具                                                              |
+| <br />       | `companion/` `world-engine/`                        | 陪伴语音台词库；世界引擎实现类                                                                            |
+| <br />       | `skills/` `mcp/`                                    | 技能系统；MCP 桥接（stdio transport + 安装管理）                                                        |
+| <br />       | `local-model/` `generation/` `media/` `multimodal/` | 本地模型托管；生成供应商层；媒体库；图片管线                                                                     |
+| <br />       | `machine/` `schedule/` `dependency/`                | Flow 状态机；定时调度；依赖分析                                                                         |
+| **交互界面**     | `channels/`                                         | ChannelManager + TUI/HTTP 内置渠道 + feishu/clawbot 插件渠道 + 跨渠道分发                               |
+| <br />       | `ui/` `ui-protocol/` `webui/`                       | TUI 组件；统一 RPC+事件协议（19 域）；WebUI 静态前端                                                        |
+| **基础设施**     | `hot-reload/` `lifecycle/`                          | 13+ Watcher 家族；受管进程状态                                                                      |
+| <br />       | `runtime/` `logging/` `utils/` `shims/`             | 运行时配置中心；日志器；通用工具；类型兜底                                                                      |
+
+***
+
+## 文档
+
+| 文档                                                 | 说明                            |
+| -------------------------------------------------- | ----------------------------- |
+| [docs/architecture.md](docs/architecture.md)       | 架构单源文档（总览 + 逐文件拆解）            |
+| [docs/plugin-sdk.md](docs/plugin-sdk.md)           | 插件开发契约                        |
+| [docs/security-kernel.md](docs/security-kernel.md) | 安全内核设计                        |
+| [docs/api.md](docs/api.md)                         | HTTP API 参考                   |
+| [docs/user-guide.md](docs/user-guide.md)           | 用户指南                          |
+| [docs/design/](docs/design/)                       | 设计决策记录（被代码注释按「文档名 §章节」引用，勿改名） |
+
+## 参与贡献
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/yunru709/hyacinth
 cd hyacinth
-
 pnpm install
-pnpm build
-pnpm dev    # 开发模式（watch）
-pnpm test   # 运行测试
+pnpm build          # tsc + copy-prompts + copy-webui + clean
+pnpm dev            # watch 模式
+pnpm test           # vitest（114 个测试套件）
+pnpm smoke          # 真实装配链冒烟（stub provider）
+pnpm verify:layers  # 分层约束机器校验
 ```
 
-**项目结构：**
-
-```
-src/
-├── gateway/       # CLI/TUI 入口、Agent 工厂装配
-├── cli/           # doctor 系统诊断
-├── orchestrator/  # AgentLoop 主循环、异步子Agent任务
-├── provider/      # 14+ LLM Provider 适配、自动路由、本地模型 Provider
-├── local-model/   # 本地模型：注册表、下载管理、桥接（llama.cpp/Ollama）
-├── lifecycle/     # 生命周期：ProcessManager、模型托管、守护监督
-├── context/       # 5-Zone 上下文、压缩、Router、precision、manifest
-├── parser/        # OutputRouter 输出流式事件路由
-├── tools/         # 工具系统（内置 + 运行时 + MCP + Bundle + 交叉引用）
-├── dependency/    # 依赖分析：AST 解析、调用图、数据流跟踪
-├── agents/        # 子 Agent 委托系统
-├── bypass/        # 旁路 Agent（元认知层：意图识别、记忆维护、簇归类）
-├── memory/        # 会话/对话/事件/统计存储
-├── knowledge/     # 知识库 FTS5 检索
-├── multimodal/    # 多模态图片管线（检测/压缩/索引/回收）
-├── channels/      # 多渠道 + MessageDispatcher 跨渠道分发
-├── machine/       # Flow 状态机 + 持久化
-├── schedule/      # 定时任务调度（五策略 + 随机增强）
-├── rollback/      # TurnRecorder 回合追踪 + 回滚
-├── repair/        # 自修复：死循环检测、风暴抑制、垃圾清理
-├── registry/      # Agent/Channel/MCP/Plugin/Provider/Skill/Tool 统一注册表
-├── plugins/       # 插件系统
-├── skills/        # Skill 系统
-├── mcp/           # MCP 协议集成
-├── hot-reload/    # 热重载管理器
-├── setup/         # 配置向导、persona 初始化
-├── runtime/       # 运行时配置中心
-├── evolution/     # Git 封装（支撑回滚锚点）
-├── ui/            # TUI 组件（斜杠命令、主题、Markdown 渲染）
-├── world-engine/  # 陪伴模式世界模拟
-└── prompts/       # 提示词模板
-
-training/          # Python LoRA 微调管线（独立于 TS 主程序）
-```
-
----
-
-## 下一步计划
-
-### 🖥 UI：WebUI 优先
-
-下一步的设计重心是**用户界面**，首选 **WebUI** 形态。让 Hyacinth 从纯终端工具走向可视化产品，降低使用门槛。
-
-### 🎨 生成式多模态
-
-图片**输入**管线已落地；下一步是 **provider 层支持图片/视频生成供应商**（如 DALL·E / Stable Diffusion / 视频生成类）。为可视化 UI 提供内容产出能力。
-
-### 💬 陪伴模式可视化
-
-在上述两者基础上，实现**陪伴模式的可视化**——世界模型、角色、场景从纯文本走向可视化呈现。
-
-### 🧠 关于提示词工程
-
-原本的计划是进一步调整、细化系统提示词。但实践中发现：**能力足够强的模型，似乎已经不太需要额外告诉它如何组合使用基建**。
-
-随着模型能力的提高，灵活调用各类工具正在成为 LLM 元认知的一部分——工具组合不再是被"提示词教出来的"，而是模型自身推理能力的一部分。相信在不远的将来，绝大多数可被描述、可被执行的流程化步骤，都可以被模型吸收为元认知，而无需人工精心编排提示词。
-
----
+提交前请确保 `pnpm test` 与 `pnpm verify:layers` 通过。分层约束是硬性规则（内核零业务依赖、装配层禁止直接 new 业务类），新增模块请先对照 [docs/architecture.md](docs/architecture.md) 的依赖边界。
 
 ## 许可证
 

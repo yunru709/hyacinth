@@ -115,9 +115,15 @@ export class GitManager {
     await this.git(['commit', '-m', 'Initial agent snapshot']);
   }
 
-  // Stage all and commit, returns commit hash
-  async commit(message: string): Promise<string> {
-    await this.git(['add', '-A']);
+  // Stage all and commit, returns commit hash.
+  // paths 提供时只暂存这些路径（避免把用户手动改动/无关文件卷入自动提交）；
+  // 未提供时保持原有「暂存全部」语义（兼容 startupDispose/postTurnCommit 的收编行为）。
+  async commit(message: string, paths?: string[]): Promise<string> {
+    if (paths && paths.length > 0) {
+      await this.git(['add', '--', ...paths]);
+    } else {
+      await this.git(['add', '-A']);
+    }
     const { stdout } = await this.git(['commit', '-m', message]);
     const match = stdout.match(/\[[\w-]+\s+([a-f0-9]+)\]/);
     return match ? match[1] : '';
@@ -255,9 +261,9 @@ export class GitManager {
     return stdout.trim();
   }
 
-  // Stash current changes
+  // Stash current changes（-u 含未跟踪文件 —— 启动处置要求"一切收编"）
   async stash(): Promise<void> {
-    await this.git(['stash', 'push', '-m', 'agent-auto-stash']);
+    await this.git(['stash', 'push', '-u', '-m', 'agent-auto-stash']);
   }
 
   // Pop the most recent stash

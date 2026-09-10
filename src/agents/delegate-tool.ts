@@ -288,26 +288,26 @@ export async function createSubAgentLoop(
     onPermissionRequest: async () => 'yes', // 子 Agent 自动批准权限请求
   };
 
-  // 9. 创建 AgentLoop
-  const loop = new AgentLoop(
-    subProvider,
-    subComposer,
+  // 9. 创建 AgentLoop（P6-2：服务表 + 配置两层）
+  const loop = new AgentLoop({
+    provider: subProvider,
+    contextComposer: subComposer,
     compressor,
     orchestrator,
     toolExecutor,
-    filteredRegistry,
+    toolRegistry: filteredRegistry,
     conversationStore,
     eventStore,
     statsManager,
-    subSessionDir,
     summaryStore,
-    agentDef.maxTurns,
-    parentContext.maxContextTokens,
-    silentHandler,
-    undefined, // skillRegistry — 子 Agent 不使用 Skill
-    undefined, // mcpBridge — 子 Agent 不使用 MCP
-    parentContext.dependencyAnalyzer,
-  );
+    outputHandler: silentHandler,
+    // skillRegistry / mcpBridge — 子 Agent 不使用 Skill / MCP
+    dependencyAnalyzer: parentContext.dependencyAnalyzer,
+  }, {
+    sessionDir: subSessionDir,
+    maxTurns: agentDef.maxTurns,
+    maxContextTokens: parentContext.maxContextTokens,
+  });
 
   return { loop, sessionDir: subSessionDir, isNew };
 }
@@ -319,10 +319,6 @@ export class DelegateToAgentTool implements Tool {
   name = 'delegate_to_agent';
   description =
     '将任务委派给子 Agent 执行。子 Agent 是拥有独立上下文、工具集和 Provider 的隔离工作单元，执行完毕后返回结构化结果。' +
-    '三种协作模式：' +
-    '"delegate"（委托）：将单个任务交给一个子 Agent 独立完成；' +
-    '"adversarial"（对抗审查）：两个子 Agent 从不同角度独立审查同一任务，综合双方意见；' +
-    '"parallel"（并行分工）：同时启动多个子 Agent 并行执行，汇总结果。' +
     '编排场景：当你有一个复杂计划时，自己负责规划和决策，将其中可并行的子任务分别委派给多个子 Agent 同步执行——spawn_sub_agent 可克隆多份实例，配合不同的 instance_id 并发调度，大幅缩短总耗时。' +
     '会话复用：子 Agent 会话在 TTL 窗口内持久化（默认 10 分钟），相同 instance_id 再次委派时自动恢复完整对话记忆，无需重新交代背景。' +
     '异步执行：设置 async=true 后子 Agent 在后台运行，主 Agent 立即获得任务句柄（如 sub_001）并可继续其他工作。之后用 list_sub_agent_tasks 查看所有异步任务状态，get_sub_agent_result <handle> 获取已完成任务的结果。默认 async=false（同步阻塞，等待结果返回）。' +
@@ -398,11 +394,6 @@ export class DelegateToAgentTool implements Tool {
       return 'Error: no sub-agent found matching the provided criteria.';
     }
 
-    // 异步模式下不支持 adversarial 和 parallel（这两种本身就是多Agent协同，异步应逐个个委派）
-    if (runAsync && agentDef.collaborationMode !== 'delegate') {
-      return `错误：异步模式仅支持 collaborationMode="delegate"。当前模式为 "${agentDef.collaborationMode}"。请用 spawn_sub_agent 克隆独立实例，然后对每个实例分别用 async=true 委派。`;
-    }
-
     // 构造完整任务描述
     const fullTask = context ? `${task}\n\nAdditional Context:\n${context}` : task;
 
@@ -411,13 +402,7 @@ export class DelegateToAgentTool implements Tool {
         return await this.executeAsync(agentDef, fullTask, acrossTurns);
       }
 
-      if (agentDef.collaborationMode === 'adversarial') {
-        return await this.executeAdversarial(agentDef, fullTask);
-      } else if (agentDef.collaborationMode === 'parallel') {
-        return await this.executeParallel(agentDef, fullTask);
-      } else {
-        return await this.executeDelegate(agentDef, fullTask);
-      }
+      return await this.executeDelegate(agentDef, fullTask);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return `Sub-agent delegation failed: ${message}`;
@@ -491,80 +476,6 @@ export class DelegateToAgentTool implements Tool {
       unregisterRunningLoop(instanceId);
     }
     return this.collectResult(agentDef, task);
-  }
-
-  /**
-   * 对抗审查模式：两个不同角色的子 Agent 独立审查，综合意见
-   */
-  private async executeAdversarial(agentDef: AgentDefinition, task: string): Promise<string> {
-    // 找一个不同角色的子 Agent 作为对抗方
-    const allAgents = this.agentRegistry.getAll();
-    const adversary = allAgents.find(a => a.name !== agentDef.name && a.collaborationMode === 'adversarial');
-
-    // 第一个子 Agent 执行
-    const { loop: loop1, sessionDir: dir1, isNew: isNew1 } = await createSubAgentLoop(agentDef, task, this.parentContext);
-    registerRunningLoop(agentDef.instanceId!, loop1);
-    try {
-      if (!isNew1) await fs.utimes(path.join(dir1, 'meta.json'), new Date(), new Date()).catch(() => {});
-      await loop1.run(task);
-    } finally { unregisterRunningLoop(agentDef.instanceId!); }
-    const result1 = await this.collectConversationSummary(agentDef.name, agentDef.instanceId!);
-
-    if (!adversary) {
-      return `## ${agentDef.name} Review\n\n${result1}`;
-    }
-
-    // 第二个子 Agent 执行（对抗方）
-    const { loop: loop2, sessionDir: dir2, isNew: isNew2 } = await createSubAgentLoop(adversary, task, this.parentContext);
-    registerRunningLoop(adversary.instanceId!, loop2);
-    try {
-      if (!isNew2) await fs.utimes(path.join(dir2, 'meta.json'), new Date(), new Date()).catch(() => {});
-      await loop2.run(task);
-    } finally { unregisterRunningLoop(adversary.instanceId!); }
-    const result2 = await this.collectConversationSummary(adversary.name, adversary.instanceId!);
-
-    // 综合两个子 Agent 的意见
-    return `## Adversarial Review Results\n\n### ${agentDef.name} Perspective\n${result1}\n\n### ${adversary.name} Perspective\n${result2}\n\n---\nBoth agents reviewed independently. Consider both perspectives when making decisions.`;
-  }
-
-  /**
-   * 并行分工模式：多个子 Agent 并行执行同一任务的不同方面，汇总结果
-   */
-  private async executeParallel(agentDef: AgentDefinition, task: string): Promise<string> {
-    // 找到所有 parallel 模式的子 Agent
-    const allAgents = this.agentRegistry.getAll();
-    const parallelAgents = allAgents.filter(a => a.collaborationMode === 'parallel');
-
-    if (parallelAgents.length <= 1) {
-      // 只有一个或没有 parallel 子 Agent，退化为普通委托
-      return await this.executeDelegate(agentDef, task);
-    }
-
-    // 并行启动所有 parallel 子 Agent
-    const results = await Promise.all(
-      parallelAgents.map(async (agent) => {
-        const { loop, sessionDir, isNew } = await createSubAgentLoop(agent, task, this.parentContext);
-        registerRunningLoop(agent.instanceId!, loop);
-        try {
-          if (!isNew) await fs.utimes(path.join(sessionDir, 'meta.json'), new Date(), new Date()).catch(() => {});
-          await loop.run(task);
-        } finally { unregisterRunningLoop(agent.instanceId!); }
-        const summary = await this.collectConversationSummary(agent.name, agent.instanceId!);
-        return { name: agent.name, summary };
-      })
-    );
-
-    // 汇总所有子 Agent 的结果
-    const parts = results.map(r => `### ${r.name}\n${r.summary}`).join('\n\n');
-    return `## Parallel Execution Results\n\n${parts}\n\n---\nAll agents executed in parallel. Review each result independently.`;
-  }
-
-  /**
-   * 收集子 Agent 的对话摘要
-   */
-  private async collectConversationSummary(agentName: string, instanceId: string): Promise<string> {
-    const result = await this.collectAgentResult(agentName, instanceId, '');
-    return result.summary;
   }
 
   /**

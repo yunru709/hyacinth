@@ -45,6 +45,8 @@ export interface PostTurnContext {
   sessionId?: string;
   /** conversation_full.jsonl 当前行数（供簇归类用，确定本轮行号范围） */
   fullArchiveLineCount?: number;
+  /** 本轮失败描述（P2-2 恢复审查用）：验证/证据门触发、plan_execute 预测落空等。无失败时为 undefined */
+  failure?: string;
 }
 
 // ── 注入 ───────────────────────────────────────────────────

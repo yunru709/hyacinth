@@ -21,6 +21,8 @@ export class TurnRecorder {
   private projectDir: string;
   /** 记录已手动捕获预状态的路径 → 避免 git diff 重复添加 */
   private recordedPaths = new Set<string>();
+  /** 上一回合 agent 明确触碰的文件（recordPreState 记录），供下一回合 pre-turn commit 精确提交 */
+  private lastTurnAgentPaths: string[] = [];
 
   constructor(
     private gitManager: GitManager,
@@ -38,16 +40,24 @@ export class TurnRecorder {
 
     try {
       if (await this.gitManager.isRepo()) {
-        // 先处理可能存在的未提交变更（上一回合残留）
+        // 回滚锚点 = pre-turn 时的 HEAD 或提交后的新 commit：
+        // - 工作树有未提交变更 → 提交生成锚点（变更属于上一回合）
+        // - 工作树干净 → 直接用当前 HEAD 作为锚点（git commit 会因
+        //   nothing-to-commit 失败，此前每次干净轮次都打一条 warn 噪音）
         const hasChanges = await this.gitManager.hasUncommittedChanges();
         if (hasChanges) {
-          // 先 stash，commit 干净的状态，再 pop（确保 pre-commit 只含本回合前的状态）
-          // 实际做法：直接 commit 当前状态（包含所有未提交变更），这些变更属于上一回合
           logger.debug('Uncommitted changes detected before turn start, committing as previous turn state.');
+          // 只提交 agent 上一回合明确触碰的文件（recordPreState 记录），避免把用户
+          // 手动改动卷入自动提交；无记录（首回合 / 纯 bash 操作）时回退全量收编。
+          const paths = this.lastTurnAgentPaths.length > 0 ? this.lastTurnAgentPaths : undefined;
+          preCommit = await this.gitManager.commit(`auto: pre-turn-${turnId}`, paths);
+          this.lastTurnAgentPaths = [];
+          logger.debug(`Pre-turn commit: ${preCommit.slice(0, 8)} for turn ${turnId}`);
+        } else {
+          const { stdout } = await this.gitManager.git(['rev-parse', 'HEAD']);
+          preCommit = stdout.trim();
+          logger.debug(`Pre-turn anchor (clean tree): ${preCommit.slice(0, 8)} for turn ${turnId}`);
         }
-
-        preCommit = await this.gitManager.commit(`auto: pre-turn-${turnId}`);
-        logger.debug(`Pre-turn commit: ${preCommit.slice(0, 8)} for turn ${turnId}`);
 
         // 打轻量 tag 方便 git log 查找
         try {
@@ -116,6 +126,10 @@ export class TurnRecorder {
   /** 回合结束时调用。补充 git diff 检测 → 写入 TurnStore */
   async endTurn(): Promise<TurnRecord | null> {
     if (!this.currentRecord) return null;
+
+    // 在 git diff 补充检测之前，先保存本回合 agent 明确触碰的文件（recordPreState 记录，
+    // 不含 git diff 补充的、可能混入用户手动改动的文件），供下一回合 pre-turn commit 精确提交。
+    this.lastTurnAgentPaths = [...this.recordedPaths];
 
     try {
       // 通过 git diff 补充检测遗漏文件（bash rm 等未被拦截的操作）

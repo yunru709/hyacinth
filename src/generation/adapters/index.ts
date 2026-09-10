@@ -10,10 +10,12 @@
 import type { AdapterMeta } from '../interface.js';
 import { meta as volcengine } from './volcengine.js';
 import { meta as minimax } from './minimax.js';
+import { meta as openaiCompatible } from './openai-compatible.js';
 
 export const BUILTIN_ADAPTERS: AdapterMeta[] = [
   volcengine,
   minimax,
+  openaiCompatible, // OpenAI 兼容 TTS（云端 OpenAI/硅基流动 + 本地 openedai-speech/Kokoro 等）
   // —— 新厂商在这里加一行（示例）——
   // kling,          // adapters/kling.ts 导出 meta
   // wanxiang,       // adapters/wanxiang.ts 导出 meta（通义万相）

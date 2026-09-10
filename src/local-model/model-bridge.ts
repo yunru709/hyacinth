@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ProcessManager } from '../lifecycle/manager.js';
 import type { ManagedProcessConfig, ProcessState, ProcessEventCallbacks } from '../lifecycle/interface.js';
+import { getOllamaEndpoints } from '../provider/local-config.js';
 import { ModelRegistry } from './model-registry.js';
 import type { ModelEntry, ModelRegisterOptions, RunningModelInfo } from './types.js';
 
@@ -75,6 +76,10 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
     }
 
     const config = this.buildConfig(model);
+    if (!config) {
+      // LM Studio 等需手动启动的后端：注册条目存在但无进程可拉起
+      return null;
+    }
     const actualPort = this.extractPortFromConfig(config);
     this.runningPorts.set(name, actualPort);
 
@@ -192,7 +197,7 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
 
   // ── 内部 ──
 
-  private buildConfig(model: ModelEntry): ManagedProcessConfig {
+  private buildConfig(model: ModelEntry): ManagedProcessConfig | null {
     const port = model.port ?? this.findAvailablePort(model.backend);
     const host = model.host ?? '127.0.0.1';
 
@@ -210,6 +215,52 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
           maxRetries: 5,
         },
       };
+    }
+
+    // vLLM backend（D3 并入 BACKEND_PRESETS 的 vllm 预设）
+    if (model.backend === 'vllm') {
+      const args = [
+        'serve',
+        '--model', model.modelPath,
+        '--host', host,
+        '--port', String(port),
+      ];
+      if (model.ctxSize) args.push('--max-model-len', String(model.ctxSize));
+      if (model.nGpuLayers && model.nGpuLayers > 0) args.push('-ngl', String(model.nGpuLayers));
+      args.push(...(model.extraArgs ?? []));
+      return {
+        name: model.name,
+        command: 'vllm',
+        args,
+        autoRestart: false,
+        healthCheck: {
+          url: `http://${host}:${port}/v1/models`,
+          intervalMs: 5000,
+          timeoutMs: 3000,
+          maxRetries: 5,
+        },
+      };
+    }
+
+    // custom backend（D3 并入 BACKEND_PRESETS 的 custom 预设：modelPath 即可执行文件）
+    if (model.backend === 'custom') {
+      return {
+        name: model.name,
+        command: model.modelPath,
+        args: model.extraArgs ?? [],
+        autoRestart: false,
+        healthCheck: {
+          url: `http://${host}:${port}/v1/models`,
+          intervalMs: 5000,
+          timeoutMs: 3000,
+          maxRetries: 5,
+        },
+      };
+    }
+
+    // LM Studio：需用户手动启动，无进程可拉起——返回 null（start 跳过）
+    if (model.backend === 'lm-studio') {
+      return null;
     }
 
     // llama.cpp backend (default)
@@ -267,7 +318,7 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
       if (e.port) used.add(e.port);
     }
 
-    const startPort = backend === 'ollama' ? 11434 : 8080;
+    const startPort = backend === 'ollama' ? getOllamaEndpoints().port : 8080;
     const maxPort = startPort + 20;
     for (let p = startPort; p < maxPort; p++) {
       if (!used.has(p)) return p;

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install deps
+        # 仓库暂无 package-lock.json：npm ci 不可用时回退 npm install
+        run: npm ci || npm install
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npx vitest run
+      - name: Layer constraints
+        run: npm run verify:layers
+      - name: Build (smoke 前置：smoke-assembly 依赖 dist/)
+        run: npm run build
+      - name: Assembly smoke
+        run: npm run smoke

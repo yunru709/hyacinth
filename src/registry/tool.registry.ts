@@ -34,6 +34,7 @@ import {
   createNewSessionTool,
   createSwitchSessionTool,
   createDeleteSessionTool,
+  createSessionForkTool,
   createAllowToolTool,
   createDisallowToolTool,
   createListAllowlistTool,
@@ -49,10 +50,17 @@ import {
   createSetChannelModelTool,
   createResetChannelModelTool,
   createChannelInfoTool,
-} from '../tools/runtime-control.js';
+} from '../tools/runtime-control/index.js';
 
 /** Tool 扩展 RegistryItem，增加可选的 source 字段 */
-interface RegisteredTool extends Tool, RegistryItem {}
+interface RegisteredTool extends Tool, RegistryItem {
+  /**
+   * 该工具来自哪个 MCP Server（仅 source==='mcp' 时有值）。
+   * 由 MCPBridge 注册时写入 —— 工具名 `mcp__{sanitizeMcpName(server)}__{tool}`
+   * 经过清洗是不可逆的（空格、点号都被换成 -），无法反推原始 server 名。
+   */
+  mcpServer?: string;
+}
 
 /**
  * 工具注册表
@@ -65,6 +73,13 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
 
   constructor() {
     super();
+    // 安全门禁：内置工具（未标 source ⇒ 视为 core）不允许被 plugin/mcp/file/user
+    // 同名替换 —— 工具被替换 = 安全策略被替换（kernel/security 的执行面随之失守）。
+    // 同源重注册（MCP 重连、插件热重载）不受影响。
+    this.overwriteGuard = (incoming, existing) => {
+      const sourceOf = (t: RegisteredTool) => t.source ?? 'core';
+      return sourceOf(incoming) === sourceOf(existing);
+    };
   }
 
   // ── 热插拔工具追踪 ──────────────────────────────────────────
@@ -97,6 +112,8 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
   getToolDefinitions(companionMode?: boolean): ToolDefinition[] {
     const isCompanion = companionMode ?? false;
     return this.getAll()
+      // 陪伴专属工具在普通模式硬隔离（不可见 → 不可调用）
+      .filter((tool) => isCompanion || !tool.companionOnly)
       .map((tool) => ({
         name: tool.name,
         description: isCompanion && tool.companionDescription
@@ -198,6 +215,7 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
     this.register(createNewSessionTool(agentLoop, cwd));
     this.register(createSwitchSessionTool(agentLoop, cwd));
     this.register(createDeleteSessionTool(agentLoop, cwd));
+    this.register(createSessionForkTool(agentLoop, cwd));
 
     // ── MCP status tool ────────────────────────────────────────────
     if (mcpSystem) {

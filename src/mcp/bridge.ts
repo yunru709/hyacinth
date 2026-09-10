@@ -65,6 +65,10 @@ export class MCPBridge {
           name: mcpToolName,
           description: `[MCP:${serverName}] ${tool.description ?? tool.name}${hasSideEffect(tool.name) ? ' [side-effect]' : ''}`,
           inputSchema: tool.inputSchema,
+          // 来源标注：RegistryItem.source 供 tool.list 区分 MCP/内置/插件工具。
+          // mcpServer 保留原始 server 名（工具名里的是清洗过的，不可逆）。
+          source: 'mcp',
+          mcpServer: serverName,
           execute: async (input: Record<string, unknown>) => {
             return client.callTool(tool.name, input);
           },
@@ -97,13 +101,18 @@ export class MCPBridge {
     return parts.join('\n\n');
   }
 
-  /** 获取所有已连接 MCP Server 的工具名称列表 */
+  /**
+   * 获取所有已连接 MCP Server 的工具名称列表。
+   * 必须与 registerToRegistry 生成的名字一致 —— 两边都要过 sanitizeMcpName，
+   * 否则带空格/点号的 server 名（如 "Chrome DevTools MCP"）会对不上。
+   */
   getAllToolNames(): string[] {
     const names: string[] = [];
     for (const client of this.clients) {
       if (!client.isConnected()) continue;
+      const prefix = `mcp__${sanitizeMcpName(client.getName())}__`;
       for (const tool of client.getTools()) {
-        names.push(`mcp__${client.getName()}__${tool.name}`);
+        names.push(`${prefix}${tool.name}`);
       }
     }
     return names;

@@ -1,0 +1,94 @@
+{
+  "chat": [
+    {
+      "op": "connected"
+    },
+    {
+      "op": "thinking",
+      "content": "思考"
+    },
+    {
+      "op": "text",
+      "content": "回复: hi"
+    },
+    {
+      "op": "status",
+      "message": "完成",
+      "level": "info"
+    },
+    {
+      "op": "tool_use",
+      "name": "read",
+      "inputSummary": "a.md"
+    },
+    {
+      "op": "tool_result",
+      "content": "file content",
+      "isError": false
+    },
+    {
+      "op": "turn_info",
+      "turnCount": 1,
+      "tokensUsed": 0
+    }
+  ],
+  "permission": [
+    {
+      "op": "connected"
+    },
+    {
+      "op": "thinking",
+      "content": "思考"
+    },
+    {
+      "op": "text",
+      "content": "回复: hi"
+    },
+    {
+      "op": "status",
+      "message": "完成",
+      "level": "info"
+    },
+    {
+      "op": "tool_use",
+      "name": "read",
+      "inputSummary": "a.md"
+    },
+    {
+      "op": "tool_result",
+      "content": "file content",
+      "isError": false
+    },
+    {
+      "op": "permission_req",
+      "toolName": "write",
+      "input": {
+        "file": "/tmp/a"
+      }
+    },
+    {
+      "op": "status",
+      "message": "perm=yes",
+      "level": "info"
+    },
+    {
+      "op": "turn_info",
+      "turnCount": 1,
+      "tokensUsed": 0
+    }
+  ],
+  "error": [
+    {
+      "op": "connected"
+    },
+    {
+      "op": "error",
+      "message": "boom"
+    }
+  ],
+  "stop": [
+    {
+      "op": "connected"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TUI Gateway — pi-tui component-based terminal UI for the Agent framework.
  *
  * Powered by @earendil-works/pi-tui.
@@ -33,7 +33,8 @@ import { ConfigManager } from '../setup/config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { ProviderManager } from '../provider/manager.js';
-import { LifecycleSupervisor } from '../lifecycle/index.js';
+import { REPLACEABLE_POINTS, togglePluginInManifest, loadExtensionManifest } from '../supervisor/extension-registry.js';
+import { LifecycleSupervisor } from '../supervisor/shutdown.js';
 import { createAgent } from './factory.js';
 import { DEFAULT_PERSONA_DIR } from '../setup/persona-bootstrap.js';
 import { createLogger } from '../logging/logger.js';
@@ -41,7 +42,7 @@ import { TuiChannel } from '../channels/builtin/tui-channel.js';
 import { ChannelManager } from '../channels/manager.js';
 import { MessageQueue, QueueMessageMode } from '../channels/index.js';
 import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
-import type { AgentFactory, ChannelMessageEvent, ReplyFn } from '../channels/interface.js';
+import type { AgentFactory, ChannelMessageEvent } from '../channels/interface.js';
 import {
   filterCommands,
   getCommandsByCategory,
@@ -52,216 +53,38 @@ import { CommandRegistry, type SlashCommandDef } from '../ui/command-registry.js
 import { ChatLog } from '../ui/chat-log.js';
 import { CustomEditor } from '../ui/pi-tui-editor.js';
 import { theme, editorTheme } from '../ui/theme.js';
-import { readRecentEvents, type ConversationEvent } from '../event-store.js';
+import { readRecentEvents } from '../memory/events.js';
 import { LocalModelModule } from '../local-model/index.js';
 import type { BackgroundProcessInfo } from '../tools/background-registry.js';
-import { setAskUserHandler } from '../tools/ask-user.js';
-import { DownloadManager } from '../local-model/download-manager.js';
+
+import { SessionManager } from '../memory/session.js';
+import { ModelChannelRegistry } from '../provider/model-channel-registry.js';
+import { getProviderConfigLoader } from '../provider/config.js';
+import { createInProcPair } from '../ui-protocol/adapter.js';
+import { UiProtocolSession, type UiProtocolSessionBackend } from '../channels/builtin/ui-protocol-session.js';
+import { UI_EVENT } from '../events.js';
+import type { UiMessage, UiEvent, UiResponse } from '../ui-protocol/types.js';
 
 const logger = createLogger('tui');
 
-// ─── Constants ────────────────────────────────────────────────────────────
-
-const BOX_H = '\u2500'; // ─
-
-// ─── Status Bar Formatters ────────────────────────────────────────────────
-
-function visualWidth(s: string): number {
-  let w = 0;
-  for (const ch of s) {
-    const cp = ch.codePointAt(0) ?? 0;
-    // CJK, fullwidth forms, emoji: count as 2
-    w += (cp >= 0x1100 && cp <= 0x115f) ||   // Hangul Jamo
-      (cp >= 0x2e80 && cp <= 0xa4cf) ||       // CJK Radicals, Kangxi, Ideographs
-      (cp >= 0xac00 && cp <= 0xd7a3) ||       // Hangul Syllables
-      (cp >= 0xf900 && cp <= 0xfaff) ||       // CJK Compatibility Ideographs
-      (cp >= 0xfe10 && cp <= 0xfe19) ||       // Vertical forms
-      (cp >= 0xfe30 && cp <= 0xfe6f) ||       // CJK Compatibility Forms
-      (cp >= 0xff00 && cp <= 0xff60) ||       // Fullwidth Forms
-      (cp >= 0xffe0 && cp <= 0xffe6) ||       // Fullwidth Signs
-      (cp >= 0x1f300 && cp <= 0x1f9ff) ||     // Emoji & Symbols
-      (cp >= 0x20000 && cp <= 0x2fa1f)        // CJK Extension
-      ? 2 : 1;
-  }
-  return w;
-}
-
-function truncateByVisualWidth(s: string, maxVisualWidth: number): string {
-  if (visualWidth(s) <= maxVisualWidth) return s;
-  let w = 0;
-  let result = '';
-  for (const ch of s) {
-    const cw = visualWidth(ch);
-    if (w + cw + 3 > maxVisualWidth) { result += '...'; break; }
-    w += cw;
-    result += ch;
-  }
-  return result;
-}
-
-function formatStatusBar(
-  info: TurnInfo,
-  modelName: string,
-  providerInfo?: { providerLabel: string; isLocal: boolean; mode: string } | null,
-  modeLabel?: string | null,
-): string {
-  const planInfo =
-    info.planStepsTotal !== undefined
-      ? `Plan: ${info.planStepsDone ?? 0}/${info.planStepsTotal}`
-      : '';
-
-  const modelDisplay = truncateByVisualWidth(modelName, 28);
-
-  const providerPart = providerInfo
-    ? theme.dim(' | ') +
-      'Provider: ' +
-      (providerInfo.isLocal ? theme.success : theme.accent)(providerInfo.providerLabel)
-    : '';
-
-  const parts = [
-    theme.fg(' Hyacinth'),
-    theme.dim(' \u00b7 '),
-    theme.accent(modelDisplay),
-    theme.dim(' | '),
-    `Turns: ${theme.fg(String(info.turnCount))}/${theme.fg(String(info.maxTurns))}`,
-    providerPart,
-  ];
-
-  if (planInfo) {
-    parts.push(theme.dim(' | '), planInfo);
-  }
-
-  if (modeLabel) {
-    parts.push(theme.dim(' | '), theme.accent(modeLabel));
-  }
-
-  return parts.join('');
-}
-
-function formatContextBar(tokensUsed: number, maxTokens: number, width: number = 40): string {
-  const ratio = Math.min(tokensUsed / maxTokens, 1);
-  const filledW = Math.floor(ratio * width);
-  const emptyW = width - filledW;
-  const bar = '\u2588'.repeat(filledW) + '\u2591'.repeat(emptyW);
-
-  let colorFn: (s: string) => string;
-  if (ratio < 0.5) colorFn = theme.success;
-  else if (ratio < 0.8) colorFn = theme.warning;
-  else colorFn = theme.error;
-
-  const usedK = (tokensUsed / 1000).toFixed(0) + 'K';
-  const maxK = (maxTokens / 1000).toFixed(0) + 'K';
-  const pct = (ratio * 100).toFixed(0) + '%';
-
-  return theme.dim('Context: ') + colorFn(bar) + ' ' + theme.fg(pct) + theme.dim(` (${usedK} / ${maxK} tokens)`);
-}
-
-// ─── Event Replay ─────────────────────────────────────────────────────────
-
-/**
- * Replay recent events from the previous session into the chat log.
- * Shows the last conversation on TUI re-entry.
- */
-function replayEvents(chatLog: ChatLog, sessionDir: string): void {
-  readRecentEvents(sessionDir, 50).then(events => {
-    if (events.length === 0) return;
-
-    chatLog.addSystem('── Previous Session ──');
-
-    let pendingText = '';
-    let pendingThinking = '';
-    let userMsgSeen = false;
-
-    for (const event of events) {
-      switch (event.type) {
-        case 'user_input':
-          // Flush any pending thinking + text before showing user message
-          if (pendingThinking) {
-            pendingThinking = '';
-          }
-          if (pendingText) {
-            chatLog.addSystem(pendingText);
-            pendingText = '';
-          }
-          chatLog.addUser(event.content || '');
-          userMsgSeen = true;
-          break;
-
-        case 'text':
-          // Accumulate text chunks into one message
-          pendingText += event.content || '';
-          break;
-
-        case 'thinking':
-          pendingThinking += event.content || '';
-          break;
-
-        case 'tool_call':
-          // Flush pending thinking + text before tool call
-          if (pendingThinking) {
-            pendingThinking = '';
-          }
-          if (pendingText) {
-            chatLog.addSystem(pendingText);
-            pendingText = '';
-          }
-          chatLog.startTool(
-            event.id || 'replay',
-            event.name || 'unknown',
-            JSON.stringify(event.input || {}).slice(0, 100),
-          );
-          break;
-
-        case 'tool_result':
-          chatLog.updateToolResult(
-            event.tool_use_id || 'replay',
-            (event.content || '').slice(0, 500),
-            { isError: event.name === 'error' },
-          );
-          break;
-
-        case 'error':
-          // 跳过回放中的原始错误日志（避免旧 session 的 API 错误 JSON 污染 UI）
-          break;
-
-        case 'stop':
-          // Flush remaining thinking + text
-          if (pendingThinking) {
-            pendingThinking = '';
-          }
-          if (pendingText) {
-            chatLog.addSystem(pendingText);
-            pendingText = '';
-          }
-          break;
-
-        default:
-          break;
-      }
-    }
-
-    // Flush any remaining thinking + text
-    if (pendingThinking) {
-      pendingThinking = '';
-    }
-    if (pendingText) {
-      chatLog.addSystem(pendingText);
-    }
-  }).catch(() => {
-    // Silently ignore replay errors — don't block TUI startup
-  });
-}
-
-/**
- * 检测是否运行在旧版 Windows 控制台（conhost）。
- * Windows Terminal / VS Code 集成终端 / WezTerm 等现代终端都会设置
- * WT_SESSION 或 TERM_PROGRAM 环境变量；旧 conhost 两者皆无。
- * 非 Windows 平台（macOS/Linux 各终端）一般无渲染问题，恒返回 false。
- */
-function detectLegacyTerminal(): boolean {
-  if (process.platform !== 'win32') return false;
-  return !process.env.WT_SESSION && !process.env.TERM_PROGRAM;
-}
+// TUI 纯格式化工具（阶段 C：从本文件拆出，见 tui-format.ts）
+import {
+  visualWidth,
+  truncateByVisualWidth,
+  formatStatusBar,
+  formatContextBar,
+  replayEvents,
+  detectLegacyTerminal,
+} from './tui-format.js';
+import { createTuiSearch } from './tui-search.js';
+import { createTuiPermission } from './tui-permission.js';
+import { createTuiAskUser } from './tui-ask-user.js';
+import { showWelcome } from './tui-welcome.js';
+import { createModelLocalCmds } from './tui-model-local.js';
+import { createModelCmds } from './tui-model-cmds.js';
+import { createCompressCmds } from './tui-compress-cmds.js';
+import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
+import { createSessionCmds } from './tui-session-cmds.js';
 
 // ─── Main TUI ─────────────────────────────────────────────────────────────
 export async function runTui(
@@ -347,24 +170,8 @@ export async function runTui(
 
   // Permission selection bar — shown between chat and editor during tool permission prompts
   const permissionBar = new Text('', 0, 0);
-  interface PermissionRequest {
-    resolve: (result: 'yes' | 'no' | 'always' | 'aor') => void;
-    toolName: string;
-    inputStr: string;
-  }
-  const permissionQueue: PermissionRequest[] = [];
-  let permissionSelection = 0; // 0=Yes, 1=AOR, 2=Always, 3=No
 
-  // ── Ask User 状态 ───────────────────────────────────────────
-  interface AskUserFormState {
-    questions: Array<{ question: string; header?: string; options?: string[]; multiSelect?: boolean; customInput?: boolean }>;
-    selectedOptions: Map<number, Set<number>>;  // question index → selected option indices
-    customTexts: Map<number, string>;           // question index → custom text
-    activeQuestion: number;  // 0..questions.length (questions.length = "补充" tab)
-    activeOption: number;    // within current question's options
-    resolve: (result: string) => void;
-  }
-  let askUserState: AskUserFormState | null = null;
+  // ── Ask User 表单组件（表单状态与逻辑在 tui-ask-user.ts，tui.ts 深拆第三批）──
   const askUserBar = new Text('', 0, 0);
   const askUserContent = new Text('', 0, 0);
 
@@ -424,9 +231,10 @@ export async function runTui(
   /** 旁路Agent（意图识别/簇归类）运行指示器 */
   let bypassLoader: Loader | null = null;
   let bypassTimeout: ReturnType<typeof setTimeout> | null = null;
-  let prevProviderLabel: string | null = null;
-  let prevProviderIsLocal = false;
-  let fallbackMessage: string | null = null;
+  /** 运行中后台进程数（footer 显示；经 process.list 协议异步刷新） */
+  let bgRunningCount = 0;
+  /** 当前正在执行的调度任务名（队列判断/状态栏用；经 schedule.runtime 协议刷新） */
+  let pendingTaskLocal: string | null = null;
   let isThinking = false;
 
   function refreshStatus(info: TurnInfo): void {
@@ -458,22 +266,12 @@ export async function runTui(
       }, 1000);
     }
 
-    // Provider fallback detection \u2014 event-driven from onFallback callback
-    const providerInfo = loop.getProviderRoutingInfo();
-    if (providerInfo) {
-      if (prevProviderLabel !== null && providerInfo.providerLabel !== prevProviderLabel) {
-        // Provider changed via fallback \u2014 one-time notification already sent by onFallback
-        fallbackMessage = `\u26a0 Fallback: ${providerInfo.providerLabel}`;
-        setTimeout(() => { fallbackMessage = null; tui.requestRender(); }, 5000);
-      }
-      prevProviderLabel = providerInfo.providerLabel;
-      prevProviderIsLocal = providerInfo.isLocal;
-    }
-
-    const ap = loop.getActiveProvider();
-    const currentModel = ap.getModel();
-    const currentProviderType = ap.getProviderType();
-    const currentProviderInfo = providerInfo ?? { providerLabel: currentProviderType, isLocal: false, mode: 'auto' };
+    // Provider 显示：用本地缓存（modelName / providerTypeStart，由协议事件与
+    // 命令维护——switch/fallback 均经服务端 status 消息 → refreshStatusFromProtocol
+    // 更新缓存）。不再轮询/直读 loop（纯协议客户端化）。
+    const currentModel = modelName;
+    const currentProviderType = providerTypeStart;
+    const currentProviderInfo = { providerLabel: currentProviderType, isLocal: false, mode: 'auto' as const };
     // Build mode label for header display
     let modeHeaderLabel: string | null = null;
     let statusContent = formatStatusBar(activeInfo, currentModel, currentProviderInfo, modeHeaderLabel);
@@ -481,11 +279,6 @@ export async function runTui(
     // Compaction message
     if (compactionMessage) {
       statusContent += ' ' + theme.warning(compactionMessage);
-    }
-
-    // Fallback message
-    if (fallbackMessage) {
-      statusContent += ' ' + theme.warning(fallbackMessage);
     }
 
     // Update header (always Text)
@@ -526,170 +319,8 @@ export async function runTui(
   let toolCounterFallback = 0;
   let showThinking = false;
 
-  function showPermissionDialog(toolName: string, inputStr: string) {
-    permissionSelection = 0;
-    chatLog.addSystem(
-      theme.warning(`\u250c Permission Required \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510`),
-    );
-    chatLog.addSystem(
-      theme.warning('\u2502 ') + theme.fg(`${toolName}(${inputStr})`) + theme.warning(' \u2502'),
-    );
-    chatLog.addSystem(
-      theme.warning(`\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518`),
-    );
-    updatePermissionBar();
-    tui.requestRender();
-  }
 
-  function resolvePermission(result: 'yes' | 'no' | 'always' | 'aor') {
-    const req = permissionQueue.shift();
-    if (!req) return;
 
-    permissionBar.setText('');
-    chatLog.addSystem(
-      result === 'no' ? theme.error('  \u25c6 Denied')
-        : result === 'aor' ? theme.warning('  \u25c6 AOR \u2014 all restrictions lifted')
-        : result === 'always' ? theme.success('  \u25c6 Always allowed')
-        : theme.success('  \u25c6 Approved'),
-    );
-    req.resolve(result);
-
-    if (permissionQueue.length > 0) {
-      const next = permissionQueue[0];
-      showPermissionDialog(next.toolName, next.inputStr);
-    }
-    tui.requestRender();
-  }
-
-  function updatePermissionBar() {
-    const labels = ['Yes', 'AOR', 'Always', 'No'];
-    const shortcuts = ['Y', 'O', 'A', 'N'];
-    const parts = labels.map((l, i) => {
-      const prefix = i === permissionSelection ? '\u25b6 ' : '  ';
-      if (i === permissionSelection) {
-        return theme.fg(`[ ${prefix}${l} (${shortcuts[i]}) ]`);
-      }
-      return theme.dim(`  ${prefix}${l} (${shortcuts[i]})  `);
-    });
-    permissionBar.setText(
-      theme.warning('\u250c Permission Required \u2500 ') +
-      parts.join(theme.dim(' \u2502 ')) +
-      theme.warning(' \u2500\u2500 Use \u2190\u2192 to select, Enter to confirm')
-    );
-  }
-
-  // \u2500\u2500 Ask User \u6e32\u67d3 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-  function renderAskUserForm() {
-    if (!askUserState) {
-      askUserContent.setText('');
-      askUserBar.setText('');
-      return;
-    }
-    const { questions, selectedOptions, customTexts, activeQuestion } = askUserState;
-    const supplementIdx = questions.length;
-    const totalTabs = supplementIdx + 1;
-
-    // \u6784\u5efa\u6807\u7b7e\u884c
-    let tabLine = '';
-    for (let i = 0; i < questions.length; i++) {
-      const isActive = i === activeQuestion;
-      const header = questions[i].header || `\u95ee\u9898${i + 1}`;
-      tabLine += isActive ? ` ${theme.fg(`[${header}]`)} ` : ` ${theme.dim(header)}  `;
-    }
-    tabLine += activeQuestion === supplementIdx
-      ? ` ${theme.fg('[\u8865\u5145]')} `
-      : ` ${theme.dim('\u8865\u5145')}  `;
-
-    // \u6784\u5efa\u5185\u5bb9
-    let content = theme.warning('\u250c Ask User \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500') + '\n';
-    content += tabLine + '\n';
-    content += theme.warning('\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500') + '\n';
-
-    if (activeQuestion < supplementIdx) {
-      // \u666e\u901a\u95ee\u9898
-      const q = questions[activeQuestion];
-      content += `${q.question}\n\n`;
-      const opts = q.options ?? [];
-      const sel = selectedOptions.get(activeQuestion) ?? new Set<number>();
-      const isMulti = q.multiSelect ?? false;
-      for (let i = 0; i < opts.length; i++) {
-        const selected = sel.has(i);
-        const bullet = isMulti
-          ? (selected ? theme.fg('\u25c9') : '\u25cb')
-          : (selected ? theme.fg('\u25cf') : '\u25cb');
-        const highlight = i === askUserState.activeOption;
-        content += (highlight ? theme.fg(` ${bullet} ${opts[i]}`) : theme.dim(` ${bullet} ${opts[i]}`)) + '\n';
-      }
-      // \u81ea\u5b9a\u4e49\u8f93\u5165
-      if (q.customInput ?? false) {
-        const custom = customTexts.get(activeQuestion) ?? '';
-        content += `\n${theme.dim('\u81ea\u5b9a\u4e49:')} ${custom}${theme.dim('\u258c')}\n`;
-      }
-    } else {
-      // "\u8865\u5145" tab
-      const custom = customTexts.get(supplementIdx) ?? '';
-      content += `${theme.fg('\u8865\u5145\u8bf4\u660e\uff08\u81ea\u7531\u8f93\u5165\uff0c\u6309 Enter \u63d0\u4ea4\u5168\u90e8\uff09')}\n\n`;
-      content += `${custom}${theme.dim('\u258c')}\n`;
-    }
-
-    content += theme.warning('\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
-    askUserContent.setText(content);
-
-    // \u5bfc\u822a\u680f
-    const currentLabel = activeQuestion < supplementIdx
-      ? (questions[activeQuestion].header || `\u95ee\u9898${activeQuestion + 1}`)
-      : '\u8865\u5145';
-    const nav = activeQuestion < supplementIdx
-      ? theme.warning(`\u2190\u2192 \u5207\u6362  \u2191\u2193 \u9009\u9879  \u7a7a\u683c \u9009\u4e2d  \u21b5 ${currentLabel === '\u8865\u5145' ? '\u63d0\u4ea4' : '\u786e\u8ba4'}`)
-      : theme.warning(`\u2190\u2192 \u5207\u6362  \u21b5 \u63d0\u4ea4\u5168\u90e8\u7b54\u6848`);
-    askUserBar.setText(nav);
-  }
-
-  function resolveAskUser() {
-    if (!askUserState) return;
-    const { questions, selectedOptions, customTexts, resolve } = askUserState;
-    const suppIdx = questions.length;
-
-    const result: Record<string, string[]> = {};
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      const answers: string[] = [];
-
-      // \u9009\u4e2d\u7684\u9009\u9879
-      const sel = selectedOptions.get(i) ?? new Set<number>();
-      for (const idx of sel) {
-        if (q.options && q.options[idx]) {
-          answers.push(q.options[idx]);
-        }
-      }
-
-      // \u81ea\u5b9a\u4e49\u8f93\u5165
-      const custom = customTexts.get(i) ?? '';
-      if (custom.trim()) {
-        answers.push(custom.trim());
-      }
-
-      // \u7528\u95ee\u9898\u539f\u6587\u4f5c\u4e3a key\uff08\u957f\u4e0a\u4e0b\u6587\u91cc\u6bd4 "0" "1" \u66f4\u6709\u8bed\u4e49\uff09
-      if (answers.length > 0) {
-        result[q.question] = answers;
-      }
-    }
-
-    // "\u8865\u5145" \u8f93\u5165
-    const suppText = customTexts.get(suppIdx) ?? '';
-    if (suppText.trim()) {
-      result['\u8865\u5145\u8bf4\u660e'] = [suppText.trim()];
-    }
-
-    askUserContent.setText('');
-    askUserBar.setText('');
-    const answeredCount = Object.keys(result).length;
-    chatLog.addSystem(theme.success(`\u25c6 Answered ${answeredCount} question(s)`));
-    askUserState = null;
-    resolve(JSON.stringify(result, null, 2));
-    tui.requestRender();
-  }
 
   const tuiHandler: OutputHandler = {
     onText(content: string) {
@@ -701,8 +332,8 @@ export async function runTui(
     onTurnStart() {
       isThinking = true;
       pendingThinking = '';
-      const label = loop.pendingTaskName
-        ? `⏰ ${loop.pendingTaskName}`
+      const label = pendingTaskLocal
+        ? `⏰ ${pendingTaskLocal}`
         : 'Thinking...';
       showThinkingIndicator(theme.accent(label));
     },
@@ -785,8 +416,8 @@ export async function runTui(
             theme.dim(`${pre.toLocaleString()} → ${post.toLocaleString()} tokens`) +
             theme.fg(` (${ratio}% reduced)`),
           );
-          // 用压缩后的 token 数刷新 context bar
-          refreshStatus(loop.getTurnInfo(lastTurnCount, post));
+          // 用压缩后的 token 数刷新 context bar（本地合成 TurnInfo，不读 loop）
+          refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: post, maxContextTokens: maxContext, sessionId: sessionDir, compressCount: 0 });
         }
         return;
       }
@@ -838,10 +469,10 @@ export async function runTui(
       } else {
         chatLog.addSystem(theme.fg(message));
         // 如果消息是 provider 切换，同步刷新 UI
+        // onStatus 是同步回调，不能 await；fire-and-forget（InProc 下协议发送同步完成）
         if (message.startsWith('Provider switched to ')) {
-          modelName = loop.getActiveProvider().getModel();
-          providerTypeStart = loop.getActiveProvider().getProviderType();
-          refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
+          // 经协议 state.get 刷新 modelName/providerTypeStart + 状态栏（不读 loop）
+          void refreshStatusFromProtocol();
         }
       }
 
@@ -851,16 +482,22 @@ export async function runTui(
       hideThinkingIndicator();
       isThinking = false;
 
-      // 陪伴模式 session 切换 → 清空显示并重放新 session 历史，同步 sessionDir
-      if (loop._sessionSwitched) {
-        sessionDir = loop._sessionSwitched;
-        chatLog.clearAll();
-        replayEvents(chatLog, loop._sessionSwitched);
-        loop._sessionSwitched = undefined;
-      }
+      // 陪伴模式自动切换 session 检测：经协议 state.get 对比 sessionId + sessionDir
+      // （sessionDir 由后端 sessionStore 解析进快照 —— 纯协议客户端化，不直读 SessionManager）
+      void (async () => {
+        try {
+          const snap = (await protocolSend('state.get')) as { sessionDir?: string } | undefined;
+          const newDir = snap?.sessionDir;
+          if (newDir && newDir !== sessionDir) {
+            sessionDir = newDir;
+            chatLog.clearAll();
+            await replayEvents(chatLog, newDir);
+            tui.requestRender();
+          }
+        } catch { /* ignore */ }
+      })();
 
       updateHeaderText(modelName);
-      const providerInfo = loop.getProviderRoutingInfo();
       if (pendingThinking.trim()) {
         if (showThinking) {
           chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(pendingThinking.trim()));
@@ -878,20 +515,6 @@ export async function runTui(
 
       tui.requestRender();
     },
-    onPermissionRequest(toolName: string, input: Record<string, unknown>): Promise<'yes' | 'no' | 'always' | 'aor'> {
-      const inputStr = Object.entries(input)
-        .map(([k, v]) => `${k}=${String(v).substring(0, 60)}`)
-        .join(', ');
-
-      return new Promise<'yes' | 'no' | 'always' | 'aor'>((resolve) => {
-        const isFirst = permissionQueue.length === 0;
-        permissionQueue.push({ resolve, toolName, inputStr });
-
-        if (isFirst) {
-          showPermissionDialog(toolName, inputStr);
-        }
-      });
-    },
     onInterrupt() {
       hideThinkingIndicator();
       isThinking = false;
@@ -900,25 +523,7 @@ export async function runTui(
     },
     onAskUser(questions): Promise<string> {
       return new Promise<string>((resolve) => {
-        const selectedOptions = new Map<number, Set<number>>();
-        const customTexts = new Map<number, string>();
-        for (let i = 0; i < questions.length; i++) {
-          selectedOptions.set(i, new Set());
-          customTexts.set(i, '');
-        }
-        // "补充" tab custom text
-        customTexts.set(questions.length, '');
-
-        askUserState = {
-          questions,
-          selectedOptions,
-          customTexts,
-          activeQuestion: 0,
-          activeOption: 0,
-          resolve,
-        };
-        renderAskUserForm();
-        tui.requestRender();
+        tuiAskUser.open(questions, { resolve });
       });
     },
   };
@@ -942,7 +547,6 @@ export async function runTui(
   try { CommandRegistry.getInstance(process.cwd()); } catch { /* already initialized */ }
   try {
     const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
-    const { getDefaultConfig } = await import('../runtime/defaults.js');
     const configCenter = RuntimeConfigCenter.getInstance();
     // 尝试读取配置——如果未初始化会抛异常
     configCenter.get<number>('session.maxTurns');
@@ -980,83 +584,304 @@ export async function runTui(
   } catch { /* fall through to standalone */ }
 
   // ── Agent + Session（远程模式下跳过，使用 WebSocket 连接） ──
-  let agent: Awaited<ReturnType<typeof createAgent>> | undefined;
+  // 本地模式的 SessionManager（协议层 backend 与 agentFactory 共用，保证会话目录一致）
+  const sessionManager = new SessionManager(process.cwd());
+
+  // 创建 AgentFactory（注入到渠道 + UiProtocolSession.initialize 创建 loop）
+  // 本地模式协议化后，TUI 的 loop 由 UiProtocolSession 通过本 factory 创建，
+  // 因此必须补全本地会话参数（shouldContinue / personaDir / localModelProvider 等）。
+  const agentFactory: AgentFactory = {
+    createAgent: async (options) => {
+      return createAgent({
+        cwd: process.cwd(),
+        provider: activeProvider,
+        maxTurns: maxTurns ?? 20,
+        maxContext: maxContext ?? 40_000,
+        outputHandler: options.outputHandler as OutputHandler,
+        // 真实会话意图来自 cli（--session / .resume-session / restart marker），
+        // 而非 UiProtocolSession 的协议连接标识（'tui' 兜底）。
+        // 修复：此前把协议标识 'tui' 当真实会话 ID 传入 → boot 恒 resume('tui')，
+        // 导致每次启动都复用同一个名为 tui 的旧会话。现在默认 undefined →
+        // boot 走 shouldContinue/惰性新建分支，首条消息才物化。
+        sessionId,
+        channel: options.channel ?? 'tui',
+        sessionManager,
+        shouldContinue,
+        maxMessages,
+        personaDir,
+        localModelProvider,
+      }, supervisor);
+    },
+  };
+
   let sessionDir: string;
+  /** 本地模式 initialize 后 agent 组件（backend 数据源 + 跨渠道工具注册用；远程为 null） */
+  let localComponents: { knowledgeBase?: unknown; backgroundRegistry?: unknown; hotReloadManager?: unknown; gitManager?: unknown; extensionRegistry?: unknown; assemblyRegistry?: unknown; toolRegistry?: unknown; sessionDir?: string } | null = null;
+  // protocolSend：本地模式协议化后由 client 端赋值（发协议请求）；远程模式走 WS 协议层
+  let protocolSend: (method: string, params?: unknown) => Promise<unknown> = async () => undefined;
+
+  // ── 权限对话框（tui-permission.ts，tui.ts 深拆第二批）──
+  const tuiPermission = createTuiPermission({ tui, chatLog, permissionBar, protocolSend: (m, p) => protocolSend(m, p) });
+
+  // ── Ask User 表单（tui-ask-user.ts，tui.ts 深拆第三批）──
+  const tuiAskUser = createTuiAskUser({ tui, chatLog, askUserContent, askUserBar, protocolSend: (m, p) => protocolSend(m, p) });
+
+  // client 端协议请求表（本地 InProc / 远程 WS 共用）：request id → resolve 回调
+  const pendingRequests = new Map<string, (resp: UiResponse) => void>();
+  let protocolSeq = 0;
+
+  /**
+   * 经协议层获取状态快照并刷新状态栏（替代 refreshStatus(loop.getTurnInfo(...)) 直连）。
+   * state.get 快照含 loop 真实 turnCount/tokensUsed（buildStateSnapshot 优先取
+   * loop.contextTokensUsed/turnNumber），用于命令处理后的通用状态刷新。
+   * 注意：事件驱动渲染（onStatus 同步回调）与 stats 特定语义的刷新点不适用此 helper。
+   */
+  async function refreshStatusFromProtocol(): Promise<void> {
+    const snap = await protocolSend('state.get') as import('../ui-protocol/types.js').StateSnapshot | undefined;
+    if (!snap) return;
+    // 同步更新 provider/model 本地缓存（provider 切换后状态栏与面板一致）
+    if (snap.provider) providerTypeStart = snap.provider as typeof providerTypeStart;
+    if (snap.model) modelName = snap.model;
+    void refreshBgCountFromProtocol();
+    void refreshPendingTaskFromProtocol();
+    refreshStatus({
+      turnCount: snap.turnCount,
+      tokensUsed: snap.tokensUsed,
+      maxTurns: snap.maxTurns,
+      maxContextTokens: snap.maxContextTokens,
+      compressCount: snap.compressCount,
+      sessionId: snap.sessionId,
+    } as unknown as TurnInfo);
+  }
+
+  /** 经协议 schedule.runtime 刷新当前调度任务名（队列判断/状态栏；异步容错） */
+  async function refreshPendingTaskFromProtocol(): Promise<void> {
+    try {
+      const res = (await protocolSend('schedule.runtime')) as { pendingTaskName?: string | null } | null | undefined;
+      pendingTaskLocal = res?.pendingTaskName ?? null;
+    } catch { /* 协议不可用时保持旧值 */ }
+  }
+
+  /** 经协议 process.list 刷新运行中后台进程计数（footer 显示；异步容错） */
+  async function refreshBgCountFromProtocol(): Promise<void> {
+    try {
+      const res = (await protocolSend('process.list')) as { list?: Array<{ status?: string }> } | Array<{ status?: string }> | null | undefined;
+      const items = Array.isArray(res) ? res : res?.list;
+      bgRunningCount = (items ?? []).filter((p) => p.status === 'running').length;
+    } catch { /* 协议不可用时保持旧值 */ }
+  }
+
+  // client 端协议事件分发：把协议事件映射回 TUI 渲染/交互
+  // （message.* → tuiHandler；permission.request → 权限队列；ask_user → 表单）
+  const handleProtocolEvent = (ev: UiEvent): void => {
+    const p = (ev.payload ?? {}) as Record<string, unknown>;
+    switch (ev.type) {
+      case UI_EVENT.MESSAGE_TEXT: tuiHandler.onText?.(String(p.content ?? '')); break;
+      case UI_EVENT.COMPANION_SAY:
+        // 陪伴表达：与普通回复同形展示（payload.text 已是 [动作]（心声）话术 渲染结果）
+        tuiHandler.onText?.(String(p.text ?? ''));
+        break;
+      case UI_EVENT.MESSAGE_THINKING: tuiHandler.onThinking?.(String(p.content ?? '')); break;
+      case UI_EVENT.MESSAGE_TOOL_USE:
+        tuiHandler.onToolUse?.(String(p.name ?? ''), String(p.inputSummary ?? ''), p.id ? String(p.id) : undefined);
+        break;
+      case UI_EVENT.MESSAGE_TOOL_RESULT:
+        tuiHandler.onToolResult?.(String(p.content ?? ''), Boolean(p.isError), p.id ? String(p.id) : undefined);
+        break;
+      case UI_EVENT.MESSAGE_DIFF:
+        tuiHandler.onDiff?.(String(p.id ?? ''), String(p.filePath ?? ''), (p.diffLines ?? []) as Array<{ kind: string; text: string }>);
+        break;
+      case UI_EVENT.MESSAGE_STATUS:
+        tuiHandler.onStatus?.(String(p.message ?? ''), (p.level as 'info' | 'warn' | 'error') ?? 'info');
+        break;
+      case UI_EVENT.MESSAGE_ERROR:
+        tuiHandler.onStatus?.(String(p.message ?? ''), 'error');
+        break;
+      case UI_EVENT.MESSAGE_TURN_START: tuiHandler.onTurnStart?.(); break;
+      case UI_EVENT.MESSAGE_FLUSH: tuiHandler.onFlush?.(); break;
+      case UI_EVENT.MESSAGE_INTERRUPT: tuiHandler.onInterrupt?.(); break;
+      case UI_EVENT.MESSAGE_TURN_INFO: {
+        const info = p as { turnCount?: number; tokensUsed?: number };
+        lastTurnCount = Number(info.turnCount ?? lastTurnCount);
+        lastTokensUsed = Number(info.tokensUsed ?? lastTokensUsed);
+        refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
+        break;
+      }
+      case UI_EVENT.PERMISSION_REQUEST: {
+        const req = p as { id?: string; toolName?: string; input?: Record<string, unknown> };
+        const inputStr = Object.entries(req.input ?? {})
+          .map(([k, v]) => `${k}=${String(v).substring(0, 60)}`)
+          .join(', ');
+        tuiPermission.enqueue({ id: String(req.id ?? ''), toolName: String(req.toolName ?? ''), inputStr });
+        break;
+      }
+      case UI_EVENT.MESSAGE_ASK_USER: {
+        const au = p as { id?: string; questions?: Array<{ question: string; header?: string; options?: string[]; multiSelect?: boolean; customInput?: boolean }> };
+        if (!au.id || !au.questions || au.questions.length === 0) break;
+        tuiAskUser.open(au.questions, { id: au.id });
+        break;
+      }
+      default: break;
+    }
+  };
 
   if (!remoteWs) {
-    agent = await createAgent({
+    // 本地模式：通过 UiProtocolSession(InProc) 走协议层，与 WebUI 对称。
+    // loop 由 UiProtocolSession.initialize 通过 agentFactory 创建，
+    // outputHandler 是 ProtocolOutputHandler（loop 回调 → message.* 协议事件）。
+    const [protocolClient, protocolServer] = createInProcPair('tui-client', 'ui-server');
+    const registry = new ModelChannelRegistry(process.cwd());
+    try { registry.load(activeProvider); } catch { /* 加载失败不阻塞 */ }
+    const manager = {
+      switchProvider: (config: { type: string; apiKey?: string; model?: string; baseUrl?: string }): void => {
+        try { registry.setChannelModel('main', config.type, config.model); } catch { /* noop */ }
+      },
+    };
+    const historyProvider = async (sid: string, limit?: number) => {
+      const dir = sessionManager.getSessionDir(sid);
+      const events = await readRecentEvents(dir, limit ?? 50);
+      return events.map((e) => ({
+        type: e.type, content: e.content, name: e.name, id: e.id, input: e.input,
+        toolUseId: e.tool_use_id, message: e.message, reason: e.reason,
+        inputTokens: e.input_tokens, outputTokens: e.output_tokens, timestamp: e.timestamp,
+      }));
+    };
+    // 会话统计真实来源：sessionId → sessionDir → stats.json（StatsManager）
+    const statsProvider = async (sid: string) => {
+      const { StatsManager } = await import('../memory/stats.js');
+      return new StatsManager(process.cwd()).get(sessionManager.getSessionDir(sid));
+    };
+    // kb / process / orchestrator 域依赖 agent 组件（initialize 后才就绪）：可变引用延迟解析
+    const uiSession = new UiProtocolSession(protocolServer, sessionId ?? 'tui', {
       cwd: process.cwd(),
-      provider: activeProvider,
-      maxTurns,
-      maxContext,
-      outputHandler: tuiHandler,
-      sessionId,
-      shouldContinue,
-      maxMessages,
-      personaDir,
-      localModelProvider,
-      channel: 'tui',
+      configCenter: RuntimeConfigCenter.getInstance() as unknown as UiProtocolSessionBackend['configCenter'],
+      sessionStore: sessionManager,
+      registry,
+      // model 域 registry 运行时重绑已内聚到 UiProtocolSession.initialize
+      // （loop.modelRouter 内部实例），TUI 不再提供 getRuntimeRegistry
+      manager,
+      commandRegistry: CommandRegistry.getInstance(process.cwd()),
+      listProvidersMeta: () => getProviderConfigLoader(process.cwd()).getAll(),
+      listLocalModels: () => LocalModelModule.getInstance().list().map((e) => ({
+        name: e.name, modelFile: e.modelFile, backend: e.backend, port: e.port,
+        host: e.host, ctxSize: e.ctxSize, nGpuLayers: e.nGpuLayers, enabled: e.enabled,
+      })),
+      statsProvider,
+      getKb: () =>
+        (localComponents?.knowledgeBase as import('../ui-protocol/domains/kb.js').KnowledgeBaseLike | undefined) ?? null,
+      getComposerConditions: () =>
+        ((localComponents as Record<string, unknown> | null)?.contextComposer as { activeConditions?: Set<string> } | undefined)?.activeConditions ?? null,
+      getRegistry: () =>
+        (localComponents?.backgroundRegistry as import('../ui-protocol/domains/process.js').BackgroundRegistryLike | undefined) ?? null,
+      // supervisor 域（S5 可观测面）：watcher 健康度来自装配组件；git 摘要用
+      // 组件里的 GitManager 现算（异步摘要，域侧 await + 异常降级 null）
+      getWatcherStatus: () => {
+        const mgr = localComponents?.hotReloadManager as
+          | { getStatus(): { started: boolean; watcherCount: number; debounceMs: number } }
+          | undefined;
+        return mgr ? mgr.getStatus() : null;
+      },
+      getGitSummary: async () => {
+        const gitManager = localComponents?.gitManager as
+          | import('../evolution/git-manager.js').GitManager
+          | undefined;
+        if (!gitManager) return null;
+        const isRepo = await gitManager.isRepo().catch(() => false);
+        if (!isRepo) return { isRepo: false, dirty: false, lastAutoCommit: null };
+        const dirty = await gitManager.hasUncommittedChanges().catch(() => false);
+        const autoCommits = await gitManager.logGrep('auto:', 1).catch(() => []);
+        return { isRepo: true, dirty, lastAutoCommit: autoCommits[0]?.message ?? null };
+      },
+      // arch 域（架构监督）：目录/名单/生效条目来自装配组件；toggle 写项目级名单
+      getArch: () => {
+        const ext = localComponents?.extensionRegistry as
+          import('../supervisor/extension-registry.js').ExtensionRegistry | undefined;
+        if (!ext) return null;
+        const cwd = process.cwd();
+        return {
+          getCatalog: () => REPLACEABLE_POINTS.map((p) => ({ id: p.id, kind: p.kind, defaultImpl: p.defaultImpl, description: p.description })),
+          getEntries: () => ext.list().map((e) => ({ ...e })),
+          getManifest: () => ext.getManifest(),
+          getAssemblyDescribe: () =>
+            (localComponents?.assemblyRegistry as
+              import('../supervisor/assembly-registry.js').AssemblyRegistry | undefined)?.describe() ?? null,
+          togglePlugin: (pluginId: string, enabled: boolean) => {
+            const r = togglePluginInManifest(cwd, pluginId, enabled);
+            if (r.ok) ext.setManifest(loadExtensionManifest(cwd).manifest);
+            return r;
+          },
+        };
+      },
+      configureLocalModel: (config) => {
+        if (config.ollamaUrl) {
+          // 经协议层写配置（fire-and-forget：内存写同步、落盘异步，与原直连语义等价）
+          void protocolSend('config.set', { path: 'localModel.ollamaUrl', value: config.ollamaUrl });
+        }
+      },
+      localModelOps: {
+        start: (name) => LocalModelModule.getInstance().start(name),
+        stop: (name) => LocalModelModule.getInstance().stop(name),
+        switch: (name) => LocalModelModule.getInstance().switch(name),
+        register: (opts) => LocalModelModule.getInstance().registerModel(opts as unknown as Parameters<LocalModelModule['registerModel']>[0]),
+        unregister: (name) => LocalModelModule.getInstance().unregisterModel(name),
+        scanUnregistered: () => LocalModelModule.getInstance().scanUnregistered(),
+      },
+      historyProvider,
     });
-    sessionDir = agent.sessionDir;
-    // Wire ask_user tool to TUI handler
-    if (tuiHandler.onAskUser) {
-      setAskUserHandler((questions) => tuiHandler.onAskUser!(questions));
-    }
+    await uiSession.initialize(agentFactory);
+    const components = uiSession.getComponents<Awaited<ReturnType<typeof createAgent>>>();
+    sessionDir = components?.sessionDir ?? '';
+    // initialize 后 agent 组件就绪：供 kb/process 域延迟解析
+    localComponents = components ?? null;
+    // model 域 registry 重绑、orchestrator 域 bypassManager 均已内聚到
+    // UiProtocolSession.initialize —— TUI 不再持有组件/loop 引用
+    // ask_user 已由 UiProtocolSession 桥接到协议层（message.ask_user 事件 →
+    // handleProtocolEvent → 表单 → message.askUserResolve 应答），此处不再直驱本地表单。
+    // client 端发送协议请求（request-response 映射：id → resolve 回调表，经 InProc 传输）
+    protocolSend = (method: string, params?: unknown): Promise<unknown> => {
+      const id = `tui_${Date.now()}_${++protocolSeq}`;
+      return new Promise((resolve) => {
+        pendingRequests.set(id, (resp) => resolve(resp.result));
+        protocolClient.send({ kind: 'request', id, method, params });
+      });
+    };
+    // client 端接收协议消息：response → resolve 请求；event → handleProtocolEvent
+    protocolClient.onMessage((msg: UiMessage) => {
+      if (msg.kind === 'response') {
+        const cb = pendingRequests.get(msg.id);
+        if (cb) {
+          pendingRequests.delete(msg.id);
+          cb(msg as UiResponse);
+        }
+        return;
+      }
+      if (msg.kind !== 'event') return;
+      handleProtocolEvent(msg as UiEvent);
+    });
   } else {
-    agent = undefined as any;
+    // 远程模式：协议发送走 WS（/tui 端点，统一协议层，与本地模式对称）
+    protocolSend = (method: string, params?: unknown): Promise<unknown> => {
+      const id = `tui_${Date.now()}_${++protocolSeq}`;
+      return new Promise((resolve) => {
+        pendingRequests.set(id, (resp) => resolve(resp.result));
+        if (remoteWs && remoteWs.readyState === 1) {
+          remoteWs.send(JSON.stringify({ kind: 'request', id, method, params }));
+        } else {
+          resolve(undefined);
+        }
+      });
+    };
     sessionDir = '';
   }
+  // 纯协议客户端化后 TUI 不持有 loop/组件：以下适配层仅承载「本地模式下
+  // 与宿主进程内共享组件（components）同源」的只读数据（backgroundRegistry
+  // 由斜杠命令读取本地进程表；远程模式为 null）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const loop: any = agent?.loop ?? {
-    getActiveProvider: () => activeProvider,
-    getProviderRoutingInfo: () => null,
-    getTurnInfo: (_tc: number, _tu: number) => ({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 }),
-    setLifecycleSupervisor: () => {},
-    run: async () => {},
-    switchSession: async () => {},
-    switchProvider: async () => {},
-    getModelSources: () => null,
-    composeStrategy: null,
-    setScheduler: () => {},
-    notifyTaskFired: async () => {},
-    subscribeConfig: () => {},
-    shutdown: async () => {},
-  };
-  // 远程模式下 agent 为 undefined，这些变量仅用于本地 TUI 功能（斜杠命令等），用 any 避免 null 检查
+  const backgroundRegistry: any = (localComponents as Record<string, unknown> | null)?.backgroundRegistry ?? null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const backgroundRegistry: any = agent?.backgroundRegistry;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const modelRouter: any = agent?.modelRouter;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const knowledgeBase: any = agent?.knowledgeBase;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const composeStrategy: any = agent?.composeStrategy;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionManager: any = agent?.sessionManager;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contextComposer: any = agent?.contextComposer;
-  let originalSessionDir: string | null = null;  // /precise on 前保存的原始 session
-  let preciseModeActive = false;
-
-  // 检测启动时恢复的 session 类型（仅本地模式）
-  if (!remoteWs) {
-    const currentSessionId = path.basename(sessionDir);
-    const sessions = await sessionManager.list();
-    const resumedSession = sessions.find((s: { id: string; type?: string }) => s.id === currentSessionId);
-    if (resumedSession?.type === 'precise') {
-      const { PreciseStrategy } = await import('../context/precision/index.js');
-      loop.composeStrategy = new PreciseStrategy(sessionDir);
-      preciseModeActive = true;
-      const normalSessions = sessions.filter((s: { type?: string }) => (s.type ?? 'normal') === 'normal');
-      if (normalSessions.length > 0) {
-        originalSessionDir = sessionManager.getSessionDir(normalSessions[0]!.id);
-      }
-      chatLog.addSystem(theme.dim('精确模式 session 已恢复'));
-    }
-  }
-
-  // 注入 LifecycleSupervisor，实现运行时 provider 切换时自动管理本地模型进程
-  loop.setLifecycleSupervisor(supervisor);
+  // (sessionManager 已在上面统一创建，供协议层 backend 与 agentFactory 共用)
+  // knowledgeBase / contextComposer 直连引用已移除（T11-P2：kb 域承载
+  // 持久化 + composer 运行时条件），UI 不再持有组件对象
 
   const statsManager = new StatsManager();
 
@@ -1098,69 +923,42 @@ export async function runTui(
     tui.requestRender();
   };
 
-  // 创建 AgentFactory（注入到渠道，渠道通过此接口创建 AgentLoop）
-  const agentFactory: AgentFactory = {
-    createAgent: async (options) => {
-      return createAgent({
-        cwd: process.cwd(),
-        provider: activeProvider,
-        maxTurns: maxTurns ?? 20,
-        maxContext: maxContext ?? 40_000,
-        outputHandler: options.outputHandler as OutputHandler,
-        sessionId: options.sessionId,
-        channel: options.channel ?? 'tui',
-      });
-    },
-  };
+  // (agentFactory 已在上面统一定义，供 UiProtocolSession.initialize 创建 loop)
 
   // 设置 TUI 渠道的消息处理回调
   if (remoteWs) {
-    // ── 远程模式：通过 WebSocket 连接统一后端 ──
+    // ── 远程模式：通过 WebSocket 连接统一后端（协议层 message.*）──
     chatLog.addSystem(theme.success('🔗 Connected to running backend (port 3000)'));
 
+    // client 端接收协议消息：response → resolve 请求；event → handleProtocolEvent
+    // （与本地模式 protocolClient.onMessage 完全一致的协议分发）
     remoteWs.on('message', (data: Buffer) => {
       try {
-        const msg = JSON.parse(data.toString());
-        switch (msg.type) {
-          case 'text': tuiHandler.onText?.(msg.content); break;
-          case 'thinking': tuiHandler.onThinking?.(msg.content); break;
-          case 'tool_use': tuiHandler.onToolUse?.(msg.name, msg.inputSummary, msg.id); break;
-          case 'tool_result': tuiHandler.onToolResult?.(msg.content, msg.isError, msg.id); break;
-          case 'diff': tuiHandler.onDiff?.(msg.id, msg.filePath, msg.diffLines); break;
-          case 'status': tuiHandler.onStatus?.(msg.message, msg.level); break;
-          case 'turn_start': tuiHandler.onTurnStart?.(); break;
-          case 'flush': tuiHandler.onFlush?.(); break;
-          case 'interrupt': tuiHandler.onInterrupt?.(); break;
-          case 'turn_info': {
-            lastTurnCount = (msg as any).turnCount ?? lastTurnCount;
-            lastTokensUsed = (msg as any).tokensUsed ?? lastTokensUsed;
-            refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
-            break;
+        const msg = JSON.parse(data.toString()) as UiMessage;
+        if (msg.kind === 'response') {
+          const cb = pendingRequests.get(msg.id);
+          if (cb) {
+            pendingRequests.delete(msg.id);
+            cb(msg as UiResponse);
           }
-          case 'error':
-            chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(msg.message));
-            break;
+          return;
         }
+        if (msg.kind !== 'event') return;
+        handleProtocolEvent(msg as UiEvent);
       } catch { /* ignore */ }
     });
 
     remoteWs.on('close', () => {
       chatLog.addSystem(theme.warning('⚠ Backend connection lost. Restart to reconnect.'));
     });
-
-    tuiChannel.onHandleMessage = async (event: ChannelMessageEvent) => {
-      if (remoteWs?.readyState === 1) {
-        remoteWs.send(JSON.stringify({ type: 'chat', content: event.content }));
-      }
-    };
-  } else {
-    tuiChannel.onHandleMessage = async (event: ChannelMessageEvent) => {
-      await loop.run(event.content);
-      const stats = await statsManager.get(sessionDir);
-      const tc = stats.turn_count ?? 0;
-      refreshStatus(loop.getTurnInfo(tc, stats.current_context_tokens ?? 0));
-    };
   }
+
+  // 消息发送统一走协议层 message.chat → server 端 loop.run →
+  // message.* 事件回传 → handleProtocolEvent 驱动 UI（本地 InProc / 远程 WS 一致）。
+  // 状态栏刷新由 turn_info 事件（MESSAGE_TURN_INFO）驱动，无需本地直读 stats。
+  tuiChannel.onHandleMessage = async (event: ChannelMessageEvent) => {
+    await protocolSend('message.chat', { content: event.content });
+  };
 
   // 启动所有渠道（每个渠道自行处理消息）
   await channelManager.startAll(agentFactory);
@@ -1170,107 +968,17 @@ export async function runTui(
   // 在 channelManager.startAll() 之后注册，此时所有渠道已启动。
   // 工具内通过 ChannelManager.get() 查找目标渠道并调用其 send()。
   // 仅在本地 TUI 模式下注册——远程模式（remoteWs）下工具由服务端提供。
-  if (agent) {
+  if (localComponents) {
+    // 跨渠道发送工具注册到共享组件 toolRegistry（本地 InProc 模式下
+    // components 即 UiProtocolSession 持有的同一组组件）
     const { MessageDispatcher, createSendChannelMessageTool } = await import('../channels/dispatcher.js');
     const dispatcher = new MessageDispatcher(channelManager);
-    agent.toolRegistry.register(createSendChannelMessageTool(dispatcher));
+    const toolRegistry = (localComponents as unknown as { toolRegistry?: { register(t: unknown): void } }).toolRegistry;
+    toolRegistry?.register(createSendChannelMessageTool(dispatcher));
   }
 
-  // ── ASCII Art loader ──────────────────────────────────────────────
-  async function loadAsciiArt(maxWidth = 54): Promise<{ text: string; width: number } | null> {
-    const asciiDir = path.join(os.homedir(), '.agent', 'ascii');
-    const lastFile = path.join(asciiDir, '_last.txt');
-    try {
-      if (!fs.existsSync(asciiDir)) {
-        fs.mkdirSync(asciiDir, { recursive: true });
-        return null;
-      }
-      const files = fs.readdirSync(asciiDir);
-      const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
-      const imageFiles = files.filter(f =>
-        imageExts.includes(path.extname(f).toLowerCase()),
-      );
-      if (imageFiles.length === 0) return null;
-      let prevName = '';
-      try { prevName = fs.readFileSync(lastFile, 'utf-8').trim(); } catch { /* first */ }
-      const candidates =
-        imageFiles.length > 1 ? imageFiles.filter(f => f !== prevName) : imageFiles;
-      const pool = candidates.length > 0 ? candidates : imageFiles;
-      const picked = pool[Math.floor(Math.random() * pool.length)]!;
-      try { fs.writeFileSync(lastFile, picked, 'utf-8'); } catch { /* ignore */ }
-      const imgPath = path.join(asciiDir, picked);
-      const cachePath = path.join(asciiDir, picked + '.txt');
-      try {
-        const imgStat = fs.statSync(imgPath);
-        const cacheStat = fs.statSync(cachePath);
-        if (cacheStat.mtimeMs >= imgStat.mtimeMs) {
-          return JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as { text: string; width: number };
-        }
-      } catch { /* cache miss */ }
-      const { imageToAscii } = await import('../orchestrator/loop.js');
-      const result = await imageToAscii(imgPath, maxWidth);
-      if (result) {
-        try { fs.writeFileSync(cachePath, JSON.stringify(result), 'utf-8'); } catch { /* ignore */ }
-      }
-      return result;
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Welcome ──
-  const asciiArt = await loadAsciiArt(54);
-  const cwd = process.cwd();
-  const cwdDisplay = cwd.length > 50 ? '...' + cwd.slice(-47) : cwd;
-  const boxLines: string[] = [];
-  boxLines.push(theme.fg('\u256d' + BOX_H.repeat(58) + '\u256e'));
-  if (asciiArt) {
-    const artWidth = asciiArt.width;
-    const pad = Math.max(0, 56 - artWidth);
-    for (const line of asciiArt.text.split('\n')) {
-      boxLines.push(theme.fg('\u2502 ') + line + ' '.repeat(pad) + theme.fg(' \u2502'));
-    }
-  }
-  // Hyacinth \u6807\u9898\u884c
-  const titleLine = theme.fg(' Hyacinth');
-  const titlePad = Math.max(0, 56 - 9); // ' Hyacinth' = 9 chars visible
-  boxLines.push(theme.fg('\u2502 ') + titleLine + ' '.repeat(titlePad) + theme.fg(' \u2502'));
-  // CWD \u884c
-  const cwdPad = Math.max(0, 56 - [...cwdDisplay].length);
-  boxLines.push(theme.fg('\u2502 ') + theme.dim(cwdDisplay) + ' '.repeat(cwdPad) + theme.fg(' \u2502'));
-  boxLines.push(theme.fg('\u2570' + BOX_H.repeat(58) + '\u256f'));
-  chatLog.addSystem(boxLines.join('\n'));
-  chatLog.addSystem('');
-  chatLog.addSystem(theme.dim('Persona: ') + theme.accent(personaDir));
-  chatLog.addSystem('');
-
-
-  chatLog.addSystem(
-    theme.dim('Type ') +
-      theme.success('exit') +
-      theme.dim(' to quit. ') +
-      theme.success('Ctrl+C') +
-      theme.dim(' twice to force. ') +
-      theme.success('Ctrl+P') +
-      theme.dim(' to toggle provider.'),
-  );
-  chatLog.addSystem('');
-  if (detectLegacyTerminal()) {
-    chatLog.addSystem(
-      theme.warning('\u26a0 \u68c0\u6d4b\u5230\u65e7\u7248\u63a7\u5236\u53f0\uff0cUnicode/emoji \u53ef\u80fd\u663e\u793a\u6210\u65b9\u5757\u3002') +
-        '\n' +
-        theme.dim('  \u5efa\u8bae\u5b89\u88c5 Windows Terminal: ') +
-        theme.accent('winget install Microsoft.WindowsTerminal'),
-    );
-    chatLog.addSystem('');
-  }
-  tui.requestRender();
-
-  // Replay previous session events
-  if (sessionDir) {
-    replayEvents(chatLog, sessionDir);
-  }
-
+  // ── Welcome（tui-welcome.ts，tui.ts 深拆第四批）──
+  await showWelcome({ tui, chatLog, personaDir, sessionDir });
   // ── Input state ──
   let isProcessing = false;
   const messageQueue = new MessageQueue();
@@ -1301,8 +1009,7 @@ export async function runTui(
   function updateTokenEstimate(): void {
     const text = editor.getText();
     const estimated = Math.ceil(text.length / 4);
-    const ap = loop.getActiveProvider();
-    const providerLabel = `${ap.getProviderType()} \u00b7 `;
+    // provider/model 用本地缓存（纯协议客户端化，不读 loop）
     let footer = theme.dim(
       `Ctrl+C exit | Ctrl+L clear | Ctrl+P provider | Ctrl+F search | Ctrl+T tools`,
     );
@@ -1311,17 +1018,14 @@ export async function runTui(
     if (isThinking) {
       footer += theme.accent(' | Esc to stop');
     }
-    if (permissionQueue.length > 0) {
+    if (tuiPermission.hasPending()) {
       footer += theme.warning(' | \u2190\u2192 select  Enter confirm');
     }
-    if (backgroundRegistry) {
-      const bgCount = backgroundRegistry.list().filter((p: BackgroundProcessInfo) => p.status === 'running').length;
-      if (bgCount > 0) {
-        footer += theme.accent(` | \u2699 ${bgCount} bg process(es)`);
-      }
+    if (bgRunningCount > 0) {
+      footer += theme.accent(` | \u2699 ${bgRunningCount} bg process(es)`);
     }
 
-    footer += theme.dim(`\n${providerLabel}${ap.getModel()} \u00b7 ~${estimated} tokens`);
+    footer += theme.dim(`\n${providerTypeStart} \u00b7 ${modelName} \u00b7 ~${estimated} tokens`);
 
     if (messageQueue.size > 0) {
       footer += theme.fg(` | Queue: ${messageQueue.size}`);
@@ -1370,7 +1074,7 @@ export async function runTui(
     let input = text.trim();
     if (!input) {
       // 定时任务完成后队列中有待处理消息 → 空回车触发队列消费
-      if (!isProcessing && !loop.pendingTaskName && messageQueue.size > 0) {
+      if (!isProcessing && !pendingTaskLocal && messageQueue.size > 0) {
         const next = messageQueue.dequeue();
         if (next) await processBatch(next.text);
       }
@@ -1391,7 +1095,6 @@ export async function runTui(
       chatLog.addSystem(theme.dim('Goodbye.'));
       tui.requestRender();
       await channelManager.stopAll();
-      await loop.shutdown();
       // 清理插件钩子
       for (const cleanup of cleanupFns) cleanup();
       await supervisor.shutdownAll();
@@ -1399,6 +1102,83 @@ export async function runTui(
       process.exit(0);
     }
 
+    // ── model/local/* 命令处理器（tui-model-local.ts，tui.ts 深拆第五批）──
+    const modelLocalCmds = createModelLocalCmds({
+      tui,
+      chatLog,
+      localModel,
+      supervisor,
+      protocolSend,
+      setConfig,
+      refreshStatusFromProtocol,
+    });
+
+    // ── model 非 local 命令处理器（tui-model-cmds.ts，tui.ts 深拆第六批）──
+    const modelCmds = createModelCmds({
+      tui,
+      chatLog,
+      localModel,
+      protocolSend,
+      setConfig,
+      refreshStatusFromProtocol,
+      getProviderType: () => providerTypeStart,
+      getModelName: () => modelName,
+      applyThinking,
+      updateTokenEstimate,
+      getShowThinking: () => showThinking,
+      setShowThinking: (v) => { showThinking = v; },
+    });
+
+    // ── compress/* 命令处理器（tui-compress-cmds.ts，tui.ts 深拆第七批）──
+    const compressCmds = createCompressCmds({
+      tui,
+      chatLog,
+      setConfig,
+      updateTokenEstimate,
+    });
+
+    // ── channel/* 命令处理器（tui-channel-cmds.ts，tui.ts 深拆第八批）──
+    const channelCmds = createChannelCmds({
+      tui,
+      chatLog,
+      // 协议发送器（lazy getter：protocolSend 在 initialize 后才赋值，取最新值）
+      getProtocolSend: () => protocolSend,
+      // 通道 registry 降级源：本地模式读共享组件（components.loop.modelRouter，
+      // 与宿主进程内同一实例）；远程模式为 null（纯协议路径）
+      getChannelRegistry: () => {
+        const compLoop = (localComponents as Record<string, unknown> | null)?.loop as
+          | { modelRouter?: { getRegistry(): ChannelRegistryLike } }
+          | undefined;
+        return compLoop?.modelRouter?.getRegistry() ?? null;
+      },
+    });
+
+    // ── 通用渠道命令分发（tui-channel-cmds.ts createChannelDispatch，第十批）──
+    const channelDispatch = createChannelDispatch({
+      tui,
+      chatLog,
+      getChannelManager: () => channelManager,
+    });
+
+    // ── session/* 命令处理器（tui-session-cmds.ts，tui.ts 深拆第九批）──
+    const sessionCmds = createSessionCmds({
+      tui,
+      chatLog,
+      updateTokenEstimate,
+      protocolSend,
+      statsManager,
+      refreshStatus,
+      // 会话切换后的即时状态刷新：本地合成 TurnInfo（不再经 loop，纯协议客户端化）
+      getLoop: () => ({
+        getTurnInfo: (tc: number, tu: number) => ({
+          turnCount: tc, maxTurns, tokensUsed: tu, maxContextTokens: maxContext, sessionId: sessionDir, compressCount: 0,
+        }),
+      }),
+      getSessionDir: () => sessionDir,
+      setSessionDir: (d) => { sessionDir = d; },
+      setLastTurnCount: (n) => { lastTurnCount = n; },
+      setLastTokensUsed: (n) => { lastTokensUsed = n; },
+    });
     // 二级菜单：检查命令是否有 children
     if (input.startsWith('/')) {
       const spaceIdx = input.indexOf(' ');
@@ -1412,10 +1192,10 @@ export async function runTui(
         if (cmdName === 'model') {
           const dynamicChildren: SlashCommandDef[] = [];
           // a) Current online model
-          const activeP = loop.getActiveProvider();
+          // a) Current online model（本地缓存 providerTypeStart/modelName）
           dynamicChildren.push({
             name: 'current_online',
-            description: `${activeP.getProviderType()} (online) - ${activeP.getModel()}`,
+            description: `${providerTypeStart} (online) - ${modelName}`,
             icon: '\u2601',
             category: 'model',
           });
@@ -1479,30 +1259,20 @@ export async function runTui(
     }
 
     // ===== Sub-Command Handler =====
-    /** 持久化单个配置字段到 JSON 文件（不展开默认值） */
-    async function persistConfigField(key: string, value: unknown): Promise<void> {
-      const configPath = path.join(os.homedir(), '.agent', 'config.json');
-      try {
-        const raw = await fs.promises.readFile(configPath, 'utf-8');
-        const obj = JSON.parse(raw);
-        const parts = key.split('.');
-        let cur: Record<string, unknown> = obj;
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') {
-            cur[parts[i]] = {};
-          }
-          cur = cur[parts[i]] as Record<string, unknown>;
-        }
-        cur[parts[parts.length - 1]] = value;
-        await fs.promises.writeFile(configPath, JSON.stringify(obj, null, 2), 'utf-8');
-      } catch { /* 文件不存在或解析失败，跳过持久化 */ }
+    /**
+     * 经协议层写配置（config.set 自动持久化到 configCenter.save()，
+     * 替代直连 cfg.set + cfg.save / persistConfigField 的组合）。
+     * 与直连期语义差异：持久化优先写项目级配置（ConfigManager 设计），
+     * 而非固定写全局 ~/.agent/config.json——与 cfg.save() 既有行为一致。
+     */
+    async function setConfig(path: string, value: unknown): Promise<void> {
+      await protocolSend('config.set', { path, value });
     }
 
     /** /model thinking 公共逻辑 */
-    function applyThinking(action: string): void {
-      const cfg = RuntimeConfigCenter.getInstance();
-      const activeP = loop.getActiveProvider();
-      const providerType = activeP.getProviderType();
+    async function applyThinking(action: string): Promise<void> {
+      // provider 类型用本地缓存（providerTypeStart，由事件/命令维护，不读 loop）
+      const providerType = providerTypeStart;
 
       const effortOptions: Record<string, { label: string; effort: string | number }> = {};
       if (providerType === 'deepseek') {
@@ -1516,20 +1286,18 @@ export async function runTui(
       }
 
       if (action === 'on') {
-        cfg.set('provider.enableThinking', true);
-        activeP.setThinking?.(true);
-        persistConfigField('provider.enableThinking', true);
+        await setConfig('provider.enableThinking', true);
+        // 运行时热改经协议层 model.setThinking（与 WebUI 同路径，域委托活跃 Provider）
+        await protocolSend('model.setThinking', { enabled: true });
         chatLog.addSystem(theme.success('Thinking enabled'));
       } else if (action === 'off') {
-        cfg.set('provider.enableThinking', false);
-        activeP.setThinking?.(false);
-        persistConfigField('provider.enableThinking', false);
+        await setConfig('provider.enableThinking', false);
+        await protocolSend('model.setThinking', { enabled: false });
         chatLog.addSystem(theme.success('Thinking disabled'));
       } else if (effortOptions[action]) {
         const opt = effortOptions[action];
-        cfg.set('provider.enableThinking', true);
-        activeP.setThinking?.(true, opt.effort);
-        persistConfigField('provider.enableThinking', true);
+        await setConfig('provider.enableThinking', true);
+        await protocolSend('model.setThinking', { enabled: true, effort: opt.effort });
         chatLog.addSystem(theme.success(`Thinking enabled (${opt.label})`));
       } else {
         const optsStr = Object.entries(effortOptions)
@@ -1613,868 +1381,80 @@ export async function runTui(
      * 处理二级菜单子命令的执行。
      * path 格式: "model/switch" / "model/provider" 等
      */
+
     async function handleSlashSubCommand(cmdPath: string, restArgs: string): Promise<void> {
-      const cfg = RuntimeConfigCenter.getInstance();
-
+      // ── session/* 会话管理（tui-session-cmds.ts，tui.ts 深拆第九批）──
       if (cmdPath.startsWith('session/')) {
-        let sub = cmdPath.slice('session/'.length);
-        // 支持嵌套路径: session/<id>/load → sub = "<id>/load"
-        const subParts = sub.split('/');
-        if (subParts.length === 2 && (subParts[1] === 'load' || subParts[1] === 'delete')) {
-          // session/<id>/load 或 session/<id>/delete
-          const sessionId = subParts[0];
-          if (subParts[1] === 'load') {
-            const SessionManager = (await import('../memory/session.js')).SessionManager;
-            const sm = new SessionManager(process.cwd());
-            const dir = sm.getSessionDir(sessionId);
-            const fsPromises = await import('node:fs/promises');
-            try {
-              await fsPromises.access(dir);
-            } catch {
-              chatLog.addSystem(theme.warning(`Session "${sessionId}" not found. Use /session list to see available sessions.`));
-              tui.requestRender();
-              updateTokenEstimate();
-              return;
-            }
-            // 就地切换，不重启
-            await loop.switchSession(dir);
-            sessionDir = dir;
-            lastTurnCount = 0;
-            lastTokensUsed = 0;
-            const newStats = await statsManager.get(dir);
-            refreshStatus(loop.getTurnInfo(newStats.turn_count ?? 0, newStats.current_context_tokens ?? 0));
-            chatLog.clearAll();
-            replayEvents(chatLog, dir);
-            chatLog.addSystem(theme.success(`已切换到 session ${sessionId}`));
-            updateTokenEstimate();
-          } else {
-            const SessionManager = (await import('../memory/session.js')).SessionManager;
-            const sm = new SessionManager(process.cwd());
-            const dir = sm.getSessionDir(sessionId);
-
-            // 保护当前活跃 session
-            if (dir === sessionDir) {
-              chatLog.addSystem(theme.warning(`Cannot delete the currently active session "${sessionId}". Switch to another session first.`));
-              tui.requestRender();
-              updateTokenEstimate();
-              return;
-            }
-
-            try {
-              const fsPromises = await import('node:fs/promises');
-              await fsPromises.access(dir);
-              await fsPromises.rm(dir, { recursive: true, force: true });
-              chatLog.addSystem(theme.success(`Session ${sessionId} deleted`));
-            } catch {
-              chatLog.addSystem(theme.warning(`Session ${sessionId} not found`));
-            }
-          }
-          tui.requestRender();
-          updateTokenEstimate();
-          return;
-        }
-        if (sub === 'list') {
-          const SessionManager = (await import('../memory/session.js')).SessionManager;
-          const sm = new SessionManager(process.cwd());
-          const sessions = await sm.list();
-          const modeType = preciseModeActive ? 'precise' : 'normal';
-          const filtered = sessions.filter(s => (s.type ?? 'normal') === modeType);
-          if (filtered.length === 0) {
-            chatLog.addSystem(theme.dim(`No ${modeType} sessions found`));
-          } else {
-            for (const s of filtered) {
-              const isCurrent = s.id === path.basename(sessionDir);
-              const marker = isCurrent ? theme.success(' ← current') : '';
-              const typeLabel = s.type ? theme.dim(` [${s.type}]`) : '';
-              chatLog.addSystem(
-                theme.accent(s.id) +
-                theme.dim(` | created: ${s.createdAt}`) +
-                theme.dim(` | updated: ${s.updatedAt}`) +
-                typeLabel + marker
-              );
-            }
-            chatLog.addSystem(theme.dim('─'.repeat(60)));
-            chatLog.addSystem(theme.dim('加载会话: /session <完整ID>/load   例如: /session ' + (filtered[0]?.id ?? '') + '/load'));
-          }
-        } else if (sub === 'new') {
-          chatLog.addSystem(theme.warning('请使用 hyacinth start 启动新会话（当前会话需要退出）'));
-        } else if (sub === 'load') {
-          const id = restArgs?.trim();
-          if (!id) {
-            chatLog.addSystem(theme.warning('用法: /session load <sessionId>'));
-          } else {
-            chatLog.addSystem(theme.warning(`请使用 hyacinth start --session ${id} 加载会话`));
-          }
-        } else if (sub === 'delete') {
-          const id = restArgs?.trim();
-          if (!id) {
-            chatLog.addSystem(theme.warning('用法: /session delete <sessionId>'));
-          } else {
-            const SessionManager = (await import('../memory/session.js')).SessionManager;
-            const sm = new SessionManager(process.cwd());
-            // 检查 session 类型是否匹配当前模式
-            const sessions = await sm.list();
-            const target = sessions.find(s => s.id === id);
-            if (!target) {
-              chatLog.addSystem(theme.warning(`Session ${id} not found`));
-            } else if ((target.type ?? 'normal') !== (preciseModeActive ? 'precise' : 'normal')) {
-              chatLog.addSystem(theme.warning(`Session ${id} 是 [${target.type ?? 'normal'}] 类型，当前为 [${preciseModeActive ? 'precise' : 'normal'}] 模式，无法跨模式操作`));
-            } else {
-              const dir = sm.getSessionDir(id);
-              try {
-                const fsPromises = await import('node:fs/promises');
-                await fsPromises.access(dir);
-                await fsPromises.rm(dir, { recursive: true, force: true });
-                chatLog.addSystem(theme.success(`Session ${id} deleted`));
-              } catch {
-                chatLog.addSystem(theme.warning(`Session ${id} not found`));
-              }
-            }
-          }
-        }
-        tui.requestRender();
+        await sessionCmds.handle(cmdPath, restArgs);
         return;
       }
 
       switch (cmdPath) {
+        // ── model 非 local 命令（tui-model-cmds.ts，tui.ts 深拆第六批）──
         case 'model/settings/switch':
-        case 'model/switch': {
-          if (!restArgs) {
-            chatLog.addSystem(theme.warning('Usage: /model switch <model-name>'));
-            tui.requestRender();
-            return;
-          }
-          const activeP = loop.getActiveProvider();
-          const providerType = activeP.getProviderType();
-          cfg.set(`provider.${providerType}.model`, restArgs);
-          cfg.save().catch(() => {});
-          chatLog.addSystem(
-            theme.success('Model name set to ') + theme.fg(String(restArgs)) + theme.dim(` (provider: ${providerType})`),
-          );
-          tui.requestRender();
-          refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-          return;
-        }
-
+        case 'model/switch':
         case 'model/settings/provider':
-        case 'model/provider': {
-          if (!restArgs) {
-            chatLog.addSystem(theme.warning('Usage: /model provider <anthropic|openai|deepseek|gemini|groq|xai|mistral|openrouter|moonshot|qwen|zhipu|minimax|mimo|local>'));
-            tui.requestRender();
-            return;
-          }
-
-          if (restArgs === 'local') {
-            const lmList = localModel.list();
-
-            // 无已注册模型 → 检查本地模型配置或直接切
-            if (lmList.length === 0) {
-              const { getLocalProviderConfigLoader } = await import('../provider/local-config.js');
-              const localCfg = getLocalProviderConfigLoader();
-              if (localCfg?.defaultModel) {
-                // 本地模型已配置 → 直接切换
-                try {
-                  await loop.switchProvider('local');
-                  // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                  cfg.set('provider.active', 'local');
-                  cfg.save().catch(() => {});
-                  modelName = loop.getActiveProvider().getModel();
-                  providerTypeStart = loop.getActiveProvider().getProviderType();
-                  chatLog.addSystem(theme.success(`Switched to local (${localCfg.baseUrl}, ${localCfg.defaultModel})`));
-                  chatLog.addSystem(theme.dim('Register models via /model local/register for process management.'));
-                  refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-                } catch (err) {
-                  chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-                }
-              } else {
-                chatLog.addSystem(theme.warning('No local models configured.'));
-                chatLog.addSystem(theme.dim('Set a local model in config or register models via /model local/register.'));
-              }
-              tui.requestRender();
-              return;
-            }
-
-            const targetName = localModel.getActive() ?? lmList[0].name;
-
-            localModel.switch(targetName).then(async (info) => {
-              if (info) {
-                cfg.set('provider.local', {
-                  type: 'local',
-                  model: info.modelFile ?? targetName,
-                  baseUrl: info.baseUrl,
-                });
-                cfg.set('provider.local.modelKey', targetName);
-                cfg.save().catch(() => {});
-                try {
-                  await loop.switchProvider('local');
-                  // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                  cfg.set('provider.active', 'local');
-                  cfg.save().catch(() => {});
-                  modelName = loop.getActiveProvider().getModel();
-                  providerTypeStart = loop.getActiveProvider().getProviderType();
-                  chatLog.addSystem(theme.success(`Switched to local model: ${targetName} (port ${info.port})`));
-                  refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-                } catch (swErr) {
-                  chatLog.addSystem(theme.error(`Failed: ${(swErr as Error).message}`));
-                }
-              } else {
-                chatLog.addSystem(theme.error(`Failed to start ${targetName}`));
-              }
-              tui.requestRender();
-            }).catch((e) => {
-              chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-              tui.requestRender();
-            });
-            return;
-          }
-
-          localModel.getBridge().stopAll().catch(() => {});
-          try {
-            await loop.switchProvider(restArgs);
-            // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-            cfg.set('provider.active', restArgs);
-            cfg.save().catch(() => {});
-          } catch (e) {
-            chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-            tui.requestRender();
-            return;
-          }
-          modelName = loop.getActiveProvider().getModel();
-          providerTypeStart = loop.getActiveProvider().getProviderType();
-          chatLog.addSystem(
-            theme.success('Provider switched to ') + theme.fg(String(restArgs)) + theme.dim(' (persisted)'),
-          );
-          tui.requestRender();
-          refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-          return;
-        }
-
+        case 'model/provider':
         case 'model/settings/source':
-        case 'model/source': {
-          if (!restArgs) {
-            chatLog.addSystem(theme.warning('Usage: /model source <role> <main|local|channel-name>'));
-            tui.requestRender();
-            return;
-          }
-          const parts2 = restArgs.split(/\s+/).filter(Boolean);
-          if (parts2.length < 2) {
-            chatLog.addSystem(theme.warning('Usage: /model source <assessment|planning|compression|sub-agent|all> <main|local|channel-name>'));
-            tui.requestRender();
-            return;
-          }
-          const roleArg = parts2[0].toLowerCase();
-          const sourceArg = parts2[1];
-          const validRoles = ['assessment', 'planning', 'compression', 'sub-agent', 'all'];
-          if (!validRoles.includes(roleArg)) {
-            chatLog.addSystem(theme.warning('Role must be: assessment, planning, compression, sub-agent, or all'));
-            tui.requestRender();
-            return;
-          }
-          // 尝试用 ModelChannelRegistry 的 setRoleMapping（多通道模式）
-          const modelRouter = (loop as any).modelRouter;
-          const registry = modelRouter?.getRegistry();
-          const channelNames = registry ? registry.listChannelNames() : [];
-          const isChannelName = channelNames.includes(sourceArg);
-
-          try {
-            if (isChannelName && registry) {
-              // 映射到已注册的通道
-              const roles = roleArg === 'all'
-                ? ['assessment', 'planning', 'compression', 'sub-agent']
-                : [roleArg];
-              for (const r of roles) {
-                registry.setRoleMapping(r, sourceArg);
-              }
-              chatLog.addSystem(theme.success(`Mapped ${roles.join(', ')} → channel "${sourceArg}"`));
-            } else {
-              chatLog.addSystem(theme.warning(`Channel "${sourceArg}" not found. Available: ${channelNames.join(', ') || '(none)'}. Use /channel add ${sourceArg} <provider> [model] to create it.`));
-            }
-          } catch (e) {
-            chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-          }
-          tui.requestRender();
-          refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-          return;
-        }
-
+        case 'model/source':
         case 'model/settings/thinking':
-        case 'model/thinking': {
-          applyThinking(restArgs);
-          return;
-        }
-
-        // 四级菜单：/model thinking on|off|high|max 通过子面板选择
+        case 'model/thinking':
         case 'model/settings/thinking/on':
-        case 'model/thinking/on':     applyThinking('on'); return;
+        case 'model/thinking/on':
         case 'model/settings/thinking/off':
-        case 'model/thinking/off':    applyThinking('off'); return;
+        case 'model/thinking/off':
         case 'model/settings/thinking/high':
-        case 'model/thinking/high':   applyThinking('high'); return;
+        case 'model/thinking/high':
         case 'model/settings/thinking/max':
-        case 'model/thinking/max':    applyThinking('max'); return;
+        case 'model/thinking/max':
         case 'model/settings/thinking/4k':
-        case 'model/thinking/4k':     applyThinking('4k'); return;
+        case 'model/thinking/4k':
         case 'model/settings/thinking/8k':
-        case 'model/thinking/8k':     applyThinking('8k'); return;
+        case 'model/thinking/8k':
         case 'model/settings/thinking/16k':
-        case 'model/thinking/16k':    applyThinking('16k'); return;
+        case 'model/thinking/16k':
         case 'model/settings/thinking/32k':
-        case 'model/thinking/32k':    applyThinking('32k'); return;
-
+        case 'model/thinking/32k':
         case 'model/settings/show-thinking':
-        case 'model/show-thinking': {
-          showThinking = !showThinking;
-          chatLog.addSystem(
-            theme.success(showThinking ? 'Thinking content will be shown' : 'Thinking content hidden'),
-          );
-          tui.requestRender();
-          updateTokenEstimate();
-          return;
-        }
-
+        case 'model/show-thinking':
         case 'model/settings/info':
-        case 'model/info': {
-          const providerName = String(cfg.get('provider.active') ?? 'unknown');
-          const activeProvider = loop.getActiveProvider();
-          const modelName = activeProvider ? activeProvider.getModel() : 'unknown';
-          const lines: string[] = [];
-          lines.push(theme.accent('=== Model Info ==='));
-          lines.push('  Provider: ' + theme.fg(providerName));
-          lines.push('  Model:    ' + theme.fg(modelName));
-          const routing = loop.getProviderRoutingInfo();
-          if (routing) {
-            lines.push('  Route:    ' + theme.fg(routing.mode) + (routing.isLocal ? theme.success(' (local)') : theme.accent(' (online)')));
-          }
-          // 通道信息
-          const modelRouter = (loop as any).modelRouter;
-          if (modelRouter) {
-            const registry = modelRouter.getRegistry();
-            const channels = registry.listChannels();
-            const roles = registry.listRoles();
-            if (channels.length > 1 || Object.keys(roles).some(r => roles[r] !== 'main')) {
-              lines.push(theme.dim('  ── Channels ──'));
-              for (const ch of channels) {
-                const chRoles = Object.entries(roles)
-                  .filter(([, cn]) => cn === ch.name)
-                  .map(([r]) => r);
-                const roleStr = chRoles.length > 0 ? ' ← ' + chRoles.join(', ') : '';
-                lines.push(theme.dim(`    ${ch.name}: ${ch.provider}${ch.model ? '/' + ch.model : ''}`) + theme.fg(roleStr));
-              }
-            }
-          }
-          // 旧 source 信息
-          const sources = loop.getModelSources();
-          if (sources) {
-            const labels: Record<string, string> = { assessment: '评估', planning: '规划', compression: '压缩' };
-            for (const [role, src] of Object.entries(sources)) {
-              const label = labels[role] ?? role;
-              const srcColor = src === 'local' ? theme.success(String(src)) : theme.accent(String(src));
-              lines.push('    ' + theme.fg(label) + theme.dim(': ') + srcColor);
-            }
-          }
-          chatLog.addSystem(lines.join('\n'));
-          tui.requestRender();
-          updateTokenEstimate();
-          return;
-        }
-
+        case 'model/info':
         case 'model/settings/context': {
-          if (!restArgs) {
-            const activeP = loop.getActiveProvider();
-            const modelCtxWindow = getModelContextWindow(activeP.getProviderType(), activeP.getModel());
-            chatLog.addSystem(theme.warning('Usage: /model settings context <tokens>') + theme.dim(` (1-${modelCtxWindow.toLocaleString()})`));
-            tui.requestRender();
-            updateTokenEstimate();
-            return;
-          }
-          const tokens = parseInt(restArgs.trim(), 10);
-          const activeP = loop.getActiveProvider();
-          const modelCtxWindow = getModelContextWindow(activeP.getProviderType(), activeP.getModel());
-          const upper = modelCtxWindow;
-          if (isNaN(tokens) || tokens < 1 || tokens > upper) {
-            chatLog.addSystem(theme.warning(`Usage: /model settings context <1-${upper.toLocaleString()}>`) + theme.dim(` (model: ${activeP.getModel()})`));
-            tui.requestRender();
-            updateTokenEstimate();
-            return;
-          }
-          cfg.set('session.maxContext', tokens);
-          cfg.save().catch(() => {});
-          chatLog.addSystem(theme.success('Max context set to ') + theme.fg(tokens.toLocaleString() + ' tokens'));
-          refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-          updateTokenEstimate();
+          await modelCmds.handle(cmdPath, restArgs);
           return;
         }
 
-        // ── 本地模型 L2: model/local/start ──
-        case 'model/local/start': {
-          const { detectLocalBackend } = await import('../provider/local-config.js');
-          const detected = await detectLocalBackend();
-          const ollamaBin = localModel.checkOllama();
-          const llamacppBin = localModel.checkLlamacpp();
-
-          const backend = restArgs?.toLowerCase();
-          const validBackend = backend === 'ollama' || backend === 'llamacpp' || backend === 'llama.cpp';
-
-          // 指定了 backend → 启动那个
-          if (validBackend) {
-            const target = (backend === 'llamacpp' || backend === 'llama.cpp') ? 'llamacpp' : 'ollama';
-            if (target === 'ollama' && ollamaBin) {
-              if (detected?.backend === 'ollama') {
-                chatLog.addSystem(theme.success('Ollama 已在运行。使用 /model/local/switch 切换。'));
-              } else {
-                chatLog.addSystem(theme.accent('启动 Ollama...'));
-                const info = await supervisor.startOllamaOnDemand(process.cwd());
-                chatLog.addSystem(info ? theme.success('Ollama 已启动（框架管理进程）。') : theme.warning('启动失败，请手动运行 ollama serve。'));
-              }
-            } else if (target === 'llamacpp' && llamacppBin) {
-              const regModels = localModel.list();
-              if (regModels.length === 0) {
-                chatLog.addSystem(theme.warning('无注册的 llama.cpp 模型。请先用 /model/local/register 注册。'));
-              } else {
-                localModel.start(regModels[0].name).then(async (info) => {
-                  if (info) {
-                    cfg.set('provider.local', { type: 'local', model: info.modelFile ?? regModels[0].name, baseUrl: info.baseUrl });
-                    cfg.set('provider.local.modelKey', regModels[0].name);
-                    cfg.save().catch(() => {});
-                    try { await loop.switchProvider('local'); cfg.set('provider.active', 'local'); cfg.save().catch(() => {}); chatLog.addSystem(theme.success(`llama.cpp ${regModels[0].name} started`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
-                    catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
-                  }
-                  tui.requestRender();
-                }).catch((e) => { chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`)); tui.requestRender(); });
-              }
-            } else {
-              chatLog.addSystem(theme.warning(`${backend} 未安装。`));
-            }
-            tui.requestRender();
-            return;
-          }
-
-          // 指定了已注册模型名 → 按名启动
-          if (restArgs) {
-            const lm = localModel.list().find((m: { name: string }) => m.name === restArgs);
-            if (lm) {
-              localModel.start(restArgs).then(async (info) => {
-                if (info) {
-                  cfg.set('provider.local', { type: 'local', model: info.modelFile ?? restArgs, baseUrl: info.baseUrl });
-                  cfg.set('provider.local.modelKey', restArgs);
-                  cfg.save().catch(() => {});
-                  try { await loop.switchProvider('local'); cfg.set('provider.active', 'local'); cfg.save().catch(() => {}); chatLog.addSystem(theme.success(`${restArgs} started on port ${info.port}`)); refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed)); }
-                  catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
-                } else { chatLog.addSystem(theme.error(`Failed to start ${restArgs}`)); }
-                tui.requestRender();
-              }).catch((e) => { chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`)); tui.requestRender(); });
-            } else {
-              chatLog.addSystem(theme.warning(`Model "${restArgs}" not registered. Available: ${localModel.list().map((m: { name: string }) => m.name).join(', ') || 'none'}`));
-              chatLog.addSystem(theme.dim('To start a backend: /model/local start ollama | /model/local start llamacpp'));
-              tui.requestRender();
-            }
-            return;
-          }
-
-          // 无参 → 列出可用选项
-          chatLog.addSystem(theme.fg('── 可用本地后端 ──'));
-          if (detected) chatLog.addSystem(theme.success(`${detected.backend} 正在运行 — ${detected.baseUrl}`));
-          if (ollamaBin) chatLog.addSystem(theme.dim(`Ollama ${detected?.backend === 'ollama' ? '(运行中)' : '— /model/local start ollama'}`));
-          if (llamacppBin) chatLog.addSystem(theme.dim(`llama.cpp ${detected?.backend === 'llamacpp' ? '(运行中)' : '— /model/local start llamacpp'}`));
-          if (!ollamaBin && !llamacppBin) chatLog.addSystem(theme.warning('本地模型服务未配置。请安装 Ollama 或 llama.cpp。'));
-          const reg = localModel.list();
-          if (reg.length > 0) chatLog.addSystem(theme.dim(`已注册模型: ${reg.map((m: { name: string }) => m.name).join(', ')}`));
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/stop ──
-        case 'model/local/stop': {
-          const { detectLocalBackend } = await import('../provider/local-config.js');
-          const detected = await detectLocalBackend();
-          const backend = restArgs?.toLowerCase();
-          if (backend === 'ollama') {
-            if (detected?.backend === 'ollama') {
-              try { await supervisor.stopModel('ollama'); chatLog.addSystem(theme.success('Ollama 已停止。')); }
-              catch { chatLog.addSystem(theme.warning('无法停止 Ollama。请手动执行 ollama stop。')); }
-            } else { chatLog.addSystem(theme.dim('Ollama 未在运行。')); }
-            tui.requestRender(); return;
-          }
-          if (backend === 'llamacpp' || backend === 'llama.cpp') {
-            const running = localModel.getBridge().getAllStatus().filter((s: { state: string }) => s.state === 'running');
-            if (running.length > 0) { for (const m of running) { localModel.getBridge().stop(m.name).catch(() => {}); chatLog.addSystem(theme.success(`Stopped: ${m.name}`)); } }
-            else { chatLog.addSystem(theme.dim('llama.cpp 未在运行。')); }
-            tui.requestRender(); return;
-          }
-          // 无参 → 停止所有
-          let stopped = 0;
-          if (detected?.backend === 'ollama') {
-            try { await supervisor.stopModel('ollama'); stopped++; chatLog.addSystem(theme.success('Ollama 已停止。')); }
-            catch { chatLog.addSystem(theme.warning('无法停止 Ollama。')); }
-          }
-          const running = localModel.getBridge().getAllStatus().filter((s: { state: string }) => s.state === 'running');
-          for (const m of running) { localModel.getBridge().stop(m.name).catch(() => {}); stopped++; chatLog.addSystem(theme.success(`Stopped: ${m.name}`)); }
-          if (stopped === 0) chatLog.addSystem(theme.dim('没有运行中的本地服务。'));
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/status ──
-        case 'model/local/status': {
-          const { detectLocalBackend } = await import('../provider/local-config.js');
-          const detected = await detectLocalBackend();
-          const ollamaBin = localModel.checkOllama();
-          const llamacppBin = localModel.checkLlamacpp();
-          chatLog.addSystem(theme.fg('── 本地模型状态 ──'));
-          chatLog.addSystem(detected ? theme.success(`运行中: ${detected.backend} — ${detected.baseUrl}`) : theme.dim('运行中: 无'));
-          chatLog.addSystem(theme.dim(`Ollama: ${ollamaBin ? '已安装' : '未安装'}  |  llama.cpp: ${llamacppBin ? '已安装' : '未安装'}`));
-          const reg = localModel.list();
-          if (reg.length > 0) chatLog.addSystem(theme.dim(`已注册模型: ${reg.map((m: { name: string }) => m.name).join(', ')}`));
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/switch ──
-        case 'model/local/switch': {
-          try {
-            await loop.switchProvider('local');
-            // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-            cfg.set('provider.active', 'local');
-            cfg.save().catch(() => {});
-            modelName = loop.getActiveProvider().getModel();
-            providerTypeStart = loop.getActiveProvider().getProviderType();
-            chatLog.addSystem(theme.success(`Switched to local (${loop.getActiveProvider().getProviderType()})`));
-            refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-          } catch (err) {
-            chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-          }
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/register ──
-        case 'model/local/register': {
-          const found = await localModel.scanUnregistered();
-          if (found.length === 0) {
-            chatLog.addSystem(theme.dim('无新模型。已检查 models/ 目录 (GGUF) 和 ollama list。'));
-          } else {
-            for (const f of found) {
-              localModel.registerModel({ name: f.name, modelFile: f.modelFile, backend: f.backend as 'llama.cpp' | 'ollama' | undefined });
-              chatLog.addSystem(theme.success(`Registered: ${f.name} (${f.backend ?? 'llama.cpp'})`));
-            }
-          }
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/unregister ──
-        case 'model/local/unregister': {
-          if (!restArgs) { chatLog.addSystem(theme.warning('Usage: /model/local unregister <name>')); tui.requestRender(); return; }
-          chatLog.addSystem(theme.success(localModel.unregister(restArgs)));
-          tui.requestRender();
-          return;
-        }
-
-        // ── 本地模型 L2: model/local/detect ──
+        // ── 本地模型 L2（tui-model-local.ts，tui.ts 深拆第五批）──
+        case 'model/local/start':
+        case 'model/local/stop':
+        case 'model/local/status':
+        case 'model/local/switch':
+        case 'model/local/register':
+        case 'model/local/unregister':
         case 'model/local/detect': {
-          const { detectLocalBackend } = await import('../provider/local-config.js');
-          const detected = await detectLocalBackend();
-          const ollamaBin = localModel.checkOllama();
-          const llamacppBin = localModel.checkLlamacpp();
-          chatLog.addSystem(theme.fg('── 本地模型检测 ──'));
-          chatLog.addSystem(detected ? theme.success(`运行中: ${detected.backend} — ${detected.baseUrl}`) : theme.dim('运行中: 无'));
-          chatLog.addSystem(theme.dim(`Ollama: ${ollamaBin ? '已安装 (' + ollamaBin + ')' : '未安装'}`));
-          chatLog.addSystem(theme.dim(`llama.cpp: ${llamacppBin ? '已安装 (' + llamacppBin + ')' : '未安装'}`));
-          const reg = localModel.list();
-          if (reg.length > 0) chatLog.addSystem(theme.dim(`已注册模型: ${reg.map((m: { name: string }) => m.name).join(', ')}`));
-          tui.requestRender();
+          await modelLocalCmds.handle(cmdPath, restArgs);
           return;
         }
 
         default: {
-          // 在线模型: model/online/<provider>/<modelName|config>
-          if (cmdPath.startsWith('model/online/')) {
-            const onlineParts = cmdPath.split('/');
-            if (onlineParts.length >= 4) {
-              const provider = onlineParts[2]!;
-              const sub = onlineParts[3]!;
-              if (sub === 'config') {
-                chatLog.addSystem(theme.accent(`Configure ${provider}: Use /context <tokens> to adjust context window`));
-                tui.requestRender();
-                return;
-              }
-              localModel.getBridge().stopAll().catch(() => {});
-              try {
-                cfg.set(`provider.${provider}.model`, sub);
-                cfg.save().catch(() => {});
-                await loop.switchProvider(provider);
-                // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                cfg.set('provider.active', provider);
-                cfg.save().catch(() => {});
-                modelName = loop.getActiveProvider().getModel();
-                providerTypeStart = loop.getActiveProvider().getProviderType();
-                chatLog.addSystem(theme.success(`Switched to ${provider}/${sub}`));
-                refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-              } catch (err) {
-                chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-              }
-              tui.requestRender();
-              return;
-            }
-          }
-          // 本地模型 L1 直接切换: model/local_<modelName>
-          if (cmdPath.startsWith('model/local_')) {
-            const lmName = cmdPath.slice('model/local_'.length);
-            const lm = localModel.list().find((m) => m.name === lmName);
-            if (lm) {
-              localModel.switch(lmName).then(async (info) => {
-                if (info) {
-                  chatLog.addSystem(theme.success(`Local model ${lmName} started on port ${info.port}`));
-                  cfg.set('provider.local', {
-                    type: 'local',
-                    model: info.modelFile ?? lmName,
-                    baseUrl: info.baseUrl,
-                  });
-                  cfg.set('provider.local.modelKey', lmName);
-                  cfg.save().catch(() => {});
-                  try {
-                    await loop.switchProvider('local');
-                    // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                    cfg.set('provider.active', 'local');
-                    cfg.save().catch(() => {});
-                    modelName = loop.getActiveProvider().getModel();
-                    providerTypeStart = loop.getActiveProvider().getProviderType();
-                    refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
-                  } catch (swErr) {
-                    chatLog.addSystem(theme.warning(`Switch to local: ${(swErr as Error).message}`));
-                  }
-                } else {
-                  chatLog.addSystem(theme.error(`Failed to start ${lmName}`));
-                }
-                tui.requestRender();
-              }).catch((e) => {
-                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-                tui.requestRender();
-              });
-              tui.requestRender();
-              return;
-            }
-          }
-          // 在线模型 L1 直接切换: model/current_online
-          if (cmdPath === 'model/current_online') {
-            chatLog.addSystem(theme.dim('Already using current online model'));
-            tui.requestRender();
+          // model 在线/L1 + 压缩器控制（tui-model-cmds / tui-compress-cmds，第七批）──
+          if (cmdPath.startsWith('model/')) {
+            await modelCmds.handle(cmdPath, restArgs);
             return;
           }
-          
-          // ── 压缩器控制: compress/* ──
-          if (cmdPath === 'compress/threshold' || cmdPath.startsWith('compress/threshold ')) {
-            const val = parseFloat((restArgs || '').trim());
-            if (isNaN(val) || val < 0 || val > 1) {
-              chatLog.addSystem(theme.warning('Usage: /compress threshold <0.0-1.0>'));
-              tui.requestRender();
-              return;
-            }
-            cfg.set('context.compressThreshold', val);
-            cfg.save().catch(() => {});
-            chatLog.addSystem(theme.success('Compress threshold: ') + theme.fg(String(val)));
-            tui.requestRender();
-            updateTokenEstimate();
+          if (cmdPath.startsWith('compress/')) {
+            await compressCmds.handle(cmdPath, restArgs);
             return;
           }
 
-          if (cmdPath === 'compress/emergency' || cmdPath.startsWith('compress/emergency ')) {
-            const val = parseFloat((restArgs || '').trim());
-            if (isNaN(val) || val < 0 || val > 1) {
-              chatLog.addSystem(theme.warning('Usage: /compress emergency <0.0-1.0>'));
-              tui.requestRender();
-              return;
-            }
-            cfg.set('context.emergencyThreshold', val);
-            cfg.save().catch(() => {});
-            chatLog.addSystem(theme.success('Emergency threshold: ') + theme.fg(String(val)));
-            tui.requestRender();
-            updateTokenEstimate();
-            return;
-          }
-
-          if (cmdPath === 'compress/depth' || cmdPath.startsWith('compress/depth ')) {
-            const val = parseFloat((restArgs || '').trim());
-            if (isNaN(val) || val < 0 || val > 1) {
-              chatLog.addSystem(theme.warning('Usage: /compress depth <0.0-1.0>'));
-              tui.requestRender();
-              return;
-            }
-            cfg.set('context.compressDepth', val);
-            cfg.save().catch(() => {});
-            chatLog.addSystem(theme.success('Compress depth: ') + theme.fg(String(val)));
-            tui.requestRender();
-            updateTokenEstimate();
-            return;
-          }
-
-// ── 通道管理: channel/* ──
+          // ── channel/* 通道管理（tui-channel-cmds.ts，tui.ts 深拆第八批）──
           if (cmdPath.startsWith('channel/')) {
-            const modelRouter = (loop as any).modelRouter;
-            if (!modelRouter) {
-              chatLog.addSystem(theme.warning('ModelRouter not available'));
-              tui.requestRender();
-              return;
-            }
-            const registry = modelRouter.getRegistry();
-
-            if (cmdPath === 'channel/list') {
-              const channels = registry.listChannels();
-              const roles = registry.listRoles();
-              if (channels.length === 0) {
-                chatLog.addSystem(theme.dim('No model channels configured. All roles use main provider.'));
-              } else {
-                const lines: string[] = [theme.accent('=== Model Channels ===')];
-                for (const ch of channels) {
-                  const chRoles = Object.entries(roles)
-                    .filter(([, cn]) => cn === ch.name)
-                    .map(([r]) => r);
-                  const roleStr = chRoles.length > 0 ? theme.dim(' → ') + theme.fg(chRoles.join(', ')) : '';
-                  lines.push(theme.fg(`  ${ch.name}`) + theme.dim(`: ${ch.provider}/${ch.model || 'default'}`) + roleStr);
-                }
-                lines.push('');
-                lines.push(theme.accent('=== Role Mappings ==='));
-                for (const [role, channel] of Object.entries(roles)) {
-                  lines.push(theme.dim(`  ${role}`) + ' → ' + theme.fg(String(channel)));
-                }
-                chatLog.addSystem(lines.join('\n'));
-              }
-              tui.requestRender();
-              return;
-            }
-
-            if (cmdPath === 'channel/add') {
-              if (!restArgs) {
-                chatLog.addSystem(theme.warning('Usage: /channel add <name> [provider] [model]'));
-                tui.requestRender();
-                return;
-              }
-              const parts = restArgs.split(/\s+/).filter(Boolean);
-              const [name, provider, model] = parts;
-              try {
-                registry.upsertChannel(name, { provider, model });
-                const info = registry.getChannelInfo(name);
-                chatLog.addSystem(theme.success(`Channel "${name}" added (${info?.provider}${model ? '/' + model : ''})`));
-              } catch (e) {
-                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-              }
-              tui.requestRender();
-              return;
-            }
-
-            if (cmdPath === 'channel/remove') {
-              if (!restArgs) {
-                chatLog.addSystem(theme.warning('Usage: /channel remove <name>'));
-                tui.requestRender();
-                return;
-              }
-              const name = restArgs.trim();
-              try {
-                registry.removeChannel(name);
-                chatLog.addSystem(theme.success(`Channel "${name}" removed`));
-              } catch (e) {
-                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-              }
-              tui.requestRender();
-              return;
-            }
-
-            if (cmdPath === 'channel/role') {
-              if (!restArgs) {
-                chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
-                tui.requestRender();
-                return;
-              }
-              const parts = restArgs.split(/\s+/).filter(Boolean);
-              if (parts.length < 2) {
-                chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
-                tui.requestRender();
-                return;
-              }
-              const [role, channel] = parts;
-              try {
-                registry.setRoleMapping(role, channel);
-                chatLog.addSystem(theme.success(`Role "${role}" → channel "${channel}"`));
-              } catch (e) {
-                chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-              }
-              tui.requestRender();
-              return;
-            }
-
-            // ── 通道子命令: channel/<name>/info | /model | /reset ──
-            const chMatch = cmdPath.match(/^channel\/([^/]+)\/(info|model|reset)$/);
-            if (chMatch) {
-              const chName = chMatch[1];
-              const action = chMatch[2];
-
-              if (action === 'info') {
-                const info = registry.getChannelInfo(chName);
-                if (!info) {
-                  chatLog.addSystem(theme.warning(`Channel "${chName}" not found`));
-                } else {
-                  const lines: string[] = [theme.accent(`=== Channel: ${info.name}${info.isMain ? ' (main)' : ''} ===`)];
-                  lines.push(theme.fg('  Provider: ') + info.provider);
-                  lines.push(theme.fg('  Model:    ') + info.model);
-                  lines.push(theme.fg('  Type:     ') + info.providerType);
-                  if (info.description) lines.push(theme.dim('  Desc:     ') + info.description);
-                  if (info.roles.length > 0) lines.push(theme.fg('  Roles:    ') + info.roles.join(', '));
-                  chatLog.addSystem(lines.join('\n'));
-                }
-                tui.requestRender();
-                return;
-              }
-
-              if (action === 'model') {
-                const parts = (restArgs || '').split(/\s+/).filter(Boolean);
-                if (parts.length < 1) {
-                  chatLog.addSystem(theme.warning(`Usage: /channel/${chName}/model <provider> [model-name]`));
-                  tui.requestRender();
-                  return;
-                }
-                const provider = parts[0];
-                const model = parts[1] || undefined;
-                try {
-                  registry.setChannelModel(chName, provider, model);
-                  const updated = registry.getChannelInfo(chName);
-                  chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${updated?.provider}/${updated?.model} (runtime only, not persisted)`));
-                } catch (e) {
-                  chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-                }
-                tui.requestRender();
-                return;
-              }
-
-              if (action === 'reset') {
-                try {
-                  registry.resetChannelModel(chName);
-                  const info = registry.getChannelInfo(chName);
-                  chatLog.addSystem(theme.success(`Channel "${chName}" reset → ${info?.provider}/${info?.model}`));
-                } catch (e) {
-                  chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-                }
-                tui.requestRender();
-                return;
-              }
-            }
+            await channelCmds.handle(cmdPath, restArgs);
+            return;
           }
 
-          // 通用渠道 TUI 命令分发：cmdPath 如 "clawbot/login" → clawbot 渠道
-          {
-            const slashIdx = cmdPath.indexOf('/');
-            if (slashIdx > 0) {
-              const chId = cmdPath.slice(0, slashIdx);
-              const chState = channelManager.get(chId);
-              if (chState?.handler.handleTuiCommand) {
-                const result = await chState.handler.handleTuiCommand(cmdPath, restArgs);
-                if (result !== null) {
-                  chatLog.addSystem(result);
-                  tui.requestRender();
-                  return;
-                }
-              }
-            }
-          }
+          // 通用渠道命令分发（tui-channel-cmds.ts createChannelDispatch，第十批）──
+          if (await channelDispatch.handle(cmdPath, restArgs)) return;
 
           // 通用 handler 路由：查找命令定义的 handler 字段
           const cmdDef = CommandRegistry.getInstance().find(cmdPath);
@@ -2538,145 +1518,72 @@ export async function runTui(
     }
 
     if (input === '/orchestrator on') {
-      if (loop.bypassManager) {
-        await loop.bypassManager.activateAgent('orchestrator');
-        const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
-        RuntimeConfigCenter.getInstance().set('bypass.orchestratorEnabled', true);
-        chatLog.addSystem(theme.success('上下文编排旁路Agent 已开启'));
-      } else {
-        chatLog.addSystem(theme.warning('旁路Agent 管理器未初始化'));
-      }
+      // orchestrator 域 setEnabled：激活旁路 Agent + 同步持久化 bypass 状态
+      // （bypass 管理器不可用时域层报错，前置检查移除 —— 纯协议客户端化）
+      await protocolSend('orchestrator.setEnabled', { enabled: true });
+      chatLog.addSystem(theme.success('上下文编排旁路Agent 已开启'));
       tui.requestRender();
       return;
     }
     if (input === '/orchestrator off') {
-      if (loop.bypassManager) {
-        await loop.bypassManager.deactivateAgent('orchestrator');
-        const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
-        RuntimeConfigCenter.getInstance().set('bypass.orchestratorEnabled', false);
-        chatLog.addSystem(theme.dim('上下文编排旁路Agent 已关闭'));
-      } else {
-        chatLog.addSystem(theme.warning('旁路Agent 管理器未初始化'));
-      }
+      await protocolSend('orchestrator.setEnabled', { enabled: false });
+      chatLog.addSystem(theme.dim('上下文编排旁路Agent 已关闭'));
       tui.requestRender();
       return;
     }
 
     if (input === '/default-mode companion') {
-      const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
-      const configCenter = RuntimeConfigCenter.getInstance();
-      configCenter.set('startup.defaultMode', 'companion');
-      await configCenter.save();
+      await setConfig('startup.defaultMode', 'companion');
       chatLog.addSystem(theme.success('启动默认模式已设为 陪伴模式 💫（下次启动生效）'));
       tui.requestRender();
       return;
     }
     if (input === '/default-mode normal') {
-      const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
-      const configCenter = RuntimeConfigCenter.getInstance();
-      configCenter.set('startup.defaultMode', 'normal');
-      await configCenter.save();
+      await setConfig('startup.defaultMode', 'normal');
       chatLog.addSystem(theme.dim('启动默认模式已设为 普通模式 💻（下次启动生效）'));
       tui.requestRender();
       return;
     }
 
     if (input === '/zone4 on') {
-      knowledgeBase.setZone4Enabled(true);
-      contextComposer.activeConditions.add('zone4_enabled');
-      const { RuntimeConfigCenter: RCC } = await import('../runtime/config-center.js');
-      RCC.getInstance().set('kb.zone4', true);
+      // kb.setZone4：域层同时持久化 kb.zone4 + 同步 composer 运行时条件
+      // （zone4_enabled），本地不再补 activeConditions（纯协议客户端化）
+      await protocolSend('kb.setZone4', { enabled: true });
       chatLog.addSystem(theme.success('Zone 4 已开启'));
       tui.requestRender();
       return;
     }
     if (input === '/zone4 off') {
-      knowledgeBase.setZone4Enabled(false);
-      contextComposer.activeConditions.delete('zone4_enabled');
-      const { RuntimeConfigCenter: RCC1 } = await import('../runtime/config-center.js');
-      RCC1.getInstance().set('kb.zone4', false);
+      await protocolSend('kb.setZone4', { enabled: false });
       chatLog.addSystem(theme.dim('Zone 4 已关闭（知识库同步停用）'));
       tui.requestRender();
       return;
     }
 
     if (input === '/kb on') {
-      if (!knowledgeBase.zone4Enabled) {
-        knowledgeBase.setZone4Enabled(true);
-        contextComposer.activeConditions.add('zone4_enabled');
-        const { RuntimeConfigCenter: RCC2 } = await import('../runtime/config-center.js');
-        RCC2.getInstance().set('kb.zone4', true);
+      // 当前 zone4 状态经协议 kb.get 读取（不再持有 knowledgeBase 引用）
+      const kbRes = (await protocolSend('kb.get')) as { kb?: { zone4Enabled?: boolean } } | null | undefined;
+      if (!(kbRes?.kb?.zone4Enabled ?? true)) {
+        await protocolSend('kb.setZone4', { enabled: true });
         chatLog.addSystem(theme.dim('Zone 4 已同步开启'));
       }
-      knowledgeBase.enable();
-      const { RuntimeConfigCenter: RCC3 } = await import('../runtime/config-center.js');
-      RCC3.getInstance().set('kb.enabled', true);
+      await protocolSend('kb.setEnabled', { enabled: true });
       chatLog.addSystem(theme.success('知识库已开启 — Zone 4 将注入检索结果'));
       tui.requestRender();
       return;
     }
     if (input === '/kb off') {
-      knowledgeBase.disable();
-      const { RuntimeConfigCenter: RCC4 } = await import('../runtime/config-center.js');
-      RCC4.getInstance().set('kb.enabled', false);
+      await protocolSend('kb.setEnabled', { enabled: false });
       chatLog.addSystem(theme.dim('知识库已关闭'));
       tui.requestRender();
       return;
     }
 
-    if (input === '/precise on') {
-      const { PreciseStrategy } = await import('../context/precision/index.js');
-      if (!originalSessionDir) originalSessionDir = sessionDir;
-      // 复用已有 precise session（保留积累的关键词和摘要）
-      const existingPrecise = (await sessionManager.list())
-        .find((s: { type?: string }) => s.type === 'precise');
-      const newSession = existingPrecise ?? await sessionManager.create('precise');
-      const newSessionDir = sessionManager.getSessionDir(newSession.id);
-      const precise = new PreciseStrategy(newSessionDir);
-      loop.composeStrategy = precise;
-      await loop.switchSession(newSessionDir);
-      sessionDir = newSessionDir;
-      preciseModeActive = true;
-      lastTurnCount = 0;
-      lastTokensUsed = 0;
-      const psStats = await statsManager.get(newSessionDir);
-      refreshStatus(loop.getTurnInfo(psStats.turn_count ?? 0, psStats.current_context_tokens ?? 0));
-      const label = existingPrecise ? '恢复已有' : '新建';
-      chatLog.addSystem(theme.success(`精确模式已开启 — ${label} session: ${newSession.id}`));
-      chatLog.clearAll();
-      tui.requestRender();
-      return;
-    }
-    if (input === '/precise off') {
-      if (!preciseModeActive) {
-        chatLog.addSystem(theme.dim('精确模式未开启'));
-        tui.requestRender();
-        return;
-      }
-      const { DefaultStrategy } = await import('../context/precision/index.js');
-      loop.composeStrategy = new DefaultStrategy();
-      if (originalSessionDir) {
-        await loop.switchSession(originalSessionDir);
-        sessionDir = originalSessionDir;
-        originalSessionDir = null;
-        lastTurnCount = 0;
-        lastTokensUsed = 0;
-        const origStats = await statsManager.get(sessionDir);
-        refreshStatus(loop.getTurnInfo(origStats.turn_count ?? 0, origStats.current_context_tokens ?? 0));
-        chatLog.clearAll();
-        replayEvents(chatLog, sessionDir);
-      }
-      preciseModeActive = false;
-      chatLog.addSystem(theme.dim('精确模式已关闭，已恢复原始 session'));
-      tui.requestRender();
-      return;
-    }
 
     if (input === '/exit') {
       chatLog.addSystem(theme.dim('Goodbye.'));
       tui.requestRender();
       await channelManager.stopAll();
-      await loop.shutdown();
       await supervisor.shutdownAll();
       tui.stop();
       process.exit(0);
@@ -2711,7 +1618,12 @@ export async function runTui(
         chatLog.addSystem('  ' + theme.fg(label) + theme.dim(': ') + theme.fg(display));
       }
 
-      const sources = loop.getModelSources();
+      // 各角色模型来源经协议 model.sources 读取（不读 loop）
+      const srcRes = (await protocolSend('model.sources')) as
+        | { sources?: Record<string, string> | null }
+        | null
+        | undefined;
+      const sources = srcRes?.sources ?? null;
       if (sources) {
         chatLog.addSystem('');
         chatLog.addSystem(theme.accent('\u2500\u2500 Model Routing \u2500\u2500'));
@@ -2735,19 +1647,17 @@ export async function runTui(
     // ── /context <tokens> ──
     if (input.startsWith('/context ')) {
       const tokens = parseInt(input.slice(9).trim(), 10);
-      const activeP = loop.getActiveProvider();
-      const modelCtxWindow = getModelContextWindow(activeP.getProviderType(), activeP.getModel());
+      const modelCtxWindow = getModelContextWindow(providerTypeStart, modelName);
       const upper = modelCtxWindow; // 当前模型支持的最大上下文
       if (isNaN(tokens) || tokens < 1 || tokens > upper) {
-        chatLog.addSystem(theme.warning(`Usage: /context <1-${upper.toLocaleString()}>`) + theme.dim(` (model: ${activeP.getModel()})`));
+        chatLog.addSystem(theme.warning(`Usage: /context <1-${upper.toLocaleString()}>`) + theme.dim(` (model: ${modelName})`));
         tui.requestRender();
         updateTokenEstimate();
         return;
       }
-      cfg.set('session.maxContext', tokens);
-      cfg.save().catch(() => {});
+      await setConfig('session.maxContext', tokens);
       chatLog.addSystem(theme.success('Max context set to ') + theme.fg(tokens.toLocaleString() + ' tokens'));
-      refreshStatus(loop.getTurnInfo(lastTurnCount, lastTokensUsed));
+      await refreshStatusFromProtocol();
       updateTokenEstimate();
       return;
     }
@@ -2761,8 +1671,7 @@ export async function runTui(
         updateTokenEstimate();
         return;
       }
-      cfg.set('session.maxTurns', n);
-      cfg.save().catch(() => {});
+      await setConfig('session.maxTurns', n);
       chatLog.addSystem(theme.success('Max turns set to ') + theme.fg(String(n)));
       tui.requestRender();
       updateTokenEstimate();
@@ -2782,8 +1691,7 @@ if (input.startsWith('/threshold ')) {
         updateTokenEstimate();
         return;
       }
-      cfg.set('context.compressThreshold', val);
-      cfg.save().catch(() => {});
+      await setConfig('context.compressThreshold', val);
       chatLog.addSystem(theme.success('Compression threshold set to ') + theme.fg(val.toFixed(2)));
       tui.requestRender();
       updateTokenEstimate();
@@ -2794,12 +1702,10 @@ if (input.startsWith('/threshold ')) {
     if (input.startsWith('/confirm ')) {
       const arg = input.slice(9).trim();
       if (arg === 'on') {
-        cfg.set('safety.requireConfirmation', true);
-        cfg.save().catch(() => {});
+        await setConfig('safety.requireConfirmation', true);
         chatLog.addSystem(theme.success('Tool confirmation ') + theme.fg('enabled'));
       } else if (arg === 'off') {
-        cfg.set('safety.requireConfirmation', false);
-        cfg.save().catch(() => {});
+        await setConfig('safety.requireConfirmation', false);
         chatLog.addSystem(theme.warning('Tool confirmation ') + theme.fg('disabled'));
       } else {
         chatLog.addSystem(theme.warning('Usage: /confirm <on|off>'));
@@ -2814,8 +1720,7 @@ if (input.startsWith('/threshold ')) {
       const arg = input.slice(5).trim();
       const validLevels = ['debug', 'info', 'warn', 'error', 'off'];
       if (validLevels.includes(arg)) {
-        cfg.set('logging.level', arg as 'debug' | 'info' | 'warn' | 'error' | 'off');
-        cfg.save().catch(() => {});
+        await setConfig('logging.level', arg as 'debug' | 'info' | 'warn' | 'error' | 'off');
         chatLog.addSystem(theme.success('Log level set to ') + theme.fg(arg));
       } else {
         chatLog.addSystem(theme.warning('Usage: /log <debug|info|warn|error|off>'));
@@ -2829,12 +1734,10 @@ if (input.startsWith('/threshold ')) {
     if (input.startsWith('/scavenge ')) {
       const arg = input.slice(10).trim();
       if (arg === 'on') {
-        cfg.set('repair.scavenge.enabled', true);
-        cfg.save().catch(() => {});
+        await setConfig('repair.scavenge.enabled', true);
         chatLog.addSystem(theme.success('Scavenge repair ') + theme.fg('enabled'));
       } else if (arg === 'off') {
-        cfg.set('repair.scavenge.enabled', false);
-        cfg.save().catch(() => {});
+        await setConfig('repair.scavenge.enabled', false);
         chatLog.addSystem(theme.warning('Scavenge repair ') + theme.fg('disabled'));
       } else {
         chatLog.addSystem(theme.warning('Usage: /scavenge <on|off>'));
@@ -2848,12 +1751,10 @@ if (input.startsWith('/threshold ')) {
     if (input.startsWith('/storm ')) {
       const arg = input.slice(7).trim();
       if (arg === 'on') {
-        cfg.set('repair.storm.enabled', true);
-        cfg.save().catch(() => {});
+        await setConfig('repair.storm.enabled', true);
         chatLog.addSystem(theme.success('Storm protection ') + theme.fg('enabled'));
       } else if (arg === 'off') {
-        cfg.set('repair.storm.enabled', false);
-        cfg.save().catch(() => {});
+        await setConfig('repair.storm.enabled', false);
         chatLog.addSystem(theme.warning('Storm protection ') + theme.fg('disabled'));
       } else {
         chatLog.addSystem(theme.warning('Usage: /storm <on|off>'));
@@ -2872,8 +1773,7 @@ if (input.startsWith('/threshold ')) {
         updateTokenEstimate();
         return;
       }
-      cfg.set('repair.storm.windowSize', n);
-      cfg.save().catch(() => {});
+      await setConfig('repair.storm.windowSize', n);
       chatLog.addSystem(theme.success('Storm window size set to ') + theme.fg(String(n)));
       tui.requestRender();
       updateTokenEstimate();
@@ -2889,8 +1789,7 @@ if (input.startsWith('/threshold ')) {
         updateTokenEstimate();
         return;
       }
-      cfg.set('repair.storm.threshold', n);
-      cfg.save().catch(() => {});
+      await setConfig('repair.storm.threshold', n);
       chatLog.addSystem(theme.success('Storm threshold set to ') + theme.fg(String(n)));
       tui.requestRender();
       updateTokenEstimate();
@@ -2899,47 +1798,52 @@ if (input.startsWith('/threshold ')) {
 
     // ── /schedule ──
     if (input === '/schedule') {
-      const scheduler = loop.getScheduler();
-      if (!scheduler) {
+      // 经协议层 schedule.list 读取（与未来 WebUI 定时任务面板同路径）
+      let tasks: Array<{ name: string; enabled?: boolean; nextRunAt?: unknown; scheduleType?: string; runCount?: number }> = [];
+      try {
+        const res = (await protocolSend('schedule.list')) as { tasks?: typeof tasks } | null | undefined;
+        tasks = res?.tasks ?? [];
+      } catch {
         chatLog.addSystem(theme.dim('No scheduler configured'));
-      } else {
-        const allTasks = scheduler.getTasks();
-        const activeTasks = allTasks.filter(
-          (t: { enabled?: boolean; nextRunAt?: unknown }) => t.enabled && t.nextRunAt !== null,
-        );
-        const disabledCount = allTasks.length - activeTasks.length;
-        if (activeTasks.length === 0) {
-          chatLog.addSystem(theme.dim('No active scheduled tasks'));
-          if (disabledCount > 0) {
-            chatLog.addSystem(
-              theme.dim(`(+${disabledCount} disabled/expired tasks)`),
-            );
-          }
-        } else {
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      const activeTasks = tasks.filter(
+        (t: { enabled?: boolean; nextRunAt?: unknown }) => t.enabled && t.nextRunAt !== null,
+      );
+      const disabledCount = tasks.length - activeTasks.length;
+      if (activeTasks.length === 0) {
+        chatLog.addSystem(theme.dim('No active scheduled tasks'));
+        if (disabledCount > 0) {
           chatLog.addSystem(
-            theme.accent(`Scheduled Tasks (${activeTasks.length} active)`),
+            theme.dim(`(+${disabledCount} disabled/expired tasks)`),
           );
-          for (const task of activeTasks) {
-            const nextRun = task.nextRunAt
-              ? new Date(task.nextRunAt).toLocaleString()
-              : 'N/A';
-            const typeLabel = theme.dim(`[${task.scheduleType}]`);
-            const runInfo = theme.dim(` | runs: ${task.runCount}`);
-            chatLog.addSystem(
-              '  ' +
-                theme.fg(task.name) +
-                ' ' +
-                typeLabel +
-                theme.dim(' | next: ') +
-                theme.fg(nextRun) +
-                runInfo,
-            );
-          }
-          if (disabledCount > 0) {
-            chatLog.addSystem(
-              theme.dim(`(+${disabledCount} disabled/expired tasks not shown)`),
-            );
-          }
+        }
+      } else {
+        chatLog.addSystem(
+          theme.accent(`Scheduled Tasks (${activeTasks.length} active)`),
+        );
+        for (const task of activeTasks) {
+          const nextRun = task.nextRunAt
+            ? new Date(task.nextRunAt as string).toLocaleString()
+            : 'N/A';
+          const typeLabel = theme.dim(`[${task.scheduleType}]`);
+          const runInfo = theme.dim(` | runs: ${task.runCount}`);
+          chatLog.addSystem(
+            '  ' +
+              theme.fg(task.name) +
+              ' ' +
+              typeLabel +
+              theme.dim(' | next: ') +
+              theme.fg(nextRun) +
+              runInfo,
+          );
+        }
+        if (disabledCount > 0) {
+          chatLog.addSystem(
+            theme.dim(`(+${disabledCount} disabled/expired tasks not shown)`),
+          );
         }
       }
       tui.requestRender();
@@ -2971,7 +1875,15 @@ if (input.startsWith('/threshold ')) {
         return;
       }
 
-      await loop.addScheduledTask(name, 'daily', time);
+      // 定时任务添加经协议层 schedule.addDaily（与 schedule 域同路径）
+      try {
+        await protocolSend('schedule.addDaily', { name, time });
+      } catch (err) {
+        chatLog.addSystem(theme.warning(`Task add failed: ${(err as Error).message}`));
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
       chatLog.addSystem(
         theme.success('Task added: ') +
           theme.fg(name) +
@@ -3008,15 +1920,21 @@ if (input.startsWith('/threshold ')) {
       return;
     }
 
-    // \u2500\u2500 Message Queue Integration \u2500\u2500
+    // ── Message Queue Integration ──
+    /** 中断当前回合：统一经协议 message.stop（域转发 loop.interrupt），
+     *  本地/远程一致，不直接持有 loop */
+    const interruptNow = async (): Promise<void> => {
+      try { await protocolSend('message.stop'); } catch { /* ignore */ }
+    };
+
     const mode = MessageQueue.detectMode(input);
     const cleanText = MessageQueue.stripMarkers(input);
 
-    if (isProcessing || loop.pendingTaskName) {
+    if (isProcessing || pendingTaskLocal) {
       messageQueue.enqueue(cleanText, mode);
       if (mode === QueueMessageMode.Insert) {
         chatLog.addSystem(theme.warning(`\u23e9 Inserting: ${truncateMsg(cleanText)}`));
-        loop.interrupt();
+        await interruptNow();
       } else {
         chatLog.addSystem(theme.dim(`\u23f3 Queued (#${messageQueue.size}): ${truncateMsg(cleanText)}`));
       }
@@ -3036,17 +1954,19 @@ if (input.startsWith('/threshold ')) {
   editor.onCtrlC = () => {
     editor.setText('');
     if (isProcessing) {
-      loop.interrupt();
+      // 经协议 message.stop 中断当前回合（不直接持有 loop）
+      void protocolSend('message.stop').catch(() => {});
     } else {
       chatLog.addSystem(theme.warning('Ctrl+C \u2014 press again to exit'));
     }
     tui.requestRender();
   };
 
+
+  // ── 搜索浮层（tui-search.ts，tui.ts 深拆第一批）──
+  const tuiSearch = createTuiSearch({ tui, chatLog });
   editor.onEscape = () => {
-    if (searchMode) {
-      closeSearch();
-    }
+    tuiSearch.closeIfOpen();
     tui.requestRender();
   };
 
@@ -3056,25 +1976,33 @@ if (input.startsWith('/threshold ')) {
   };
 
   editor.onCtrlP = () => {
-    loop.toggleProvider();
-    modelName = loop.getActiveProvider().getModel();
-    providerTypeStart = loop.getActiveProvider().getProviderType();
-    const providerInfo = loop.getProviderRoutingInfo();
-    if (providerInfo) {
-      chatLog.addSystem(
-        theme.accent('Provider toggled to ') +
-          theme.fg(providerInfo.providerLabel) +
-          theme.dim(` (${providerInfo.mode})`),
-      );
-    } else {
-      chatLog.addSystem(theme.dim('No ProviderRouter configured.'));
-    }
-    const statsP = statsManager.get(sessionDir);
-    statsP.then((st) => {
-      const tc = st.turn_count ?? 0;
-      refreshStatus(loop.getTurnInfo(tc, st.current_context_tokens ?? 0));
-    }).catch(() => {});
-    tui.requestRender();
+    void (async () => {
+      try {
+        // 循环切换主 provider：经协议 model.toggle（委托 loop.toggleProvider）
+        await protocolSend('model.toggle');
+      } catch {
+        chatLog.addSystem(theme.dim('Provider toggle failed (model.toggle unavailable)'));
+        tui.requestRender();
+        return;
+      }
+      // 切换后经 state.get 读回当前 provider/model 快照（不再直读 loop）
+      const snap = (await protocolSend('state.get')) as
+        | { provider?: string; model?: string; providerLabel?: string; routeMode?: string }
+        | null
+        | undefined;
+      if (snap?.provider) {
+        modelName = snap.model ?? '';
+        providerTypeStart = snap.provider as typeof providerTypeStart;
+        chatLog.addSystem(
+          theme.accent('Provider toggled to ') +
+            theme.fg(snap.providerLabel ?? snap.provider) +
+            theme.dim(` (${snap.routeMode ?? ''})`),
+        );
+      } else {
+        chatLog.addSystem(theme.dim('No ProviderRouter configured.'));
+      }
+      tui.requestRender();
+    })();
   };
 
   // ── Queue cancellation: Backspace on empty input pops last queued message ──
@@ -3105,10 +2033,6 @@ if (input.startsWith('/threshold ')) {
   // ── Global input listeners (for shortcuts not caught by the editor) ──
   let ctrlCCount = 0;
   let lastCtrlCTime = 0;
-  let searchMode = false;
-  let searchQuery = '';
-  let searchMatches: number[] = [];
-  let searchMatchIndex = 0;
 
   tui.addInputListener((data) => {
     // ── Slash autocomplete: Space → accept completion + insert space (never submit) ──
@@ -3123,133 +2047,26 @@ if (input.startsWith('/threshold ')) {
       }
     }
 
-    // ── Ask User form: full keyboard navigation ──
-    if (askUserState) {
-      const st = askUserState;
-      const suppIdx = st.questions.length;
-      const totalTabs = suppIdx + 1;
-      const currentQ = st.activeQuestion < suppIdx ? st.questions[st.activeQuestion] : null;
-      const opts = currentQ?.options ?? [];
-      const isMulti = currentQ?.multiSelect ?? false;
-
-      // Enter: submit (on "补充" tab or when focused on custom input)
-      if (matchesKey(data, Key.enter)) {
-        // 收集当前活动的自定义输入
-        const editIdx = st.activeQuestion;
-        const currentCustom = st.customTexts.get(editIdx) ?? '';
-        if (currentCustom.trim()) {
-          st.customTexts.set(editIdx, currentCustom.trim());
-        }
-        resolveAskUser();
-        return { consume: true };
-      }
-
-      // Escape: cancel (discard form)
-      if (matchesKey(data, Key.escape)) {
-        askUserContent.setText('');
-        askUserBar.setText('');
-        askUserState = null;
-        st.resolve('{}');
-        tui.requestRender();
-        return { consume: true };
-      }
-
-      // Left/Right: switch tabs
-      if (matchesKey(data, Key.left)) {
-        st.activeQuestion = (st.activeQuestion + totalTabs - 1) % totalTabs;
-        st.activeOption = 0;
-        renderAskUserForm();
-        tui.requestRender();
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.right)) {
-        st.activeQuestion = (st.activeQuestion + 1) % totalTabs;
-        st.activeOption = 0;
-        renderAskUserForm();
-        tui.requestRender();
-        return { consume: true };
-      }
-
-      // Up/Down: navigate options (only on question tabs)
-      if (st.activeQuestion < suppIdx && opts.length > 0) {
-        if (matchesKey(data, Key.up)) {
-          st.activeOption = (st.activeOption + opts.length - 1) % opts.length;
-          renderAskUserForm();
-          tui.requestRender();
-          return { consume: true };
-        }
-        if (matchesKey(data, Key.down)) {
-          st.activeOption = (st.activeOption + 1) % opts.length;
-          renderAskUserForm();
-          tui.requestRender();
-          return { consume: true };
-        }
-      }
-
-      // Space: toggle checkbox (works for both multiSelect and single-select)
-      if (matchesKey(data, Key.space)) {
-        if (st.activeQuestion < suppIdx && opts.length > 0) {
-          const sel = st.selectedOptions.get(st.activeQuestion) ?? new Set<number>();
-          if (sel.has(st.activeOption)) {
-            sel.delete(st.activeOption);  // 取消选中
-          } else {
-            if (isMulti) {
-              sel.add(st.activeOption);
-            } else {
-              // 单选：清除其它，只选中当前
-              sel.clear();
-              sel.add(st.activeOption);
-            }
-          }
-          st.selectedOptions.set(st.activeQuestion, sel);
-        }
-        renderAskUserForm();
-        tui.requestRender();
-        return { consume: true };
-      }
-
-      // Backspace: delete last char in custom text
-      if (matchesKey(data, Key.backspace)) {
-        const editIdx = st.activeQuestion;
-        const current = st.customTexts.get(editIdx) ?? '';
-        st.customTexts.set(editIdx, current.slice(0, -1));
-        renderAskUserForm();
-        tui.requestRender();
-        return { consume: true };
-      }
-
-      // Typing characters → add to current tab's custom text buffer
-      // data is a string; printable chars have length 1 and are not control chars
-      if (typeof data === 'string' && data.length === 1 && data.charCodeAt(0) >= 32) {
-        const editIdx = st.activeQuestion;
-        const current = st.customTexts.get(editIdx) ?? '';
-        st.customTexts.set(editIdx, current + data);
-        renderAskUserForm();
-        tui.requestRender();
-        return { consume: true };
-      }
-
-      // Consume all other keys during ask_user
+    // ── Ask User form: full keyboard navigation（tui-ask-user.ts 深拆第三批）──
+    if (tuiAskUser.hasPending()) {
+      tuiAskUser.handleKey(data);
       return { consume: true };
     }
 
     // ── Permission bar: Left/Right arrows + Enter ──
-    if (permissionQueue.length > 0) {
+    if (tuiPermission.hasPending()) {
       if (matchesKey(data, Key.left)) {
-        permissionSelection = (permissionSelection + 3) % 4;
-        updatePermissionBar();
+        tuiPermission.moveLeft();
         tui.requestRender();
         return { consume: true };
       }
       if (matchesKey(data, Key.right)) {
-        permissionSelection = (permissionSelection + 1) % 4;
-        updatePermissionBar();
+        tuiPermission.moveRight();
         tui.requestRender();
         return { consume: true };
       }
       if (matchesKey(data, Key.enter)) {
-        const options: Array<'yes' | 'aor' | 'always' | 'no'> = ['yes', 'aor', 'always', 'no'];
-        resolvePermission(options[permissionSelection]);
+        tuiPermission.confirm();
         return { consume: true };
       }
       return { consume: true }; // consume all other keys during permission
@@ -3281,11 +2098,7 @@ if (input.startsWith('/threshold ')) {
 
     // Ctrl+F: toggle search overlay
     if (matchesKey(data, Key.ctrl('f'))) {
-      if (searchMode) {
-        closeSearch();
-      } else {
-        openSearch();
-      }
+      tuiSearch.toggle();
       return { consume: true };
     }
 
@@ -3353,154 +2166,26 @@ if (input.startsWith('/threshold ')) {
     return undefined;
   });
 
-  // ── Search helpers ──
-  let searchOverlayContainer: Container | null = null;
-  let searchOverlayText: Text | null = null;
-
-  /** Highlight occurrences of `query` in `text` (case-insensitive) using accent color */
-  function highlightMatch(text: string, query: string, maxLen = 80): string {
-    if (!query) return theme.dim(text.slice(0, maxLen));
-    const truncated = text.slice(0, maxLen);
-    const lower = truncated.toLowerCase();
-    const q = query.toLowerCase();
-    let result = '';
-    let idx = 0;
-    while (idx < truncated.length) {
-      const found = lower.indexOf(q, idx);
-      if (found === -1) {
-        result += theme.dim(truncated.slice(idx));
-        break;
-      }
-      if (found > idx) {
-        result += theme.dim(truncated.slice(idx, found));
-      }
-      result += theme.accent(truncated.slice(found, found + q.length));
-      idx = found + q.length;
-    }
-    return result;
-  }
-
-  function performSearch(query: string): void {
-    searchQuery = query;
-    const contentLines = chatLog.getContentLines();
-    const cleanLines = contentLines.map((l) =>
-      // eslint-disable-next-line no-control-regex
-      l.replace(/\x1b\[[0-9;]*m/g, ''),
-    );
-
-    searchMatches = [];
-    const lowerQuery = query.toLowerCase();
-    for (let i = 0; i < cleanLines.length; i++) {
-      if (cleanLines[i].toLowerCase().includes(lowerQuery)) {
-        searchMatches.push(i);
-      }
-    }
-    searchMatchIndex = 0;
-
-    if (searchOverlayText) {
-      if (searchMatches.length > 0) {
-        const preview = highlightMatch(cleanLines[searchMatches[0]]!, query);
-        searchOverlayText.setText(
-          theme.accent('Search: ') +
-            theme.fg(query) +
-            theme.dim(` [${searchMatchIndex + 1}/${searchMatches.length}]`) +
-            '\n' +
-            preview,
-        );
-      } else {
-        searchOverlayText.setText(
-          theme.accent('Search: ') + theme.fg(query) + theme.dim(' [0/0]'),
-        );
-      }
-    }
-    tui.requestRender();
-  }
-
-  function nextSearchMatch(): void {
-    if (searchMatches.length === 0) return;
-    searchMatchIndex = (searchMatchIndex + 1) % searchMatches.length;
-    chatLog.scrollToLine(searchMatches[searchMatchIndex]);
-    if (searchOverlayText) {
-      const contentLines = chatLog.getContentLines();
-      const cleanLines = contentLines.map((l) =>
-        // eslint-disable-next-line no-control-regex
-        l.replace(/\x1b\[[0-9;]*m/g, ''),
-      );
-      const preview = highlightMatch(cleanLines[searchMatches[searchMatchIndex]] ?? '', searchQuery);
-      searchOverlayText.setText(
-        theme.accent('Search: ') +
-          theme.fg(searchQuery) +
-          theme.dim(` [${searchMatchIndex + 1}/${searchMatches.length}]`) +
-          '\n' +
-          preview,
-      );
-    }
-    tui.requestRender();
-  }
-
-  function openSearch(): void {
-    searchMode = true;
-    searchQuery = '';
-    searchMatches = [];
-    searchMatchIndex = 0;
-
-    searchOverlayContainer = new Container();
-    searchOverlayText = new Text(
-      theme.accent('Search: ') + theme.dim('type to search, Enter for next, Esc to close'),
-      0,
-      0,
-    );
-    searchOverlayContainer.addChild(searchOverlayText);
-    tui.showOverlay(searchOverlayContainer);
-    tui.requestRender();
-
-    // Add a temporary input listener for search typing
-    const searchListenerId = `search_${Date.now()}`;
-    tui.addInputListener((data) => {
-      if (!searchMode) return undefined;
-
-      if (matchesKey(data, Key.escape)) {
-        closeSearch();
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.enter)) {
-        nextSearchMatch();
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.backspace)) {
-        if (searchQuery.length > 0) {
-          searchQuery = searchQuery.slice(0, -1);
-          performSearch(searchQuery);
-        }
-        return { consume: true };
-      }
-      // Regular character input
-      if (typeof data === 'string' && data.length === 1 && !data.startsWith('\x1b')) {
-        searchQuery += data;
-        performSearch(searchQuery);
-        return { consume: true };
-      }
-      // Consume all other input while searching
-      return { consume: true };
-    });
-  }
-
-  function closeSearch(): void {
-    searchMode = false;
-    searchQuery = '';
-    searchMatches = [];
-    searchMatchIndex = 0;
-    searchOverlayText = null;
-    if (searchOverlayContainer) {
-      tui.hideOverlay();
-      searchOverlayContainer = null;
-    }
-    tui.requestRender();
-  }
 
   // ── Initial render ──
-  const stats = await statsManager.get(sessionDir);
-  const initialInfo = loop.getTurnInfo(0, stats.current_context_tokens ?? 0);
+  // 初始状态经协议 state.get 获取（启动同步 provider/model 缓存 + 状态栏）
+  const snap0 = (await protocolSend('state.get')) as
+    | { provider?: string; model?: string; turnCount?: number; tokensUsed?: number; maxTurns?: number; maxContextTokens?: number; compressCount?: number; sessionId?: string }
+    | null
+    | undefined;
+  if (snap0?.provider) providerTypeStart = snap0.provider as typeof providerTypeStart;
+  if (snap0?.model) modelName = snap0.model;
+  const stats0 = await statsManager.get(sessionDir);
+  const initialInfo: TurnInfo = snap0
+    ? {
+        turnCount: snap0.turnCount ?? 0,
+        tokensUsed: snap0.tokensUsed ?? 0,
+        maxTurns: snap0.maxTurns ?? maxTurns,
+        maxContextTokens: snap0.maxContextTokens ?? maxContext,
+        compressCount: snap0.compressCount ?? 0,
+        sessionId: snap0.sessionId ?? sessionDir,
+      }
+    : { turnCount: 0, tokensUsed: stats0.current_context_tokens ?? 0, maxTurns, maxContextTokens: maxContext, sessionId: sessionDir, compressCount: 0 };
   refreshStatus(initialInfo);
   updateTokenEstimate();
 
@@ -3530,10 +2215,19 @@ if (input.startsWith('/threshold ')) {
   // ── Cleanup ──
   tui.stop();
   await channelManager.stopAll();
-  await loop.shutdown();
   // 清理插件钩子
   for (const cleanup of cleanupFns) cleanup();
   await supervisor.shutdownAll();
   process.stderr.write = origStderrWrite;
   logStream.end();
 }
+
+
+
+
+
+
+
+
+
+
