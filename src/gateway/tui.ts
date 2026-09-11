@@ -33,6 +33,7 @@ import { ConfigManager } from '../setup/config.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { ProviderManager } from '../provider/manager.js';
+import { LocalProvider } from '../provider/local.js';
 import { REPLACEABLE_POINTS, togglePluginInManifest, loadExtensionManifest } from '../supervisor/extension-registry.js';
 import { LifecycleSupervisor } from '../supervisor/shutdown.js';
 import { createAgent } from './factory.js';
@@ -529,17 +530,34 @@ export async function runTui(
   };
 
   // ── Local Model (llama.cpp) ──
-  try {
-    const loadedModels = await supervisor.loadAndStartModels(process.cwd());
-    if (loadedModels.length > 0) {
-      chatLog.addSystem(theme.success('\uD83D\uDDA5  Local Model Server'));
-      for (const m of loadedModels) {
-        chatLog.addSystem(theme.success('   \u2022 ') + theme.accent(m.name) + theme.dim(' \u2192 ') + theme.accent(m.baseUrl));
+  // 仅在「当前使用的模型是本地模型」时才拉起本地模型服务，且为后台异步：
+  // 不阻塞 UI 渲染；模型 ready 后自动挂载到 provider 并提示。
+  // 运行中 /model 切到 local 时由 tui-model-local 命令按需拉起。
+  if (activeProvider.getProviderType() === 'local') {
+    chatLog.addSystem(theme.dim('\u23f3  Local model server starting in background\u2026'));
+    void (async () => {
+      try {
+        const loadedModels = await supervisor.loadAndStartModels(process.cwd());
+        if (loadedModels.length > 0) {
+          chatLog.addSystem(theme.success('\uD83D\uDDA5  Local Model Server'));
+          for (const m of loadedModels) {
+            chatLog.addSystem(theme.success('   \u2022 ') + theme.accent(m.name) + theme.dim(' \u2192 ') + theme.accent(m.baseUrl));
+          }
+          // 挂载：ready 后将已启动模型的 URL/model 注入 provider
+          try {
+            const m = loadedModels[0];
+            (activeProvider as LocalProvider).setBaseUrl(m.baseUrl);
+            (activeProvider as LocalProvider).setModel(m.modelName);
+          } catch {
+            // 非 LocalProvider 时忽略（挂载失败不影响 UI）
+          }
+        }
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        chatLog.addSystem(theme.warning('\u26a0  Local model server not available: ' + msg));
       }
-    }
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    chatLog.addSystem(theme.warning('\u26a0  Local model server not available: ' + msg));
+      tui.requestRender();
+    })();
   }
   tui.requestRender();
 
@@ -704,6 +722,14 @@ export async function runTui(
         const info = p as { turnCount?: number; tokensUsed?: number };
         lastTurnCount = Number(info.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(info.tokensUsed ?? lastTokensUsed);
+        refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
+        break;
+      }
+      case UI_EVENT.MESSAGE_CONTEXT_UPDATE: {
+        // 迭代级上下文占用推送：即时刷新进度条，不表示回合结束（无 busy/streaming 副作用）
+        const ctx = p as { turnCount?: number; tokensUsed?: number };
+        lastTurnCount = Number(ctx.turnCount ?? lastTurnCount);
+        lastTokensUsed = Number(ctx.tokensUsed ?? lastTokensUsed);
         refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
         break;
       }

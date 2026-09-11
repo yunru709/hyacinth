@@ -1,13 +1,18 @@
 import { EventEmitter } from 'node:events';
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ProcessManager } from '../lifecycle/manager.js';
+import { createLogger } from '../logging/logger.js';
+import { DownloadManager } from './download-manager.js';
 import type { ManagedProcessConfig, ProcessState, ProcessEventCallbacks } from '../lifecycle/interface.js';
 import { getOllamaEndpoints } from '../provider/local-config.js';
 import { ModelRegistry } from './model-registry.js';
 import type { ModelEntry, ModelRegisterOptions, RunningModelInfo } from './types.js';
 
 export type { RunningModelInfo };
+
+const logger = createLogger('model-bridge');
 
 declare interface ModelBridgeEvents {
   'model-starting': [string];
@@ -16,6 +21,10 @@ declare interface ModelBridgeEvents {
   'model-error': [string, string];
   'active-changed': [string | null];
   'all-stopped': [];
+  'binary-downloading': [];
+  'binary-progress': [number, string];
+  'binary-ready': [string];
+  'binary-error': [string];
 }
 
 /**
@@ -26,29 +35,104 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
   private lastStartedModel: string | null = null;
   private runningPorts = new Map<string, number>();
   private registry: ModelRegistry;
-  private llamaServerPath: string;
+  private projectRoot: string;
+  /** llama-server 二进制路径；null = 缺失（start 时自动下载自愈） */
+  private llamaServerPath: string | null;
+  /** 进行中的二进制下载 Promise（幂等：并发触发只下载一次） */
+  private ensureBinaryPromise: Promise<string | null> | null = null;
+  /** 下载器（可注入替身以便测试；默认 DownloadManager 从 GitHub release 拉取） */
+  private downloader: {
+    download(projectRoot: string, onProgress?: (percent: number, speed: string) => void): Promise<string>;
+  };
 
-  constructor(llamaServerPath?: string) {
+  constructor(projectRoot: string, llamaServerPath?: string | null, downloader?: ModelBridge['downloader']) {
     super();
+    this.projectRoot = projectRoot;
     this.registry = ModelRegistry.getInstance();
+    this.downloader = downloader ?? new DownloadManager();
 
     if (llamaServerPath && existsSync(llamaServerPath)) {
       this.llamaServerPath = llamaServerPath;
     } else {
-      const candidates = [
-        join(process.cwd(), 'libs', 'llama.cpp', 'build', 'bin', 'Release', 'llama-server.exe'),
-        join(process.cwd(), 'libs', 'llama.cpp', 'build', 'bin', 'llama-server'),
-        join(process.cwd(), 'libs', 'llama.cpp', 'llama-server.exe'),
-        join(process.cwd(), 'libs', 'llama.cpp', 'llama-server'),
-        'llama-server',
-        'llama-server.exe',
-      ];
-      const found = candidates.find((c) => existsSync(c));
-      this.llamaServerPath = found ?? 'llama-server';
+      this.llamaServerPath = this.resolveServerPath();
     }
   }
 
+  /** 按优先级查找 libs/llama.cpp 下的 llama-server 二进制；找不到返回 null */
+  private resolveServerPath(): string | null {
+    const candidates = [
+      join(this.projectRoot, 'libs', 'llama.cpp', 'build', 'bin', 'Release', 'llama-server.exe'),
+      join(this.projectRoot, 'libs', 'llama.cpp', 'build', 'bin', 'llama-server'),
+      join(this.projectRoot, 'libs', 'llama.cpp', 'llama-server.exe'),
+      join(this.projectRoot, 'libs', 'llama.cpp', 'llama-server'),
+      'llama-server',
+      'llama-server.exe',
+    ];
+    return candidates.find((c) => existsSync(c)) ?? null;
+  }
+
   // ── 生命周期 ──
+
+  /**
+   * 确保 llama-server 二进制可用（自愈）。
+   * 已存在 → 直接返回路径；缺失 → 先查 PATH，仍无 → 自动下载（幂等：并发只下载一次）。
+   * @returns 可用的 llama-server 路径；下载失败返回 null
+   */
+  async ensureBinary(): Promise<string | null> {
+    if (this.llamaServerPath && existsSync(this.llamaServerPath)) {
+      return this.llamaServerPath;
+    }
+    this.llamaServerPath = null; // 原路径已失效
+
+    if (this.ensureBinaryPromise) return this.ensureBinaryPromise;
+
+    // PATH 中已有 llama-server 则直接使用（无需下载）
+    if (this.hasLlamaServerInPath()) {
+      this.llamaServerPath = 'llama-server';
+      return this.llamaServerPath;
+    }
+
+    // 触发下载（同一 Promise 去重，不阻塞其它模型启动）
+    this.emit('binary-downloading');
+    let lastReported = -1;
+    const p = this.downloader
+      .download(this.projectRoot, (percent, speed) => {
+        if (percent >= lastReported + 5 || percent === 100) {
+          lastReported = percent;
+          this.emit('binary-progress', percent, speed);
+          logger.info('llama.cpp downloading', { percent, speed });
+        }
+      })
+      .then((version) => {
+        this.llamaServerPath = this.resolveServerPath();
+        this.ensureBinaryPromise = null;
+        this.emit('binary-ready', version);
+        logger.info('llama.cpp ready', { version, path: this.llamaServerPath });
+        return this.llamaServerPath;
+      })
+      .catch((error: unknown) => {
+        this.ensureBinaryPromise = null;
+        const msg = error instanceof Error ? error.message : String(error);
+        this.emit('binary-error', msg);
+        logger.warn('llama.cpp download failed', { error: msg });
+        return null;
+      });
+    this.ensureBinaryPromise = p;
+    return p;
+  }
+
+  /** 检查 PATH 中是否存在 llama-server 命令 */
+  private hasLlamaServerInPath(): boolean {
+    try {
+      execSync(process.platform === 'win32' ? 'where llama-server' : 'which llama-server', {
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async startAll(): Promise<RunningModelInfo[]> {
     const models = this.registry.list().filter((m) => m.enabled);
@@ -73,6 +157,15 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
       }
       await existing.start();
       return this.toRunningInfo(model);
+    }
+
+    // llama.cpp 后端：确保二进制可用（缺失时自动下载自愈）
+    if (model.backend !== 'ollama' && model.backend !== 'vllm' && model.backend !== 'custom' && model.backend !== 'lm-studio') {
+      const serverPath = await this.ensureBinary();
+      if (!serverPath) {
+        this.emit('model-error', name, 'llama.cpp binary unavailable (auto-download failed)');
+        return null;
+      }
     }
 
     const config = this.buildConfig(model);
@@ -280,7 +373,7 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
 
     return {
       name: model.name,
-      command: this.llamaServerPath,
+      command: this.llamaServerPath ?? 'llama-server',
       args,
       autoRestart: false,
       healthCheck: {

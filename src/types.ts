@@ -230,7 +230,7 @@ export interface AgentDefinition {
   instanceId?: string;
   /** 角色描述，供主 Agent 判断何时使用该子 Agent */
   description: string;
-  /** 系统提示词模板（支持 {{task}} 占位符） */
+  /** 系统提示词模板（支持 {{task}} 占位符，首次委派时解析为固定指引；任务经 user 消息传递） */
   systemPrompt: string;
   /** 工具白名单（空数组表示允许所有工具） */
   allowedTools: string[];

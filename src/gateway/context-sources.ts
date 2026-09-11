@@ -26,7 +26,7 @@ import type { SkillRegistry } from '../skills/registry.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
-import { collectSystemInfo, buildEnvironmentSection } from '../env/index.js';
+import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
 import { getActiveRouter } from '../context/profiles.js';
 
 export interface ContextSourceDeps {
@@ -34,7 +34,7 @@ export interface ContextSourceDeps {
   cwd: string;
   sessionDir: string;
   channelsInfo: ChannelsInfo[] | undefined;
-  envInfo: ReturnType<typeof collectSystemInfo>;
+  envInfo: Promise<SystemEnvInfo>;
   currentChannel: string | undefined;
   currentSessionIdForCtx: string;
   flowRegistry: MachineRegistry;
@@ -62,7 +62,7 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     strategy: 'always_inline',
     cacheability: 'anchor',
     description: '运行环境信息（静态模板 + 动态系统信息 + 渠道信息）',
-    getContent: () => buildEnvironmentSection(deps.envInfo, deps.channelsInfo ?? [], { cwd }),
+    getContent: async () => buildEnvironmentSection(await deps.envInfo, deps.channelsInfo ?? [], { cwd }),
   });
 
   // ── 渠道上下文（告诉模型当前在哪个渠道、哪个 session） ──────────────

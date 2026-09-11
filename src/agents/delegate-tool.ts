@@ -158,6 +158,22 @@ interface SubSessionMeta {
   createdAt: number;
   agentName: string;
   instanceId: string;
+  /** 首次落定的 system prompt（物化即冻结；复用直接读回，保证前缀恒定以利 KV 缓存命中） */
+  resolvedSystemPrompt?: string;
+}
+
+/**
+ * 解析子 Agent 的 system prompt：
+ *  - override 仅首次委派传入，复用阶段忽略（system prompt 一经物化即冻结）；
+ *  - {{task}} 占位符解析为固定指引——任务一律通过 user 消息传递，不再烧进
+ *    system prompt，避免每次委派重写前缀导致 KV 前缀缓存断裂。
+ */
+function resolveSubAgentSystemPrompt(agentDef: AgentDefinition, override?: string): string {
+  let systemPrompt = override ?? agentDef.systemPrompt;
+  if (systemPrompt.includes('{{task}}')) {
+    systemPrompt = systemPrompt.replace(/\{\{task\}\}/g, '当前任务以最新一条用户消息为准');
+  }
+  return systemPrompt;
 }
 
 /**
@@ -173,6 +189,7 @@ export async function createSubAgentLoop(
   agentDef: AgentDefinition,
   task: string,
   parentContext: SubAgentContext,
+  opts?: { systemPromptOverride?: string },
 ): Promise<{ loop: AgentLoop; sessionDir: string; isNew: boolean }> {
   const instanceId = agentDef.instanceId ?? `${agentDef.name}-default`;
   const subSessionDir = path.join(parentContext.sessionDir, 'sub-agents', instanceId);
@@ -188,6 +205,7 @@ export async function createSubAgentLoop(
 
   // TTL 检查：过期则清理重建
   let isNew = false;
+  let resolvedSystemPrompt: string | undefined;
   try {
     const metaRaw = await fs.readFile(path.join(subSessionDir, 'meta.json'), 'utf-8');
     const meta: SubSessionMeta = JSON.parse(metaRaw);
@@ -195,6 +213,8 @@ export async function createSubAgentLoop(
     if (elapsed > ttlMinutes) {
       await fs.rm(subSessionDir, { recursive: true });
       isNew = true;
+    } else {
+      resolvedSystemPrompt = meta.resolvedSystemPrompt;
     }
   } catch {
     isNew = true; // 目录不存在或 meta 损坏
@@ -202,9 +222,14 @@ export async function createSubAgentLoop(
 
   if (isNew) {
     await fs.mkdir(subSessionDir, { recursive: true });
+    // 首次落定 system prompt（override 优先），冻结进 meta.json 供复用读回
+    resolvedSystemPrompt = resolveSubAgentSystemPrompt(agentDef, opts?.systemPromptOverride);
     await fs.writeFile(path.join(subSessionDir, 'meta.json'), JSON.stringify({
-      createdAt: Date.now(), agentName: agentDef.name, instanceId,
+      createdAt: Date.now(), agentName: agentDef.name, instanceId, resolvedSystemPrompt,
     } satisfies SubSessionMeta), 'utf-8');
+  } else if (!resolvedSystemPrompt) {
+    // 旧会话（改版前创建）无 resolvedSystemPrompt：兜底解析（复用阶段忽略 override）
+    resolvedSystemPrompt = resolveSubAgentSystemPrompt(agentDef);
   }
 
   // 仅在首次创建时写入空文件（复用时不覆盖已有数据）
@@ -229,7 +254,8 @@ export async function createSubAgentLoop(
   const subComposer = new LayeredContextComposer(parentContext.maxContextTokens);
   // 使用 registerPromptSection 注册子 Agent 的 system prompt 作为持久化 section
   // 这样每次 compose() 调用时都会自动注册，不会被 builder 重置清除
-  let systemPrompt = agentDef.systemPrompt.replace(/\{\{task\}\}/g, task);
+  // system prompt 已在上方按「首次落定、复用冻结」解析（{{task}} → 固定指引，任务走 user 消息）
+  let systemPrompt = resolvedSystemPrompt;
 
   // 结构化输出：追加 JSON 格式指令
   if (agentDef.outputFormat === 'json') {
@@ -320,7 +346,7 @@ export class DelegateToAgentTool implements Tool {
   description =
     '将任务委派给子 Agent 执行。子 Agent 是拥有独立上下文、工具集和 Provider 的隔离工作单元，执行完毕后返回结构化结果。' +
     '编排场景：当你有一个复杂计划时，自己负责规划和决策，将其中可并行的子任务分别委派给多个子 Agent 同步执行——spawn_sub_agent 可克隆多份实例，配合不同的 instance_id 并发调度，大幅缩短总耗时。' +
-    '会话复用：子 Agent 会话在 TTL 窗口内持久化（默认 10 分钟），相同 instance_id 再次委派时自动恢复完整对话记忆，无需重新交代背景。' +
+    '会话复用：子 Agent 会话在 TTL 窗口内持久化（默认 10 分钟），相同 instance_id 再次委派时自动恢复完整对话记忆，无需重新交代背景。system prompt 首次委派时落定并冻结（可用 system_prompt 参数临时定制），复用阶段不再变更；新任务追加为新的用户消息——前缀恒定，利于 KV 缓存命中。' +
     '异步执行：设置 async=true 后子 Agent 在后台运行，主 Agent 立即获得任务句柄（如 sub_001）并可继续其他工作。之后用 list_sub_agent_tasks 查看所有异步任务状态，get_sub_agent_result <handle> 获取已完成任务的结果。默认 async=false（同步阻塞，等待结果返回）。' +
     '使用 list_sub_agents 查看可用 Agent 及其实例 ID，create_sub_agent 创建新 Agent，spawn_sub_agent 克隆以支持并行，destroy_sub_agent 清理不再需要的实例。';
   inputSchema = {
@@ -336,11 +362,15 @@ export class DelegateToAgentTool implements Tool {
       },
       task: {
         type: 'string' as const,
-        description: '委派给子 Agent 的任务描述，清晰说明要做什么和期望的输出。',
+        description: '委派给子 Agent 的任务描述，清晰说明要做什么和期望的输出。作为用户消息进入子 Agent 上下文。',
       },
       context: {
         type: 'string' as const,
         description: '可选的附加上下文（如相关代码片段、文件路径、背景信息）。',
+      },
+      system_prompt: {
+        type: 'string' as const,
+        description: '可选，仅首次委派生效：自定义该子 Agent 的系统提示词，落定后冻结（复用沿用首次定稿，保证前缀恒定以利 KV 缓存命中）。缺省用子 Agent 定义中的 systemPrompt（{{task}} 解析为固定指引）。',
       },
       async: {
         type: 'boolean' as const,
@@ -367,6 +397,7 @@ export class DelegateToAgentTool implements Tool {
     const agentName = args.agent_name as string | undefined;
     const task = args.task as string;
     const context = args.context as string | undefined;
+    const systemPromptOverride = args.system_prompt as string | undefined;
     const runAsync = args.async === true;
     const acrossTurns = args.across_turns === true;
 
@@ -399,10 +430,10 @@ export class DelegateToAgentTool implements Tool {
 
     try {
       if (runAsync) {
-        return await this.executeAsync(agentDef, fullTask, acrossTurns);
+        return await this.executeAsync(agentDef, fullTask, acrossTurns, systemPromptOverride);
       }
 
-      return await this.executeDelegate(agentDef, fullTask);
+      return await this.executeDelegate(agentDef, fullTask, systemPromptOverride);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return `Sub-agent delegation failed: ${message}`;
@@ -413,12 +444,12 @@ export class DelegateToAgentTool implements Tool {
    * 异步委托：在后台启动子 Agent，立即返回任务句柄。
    * 子 Agent 的 loop.run() 在后台 Promise 中执行，完成后结果写入 AsyncSubAgentTask。
    */
-  private async executeAsync(agentDef: AgentDefinition, task: string, acrossTurns: boolean): Promise<string> {
+  private async executeAsync(agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string): Promise<string> {
     const instanceId = agentDef.instanceId!;
     const handle = registerAsyncTask(agentDef.name, instanceId, task);
 
     // 在后台启动子 Agent，不阻塞。catch 兜底防止未处理的 Promise rejection
-    this.runAsyncInBackground(handle, agentDef, task, acrossTurns).catch((err) => {
+    this.runAsyncInBackground(handle, agentDef, task, acrossTurns, systemPromptOverride).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       failAsyncTask(handle, message);
       if (!acrossTurns) {
@@ -433,10 +464,10 @@ export class DelegateToAgentTool implements Tool {
   }
 
   /** 后台执行子 Agent 任务 */
-  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string, acrossTurns: boolean): Promise<void> {
+  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string): Promise<void> {
     const instanceId = agentDef.instanceId!;
     try {
-      const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext);
+      const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride });
       registerRunningLoop(instanceId, loop);
       if (!isNew) {
         await fs.utimes(path.join(sessionDir, 'meta.json'), new Date(), new Date()).catch(() => {});
@@ -462,9 +493,9 @@ export class DelegateToAgentTool implements Tool {
   /**
    * 委托模式：单个子 Agent 执行任务（同步阻塞）
    */
-  private async executeDelegate(agentDef: AgentDefinition, task: string): Promise<string> {
+  private async executeDelegate(agentDef: AgentDefinition, task: string, systemPromptOverride?: string): Promise<string> {
     const instanceId = agentDef.instanceId!;
-    const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext);
+    const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride });
     registerRunningLoop(instanceId, loop);
     try {
       if (!isNew) {

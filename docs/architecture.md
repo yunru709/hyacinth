@@ -3,7 +3,7 @@
 > 本文档基于对 `src/` 全量源码的逐模块阅读整理，聚焦**结构**与**关系**，不含实现代码。
 > 本文档分两部分：**第一部分**总览（§0-§12，章节级）；**第二部分**逐模块详细拆解（8 篇，逐文件级）。
 >
-> 版本基线：v0.9.42 · 语言：TypeScript（ESM）· 运行：Node.js 22.5+（依赖 `node:sqlite`）· 模块数：约 40 个目录、98K 行 TS（含测试）。2026-09-04 增补：supervisor/ 进程监督层、evolution/auto-git、协议 19 域、bypass/orchestrator 与 shims//diagnostics/ 改名（见各章节）。
+> 版本基线：v0.9.43 · 语言：TypeScript（ESM）· 运行：Node.js 22.5+（依赖 `node:sqlite`）· 模块数：44 个目录、98K 行 TS（含测试）。2026-09-04 增补：supervisor/ 进程监督层、evolution/auto-git、协议 19 域、bypass/orchestrator 与 shims//diagnostics/ 改名（见各章节）。
 
 ---
 
@@ -15,7 +15,7 @@ Hyacinth 是一个**运行在本地的多 Provider AI Agent 框架**：用户经
 
 1. **单一职责 + 单向依赖**：接口层 / 核心执行层 / Provider 层 / 工具层 / 基础设施层，依赖方向严格单向、零环形依赖（DAG）。
 2. **零侵入可插拔**：模块通过"注册表 / 插件 / 贡献批 / 内核槽位"接入，而非硬编码分支；任何实现约定接口的对象都可替换实现。
-3. **外部配置化**：行为开关、阈值、路径、装配顺序全部可在运行时配置中心 / 配置文件 / Manifest 中声明，改即生效（13 个热重载 watcher）。
+3. **外部配置化**：行为开关、阈值、路径、装配顺序全部可在运行时配置中心 / 配置文件 / Manifest 中声明，改即生效（14 个热重载 watcher）。
 
 ---
 
@@ -241,7 +241,7 @@ input → bypass → context → llm → tools → finalize
 
 - **multimodal**：图片管线 `ImageStore`（检测→压缩→会话索引→view_image 工具→回收），fingerprint 去重。
 - **media**：独立媒体库 `MediaStore`（与 kb 刻意隔离），scene_render/generate_media 回填，落库失败不阻断生成。
-- **hot-reload**：`watcher-base` 统一骨架（fs.watch/poll + debounce + mtime 去重），管理 **13 个 watcher** 装配表（mcp/plugin/prompt/agent/config/tool/skill/command/provider/model-catalog/manifest/channel/bundle），`flag` 读取 configCenter 开关，动态 import 消除循环依赖。
+- **hot-reload**：`watcher-base` 统一骨架（fs.watch/poll + debounce + mtime 去重），管理 **14 个 watcher** 装配表（mcp/plugin/prompt/agent/config/tool/skill/command/provider/model-catalog/manifest/channel/bundle/extension-registry），`flag` 读取 configCenter 开关，动态 import 消除循环依赖。
 - **setup**：`ConfigManager`（三层合并持久化）、`SetupWizard`/`GenerationWizard`、`persona-bootstrap`（SOUL/IDENTITY/USER 引导）、`model-defaults`。
 - **cli（doctor）**：8 项系统诊断 + 自动修复（Node/env/persona/deps/native-sqlite/config/kb/api keys）。2026-09-04 改名 `src/diagnostics/`。
 - **supervisor（进程监督层）**：`guardian.ts`（守护进程，退出码 42 重启 / 43 更新后剥参 / 44 插件热更新兜底；60s 滑动窗口 ≥5 次拉起熔断）、`protocol.ts`（进程边界契约叶：退出码常量、`.restart-session/.restart-continuation/.restart-reason` 标记读写、`prepareShellRestart` 会话快照，零内部依赖，verify:layers 规则 4 唯一白名单）、`shutdown.ts`（自 lifecycle/ 迁入的 `LifecycleSupervisor` 优雅关闭）。方案见 `docs/design/壳层方案-顶层操作收敛规划.md`。
@@ -265,7 +265,7 @@ input → bypass → context → llm → tools → finalize
 |---|---|
 | 单一职责 | 各模块一句话职责清晰；tools 只管执行、context 只管组装、provider 只管 LLM 抽象 |
 | 零侵入集成 | Tool/Plugin/ContextSource/BypassAgent 先注册后使用；内核 slot 可运行时替换 |
-| 外部配置化 | `kernel.pipeline` 装配、Manifest zone、configCenter 全量开关/阈值、13 watcher |
+| 外部配置化 | `kernel.pipeline` 装配、Manifest zone、configCenter 全量开关/阈值、14 watcher |
 | 数据/配置/代码分离 | MODEL_CATALOG(数据) / *.json(配置) / .ts(代码) |
 | 可插拔接口稳定 | `Tool`/`Provider`/`BypassAgent`/`ChannelHandler`/`GenerationProvider` 均为稳定小接口，实现可换 |
 | 可独立测试 | 各模块独立 vitest（assembly-graph/context/truncating-composer/registry/resilient/generation adapter 等） |
@@ -2441,7 +2441,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 
 ## 3. src/hot-reload/（17 文件 —— 热重载管理器）
 
-**职责**：实现"配置变更即时生效，不重启"的项目原则。所有外部化内容（MCP、Skill、Agent、Workflow、Provider、Config、Tools、Plugins、Commands、Prompts、Model Catalyst、Channels、Context Manifest、Tool Bundles）通过各自 watcher 监听变化并自动重载。核心思想是把所有 watcher 的公共样板（fs.watch/watchFile + debounce + mtime 去重 + try/catch + logger）收敛到 `watcher-base.ts`，13 个业务 watcher 只管声明 spec。
+**职责**：实现"配置变更即时生效，不重启"的项目原则。所有外部化内容（MCP、Skill、Agent、Workflow、Provider、Config、Tools、Plugins、Commands、Prompts、Model Catalyst、Channels、Context Manifest、Tool Bundles、Extension Registry）通过各自 watcher 监听变化并自动重载。核心思想是把所有 watcher 的公共样板（fs.watch/watchFile + debounce + mtime 去重 + try/catch + logger）收敛到 `watcher-base.ts`，14 个业务 watcher 只管声明 spec。
 
 ### 3.1 骨架与核心类型
 
@@ -2466,7 +2466,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 - **类 `HotReloadManager`**：
   - 内部 `handles: WatcherHandle[]`、`logger`、`started` 标志。
   - 静态工厂 `create()`：构造 + start。
-  - `watcherSpecs()`：**13 条装配表**的单一事实源。
+  - `watcherSpecs()`：**14 条装配表**的单一事实源。
   - `start()`：读 `hotReload.enabled`，关闭则直接返回；逐条 spec 校验 flag → 动态 `load()` → `build()`（null 则跳过）→ `registerWatcher(watch, ...args)`。
   - `stop()`：遍历 handles close，清空数组。
   - `registerWatcher(fn, ...args)`：统一把单句柄/数组归一化入 handles，异常由 logger 捕获。
@@ -2476,7 +2476,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
   - channel-watcher 与 provider-watcher 共用 `hotReload.watchProviders` 开关；channelRegistry 缺失时 build 返回 null。
   - watchCommands/watchContextManifest 的缺省启用由 defaults 承担，用户显式 false 才跳过。
 
-### 3.2 13 个业务 Watcher（均基于 createWatcher 声明 spec）
+### 3.2 14 个业务 Watcher（均基于 createWatcher 声明 spec）
 
 | 文件 | 监听目标 | 模式 | reload 行为 | 外部依赖 |
 |---|---|---|---|---|
@@ -2493,6 +2493,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 | `manifest-watcher.ts` | .agent/context-manifest.json | watch | `getManifestLoader(cwd)`（按 resolve 路径缓存实例）省二次 .load()/reload() | ../context/manifest-loader |
 | `channel-watcher.ts` | 全局 + 项目 model-channels.json | watch | `channelRegistry.reload()` | ../provider/model-channel-registry |
 | `bundle-watcher.ts` | ~/.agent/tool-bundles.json（监听父目录 + filename 过滤） | watch | `registry.reload()` | ../tools/bundle-registry |
+| `extension-registry-watcher.ts` | 全局 + 项目 extension-registry.json | poll | 重载名单注入 ExtensionRegistry（校验失败保留旧值）+ 插件裁决 diff（名单 enabled 与挂载态不一致时 deactivate/activate） | ../supervisor/extension-registry、../plugins/manager |
 
 **特殊说明（tool-watcher）**：自身定义 `ResolvedEntry`（trackingKey/filePath/label/factory）与 `scanAndSync`、`resolveToolEntries`、`loadAndRegister` 内部函数，维护 `fileMap`/`mtimeMap`；对外暴露 `watchTools(deps)`。
 

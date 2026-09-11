@@ -1,6 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, exec } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execAsync = promisify(exec);
 import { createLogger } from '../logging/logger.js';
 import { loadPrompt, clearPromptCache, renderPrompt } from '../prompts/loader.js';
 
@@ -160,6 +163,155 @@ export function collectSystemInfo(): SystemEnvInfo {
 }
 
 export function getSystemInfo(): SystemEnvInfo | null {
+  return cachedInfo;
+}
+
+// ── 异步并行采集（启动路径用：不阻塞 UI，首次 compose 时经 getContent await）──
+
+/** 异步执行 shell 命令（并行安全，超时兜底），失败返回 fallback */
+async function safeExecAsync(cmd: string, fallback: string = '(未检测到)'): Promise<string> {
+  try {
+    const { stdout } = await execAsync(cmd, { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+    return stdout.trim() || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 解析 nvidia-smi 输出（返回 'Name (VRAM x.x GB)' 或 null） */
+function parseNvidiaGpu(nvidiaOutput: string): string | null {
+  if (!nvidiaOutput || nvidiaOutput === '(未检测到)') return null;
+  const firstLine = nvidiaOutput.split('\n')[0].trim();
+  const parts = firstLine.split(',').map((s) => s.trim());
+  if (parts.length >= 2) {
+    const vramMatch = parts[1].match(/(\d+)/);
+    const vramMB = vramMatch ? parseInt(vramMatch[1], 10) : 0;
+    if (vramMB > 0) {
+      const vramGB = (vramMB / 1024).toFixed(1);
+      return parts[0] + ' (VRAM ' + vramGB + ' GB)';
+    }
+  }
+  return firstLine;
+}
+
+/** 解析 PowerShell Win32_VideoController 输出（返回 'Name (VRAM x.x GB)' 或 null） */
+function parsePowerShellGpu(output: string): string | null {
+  if (!output || output === '(未检测到)') return null;
+  const lines = output.split('\n').map((l) => l.trim()).filter(Boolean);
+  const realCards = lines.filter(
+    (l) =>
+      !l.includes('Microsoft Basic') &&
+      !l.includes('Microsoft Remote') &&
+      !l.includes('Microsoft Hyper-V') &&
+      !l.includes('Remote Display'),
+  );
+  for (const line of [...realCards, ...lines]) {
+    const sepIdx = line.indexOf('||');
+    const name = sepIdx >= 0 ? line.substring(0, sepIdx).trim() : line.trim();
+    const vramStr = sepIdx >= 0 ? line.substring(sepIdx + 2).trim() : '';
+    const vramBytes = parseInt(vramStr, 10);
+    if (vramBytes && !isNaN(vramBytes) && vramBytes > 0 && vramBytes < 1_000_000_000_000) {
+      const vramGB = (vramBytes / 1024 / 1024 / 1024).toFixed(1);
+      return name + ' (VRAM ' + vramGB + ' GB)';
+    }
+    if (name && name !== '(未检测到)') {
+      return name;
+    }
+  }
+  return null;
+}
+
+async function detectGpuAsync(): Promise<string> {
+  if (process.platform === 'win32') {
+    const nvidiaOutput = await safeExecAsync(
+      'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader',
+      '',
+    );
+    const parsed = parseNvidiaGpu(nvidiaOutput);
+    if (parsed) return parsed;
+
+    const psOutput = await safeExecAsync(
+      'powershell -Command "Get-CimInstance Win32_VideoController | ForEach-Object { \"$($_.Name)||$($_.AdapterRAM)\" }"',
+      '',
+    );
+    return parsePowerShellGpu(psOutput) ?? '(未检测到)';
+  }
+
+  if (process.platform === 'linux') {
+    const lspciOut = await safeExecAsync('lspci | grep -i vga', '');
+    if (lspciOut) {
+      const nameMatch = lspciOut.match(/:\s*(.+)/);
+      return nameMatch ? nameMatch[1].trim() : lspciOut;
+    }
+    const nvidiaOutput = await safeExecAsync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader', '');
+    const parsed = parseNvidiaGpu(nvidiaOutput);
+    if (parsed) return parsed;
+    return '(未检测到)';
+  }
+
+  if (process.platform === 'darwin') {
+    return safeExecAsync('system_profiler SPDisplaysDataType 2>/dev/null | grep "Chipset Model" | head -1 | sed "s/.*: //"');
+  }
+
+  return '(未检测到)';
+}
+
+async function detectPythonAsync(): Promise<string> {
+  for (const cmd of ['python3 --version', 'python --version']) {
+    const result = await safeExecAsync(cmd, '');
+    if (result && result !== '(未检测到)') {
+      return result.replace(/^Python\s+/i, '').trim();
+    }
+  }
+  return '(未安装)';
+}
+
+/**
+ * 异步并行采集系统环境信息（不阻塞启动路径）。
+ * 与 collectSystemInfo 共享 cachedInfo：先到者填充，后到者直接返回缓存。
+ */
+export async function collectSystemInfoAsync(): Promise<SystemEnvInfo> {
+  if (cachedInfo) return cachedInfo;
+
+  const totalMemBytes = os.totalmem();
+  const totalMemGB = (totalMemBytes / 1024 / 1024 / 1024).toFixed(1);
+
+  const [osName, cpuModel, python, shell] = await Promise.all([
+    process.platform === 'win32'
+      ? safeExecAsync(
+          'powershell -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
+          os.type(),
+        ).then((s) => s.replace(/[\r\n]+/g, '').trim())
+      : Promise.resolve(os.type() + ' ' + os.release()),
+    process.platform === 'win32'
+      ? safeExecAsync(
+          'powershell -Command "(Get-CimInstance Win32_Processor).Name"',
+          '',
+        ).then((s) => s.replace(/[\r\n]+/g, '').trim())
+      : Promise.resolve((os.cpus()[0]?.model?.trim() ?? os.arch())),
+    detectPythonAsync(),
+    process.platform === 'win32'
+      ? safeExecAsync('powershell -Command "$PSVersionTable.PSVersion.ToString()"', '').then((v) =>
+          v && v !== '(未检测到)' ? 'PowerShell ' + v : 'Command Prompt',
+        )
+      : Promise.resolve(process.env.SHELL || '/bin/sh'),
+  ]);
+
+  const gpu = await detectGpuAsync();
+
+  cachedInfo = {
+    os: osName,
+    arch: os.arch(),
+    cpuModel,
+    cpuCores: os.cpus().length,
+    totalMemoryGB: totalMemGB,
+    gpu,
+    python,
+    nodeVersion: process.version,
+    shell,
+  };
+
+  logger.info('System environment collected', { ...cachedInfo });
   return cachedInfo;
 }
 

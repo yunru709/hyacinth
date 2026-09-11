@@ -18,6 +18,8 @@ export class LocalModelModule {
   private registry: ModelRegistry;
   private bridge: ModelBridge;
   private initialized = false;
+  /** 已初始化的项目根目录（幂等防重建：避免清掉已启动的模型 bridge 状态） */
+  private projectRoot: string | null = null;
 
   static getInstance(): LocalModelModule {
     if (!LocalModelModule.instance) {
@@ -28,7 +30,7 @@ export class LocalModelModule {
 
   private constructor() {
     this.registry = ModelRegistry.getInstance();
-    this.bridge = new ModelBridge();
+    this.bridge = new ModelBridge(process.cwd());
   }
 
   // ── 初始化 ──
@@ -39,12 +41,18 @@ export class LocalModelModule {
    * @param projectRoot - 项目根目录
    */
   initialize(projectRoot: string): void {
+    // 幂等：同一项目已初始化则保留现有 bridge（避免重复 spawn 本地模型进程）
+    if (this.initialized && this.projectRoot === projectRoot) {
+      return;
+    }
+    this.projectRoot = projectRoot;
+
     // 确保单例指向正确的项目根目录
     this.registry = ModelRegistry.getInstance(projectRoot);
     this.registry.init();
 
-    // 重新创建 bridge 以使用正确的 llama-server 路径
-    this.bridge = new ModelBridge(this.resolveLlamaServerPath(projectRoot));
+    // 重新创建 bridge 以使用正确的 llama-server 路径（缺失时由 ensureBinary 自愈下载）
+    this.bridge = new ModelBridge(projectRoot, this.resolveLlamaServerPath(projectRoot));
     this.initialized = true;
   }
 
@@ -67,6 +75,14 @@ export class LocalModelModule {
    */
   async startAll(): Promise<RunningModelInfo[]> {
     return this.bridge.startAll();
+  }
+
+  /**
+   * 确保 llama-server 二进制可用（缺失时自动下载；幂等并发去重）。
+   * @returns 可用的 llama-server 路径；下载失败返回 null
+   */
+  ensureBinary(): Promise<string | null> {
+    return this.bridge.ensureBinary();
   }
 
   /**
@@ -269,7 +285,7 @@ export class LocalModelModule {
   /**
    * 按优先级查找 llama-server 二进制路径。
    */
-  private resolveLlamaServerPath(projectRoot: string): string {
+  private resolveLlamaServerPath(projectRoot: string): string | null {
     const candidates = [
       join(projectRoot, 'libs', 'llama.cpp', 'build', 'bin', 'Release', 'llama-server.exe'),
       join(projectRoot, 'libs', 'llama.cpp', 'build', 'bin', 'llama-server'),
@@ -279,6 +295,6 @@ export class LocalModelModule {
       'llama-server.exe',
     ];
     const found = candidates.find((c) => existsSync(c));
-    return found ?? 'llama-server';
+    return found ?? null;
   }
 }

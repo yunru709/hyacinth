@@ -129,13 +129,13 @@ export function createSpawnSubAgentTool(agentRegistry: any): Tool {
 export function createCreateSubAgentTool(agentRegistry: any, cwd: string): Tool {
   return {
     name: 'create_sub_agent',
-    description: '创建一个新的自定义子 Agent。定义其角色（description）、行为准则（systemPrompt）和可用工具（allowedTools）。系统提示词中使用 {{task}} 作为占位符——委派时自动替换为实际任务。persist=true 时将 Agent 定义持久化到磁盘，重启后仍可用。默认可用工具为 read/glob/grep/write，可按需扩展。',
+    description: '创建一个新的自定义子 Agent。定义其角色（description）、行为准则（systemPrompt）和可用工具（allowedTools）。系统提示词中的 {{task}} 占位符在首次委派时解析为固定指引（"当前任务以最新一条用户消息为准"）——具体任务通过委派时的 user 消息传递，system prompt 落定后冻结，复用不变，前缀恒定以利 KV 缓存命中。persist=true 时将 Agent 定义持久化到磁盘，重启后仍可用。默认可用工具为 read/glob/grep/write，可按需扩展。',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Unique name for the new sub-agent (e.g. "doc-reviewer")' },
         description: { type: 'string', description: 'Role description — helps the orchestrator decide when to use this agent.' },
-        systemPrompt: { type: 'string', description: 'Full system prompt defining the sub-agent\'s behavior, expertise, and constraints. Use {{task}} as a placeholder for the delegated task.' },
+        systemPrompt: { type: 'string', description: 'Full system prompt defining the sub-agent\'s behavior, expertise, and constraints. {{task}} is resolved once to a fixed pointer (task is delivered via the delegated user message); the resolved prompt is frozen on first delegation for cache stability.' },
         allowedTools: {
           type: 'array',
           items: { type: 'string' },
@@ -187,7 +187,7 @@ export function createCreateSubAgentTool(agentRegistry: any, cwd: string): Tool 
         ];
 
         if (persist) {
-          await persistSubAgent(cwd, name, systemPrompt, allowedTools, maxTurns, sessionTtlMinutes);
+          await persistSubAgent(cwd, name, description, systemPrompt, allowedTools, maxTurns, sessionTtlMinutes);
           lines.push(`- Persisted to disk: yes (prompts/agents/${name}.md + .agent/agents.json)`);
         } else {
           lines.push(`- Persisted to disk: no (memory only, use persist=true to save permanently)`);
@@ -213,7 +213,7 @@ export function createUpdateSubAgentTool(agentRegistry: any): Tool {
       properties: {
         instance_id: { type: 'string', description: 'Instance ID of the sub-agent to update (required).' },
         description: { type: 'string', description: 'Updated role description.' },
-        systemPrompt: { type: 'string', description: 'Updated system prompt. Use {{task}} as placeholder.' },
+        systemPrompt: { type: 'string', description: 'Updated system prompt. {{task}} resolves once to a fixed pointer on first delegation; changing this only affects newly-created sessions.' },
         allowedTools: {
           type: 'array',
           items: { type: 'string' },
@@ -304,6 +304,7 @@ export function createDestroySubAgentTool(
 async function persistSubAgent(
   cwd: string,
   name: string,
+  description: string,
   systemPrompt: string,
   allowedTools: string[],
   maxTurns: number,
@@ -315,15 +316,18 @@ async function persistSubAgent(
   }
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
+  const os = await import('node:os');
 
-  const srcPromptDir = path.join(cwd, 'src', 'prompts', 'agents');
+  // 修复：写到 loadPrompt 的第一查找位置 ~/.agent/prompts/agents/{name}.md。
+  // 旧实现写 cwd/src 与 cwd/dist，而加载器（prompts/loader.ts）读的是
+  // ~/.agent/prompts 与部署 dist——运行时 cwd 为家目录时两个路径全落空，
+  // 导致 persist 后 prompt 文件“写成功但加载器读不到”，agent 被静默跳过。
+  const externalPromptDir = path.join(os.homedir(), '.agent', 'prompts', 'agents');
+  await fs.mkdir(externalPromptDir, { recursive: true });
+  await fs.writeFile(path.join(externalPromptDir, `${name}.md`), systemPrompt, 'utf-8');
+
+  // 兼容仓库部署场景：同时写 dist/prompts/agents/{name}.md（loadPrompt 的内置回退目录）
   const distPromptDir = path.join(cwd, 'dist', 'prompts', 'agents');
-
-  // 1. Write src/prompts/agents/{name}.md
-  await fs.mkdir(srcPromptDir, { recursive: true });
-  await fs.writeFile(path.join(srcPromptDir, `${name}.md`), systemPrompt, 'utf-8');
-
-  // 2. Write dist/prompts/agents/{name}.md (immediate runtime readiness)
   try {
     await fs.mkdir(distPromptDir, { recursive: true });
     await fs.writeFile(path.join(distPromptDir, `${name}.md`), systemPrompt, 'utf-8');
@@ -347,7 +351,7 @@ async function persistSubAgent(
 
   const entry: any = {
     name,
-    description: `Custom sub-agent created at runtime`,
+    description,
     promptFile: `agents/${name}`,
     allowedTools,
     maxTurns,

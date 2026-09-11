@@ -1,5 +1,6 @@
 export {
   collectSystemInfo,
+  collectSystemInfoAsync,
   getSystemInfo,
   formatEnvInfo,
   buildEnvironmentSection,

@@ -1099,6 +1099,13 @@ export class AgentLoop {
           stopReason: result.stopReason,
         });
 
+        // ── 迭代级上下文占用推送（UI 即时刷新进度条，无需等整轮结束） ──
+        // 与回合级 MESSAGE_TURN_INFO 语义区分：本事件不表示回合结束。
+        this.emitUiEvent(UI_EVENT.MESSAGE_CONTEXT_UPDATE, {
+          turnCount: this.turnNumber,
+          tokensUsed: this.lastContextTokens,
+        });
+
         // ── 异步子Agent 结果回合内注入 ─────────────────────────
         // delegate-tool 中异步任务完成后会将结果推送到此队列。
         // 本轮迭代结束后检查：有已完成的结果→注入对话→强制继续迭代，
@@ -1618,7 +1625,9 @@ export class AgentLoop {
     // 没有 tool_calls —— 先检查 Flow 状态机是否仍在运行。
     // 若 flow 活跃（即使本轮 LLM 失误没调 flow_complete），不终止主循环：
     // 下一轮 Zone 5 注入 flow 状态，引导 LLM 继续推进。
-    const flowStillActive = this.flowRegistry.getActive();
+    // flowRegistry 是可选服务（factory 注入，子 Agent 不传）。
+    // 子 Agent 的 AgentLoop 无 flowRegistry，必须可选链，否则 undefined.getActive() 崩溃。
+    const flowStillActive = this.flowRegistry?.getActive();
     await this.checkTextLoop(textParts);
     // ── P1 M3：finalize 阶段（endTurn + stop 判定；flow 活跃时不写 stop 事件） ──
     const finB = await this.pipeline.runSlot('finalize', { ...stateRef, flowStillActive: !!flowStillActive }, this.makeStageCtx());

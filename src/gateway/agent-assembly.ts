@@ -72,7 +72,7 @@ import { createProcessListTool, createProcessKillTool, createProcessOutputTool }
 import { createSystemInfoTool } from '../tools/system-info.js';
 import { createChannelInfoTool, setChannelsInfo } from '../tools/channel-info.js';
 import type { ChannelsInfo } from '../env/index.js';
-import { collectSystemInfo } from '../env/index.js';
+import { collectSystemInfoAsync } from '../env/index.js';
 import { CommandRegistry } from '../ui/command-registry.js';
 
 import { runBaseContributions } from './base-contributions.js';
@@ -222,8 +222,8 @@ export async function createAgentAssembly(
   const loopRefBox: { current: AgentLoop | null } = { current: null };
   wireFallbackNotifications({ provider, configCenter, loopRefBox });
 
-  // ── 环境信息（进程启动时采集一次；ContextSource 注册已抽离至 context-sources.ts） ──
-  const envInfo = collectSystemInfo();
+  // ── 环境信息（异步并行采集：不阻塞启动；首次 compose 时经 ContextSource await 消费） ──
+  const envInfo = collectSystemInfoAsync();
 
   // 初始化渠道信息缓存（供 channel_info 工具查询）
   setChannelsInfo(channelsInfo ?? []);

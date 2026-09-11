@@ -41,7 +41,7 @@ hyacinth [options] [prompt]
 
 | 选项 | 简写 | 说明 |
 |--------|-------|-------------|
-| `--provider <type>` | `-p` | Provider：anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / groq / xai / mistral / openrouter / moonshot / local（16 种） |
+| `--provider <type>` | `-p` | Provider：anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / groq / xai / mistral / openrouter / moonshot / local / ollama / llamacpp（16 种） |
 | `--model <name>` | `-m` | 模型名（按 provider 默认值） |
 | `--interactive` | `-i` | 强制交互模式 |
 | `--tui` | | 全屏终端界面 |

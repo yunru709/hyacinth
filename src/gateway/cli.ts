@@ -1313,7 +1313,16 @@ async function executeAction(
       }
     }
 
-    if (providerType === 'local' || startModel) {
+    if (providerType === 'local') {
+      // 同步取注册表首个 enabled 模型名（不 spawn 进程），供 createProvider 使用
+      if (!finalModelName) {
+        try {
+          finalModelName = supervisor.getFirstEnabledModelName(process.cwd()) ?? undefined;
+        } catch {
+          // 注册表不可用时保持默认
+        }
+      }
+    } else if (startModel) {
       const models = await supervisor.loadAndStartModels(process.cwd());
 
       if (models.length > 0) {
@@ -1329,6 +1338,31 @@ async function executeAction(
     // 创建 Provider
     getProviderConfigLoader(process.cwd());
     const provider = await createProvider(finalProviderType, finalModelName);
+
+    // 异步拉起本地模型：不阻塞进入 TUI；ready 后自动挂载到 provider。
+    // （幂等：LocalModelModule 单例共享 bridge，重复调用不会重复 spawn）
+    if (providerType === 'local') {
+      void (async () => {
+        try {
+          const models = await supervisor.loadAndStartModels(process.cwd());
+          if (models.length > 0) {
+            const model = models[0];
+            if (provider.getProviderType() === 'local') {
+              (provider as LocalProvider).setBaseUrl(model.baseUrl);
+              (provider as LocalProvider).setModel(model.modelName);
+            }
+            logger.info(
+              'Local model started (async)',
+              { model: model.name, backend: model.backend, baseUrl: model.baseUrl, modelName: model.modelName },
+            );
+          }
+        } catch (error: unknown) {
+          logger.warn('Local model start failed (async)', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    }
 
     // 动态获取 maxContext：如果用户未指定，从模型目录读取
     if (!options.maxContext) {

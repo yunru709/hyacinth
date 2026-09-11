@@ -64,6 +64,18 @@ export class LifecycleSupervisor {
   // ===== Local Model 管理 =====
 
   /**
+   * 同步取注册表首个 enabled 模型名（不 spawn 进程）。
+   * 供 CLI 在 providerType=local 时兜底推导模型名，避免直连 local-model 模块。
+   */
+  getFirstEnabledModelName(projectDir: string): string | null {
+    const mod = this.localModelModule;
+    if (!mod.isInitialized()) mod.initialize(projectDir);
+    const first = mod.list().find((m) => m.enabled);
+    if (!first) return null;
+    return mod.getModelName(first.name) ?? first.modelFile;
+  }
+
+  /**
    * 从本地模型注册表加载并启动所有 enabled 的模型（D3：LocalModelModule 门面）。
    * @returns 加载到的模型信息列表
    */

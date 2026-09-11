@@ -79,7 +79,7 @@ export class HotReloadManager {
     return manager;
   }
 
-  // ── Watcher 装配表（13 个 watcher 的注册配置；防屎山核心） ──
+  // ── Watcher 装配表（14 个 watcher 的注册配置；防屎山核心） ──
 
   private watcherSpecs(): WatcherSpecEntry[] {
     return [

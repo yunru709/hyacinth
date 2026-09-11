@@ -63,8 +63,12 @@ export async function loadAgentConfigs(cwd: string, configOverride?: AgentsConfi
     let systemPrompt: string;
     try {
       systemPrompt = loadPrompt(entry.promptFile);
-    } catch {
-      // 提示词文件不存在，跳过该 agent
+    } catch (err) {
+      // 提示词文件不存在，跳过该 agent。必须记录——静默跳过会掩盖
+      // persist 路径错误等 bug（历史上因此长期漏检）。
+      console.warn(
+        `[agents] skip "${name}": prompt file "${entry.promptFile}" not found (${err instanceof Error ? err.message : String(err)})`,
+      );
       continue;
     }
 

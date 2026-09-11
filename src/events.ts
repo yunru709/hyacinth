@@ -51,6 +51,11 @@ export const UI_EVENT = {
   MESSAGE_ERROR: 'message.error',
   MESSAGE_TURN_START: 'message.turn_start',
   MESSAGE_TURN_INFO: 'message.turn_info',
+  /**
+   * 迭代级上下文占用推送：每轮 loop 迭代（compose/LLM/工具）结束后广播，
+   * 供 UI 即时刷新上下文进度条——不表示回合结束（区别于 MESSAGE_TURN_INFO）。
+   */
+  MESSAGE_CONTEXT_UPDATE: 'message.context_update',
   MESSAGE_FLUSH: 'message.flush',
   MESSAGE_INTERRUPT: 'message.interrupt',
   MESSAGE_ASK_USER: 'message.ask_user',

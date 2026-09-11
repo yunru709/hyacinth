@@ -35,6 +35,8 @@ export class ProcessManager {
   private lastError: string | null = null;
 
   private healthTimer: ReturnType<typeof setInterval> | null = null;
+  /** 进行中的启动 Promise（幂等：starting 状态下再次 start 等待同一启动，不重复 spawn） */
+  private startPromise: Promise<void> | null = null;
   private healthOk = false;
   private healthFailCount = 0;
   private manualStop = false;
@@ -71,13 +73,22 @@ export class ProcessManager {
     };
   }
 
-  /** 启动进程 + 等待健康检查通过 */
+  /** 启动进程 + 等待健康检查通过（幂等：starting 时复用同一启动，避免重复 spawn） */
   async start(): Promise<void> {
     if (this.state === 'running') return;
+    if (this.state === 'starting' && this.startPromise) {
+      return this.startPromise;
+    }
     this.manualStop = false;
     this.transitionTo('starting');
     this.spawnProcess();
-    await this.waitForStartup();
+    const p = this.waitForStartup();
+    this.startPromise = p;
+    try {
+      await p;
+    } finally {
+      if (this.startPromise === p) this.startPromise = null;
+    }
   }
 
   /** 停止进程（优雅 → 强制进程树杀） */
