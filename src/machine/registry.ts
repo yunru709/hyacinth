@@ -47,8 +47,17 @@ export class MachineRegistry {
     if (!this.activeId) return undefined;
     const flow = this.flows.get(this.activeId);
     // 只有当 Flow 的 runner 处于 active 状态时才返回
-    if (flow?.runner.status === 'active') return flow;
-    return undefined;
+    if (flow?.runner.status !== 'active') return undefined;
+    // 根治（死循环防御）：planning 阶段且没有任何 steps 的空 flow 不算"活跃"。
+    // 否则无工具调用时 finalize 恒返回 stop:false → 主循环无限继续，
+    // 即使模型已放弃该 flow 也无法正常结束（只能等 maxTurns/LoopGuard 兜底）。
+    // 空 planning flow 尚未真正开始工作，不应阻止主循环退出。
+    try {
+      const snap = flow.getSnapshot();
+      const steps = (snap.context.steps as unknown[] | undefined) ?? [];
+      if (snap.currentState === 'planning' && steps.length === 0) return undefined;
+    } catch { /* snapshot 异常按活跃处理（保守） */ }
+    return flow;
   }
 
   /** 消费并清空「最近完成的 Flow」描述（一次性，避免重复注入完成通知） */

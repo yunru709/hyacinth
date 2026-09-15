@@ -1099,6 +1099,10 @@ export class AgentLoop {
       // LoopGuard 跟踪连续触发次数，超过上限后强制停止以防止死循环。
       let toolWasCalled = false;
       let lastResult: { stop: boolean; stopReason?: string } = { stop: false };
+      // 连续空转计数（方案 B：无工具调用且不停止的轮次；flow 强制继续但模型
+      // 不再推进时，避免无限空转 —— 由 LoopGuard/空转兜底双保险）
+      let idleTurnCount = 0;
+      const IDLE_TURN_LIMIT = 3;
       while (true) {
         if (this.interrupted) {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
@@ -1108,7 +1112,12 @@ export class AgentLoop {
         const result = await this.runTurn();
         turnCount++;
         lastResult = result;
-        if (result.toolCalled) toolWasCalled = true;
+        if (result.toolCalled) {
+          toolWasCalled = true;
+          idleTurnCount = 0; // 有工具调用 = 在推进，重置空转计数
+        } else {
+          idleTurnCount++; // 无工具调用：可能正常结束（stop）或 flow 强制继续
+        }
         // ── 钩子：迭代结束（异步子Agent注入 / stats / loopGuard 可在此挂载） ──
         await this.loopHooks.emit('onIterationEnd', {
           turn: turnCount,
@@ -1169,6 +1178,17 @@ export class AgentLoop {
         }
 
         if (result.stop) {
+          break;
+        }
+
+        // 方案 B：连续多轮无工具调用且未停止（flow 强制继续但模型不再推进）
+        // → 空转兜底：强制退出，防止"无工具调用却停不下来"的死循环
+        if (!result.toolCalled && idleTurnCount >= IDLE_TURN_LIMIT) {
+          this.outputHandler?.onStatus?.(
+            `No tool calls for ${IDLE_TURN_LIMIT} consecutive turns. Stopping to prevent idle loop.`,
+            'warn',
+          );
+          lastResult = { stop: true, stopReason: 'idle_loop' };
           break;
         }
 
