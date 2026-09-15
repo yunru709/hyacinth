@@ -791,9 +791,12 @@ export class AgentLoop {
     this.lifecycleSupervisor = supervisor;
   }
 
-  /** 注入工具包注册表（在 factory.ts 中紧接 AgentLoop 创建后调用） */
+  /** 注入工具包注册表（在 factory.ts 中紧接 AgentLoop 创建后调用）。
+   *  必须同步 stageServices —— 否则 context 阶段 ctx.get('bundleRegistry')
+   *  拿到构造时捕获的 undefined，工具包过滤整体失效（全量工具暴露）。 */
   setBundleRegistry(registry: ToolBundleRegistry): void {
     this.bundleRegistry = registry;
+    this.stageServices.set('bundleRegistry', registry);
   }
 
   /** 运行时替换 outputHandler（用于 server 模式按请求切换流式输出）；askUserHandler 同步跟随 */

@@ -103,6 +103,35 @@ describe('context 阶段（builtin:layered-composer）', () => {
     expect(st.toolDefinitions.map((t) => t.name)).toEqual(['a']);
   });
 
+  it('工具过滤：bundleRegistry 注入时只暴露激活包工具（回归：setBundleRegistry 须同步 stageServices）', async () => {
+    // bundleRegistry 存在（已注入）→ 激活包 = common+coding，只放行包内工具。
+    // 此用例对应 bug：loop.setBundleRegistry 若未同步 stageServices，
+    // ctx.get('bundleRegistry') 为 undefined，过滤被跳过 → 全量工具暴露。
+    const ctx = makeCtx({
+      getRouter: () => ({ name: 'normal', toolAllowlist: [], toolBlacklist: [], filterHistory: (h: Message[]) => h }),
+      bundleRegistry: {
+        getActiveToolNames: () => ['a', 'c'], // 模拟 coding 包（a/c 在包内，b 不在）
+      },
+    });
+
+    const st = await stage.run(baseState(), ctx);
+
+    // b 不在激活包 → 被过滤掉
+    expect(st.toolDefinitions.map((t) => t.name)).toEqual(['a', 'c']);
+  });
+
+  it('工具过滤：bundleRegistry 未注入时（undefined）不过滤（全量）', async () => {
+    const ctx = makeCtx({
+      getRouter: () => ({ name: 'normal', toolAllowlist: [], toolBlacklist: [], filterHistory: (h: Message[]) => h }),
+      bundleRegistry: undefined, // 构造时未注入（旧 bug 场景）
+    });
+
+    const st = await stage.run(baseState(), ctx);
+
+    // undefined → 跳过过滤，全量工具保留（此时由注入方保证 bundleRegistry 已同步）
+    expect(st.toolDefinitions.map((t) => t.name)).toEqual(['a', 'b', 'c']);
+  });
+
   it('effectiveHistory：router.filterHistory 过滤后传给 compose', async () => {
     const filterHistory = vi.fn((h: Message[]) => h.slice(1));
     const compose = vi.fn().mockResolvedValue({
