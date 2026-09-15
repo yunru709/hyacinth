@@ -14,6 +14,11 @@
  * 新增厂商只改此处一项 + provider 实现文件；types.ts 的 ProviderType 由注册表键
  * 派生，config.ts 的 DEFAULT_PROVIDERS / setup 的 API_KEY_MAP 全部自动收敛。
  *
+ * 三层查询（getProviderFactory / listProviderFactories）：
+ *   1. 运行时扩展（registerProviderFactory，B-3）
+ *   2. 内置注册表（PROVIDER_FACTORIES，本文件）
+ *   3. JSON 声明兜底（~/.agent/providers.json，零代码接入，见 createJsonDeclaredFactory）
+ *
  * ⚠️ 键序即优先级：detectFromEnv / getAvailableProviders 遍历保序
  * （Object.values / Object.entries 遵循插入序），anthropic 最优先、local 兜底。
  *
@@ -32,6 +37,8 @@ import {
   createMistralProvider,
   createOpenRouterProvider,
   createMoonshotProvider,
+  createVolcengineProvider,
+  OpenAICompatibleProvider,
 } from './compatible.js';
 import { GeminiProvider } from './gemini.js';
 import { createQwenProvider, createQwenFromConfig } from './qwen.js';
@@ -39,7 +46,9 @@ import { createZhipuProvider, createZhipuFromConfig } from './zhipu.js';
 import { createMiniMaxProvider, createMiniMaxFromConfig } from './minimax.js';
 import { createMiMoProvider, createMiMoFromConfig } from './mimo.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
+import { getProviderConfigLoader } from './config.js';
 import { PROVIDER_META } from './provider-meta.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 
 // ProviderFactoryMeta 类型与数据真源在 provider-meta.ts（模块环：工厂文件内联
 // meta 会形成 config → factory-registry → 实现文件 → config 的加载环）
@@ -66,6 +75,7 @@ export const PROVIDER_TYPES = [
   'zhipu',
   'minimax',
   'mimo',
+  'volcengine',
   // ── 本地模型三态 ──
   'local',
   'ollama',
@@ -82,6 +92,27 @@ export interface ProviderConfigLike {
   baseUrl?: string;
   model: string;
   userId?: string;
+  /** 单次请求最大输出 token 数（不传则从模型目录自动获取） */
+  maxOutputTokens?: number;
+  /** 通用字段（userId 等；工厂层归一 userId 进 fields） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/penalties；让配置生效） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（缺省从厂商 meta.fieldMap 解析，providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
+}
+
+/**
+ * 解析厂商的 wire 字段名覆盖（映射数据化）。
+ * 优先用户配置（providers.json 覆盖内置 meta），回退内置 PROVIDER_META。
+ * loader 未初始化（启动早期）时回退内置对象；内置未声明 → undefined（走代码默认 PROTOCOL_FIELD_MAP）。
+ */
+function resolveFieldMap(type: string): Partial<Record<keyof ProviderFields, string>> | undefined {
+  try {
+    return getProviderConfigLoader().getProvider(type)?.fieldMap ?? PROVIDER_META[type]?.fieldMap;
+  } catch {
+    return PROVIDER_META[type]?.fieldMap;
+  }
 }
 
 /** 单个厂商的工厂描述 */
@@ -124,7 +155,15 @@ function detectLocalFromConfig(): Provider | null {
 export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   anthropic: {
     create: (config: ProviderConfigLike) =>
-      new AnthropicProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model }),
+      new AnthropicProvider({
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        maxOutputTokens: config.maxOutputTokens,
+        fields: config.fields,
+        sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('anthropic'),
+      }),
     createFromEnv: () =>
       process.env.ANTHROPIC_API_KEY
         ? new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY, baseUrl: process.env.ANTHROPIC_BASE_URL })
@@ -138,6 +177,10 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
         baseUrl: config.baseUrl,
         model: config.model,
         userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens,
+        fields: config.fields,
+        sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('openai'),
       }),
     createFromEnv: () =>
       process.env.OPENAI_API_KEY
@@ -146,7 +189,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
     meta: PROVIDER_META.openai,
   },
   deepseek: {
-    create: (config: ProviderConfigLike) => createDeepSeekFromConfig(config),
+    create: (config: ProviderConfigLike) => createDeepSeekFromConfig(config, config.fieldMap ?? resolveFieldMap('deepseek')),
     createFromEnv: () =>
       process.env.DEEPSEEK_API_KEY
         ? createDeepSeekProvider({ apiKey: process.env.DEEPSEEK_API_KEY, baseUrl: process.env.DEEPSEEK_BASE_URL })
@@ -155,19 +198,31 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   },
   groq: {
     create: (config: ProviderConfigLike) =>
-      createGroqProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId }),
+      createGroqProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('groq'),
+      }),
     createFromEnv: () => (process.env.GROQ_API_KEY ? createGroqProvider() : null),
     meta: PROVIDER_META.groq,
   },
   xai: {
     create: (config: ProviderConfigLike) =>
-      createXAIProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId }),
+      createXAIProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('xai'),
+      }),
     createFromEnv: () => (process.env.XAI_API_KEY ? createXAIProvider() : null),
     meta: PROVIDER_META.xai,
   },
   mistral: {
     create: (config: ProviderConfigLike) =>
-      createMistralProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId }),
+      createMistralProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('mistral'),
+      }),
     createFromEnv: () => (process.env.MISTRAL_API_KEY ? createMistralProvider() : null),
     meta: PROVIDER_META.mistral,
   },
@@ -181,35 +236,53 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   },
   openrouter: {
     create: (config: ProviderConfigLike) =>
-      createOpenRouterProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId }),
+      createOpenRouterProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('openrouter'),
+      }),
     createFromEnv: () => (process.env.OPENROUTER_API_KEY ? createOpenRouterProvider() : null),
     meta: PROVIDER_META.openrouter,
   },
   moonshot: {
     create: (config: ProviderConfigLike) =>
-      createMoonshotProvider({ apiKey: config.apiKey, model: config.model, userId: config.userId }),
+      createMoonshotProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('moonshot'),
+      }),
     createFromEnv: () => (process.env.MOONSHOT_API_KEY ? createMoonshotProvider() : null),
     meta: PROVIDER_META.moonshot,
   },
   qwen: {
-    create: (config: ProviderConfigLike) => createQwenFromConfig(config),
+    create: (config: ProviderConfigLike) => createQwenFromConfig(config, config.fieldMap ?? resolveFieldMap('qwen')),
     createFromEnv: () => (process.env.DASHSCOPE_API_KEY ? createQwenProvider() : null),
     meta: PROVIDER_META.qwen,
   },
   zhipu: {
-    create: (config: ProviderConfigLike) => createZhipuFromConfig(config),
+    create: (config: ProviderConfigLike) => createZhipuFromConfig(config, config.fieldMap ?? resolveFieldMap('zhipu')),
     createFromEnv: () => (process.env.ZHIPU_API_KEY ? createZhipuProvider() : null),
     meta: PROVIDER_META.zhipu,
   },
   minimax: {
-    create: (config: ProviderConfigLike) => createMiniMaxFromConfig(config),
+    create: (config: ProviderConfigLike) => createMiniMaxFromConfig(config, config.fieldMap ?? resolveFieldMap('minimax')),
     createFromEnv: () => (process.env.MINIMAX_API_KEY ? createMiniMaxProvider() : null),
     meta: PROVIDER_META.minimax,
   },
   mimo: {
-    create: (config: ProviderConfigLike) => createMiMoFromConfig(config),
+    create: (config: ProviderConfigLike) => createMiMoFromConfig(config, config.fieldMap ?? resolveFieldMap('mimo')),
     createFromEnv: () => (process.env.MIMO_API_KEY ? createMiMoProvider() : null),
     meta: PROVIDER_META.mimo,
+  },
+  volcengine: {
+    create: (config: ProviderConfigLike) =>
+      createVolcengineProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('volcengine'),
+      }),
+    createFromEnv: () => (process.env.ARK_API_KEY ? createVolcengineProvider() : null),
+    meta: PROVIDER_META.volcengine,
   },
   // ── 本地模型三态（不进 DEFAULT_PROVIDERS；仅 local 参与主检测兜底） ──
   local: {
@@ -236,15 +309,93 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
 /** 运行时注册的扩展厂商（string 键，不受 ProviderType 闭合联合限制） */
 const extendedFactories = new Map<string, ProviderFactory>();
 
-/** 合并查询：扩展优先，回退内置 */
+/**
+ * JSON 声明厂商兜底 —— 通过 ~/.agent/providers.json 声明即可接入，无需改内核。
+ *
+ * 声明示例（protocol 缺省为 openai）：
+ * ```json
+ * { "providers": {
+ *     "my_vendor": {
+ *       "id": "my_vendor", "name": "My Vendor",
+ *       "baseUrl": "https://api.my-vendor.com/v1",
+ *       "defaultModel": "my-model", "envKey": "MY_VENDOR_API_KEY",
+ *       "protocol": "openai"
+ *     }
+ * } }
+ * ```
+ * 与 registerProviderFactory（代码工厂运行时注册）互补：这是「纯声明式接入」。
+ * 仅当内置/扩展均未命中且 JSON 有声明时生效；未声明返回 undefined（保持原行为）。
+ */
+function createJsonDeclaredFactory(type: string): ProviderFactory | undefined {
+  let meta: ProviderFactoryMeta | undefined;
+  try {
+    meta = getProviderConfigLoader().getProvider(type);
+  } catch {
+    return undefined; // loader 未初始化（启动早期）——不兜底
+  }
+  if (!meta || !meta.baseUrl) return undefined; // 未声明或元数据不完整
+
+  const protocol = meta.protocol ?? 'openai';
+  // 归一：fields.userId ?? config.userId（工厂层单一入口，各实现无需各自合并）
+  const withFields = (config: ProviderConfigLike): ProviderFields => ({
+    ...config.fields,
+    userId: config.fields?.userId ?? config.userId,
+  });
+  const build = (config: ProviderConfigLike) =>
+    protocol === 'anthropic'
+      ? new AnthropicProvider({
+          apiKey: config.apiKey,
+          baseUrl: meta!.baseUrl,
+          model: config.model ?? meta!.defaultModel,
+          providerType: type as ProviderType,
+          maxOutputTokens: config.maxOutputTokens,
+          fields: withFields(config),
+          sampling: config.sampling ?? meta!.sampling,
+        })
+      : new OpenAICompatibleProvider({
+          apiKey: config.apiKey,
+          baseUrl: meta!.baseUrl,
+          model: config.model ?? meta!.defaultModel,
+          providerType: type as ProviderType,
+          maxOutputTokens: config.maxOutputTokens,
+          fields: withFields(config),
+          sampling: config.sampling ?? meta!.sampling,
+          fieldMap: meta!.fieldMap,
+        });
+
+  return {
+    create: build,
+    createFromEnv: () =>
+      meta!.envKey && process.env[meta!.envKey]
+        ? build({ type, apiKey: process.env[meta!.envKey]!, model: meta!.defaultModel })
+        : null,
+    meta,
+  };
+}
+
+/** 合并查询：扩展优先 → 内置 → JSON 声明兜底 */
 export function getProviderFactory(type: string): ProviderFactory | undefined {
-  return extendedFactories.get(type) ?? PROVIDER_FACTORIES[type as ProviderType];
+  return extendedFactories.get(type)
+    ?? PROVIDER_FACTORIES[type as ProviderType]
+    ?? createJsonDeclaredFactory(type);
 }
 
 /** 合并遍历（detectFromEnv / getAvailableProviders 用）：内置键序优先，扩展殿后 */
 export function listProviderFactories(): Array<[string, ProviderFactory]> {
+  const declared: Array<[string, ProviderFactory]> = [];
+  try {
+    const all = getProviderConfigLoader().getAll();
+    for (const meta of all) {
+      if (meta.id in PROVIDER_FACTORIES || extendedFactories.has(meta.id)) continue;
+      const factory = createJsonDeclaredFactory(meta.id);
+      if (factory) declared.push([meta.id, factory]);
+    }
+  } catch {
+    // loader 未初始化——跳过 JSON 声明厂商
+  }
   return [
     ...Object.entries(PROVIDER_FACTORIES) as Array<[string, ProviderFactory]>,
+    ...declared,
     ...extendedFactories.entries(),
   ];
 }

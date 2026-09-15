@@ -9,13 +9,25 @@
  * 44 重启兜底分支（process.exit）不在此触发 —— 升级判定抽为纯函数
  * shouldEscalateToRestart 单测覆盖，exit 路径仅一行接线。
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { PluginManager } from '../plugins/manager.js';
 import { handlePluginChange, resolveChangedPluginId, shouldEscalateToRestart } from './plugin-watcher.js';
+
+// P-Config 收敛后插件统一走全局 ~/.agent/plugins/：mock homedir → 测试临时目录，
+// root/.agent/plugins/ 即全局插件目录。homeBox 容器规避 vi.mock 提升期的 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
 
 // ── 临时插件源码（JS，免编译；execute 返回版本标记供断言） ──────────
 
@@ -69,6 +81,7 @@ interface Harness {
 
 async function makeHarness(): Promise<Harness> {
   const root = await mkdtemp(path.join(tmpdir(), 'hot-reload-test-'));
+  homeBox.path = root; // homedir → root：root/.agent/plugins 即全局插件目录
   const pluginDir = path.join(root, '.agent', 'plugins', 'hotplug-p');
   await mkdir(pluginDir, { recursive: true });
   await writeFile(path.join(pluginDir, 'plugin.json'), MANIFEST_SRC, 'utf-8');

@@ -25,6 +25,9 @@ function buildProviderModels(): Record<string, ModelMeta[]> {
   const excludedIds = new Set(['__default__']);
   for (const e of entries) {
     if (excludedIds.has(e.id)) continue;
+    // 过滤已退役模型：getDefaultModel/PROVIDER_MODELS[0] 取默认时不得选中
+    // deprecated 条目（如 deepseek-v4-flash-0731），否则默认模型必然 404/熔断
+    if (e.status === 'deprecated') continue;
     const p = e.provider;
     if (!map[p]) map[p] = [];
     map[p].push({

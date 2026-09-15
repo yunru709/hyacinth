@@ -351,11 +351,11 @@ export function mergeManifests(globalM: ExtensionManifest, projectM: ExtensionMa
   return merged;
 }
 
-/** 名单文件位置约定：全局 ~/.agent/extension-registry.json ＋ 项目 .agent/extension-registry.json（覆盖） */
+/** 名单文件位置约定：全局 ~/.agent/extension-registry.json（P-Config 收敛，项目级已取消） */
 export function manifestPaths(projectDir: string): { globalPath: string; projectPath: string } {
   return {
     globalPath: path.join(os.homedir(), '.agent', 'extension-registry.json'),
-    projectPath: path.join(projectDir, '.agent', 'extension-registry.json'),
+    projectPath: path.join(os.homedir(), '.agent', 'extension-registry.json'),
   };
 }
 
@@ -374,7 +374,8 @@ function readManifestFile(p: string): { manifest?: ExtensionManifest; error?: st
 }
 
 /**
- * 读取两层名单并合并。文件缺失视为空名单；解析错误记录并跳过该层。
+ * 读取名单并合并。文件缺失视为空名单；解析错误记录并跳过该层。
+ * P-Config 收敛：项目级已取消，global 与 project 指向同一全局文件 → 只读一次。
  */
 export function loadExtensionManifest(projectDir: string): {
   manifest: ExtensionManifest;
@@ -383,17 +384,18 @@ export function loadExtensionManifest(projectDir: string): {
 } {
   const paths = manifestPaths(projectDir);
   const errors: string[] = [];
+  const same = paths.globalPath === paths.projectPath;
   const g = readManifestFile(paths.globalPath);
   if (g.error) errors.push(g.error);
-  const pr = readManifestFile(paths.projectPath);
-  if (pr.error) errors.push(pr.error);
+  const pr = same ? g : readManifestFile(paths.projectPath);
+  if (!same && pr.error) errors.push(pr.error);
   const manifest = mergeManifests(g.manifest ?? emptyManifest(), pr.manifest ?? emptyManifest());
   return { manifest, errors, paths };
 }
 
 /**
- * 名单裁决翻转（arch.toggle / CLI 的落地点）：读两层名单 → 项目层写回该插件的
- * enabled 声明（其余条目原样保留）。只写项目级名单（用户当前工作区的声明）。
+ * 名单裁决翻转（arch.toggle / CLI 的落地点）：读全局名单 → 写回该插件的
+ * enabled 声明（其余条目原样保留）。P-Config 收敛后统一写全局名单。
  * 返回写回后的裁决值；写盘失败返回 { ok: false, error }。
  */
 export function togglePluginInManifest(

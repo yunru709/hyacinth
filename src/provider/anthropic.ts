@@ -9,6 +9,8 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import { translateFields } from './fields.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
@@ -29,6 +31,14 @@ export interface AnthropicProviderOptions {
   thinkingBudget?: number;
   /** 覆盖 ProviderType（MiniMax/Qwen/Zhipu/MiMo 等兼容协议用） */
   providerType?: ProviderType;
+  /** 缓存隔离 ID（anthropic 协议 → metadata.user_id；仅显式设置才发） */
+  userId?: string;
+  /** 通用字段（userId → metadata.user_id；仅显式设置才发，保守） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP；翻译层注入请求 body） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }
 
 /**
@@ -47,6 +57,9 @@ export class AnthropicProvider implements Provider {
   private thinkingBudget: number;
 
   private _providerType: ProviderType;
+  private userId?: string;
+  private sampling?: ProviderSampling;
+  private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 
   constructor(opts: AnthropicProviderOptions = {}) {
     this._providerType = opts.providerType ?? 'anthropic';
@@ -72,6 +85,9 @@ export class AnthropicProvider implements Provider {
       ?? 8192;                                                     // ③ 兜底
     this.thinkingEnabled = opts.thinkingEnabled ?? false;
     this.thinkingBudget = opts.thinkingBudget ?? 10000;
+    this.userId = opts.fields?.userId ?? opts.userId;
+    this.sampling = opts.sampling ?? getModelInfo('anthropic', this.model)?.sampling; // 三级兜底：激活配置 → 模型目录默认
+    this.fieldMap = opts.fieldMap;
   }
 
   getProviderType(): ProviderType {
@@ -133,6 +149,17 @@ export class AnthropicProvider implements Provider {
         budget_tokens: this.thinkingBudget,
       };
     }
+
+    // 通用字段翻译：metadata.user_id（仅显式设置才发）+ 采样参数（temperature/topP）
+    const { topLevel, metadata } = translateFields(
+      'anthropic',
+      { ...this.sampling, userId: this.userId },
+      this.fieldMap,
+    );
+    if (metadata) {
+      (params as unknown as Record<string, unknown>).metadata = metadata;
+    }
+    Object.assign(params as unknown as Record<string, unknown>, topLevel);
 
     // ---- 流式消费 ----
     const stream = this.client.messages.stream(params, { signal });
@@ -463,5 +490,8 @@ export function createAnthropicProvider(config: ProviderConfig): AnthropicProvid
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
+    maxOutputTokens: config.maxOutputTokens,
+    fields: config.fields,
+    sampling: config.sampling,
   });
 }

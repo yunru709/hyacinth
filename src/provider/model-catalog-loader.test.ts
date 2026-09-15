@@ -161,6 +161,30 @@ describe('ModelCatalogLoader 行为契约', () => {
     const loader = new ModelCatalogLoader(process.cwd(), PROV_PATH);
     expect(loader.getModel('deepseek-v4-flash', 'deepseek')?.maxOutputTokens).toBe(12345);
   });
+
+  it('models 条目省略 provider 字段 → 自动继承父键厂商 ID（改动一处声明即用）', () => {
+    writeProviders({
+      my_gateway: {
+        id: 'my_gateway',
+        name: '我的中转站',
+        baseUrl: 'https://gw.example.com/v1',
+        defaultModel: 'gpt-4o',
+        envKey: 'GW_API_KEY',
+        models: [
+          makeEntry({ id: 'gpt-4o', provider: '' as never, contextWindow: 128000 }), // 省略 provider
+          makeEntry({ id: 'dall-e-3', provider: 'openai', contextWindow: 0 }), // 显式指定其它厂商
+        ],
+      },
+    });
+    const loader = new ModelCatalogLoader(process.cwd(), PROV_PATH);
+    // 仅继承父键的条目被分组到 my_gateway；显式指定其它 provider 的不混入
+    const gw = loader.getByProvider('my_gateway');
+    expect(gw).toHaveLength(1);
+    expect(gw[0].id).toBe('gpt-4o');
+    expect(gw[0].provider).toBe('my_gateway');
+    // dall-e-3 归属显式声明的 openai
+    expect(loader.getByProvider('openai').some((m) => m.id === 'dall-e-3')).toBe(true);
+  });
 });
 
 describe('setup 与 provider 层一致性（黄金主测试）', () => {
@@ -195,5 +219,35 @@ describe('setup 与 provider 层一致性（黄金主测试）', () => {
       expect(info).toBeTruthy();
       expect(info!.contextWindow).toBeGreaterThan(0);
     }
+  });
+
+  it('providers.json 声明自定义厂商（models 省略 provider）→ PROVIDER_MODELS 出现该厂商模型', async () => {
+    writeProviders({
+      my_gateway: {
+        id: 'my_gateway',
+        name: '我的中转站',
+        baseUrl: 'https://gw.example.com/v1',
+        defaultModel: 'gpt-4o',
+        envKey: 'GW_API_KEY',
+        models: [
+          {
+            id: 'gpt-4o', name: 'GPT-4o', contextWindow: 128000, maxOutputTokens: 4096,
+            capabilities: { streaming: true, toolCalling: true, thinking: false, vision: true, inputTypes: ['text', 'image'] },
+            status: 'available',
+            // 省略 provider → 继承父键 my_gateway
+          },
+        ],
+      },
+    });
+
+    vi.resetModules();
+    const { PROVIDER_MODELS } = await import('../setup/model-defaults.js');
+
+    // setup 模型选择列表出现 JSON 厂商及其模型
+    const list = PROVIDER_MODELS['my_gateway'] ?? [];
+    expect(list.some((m) => m.id === 'gpt-4o')).toBe(true);
+    expect(list.some((m) => m.id === '__default__')).toBe(false);
+    // 未声明的内置厂商仍回退内置目录
+    expect((PROVIDER_MODELS['deepseek'] ?? []).length).toBeGreaterThan(0);
   });
 });

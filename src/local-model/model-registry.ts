@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync, watch, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { homedir } from 'node:os';
 import type { ModelEntry, ModelBackend, ModelRegisterOptions } from './types.js';
 
 export type { ModelEntry, ModelBackend, ModelRegisterOptions };
@@ -14,9 +15,10 @@ declare interface ModelRegistryEvents {
 /**
  * 模型注册中心 — 管理 models.json 与 models/ 目录
  *
- * 职责：
- * - 读写 .agent/models.json 作为模型注册表
- * - 扫描 models/ 目录发现未注册的 GGUF 文件
+ * P-Config 收敛：本地模型是 agent 自身的资源（GGUF 文件大，与项目无关），
+ * 统一放全局 ~/.agent/：
+ * - 读写 ~/.agent/models.json 作为模型注册表
+ * - 扫描 ~/.agent/models/ 目录发现未注册的 GGUF 文件
  * - 热插拔：监听 models/ 目录变更
  * - 增删改查模型注册项
  */
@@ -36,8 +38,9 @@ export class ModelRegistry extends EventEmitter<ModelRegistryEvents> {
 
   private constructor(projectRoot: string) {
     super();
-    this.registryPath = join(projectRoot, '.agent', 'models.json');
-    this.modelsDir = join(projectRoot, 'models');
+    // P-Config 收敛：projectRoot 保留仅为调用方兼容，实际统一走全局 ~/.agent/
+    this.registryPath = join(homedir(), '.agent', 'models.json');
+    this.modelsDir = join(homedir(), '.agent', 'models');
   }
 
   // ── 初始化 ──

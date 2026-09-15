@@ -111,6 +111,7 @@ export function toggleProvider(deps: ProviderDeps): Pick<ProviderSwitchResult, '
 export async function switchProvider(
   deps: ProviderDeps,
   providerName: string,
+  model?: string,
 ): Promise<ProviderSwitchResult> {
   const { providerRouter, modelRouter, lifecycleSupervisor, configCenter, outputHandler } = deps;
   if (!providerRouter) {
@@ -118,6 +119,23 @@ export async function switchProvider(
   }
 
   let newProvider = providerRouter.get(providerName);
+
+  // 路由表命中同名实例但目标模型不同 → 按新 model 重建，避免复用旧实例导致换模型不生效
+  if (newProvider && model && !isLocalType(newProvider.getProviderType())
+    && newProvider.getModel() !== model) {
+    const recreated = tryCreateProviderFromConfig(deps, providerName, model);
+    // fail-fast：重建失败（配置段缺失 / apiKeyEnv 无法解析）时旧实例仍持有旧
+    // model，静默保留会让 "切到 X" 实际继续用旧模型且 status 显示旧值——
+    // 必须显式抛错让调用方（TUI/协议层）如实报告切换失败。
+    if (!recreated) {
+      throw new Error(
+        `Cannot switch "${providerName}" to model "${model}": config section ` +
+        `"provider.${providerName}" is missing or has no resolvable API key (apiKeyEnv).`,
+      );
+    }
+    providerRouter.register(providerName, recreated);
+    newProvider = recreated;
+  }
 
   if (!newProvider && configCenter) {
     // 本地模型：跳过 configCenter，始终自动检测
@@ -195,7 +213,7 @@ export async function switchProvider(
         // fallback failed
       }
     } else {
-      const created = tryCreateProviderFromConfig(deps, providerName);
+      const created = tryCreateProviderFromConfig(deps, providerName, model);
       if (created) {
         newProvider = created;
         providerRouter.register(providerName, created);
@@ -284,13 +302,12 @@ export async function switchProvider(
   }
   // 3. 当前上下文和新模型上限都够用 → 无需操作
 
-  // 注意：不再在此处写 configCenter.set('provider.active') + save()，
+  // 注意：不在依赖注入层写 configCenter.set('provider.active') + save()，
   // 避免共享同一 RuntimeConfigCenter 单例的其他 AgentLoop 被迫切换 provider。
   // 持久化由调用方（如 TUI /model 命令）显式负责。
-  outputHandler?.onStatus?.(
-    `Provider switched to ${providerName} (${newProvider.getProviderType()}/${newProvider.getModel()})`,
-    'info',
-  );
+  // "Provider switched to ..." 状态消息同样由调用方（AgentLoop.switchProvider）
+  // 在状态回写完成后发出——若在此处提前发出，UI 随即触发的 state.get 刷新
+  // 会读到旧的 activeProvider（竞态：状态栏停留在旧模型）。
 
   return result;
 }
@@ -299,6 +316,7 @@ export async function switchProvider(
 export function tryCreateProviderFromConfig(
   deps: ProviderDeps,
   providerName: string,
+  modelOverride?: string,
 ): Provider | undefined {
   const configCenter = deps.configCenter;
   if (!configCenter) return undefined;
@@ -317,7 +335,7 @@ export function tryCreateProviderFromConfig(
     return ProviderManager.createProviderFromConfig({
       type: providerName as import('../types.js').ProviderType,
       apiKey: apiKey ?? '',
-      model: model ?? '',
+      model: modelOverride ?? model ?? '',
       baseUrl,
       userId: sessionDir ? mainUserId(path.basename(sessionDir)) : undefined,
     });
@@ -334,8 +352,9 @@ export function tryCreateProviderFromConfig(
 export function subscribeConfig(
   deps: ProviderDeps,
   hooks: {
-    /** 执行切换（loop.switchProvider 薄壳，保持重入守卫与状态回写在 loop 侧） */
-    switchProvider: (name: string) => Promise<void>;
+    /** 执行切换（loop.switchProvider 薄壳，保持重入守卫与状态回写在 loop 侧）；
+     *  model 可选——config watch 路径需要把新模型一并传下去，避免只切 provider 不切模型 */
+    switchProvider: (name: string, model?: string) => Promise<void>;
     /** 回写 maxTurns */
     setMaxTurns: (n: number) => void;
     /** 回写 maxContextTokens */
@@ -352,11 +371,13 @@ export function subscribeConfig(
     // 守卫：如果与当前 provider 相同，跳过，避免重复切换
     const currentType = deps.getActiveProvider().getProviderType();
     if (name === currentType) return;
-    if (providerRouter?.get(name)) {
-      hooks.switchProvider(name).catch(() => {
-        outputHandler?.onStatus?.(`Config changed provider to "${name}" but switch failed`, 'error');
-      });
-    }
+    // 直接委托 switchProvider(name, model)：内部在 router 未注册类型名时，
+    // 会从 configCenter 的 provider.<name> 段 tryCreateProviderFromConfig 创建
+    // 并 register。旧实现用 `providerRouter.get(name)` 做守卫——类型名（volcengine
+    // /deepseek…）初始未注册（router 只有 main/local），导致「改 active 但首选不跟随」。
+    hooks.switchProvider(name, configCenter.get<string>(`provider.${name}.model`)).catch(() => {
+      outputHandler?.onStatus?.(`Config changed provider to "${name}" but switch failed`, 'error');
+    });
   });
 
   // provider.<name>.model 变更 → 如果当前 active provider 匹配，重新创建 provider 并切换
@@ -376,17 +397,62 @@ export function subscribeConfig(
     // 只响应当前 active provider 的 model 变更
     if (changedProvider !== activeName) return;
 
-    // 注销旧的 provider，用新 model 重建
-    providerRouter.unregister(activeName);
-    const created = tryCreateProviderFromConfig(deps, activeName);
-    if (created) {
-      providerRouter.register(activeName, created);
-    }
+    // 幂等：运行时已经是该模型 → 说明这次变更正是 model.switch 自己写下的，
+    // 无需再重建/再切换。旧实现无条件 unregister + 重建 + 再切一次，与显式切换
+    // 并发竞争（两条写路径），是「切换丢失 / 状态栏停留旧模型」的成因之一。
+    const existing = providerRouter.get(activeName);
+    if (existing && !isLocalType(existing.getProviderType()) && existing.getModel() === newModel) return;
 
-    hooks.switchProvider(activeName).catch(() => {
+    // 先建后换：创建失败时保留旧实例，不能先 unregister 把路由表清空——
+    // 否则 route() 会因 defaultName 悬空而抛错，整个 loop 崩掉。
+    const created = tryCreateProviderFromConfig(deps, activeName, newModel);
+    if (!created) {
+      outputHandler?.onStatus?.(
+        `Config changed model for "${activeName}" but provider rebuild failed`,
+        'error',
+      );
+      return;
+    }
+    providerRouter.register(activeName, created);
+
+    hooks.switchProvider(activeName, newModel).catch(() => {
       outputHandler?.onStatus?.(`Config changed model for "${activeName}" but switch failed`, 'error');
     });
   });
+
+  // 把 routeMode 投影到 router：唯一真相源是配置，router 的 defaultName
+  // 只是它的投影，不独立存在。manual 时钉住 provider.active，route() 便不会
+  // 再抢回注册表第一个。
+  const applyRouteMode = (mode: string): void => {
+    if (!providerRouter) return;
+    if (mode === 'manual') {
+      const activeName = configCenter.get<string>('provider.active');
+      if (!activeName) return;
+      if (providerRouter.get(activeName)) {
+        providerRouter.setDefault(activeName);
+      } else if (providerRouter.get('main')) {
+        // 启动初期 router 只以 'main' 注册了当前活跃 Provider
+        // （orchestrator-contributions：register('main', d.provider)），
+        // provider.active 的类型名尚未注册 —— 此时钉 'main' 与钉 provider.active
+        // 等价（'main' 按构造即当前活跃 Provider），否则钉住会被跳过。
+        providerRouter.setDefault('main');
+      }
+    } else if (mode === 'auto') {
+      providerRouter.clearDefault();
+    }
+  };
+
+  configCenter.watch('provider.routeMode', (event) => {
+    applyRouteMode(event.newValue as string);
+  });
+
+  // 电平触发补齐（治本）：watch 只在「变更」时回调，而启动路径里
+  // RuntimeConfigCenter.initialize(defaults) + merge(cfg) 的 diff 发生在 watch
+  // 注册之前（loop 创建晚于配置装配）—— 此时 routeMode 早已是最终值 manual，
+  // 变更事件被永久错过 → defaultName 停留 null → 每轮 route() 抢回注册表第一个
+  // Provider，用户持久化的 provider.active 在重启后静默丢失。
+  // 故注册后立即按「当前值」应用一次，让持久化选择在启动时即生效。
+  applyRouteMode(configCenter.get<string>('provider.routeMode') ?? 'auto');
 
   // session.maxTurns 变更 → 即时更新
   configCenter.watch('session.maxTurns', (event) => {

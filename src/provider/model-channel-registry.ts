@@ -53,12 +53,7 @@ const DEFAULT_ROLES: Record<string, string> = {
   'sub-agent': 'main',
 };
 
-/** 配置文件路径（项目级 .agent/model-channels.json） */
-function getConfigPath(cwd: string): string {
-  return path.join(cwd, '.agent', 'model-channels.json');
-}
-
-/** 全局配置文件路径（~/.agent/model-channels.json） */
+/** 全局配置文件路径（~/.agent/model-channels.json；项目级已取消，P-Config 收敛） */
 function getGlobalConfigPath(): string {
   return path.join(os.homedir(), '.agent', 'model-channels.json');
 }
@@ -66,7 +61,6 @@ function getGlobalConfigPath(): string {
 // ── Registry ───────────────────────────────────────────────────────
 
 export class ModelChannelRegistry {
-  private configPath: string;
   private globalConfigPath: string;
   private config: ModelChannelsConfig;
   /** 通道名 → Provider 实例 */
@@ -80,7 +74,8 @@ export class ModelChannelRegistry {
   private legacyProviderActive?: string;
 
   constructor(cwd?: string) {
-    this.configPath = cwd ? getConfigPath(cwd) : '';
+    // P-Config 收敛：项目级配置已取消，统一只读全局 ~/.agent/model-channels.json。
+    // 构造参数 cwd 保留仅为调用方兼容，不再用于定位任何项目级文件。
     this.globalConfigPath = getGlobalConfigPath();
     this.config = { channels: {}, roles: { ...DEFAULT_ROLES } };
   }
@@ -482,17 +477,15 @@ export class ModelChannelRegistry {
 
   /** 读取配置文件（先项目级，再全局） */
   private readConfigFile(): ModelChannelsConfig | null {
-    for (const p of [this.configPath, this.globalConfigPath]) {
-      try {
-        const raw = fs.readFileSync(p, 'utf-8');
-        const parsed = JSON.parse(raw) as ModelChannelsConfig;
-        if (parsed.channels && typeof parsed.channels === 'object') {
-          logger.info('Read model channels config', { path: p });
-          return parsed;
-        }
-      } catch {
-        // 文件不存在或无效，继续尝试下一个
+    try {
+      const raw = fs.readFileSync(this.globalConfigPath, 'utf-8');
+      const parsed = JSON.parse(raw) as ModelChannelsConfig;
+      if (parsed.channels && typeof parsed.channels === 'object') {
+        logger.info('Read model channels config', { path: this.globalConfigPath });
+        return parsed;
       }
+    } catch {
+      // 文件不存在或无效 → 返回 null（走 legacy 构建）
     }
     return null;
   }
@@ -612,14 +605,14 @@ export class ModelChannelRegistry {
 
   private save(): void {
     try {
-      const dir = path.dirname(this.configPath);
+      const dir = path.dirname(this.globalConfigPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       // 不保存由 legacy 自动构建的标记
       const toSave: ModelChannelsConfig = {
         channels: this.config.channels,
         roles: this.config.roles,
       };
-      fs.writeFileSync(this.configPath, JSON.stringify(toSave, null, 2), 'utf-8');
+      fs.writeFileSync(this.globalConfigPath, JSON.stringify(toSave, null, 2), 'utf-8');
     } catch (err) {
       logger.warn(`Failed to save model channels config: ${(err as Error).message}`);
     }

@@ -18,9 +18,9 @@ interface PluginWatcherDeps {
 /**
  * 监听插件目录变化，自动热更新插件（S3：插件代码热更新闭环）。
  *
- * 监听两个目录：
- *   - ~/.agent/plugins/（不存在则创建）
- *   - <cwd>/plugins/（存在才监听）
+ * P-Config 收敛：用户插件走全局，内置插件随仓库。监听：
+ *   - ~/.agent/plugins/（用户安装，全局；不存在则创建）
+ *   - <cwd>/plugins/（内置/开发用，存在才监听）
  *
  * 变更分发（handlePluginChange）：
  *   - 已激活插件的**代码文件**变更 → 定向 `reloadFromDisk(id)`
@@ -34,12 +34,11 @@ interface PluginWatcherDeps {
  * （entry 路径等清单级改动需重启生效）—— 文档化取舍，避免把清单语义混进代码热更新。
  */
 
-// 变更触发的目录是否为插件根目录之一（用户级 / 项目级）
+// 变更触发的目录是否为插件根目录之一（全局用户插件 / 内置插件）
 const PLUGIN_DIRS = (deps: PluginWatcherDeps): string[] => {
-  const userDir = path.join(os.homedir(), '.agent', 'plugins');
-  const dirs = [userDir];
-  const projectDir = path.join(deps.cwd, 'plugins');
-  if (fs.existsSync(projectDir)) dirs.push(projectDir);
+  const dirs = [path.join(os.homedir(), '.agent', 'plugins')];
+  const builtinDir = path.join(deps.cwd, 'plugins');
+  if (fs.existsSync(builtinDir)) dirs.push(builtinDir);
   return dirs;
 };
 

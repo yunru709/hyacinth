@@ -136,9 +136,13 @@ input → bypass → context → llm → tools → finalize
 ### 4.1 统一 LLM Provider（`provider/`，29 文件）
 
 - **统一接口**：`Provider.createStream(messages, tools, signal): AsyncIterable<StreamEvent>`；`ProviderCapabilities`（toolCalling/streaming/maxContextTokens/isLocal/vision）自描述。
-- **两套"单一真源"**：`MODEL_CATALOG`（按厂商分组的模型目录：contextWindow/maxOutputTokens/capabilities/cost/replacedBy）与 `PROVIDER_META`（12 在线厂商元数据），三者同源由守卫测试锁死。
+- **两套"单一真源"**：`MODEL_CATALOG`（按厂商分组的模型目录：contextWindow/maxOutputTokens/capabilities/cost/replacedBy）与 `PROVIDER_META`（14 在线厂商元数据），三者同源由守卫测试锁死。
 - **工厂注册表** `factory-registry`：`PROVIDER_FACTORIES` **键序即优先级**，`ProviderType` 由此派生；`registerProviderFactory` 支持运行时扩展/卸载回滚。
-- **适配器**：Anthropic/OpenAI/Gemini 原生，Groq/xAI/Mistral/OpenRouter/Moonshot/Zhipu 复用 `OpenAICompatibleProvider`，Qwen/MiniMax/MiMo 复用 `AnthropicProvider`，DeepSeek 薄封装。统一 `recoverToolArguments` 容错 + `sanitizeText` 防注入。
+- **三层厂商接入**：① 内置（改 `PROVIDER_TYPES`/`PROVIDER_FACTORIES`/`PROVIDER_META`/`MODEL_CATALOG` 四处，进 DEFAULT_PROVIDERS 与模型目录）；② 运行时扩展（`registerProviderFactory`，代码注册、dispose 回滚）；③ **JSON 声明（零代码）**——在 `~/.agent/providers.json` 加一条 `{ id, name, baseUrl, defaultModel, envKey, protocol?, sampling?, fieldMap? }` 即接入：`getProviderFactory` 命中兜底、`detectFromEnv`/`getAvailableProviders`/setup 向导/`getApiKeyEnvName` 自动纳入，改文件即热生效（provider-watcher）。
+- **字段翻译层**（`fields.ts`）：厂商私有字段通用化——`ProviderFields` 定义通用语义（userId/温度/topP/penalties/maxOutputTokens），`PROTOCOL_FIELD_MAP` 按协议（openai→user_id / openaiUser→user / anthropic→metadata.user_id / responses→user）翻译成 wire 字段，`translateFields` 注入请求 body。**映射数据化**：内置厂商的 wire 映射也是数据（`PROVIDER_META[type].fieldMap`，如 openrouter 默认 `userId→user`），可被 providers.json 覆盖——厂商换代/端点差异改一行配置即生效（provider-watcher 热加载），零代码。新增通用字段只加「ProviderFields 一行 + 映射一行」。
+- **多能力厂商（capabilities 声明即用）**：`ProviderFactoryMeta.capabilities` 声明非 chat 能力（`tts/image/video/embedding/rerank`），适配中转站/聚合平台（一个 key + baseUrl 背后同时提供 LLM、TTS、图片、视频、embedding）。声明后生成侧**零配置**自动物化（见 §4.4），embedding 侧 `getEmbeddingProvider` 声明即取（`provider/embedding.ts`：统一接口 + OpenAI 兼容实现，POST `{baseUrl}/embeddings`，按 index 重排对齐）。
+- **采样参数三级兜底**：激活配置（config.json provider 节点 `sampling`）→ 厂商级（meta.sampling）→ 模型级（ModelCatalogEntry.sampling）→ 不发送；`ProviderManager.createFromConfigFile` 把 sampling/fields/maxOutputTokens 从 config.json 收敛进 ProviderConfig，让 temperature 等配置真正生效。
+- **适配器**：Anthropic/OpenAI/Gemini 原生，Groq/xAI/Mistral/OpenRouter/Moonshot/Zhipu/Volcengine 复用 `OpenAICompatibleProvider`，Qwen/MiniMax/MiMo 复用 `AnthropicProvider`，DeepSeek 薄封装。统一 `recoverToolArguments` 容错 + `sanitizeText` 防注入。
 - **弹性层**：`ResilientProvider`（指数退避重试 + 三态熔断）+ `FallbackProviderChain`（顺序降级、剥 cache_control、onFallback/onRecover 回调）。
 - **路由**：`ProviderRouter`（按复杂度自动路由：high→在线否则本地）、`ModelRouter`/`ModelChannelRegistry`（按角色 assessment/planning/compression/sub-agent → 通道 → provider → main 降级链）。
 - `user-id.ts`：DeepSeek KVCache 隔离 ID 统一管理。
@@ -153,7 +157,9 @@ input → bypass → context → llm → tools → finalize
 
 ### 4.4 媒体生成（`generation/`，12 文件）
 
-与对话 LLM **并列但独立**的生成供应商层（图片/视频/音频），复用轻量接口 `GenerationProvider.submitTask/getTaskStatus`。适配器：`volcengine`（Seedream/Seedance）、`minimax`（三模态）、`openai-compatible`（本地/云端 TTS）。`GenerationService` 统一提交→轮询→下载转存；`vendor` 继承机制从 LLM providers.json 借 baseUrl/apiKeyEnv；`scene-render` 提供陪伴模式场景渲染窄工具（SHA 去重防烧 API）。
+与对话 LLM **并列但独立**的生成供应商层（图片/视频/音频），复用轻量接口 `GenerationProvider.submitTask/getTaskStatus`。适配器：`volcengine`（Seedream/Seedance）、`minimax`（三模态）、`openai-compatible`（**双轨**：TTS `/v1/audio/speech` + 文生图 `/v1/images/generations`，`getCapabilities` 按 models 声明动态派生）。`GenerationService` 统一提交→轮询→下载转存；`scene-render` 提供陪伴模式场景渲染窄工具（SHA 去重防烧 API）。
+
+**vendor 声明即用（auto-materialize）**：`generation/vendor.ts` 在凭证继承（baseUrl/apiKeyEnv 从 LLM providers.json 借）之外，新增两级联动——① LLM 厂商声明 `capabilities` 后，生成侧**零配置**自动物化条目：`tts→audio_tts`、`image→text_to_image`（缺省走 `openai-compatible` 适配器），`video→text_to_video`（无 OpenAI 标准端点，需显式 `spec.adapter`，缺省跳过并 warning）；embedding/rerank 走独立接口不进生成侧。同一厂商多能力走不同适配器时拆条目（第一组保留原名，其余加能力后缀）。② **声明即用默认路由**：某任务类型无显式 `defaults` 且只有一家能力供应商 → 自动写入 `defaults`；多厂商竞争同一能力不自动（避免隐式路由意外）。显式配置/显式 defaults 始终优先。
 
 ---
 
@@ -774,11 +780,11 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 **`model-types.ts`** —— 独立文件（避免 provider/config.ts 与 loader 循环依赖）。
 - `ModelCatalogEntry`：模型目录条目结构（id/name/provider/contextWindow/maxOutputTokens/capabilities/cost/status/replacedBy/reasoningEffort）。
 - `ModelsCatalogConfig`。
-- `MODEL_CATALOG: Record<provider, ModelCatalogEntry[]>`：内置模型目录单一事实源，按 12 在线厂商分组（anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo）。厂商更新模型只需改这里。含 deprecated + `replacedBy` 迁移链、`reasoning`/`reasoningEffort` 推理字段、`cost` 定价。
+- `MODEL_CATALOG: Record<provider, ModelCatalogEntry[]>`：内置模型目录单一事实源，按 14 在线厂商分组（anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo/volcengine）。厂商更新模型只需改这里。含 deprecated + `replacedBy` 迁移链、`reasoning`/`reasoningEffort` 推理字段、`cost` 定价。
 
 **`provider-meta.ts`** —— 厂商元数据单一真源（P5-15 方案 C）。
 - `ProviderFactoryMeta`：id/name/baseUrl/defaultModel/envKey/models(挂载 MODEL_CATALOG)。
-- `PROVIDER_META`：12 个在线厂商（local 三态不在列，不进 DEFAULT_PROVIDERS）。
+- `PROVIDER_META`：14 个在线厂商（local 三态不在列，不进 DEFAULT_PROVIDERS）。
 - 从 factory-registry 独立成文件的动机：避免 config→factory-registry→实现文件→config 的模块加载环（TDZ）。三处同源由守卫测试锁死。
 
 ### 1.3 能力/成本查询层
@@ -1027,7 +1033,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | `service.ts` | `GenerationService` 门面（提交+轮询+下载转存） |
 | `config.ts` | `.agent/generation.json` 加载（项目级 > 全局 > 空） |
 | `generation-config.ts` | 轮询/音色/格式默认值（configCenter 注入） |
-| `vendor.ts` | vendor 引用机制（生成侧从 LLM providers.json 继承 baseUrl/apiKeyEnv） |
+| `vendor.ts` | vendor 引用机制 + auto-materialize（生成侧从 LLM providers.json 继承 baseUrl/apiKeyEnv；LLM 厂商声明 capabilities → 生成侧零配置物化条目 + 声明即用默认路由） |
 | `scene-render.ts` | 陪伴模式场景渲染窄工具（scene_render，签名去重防烧 API） |
 | `index.ts` | 模块统一出口 |
 
@@ -1084,7 +1090,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 **`generation-config.ts`** —— 轮询/默认值走 configCenter（`generation.*` 键注入）：pollIntervalMs(3000)/videoPollIntervalMs(15000)/maxPollAttempts(600)/minimaxDefaultVoiceId/minimaxAudioFormat。未注入回退硬编码。
 
-**`vendor.ts`** —— vendor 引用机制：生成侧厂商声明 `vendor` 指向 LLM providers.json（`~/.agent/providers.json`）同名厂商，自动继承 baseUrl/apiKeyEnv（只补缺失字段，显式优先）。`resolveVendorInheritance` 纯函数 + `getLlmProvidersPath`。
+**`vendor.ts`** —— vendor 引用机制 + auto-materialize（声明即用）：① 生成侧厂商声明 `vendor` 指向 LLM providers.json（`~/.agent/providers.json`）同名厂商，自动继承 baseUrl/apiKeyEnv（只补缺失字段，显式优先）；② LLM 厂商声明 `capabilities`（tts/image/video）后生成侧零配置物化条目，某任务类型唯一能力供应商时自动写 `defaults` 默认路由；embedding/rerank 走独立接口；未注册适配器/无 adapter 的 video 跳过并 warning。`resolveVendorInheritance` 纯函数 + `getLlmProvidersPath`。
 
 ### 4.7 场景渲染窄工具（`scene-render.ts`）
 - `SCENE_RENDER_TOOL`：LLM 可见工具定义（只接受 scene_desc 一句画面描述）。

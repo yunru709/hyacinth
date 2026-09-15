@@ -128,6 +128,13 @@ export function createCommandDomain(options: CommandDomainOptions): DomainHandle
 
       const def = registry.find(name);
       if (!def) {
+        // 动态路径（childrenProvider 展开，如 model/online/<p>/<m>）在静态注册表
+        // 查不到叶子 → 若有 executor 仍委托（executor 按 fullName 前缀分派）；
+        // 无 executor 才报 command-not-found。
+        if (executor) {
+          const result = await executor({ name: name.split('/').pop() ?? name, description: name }, args, name);
+          return { ok: true, result, command: name };
+        }
         return {
           ok: false,
           unsupported: false,

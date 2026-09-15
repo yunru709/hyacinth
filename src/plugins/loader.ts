@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import type { PluginManifest, PluginDefinition } from './types.js';
 import type { HyPlugin } from '../kernel/plugin-host.js';
 import type { LoopHooks } from '../orchestrator/loop-hooks.js';
@@ -23,9 +24,12 @@ export interface PluginConfigEntry {
  * 插件加载器
  *
  * 负责扫描插件目录、加载 plugin.json manifest、dynamic import 入口模块。
- * 搜索路径（按优先级）：
- *   1. <projectDir>/.agent/plugins/<plugin-id>/
- *   2. <projectDir>/plugins/                        （内置/开发用）
+ * P-Config 收敛：用户插件统一走全局 ~/.agent/plugins/（个人助手定位，
+ * 整个电脑都是操作范围；不再按项目隔离插件安装位置）。
+ * 内置/开发插件保留在 <projectDir>/plugins/（随仓库分发）。
+ * 搜索路径：
+ *   1. ~/.agent/plugins/<plugin-id>/        （用户安装，全局）
+ *   2. <projectDir>/plugins/<plugin-id>/    （内置/开发用）
  */
 export class PluginLoader {
   constructor(private projectDir: string) {}
@@ -36,9 +40,9 @@ export class PluginLoader {
   async discover(): Promise<PluginManifest[]> {
     const manifests: PluginManifest[] = [];
 
-    // 搜索路径
+    // 搜索路径：全局用户插件 + 仓库内置插件
     const searchDirs = [
-      path.join(this.projectDir, '.agent', 'plugins'),
+      path.join(os.homedir(), '.agent', 'plugins'),
       path.join(this.projectDir, 'plugins'),
     ];
 
@@ -135,14 +139,17 @@ export class PluginLoader {
   }
 
   /**
-   * 读取插件配置文件（.agent/plugins.config.json）
+   * 读取插件配置文件（~/.agent/plugins.config.json，全局）
+   *
+   * P-Config 收敛：插件配置与插件目录一样统一走全局（个人助手定位，
+   * 整个电脑都是操作范围）。
    *
    * 支持两种格式：
    * 1. 旧格式：{ "plugins": { "id": { ...config } } }
    * 2. 新格式：{ "plugins": { "id": { "enabled": true, "config": { ... } } } }
    */
   async loadPluginConfig(): Promise<Record<string, PluginConfigEntry>> {
-    const configPath = path.join(this.projectDir, '.agent', 'plugins.config.json');
+    const configPath = path.join(os.homedir(), '.agent', 'plugins.config.json');
     try {
       const content = await fs.readFile(configPath, 'utf-8');
       const parsed = JSON.parse(content);
@@ -170,11 +177,11 @@ export class PluginLoader {
   }
 
   /**
-   * 解析插件目录位置
+   * 解析插件目录位置（全局 ~/.agent/plugins/<id> 优先，内置 <projectDir>/plugins/<id> 兜底）
    */
   private async resolvePluginDir(manifest: PluginManifest): Promise<string | null> {
     const candidates = [
-      path.join(this.projectDir, '.agent', 'plugins', manifest.id),
+      path.join(os.homedir(), '.agent', 'plugins', manifest.id),
       path.join(this.projectDir, 'plugins', manifest.id),
     ];
 

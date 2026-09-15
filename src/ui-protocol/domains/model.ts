@@ -122,6 +122,23 @@ export interface ModelDomainOptions {
   configureLocalModel?: (config: { ollamaUrl?: string }) => void;
   /** 本地模型写操作（model.local* 用；对应 LocalModelModule 的 start/stop/switch/register/unregister/scan）。可选。 */
   localModelOps?: LocalModelOpsLike;
+  /**
+   * 配置中心（唯一真相源的写入端）。
+   *
+   * model.switch 是 provider 选择**唯一**的写入口：应用运行时后，由它把
+   * provider.active / provider.<name>.model / provider.routeMode 落盘。
+   * UI 不得再自行 setConfig——两端各写一份正是历史上「运行时与配置静默分叉」的根源。
+   * 可选：registry-only 假 manager / 测试 mock 可不传（此时跳过持久化）。
+   */
+  configCenter?: ConfigWriterLike;
+}
+
+/** RuntimeConfigCenter 的结构化最小接口（避免协议层耦合运行时实现） */
+export interface ConfigWriterLike {
+  get(path: string): unknown;
+  set(path: string, value: unknown): void;
+  /** 落盘。缺省（registry-only mock / 只读注入）时仅更新内存运行时。 */
+  save?(): Promise<void>;
 }
 
 /** 本地模型写操作接口（宽松类型，对应 LocalModelModule 写方法；协议层缺省 mock 可不实现） */
@@ -139,7 +156,7 @@ export interface LocalModelOpsLike {
 // ────────────────────────────────────────────────────────────
 
 export function createModelDomain(options: ModelDomainOptions): DomainHandler {
-  const { registry, manager, listProvidersMeta = () => [], listLocalModels = () => [], emit, getLoop, getActiveProvider, configureLocalModel, localModelOps } = options;
+  const { registry, manager, listProvidersMeta = () => [], listLocalModels = () => [], emit, getLoop, getActiveProvider, configureLocalModel, localModelOps, configCenter } = options;
 
   /** 当前活跃 provider 类型 + 模型 */
   const currentActive = (): { provider: string; model: string } => ({
@@ -229,7 +246,7 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
       // 通过 getLoop 动态获取。
       const loop = getLoop?.();
       if (loop?.switchProvider) {
-        await loop.switchProvider(provider);
+        await loop.switchProvider(provider, model);
       } else {
         // fallback：manager.switchProvider（registry-only 假 manager 或测试 mock）
         manager.switchProvider({ type: provider, model, apiKey, baseUrl });
@@ -241,8 +258,33 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
       } catch {
         // registry 同步失败不阻断切换（loop/manager 已生效）
       }
+
+      // ── 持久化到唯一真相源（协议层是 provider 选择唯一的写入口）──────────
+      // UI 不再自行 setConfig：历史上 TUI 先写盘、再发 model.switch，两条写路径
+      // 并发触发 config watch 的隐式切换，导致「切换丢失 / 状态栏停留旧模型」。
+      // routeMode 置 manual —— 用户显式选择了模型，就不该被 route() 的自动路由抢回去。
+      if (configCenter) {
+        try {
+          if (model) configCenter.set(`provider.${provider}.model`, model);
+          configCenter.set('provider.active', provider);
+          configCenter.set('provider.routeMode', 'manual');
+          await configCenter.save?.();
+        } catch (err) {
+          // 持久化失败不回滚已生效的运行时切换，但必须如实上报（否则重启后悄悄回退）
+          emit?.(UI_EVENT.MODEL_CHANGE, {
+            action: 'persistFailed',
+            provider,
+            model,
+            message: (err as Error).message,
+          });
+        }
+      }
+
       emit?.(UI_EVENT.MODEL_CHANGE, { action: 'switch', provider, model });
-      return { ok: true, provider, model };
+      // 返回**生效值**而非请求值：UI 直接渲染这份快照，无需再发一次 state.get 自行比对
+      // （旧实现「切完自己读回来比对」是 Switch incomplete 误报的来源）。
+      const eff = currentActive();
+      return { ok: true, provider: eff.provider, model: eff.model, requested: { provider, model } };
     },
 
     // ── model.setThinking ──────────────────────────────────

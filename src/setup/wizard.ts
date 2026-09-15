@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as p from '@clack/prompts';
@@ -11,7 +12,8 @@ import { ensurePersonaFiles, DEFAULT_PERSONA_DIR } from './persona-bootstrap.js'
 import { DEFAULT_PROVIDERS } from '../provider/config.js';
 
 /**
- * Provider 选项 —— 从 DEFAULT_PROVIDERS 派生（单一事实源，含新增的 qwen/zhipu/minimax/mimo），
+ * Provider 选项 —— 从 DEFAULT_PROVIDERS 派生（单一事实源，含新增的 qwen/zhipu/minimax/mimo/volcengine），
+ * 合并 providers.json 声明（JSON 直连厂商零代码接入），
  * 外加 local 特殊项（本地 OpenAI 兼容服务，不在 DEFAULT_PROVIDERS 中）。
  */
 const PROVIDERS: { value: string; label: string; hint: string }[] = [
@@ -20,8 +22,36 @@ const PROVIDERS: { value: string; label: string; hint: string }[] = [
     label: meta.name,
     hint: meta.defaultModel,
   })),
+  ...declaredProviders().map(([id, meta]) => ({
+    value: id,
+    label: `${meta.name} (JSON)`,
+    hint: meta.defaultModel,
+  })),
   { value: 'local', label: 'Local (OpenAI-compatible)', hint: 'localhost' },
 ];
+
+/**
+ * providers.json 中声明的非内置厂商（向导可选项）。
+ *
+ * 直接同步读 ~/.agent/providers.json（与 ModelCatalogLoader 同一路径语义），
+ * 不依赖 ProviderConfigLoader 单例 —— setup 首次运行时该单例尚未初始化，
+ * 且其 cache 在 load() 前恒为内置 DEFAULT_PROVIDERS，会导致 JSON 厂商漏显。
+ * 文件缺失/解析失败时静默跳过。
+ */
+function declaredProviders(): Array<[string, { name: string; defaultModel: string }]> {
+  try {
+    const provPath = join(os.homedir(), '.agent', 'providers.json');
+    if (!existsSync(provPath)) return [];
+    const parsed = JSON.parse(readFileSync(provPath, 'utf-8')) as {
+      providers?: Record<string, { name?: string; defaultModel?: string }>;
+    };
+    return Object.entries(parsed.providers ?? {})
+      .filter(([id]) => !(id in DEFAULT_PROVIDERS.providers))
+      .map(([id, meta]) => [id, { name: meta.name ?? id, defaultModel: meta.defaultModel ?? '' }] as const);
+  } catch {
+    return [];
+  }
+}
 
 /** Key 获取链接 */
 const KEY_URLS: Record<string, string> = {
@@ -38,6 +68,7 @@ const KEY_URLS: Record<string, string> = {
   zhipu: 'https://open.bigmodel.cn/usercenter/apikeys',
   minimax: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
   mimo: 'https://platform.xiaomimimo.com/',
+  volcengine: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apikey',
 };
 
 /** 从 PROVIDER_MODELS 生成每个 provider 的模型选项 */

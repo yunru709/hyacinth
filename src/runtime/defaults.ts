@@ -33,6 +33,7 @@ export function getDefaultConfig(): FullConfig {
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
       deepseek: { model: providerDefault('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },
       gemini: { model: providerDefault('gemini'), apiKeyEnv: 'GEMINI_API_KEY' },
+      volcengine: { model: providerDefault('volcengine'), apiKeyEnv: 'ARK_API_KEY' },
       local: {
         model: localCfg.defaultModel,
         baseUrl: localCfg.baseUrl,
@@ -94,6 +95,8 @@ export function getDefaultConfig(): FullConfig {
       retry: { enabled: true, maxRetries: 4, baseDelayMs: 1000, maxDelayMs: 30000 },
       circuitBreaker: { failureThreshold: 5, cooldownMs: 30000 },
       fallbackChain: [],
+      fallbackToPrimary: true,
+      probe: { timeoutMs: 5000, cacheTtlMs: 60000, failureCooldownMs: 30000, uncertainCooldownMs: 15000 },
     },
     agents: { disabled: [] },
     tools: {

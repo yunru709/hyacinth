@@ -60,7 +60,7 @@ export function createAddModelChannelTool(modelRouter: ModelRouter): Tool {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Channel name (e.g. "compression", "sub-agent")' },
-        provider: { type: 'string', description: 'Provider type: anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo/local. Defaults to main channel provider.' },
+        provider: { type: 'string', description: 'Provider type: anthropic/openai/deepseek/gemini/groq/xai/mistral/openrouter/moonshot/qwen/zhipu/minimax/mimo/volcengine/local. Defaults to main channel provider.' },
         model: { type: 'string', description: 'Model name (optional, defaults to provider default)' },
         apiKey: { type: 'string', description: 'API key (optional)' },
         apiKeyEnv: { type: 'string', description: 'Env variable name for API key (optional)' },

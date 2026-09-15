@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,19 @@ import {
 } from './arch-assembly.js';
 import { switchRouter, getActiveRouterName } from '../context/profiles.js';
 import type { Provider } from '../provider/interface.js';
+
+// P-Config 收敛后 manifestPaths 只读全局 ~/.agent/extension-registry.json：
+// mock homedir → 当前 tmpDir，setupManifest 写入 tmpDir/.agent/ 即全局名单。
+// homeBox 容器在 vi.hoisted 内创建，mock 闭包引用容器而非模块变量，规避 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
 
 // =============================================================
 // 架构监督装配（扩展注册表方案阶段 4）
@@ -74,7 +87,7 @@ export default function createProvider({ cwd }) {
 `;
 
 describe('createArchRegistries', () => {
-  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); });
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); homeBox.path = tmpDir; });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('本体注册表收编三处装配记录（图/槽位/服务），id 唯一', () => {
@@ -98,7 +111,7 @@ describe('createArchRegistries', () => {
 });
 
 describe('applyProviderReplacement（provider:main 真实替换点端到端）', () => {
-  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); });
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); homeBox.path = tmpDir; });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('名单声明 → 动态装载用户模块 → 取代出厂主通道（生效记录 + replacedFrom）', async () => {
@@ -161,7 +174,7 @@ describe('applyProviderReplacement（provider:main 真实替换点端到端）',
 // =============================================================
 
 describe('多 kind 分发表（source/agent/router/slot/service）', () => {
-  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); });
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-asm-')); homeBox.path = tmpDir; });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   function manifestWith(point: string, filename: string): void {

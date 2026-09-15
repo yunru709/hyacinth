@@ -5,6 +5,8 @@
  * ModelCatalogLoader 负责从 ProviderConfigLoader 聚合。
  */
 
+import type { ProviderSampling } from './fields.js';
+
 /** 模型目录条目 */
 export interface ModelCatalogEntry {
   id: string;
@@ -14,6 +16,8 @@ export interface ModelCatalogEntry {
   contextWindow: number;
   /** 单次请求最大输出 token 数（区别于 contextWindow 输入上限）。兼容旧键名 maxTokens。 */
   maxOutputTokens: number;
+  /** 模型级默认采样参数（激活配置未覆盖时使用；可选） */
+  sampling?: ProviderSampling;
   capabilities: {
     streaming: boolean;
     toolCalling: boolean;
@@ -115,6 +119,36 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry[]> = {
   mimo: [
     { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', provider: 'mimo', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.435, output: 0.87, cacheRead: 0.0036 }, status: 'available' },
     { id: 'mimo-v2.5', name: 'MiMo V2.5', provider: 'mimo', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'audio', 'video'] }, cost: { input: 0.14, output: 0.28, cacheRead: 0.0028 }, status: 'available' },
+  ],
+  volcengine: [
+    // ── Agent/Coding Plan 专属 Model Name（短名）：配 Plan 专属 API Key + Plan 专属端点 ──
+    // Plan Key 与通用 API Key 不通用（官方要求勿混用），短名仅在 Plan 端点有效
+    { id: 'doubao-seed-evolving', name: 'Doubao Seed Evolving (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 262144, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, reasoningEffort: 'max' },
+    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, reasoningEffort: 'high' },
+    { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, status: 'available', reasoning: true, reasoningEffort: 'high' },
+    { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo (Plan)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 262144, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite (Plan)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'doubao-seed-2.0-mini', name: 'Doubao Seed 2.0 Mini (Plan)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    // ⚠️ maxOutputTokens 必须是「服务端真实接受的 max_tokens 上限」——写大了不会被夹取，
+    // 而是每次请求硬 400（InvalidParameter: integer above maximum value），直接烧掉整个会话。
+    // 下列 4 项于 2026-09-15 对 Plan 端点逐个实测校正（原值 262144/262144/512000/131072 全部超限）。
+    { id: 'glm-5.3', name: 'GLM-5.3 (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available' },
+    { id: 'glm-5.3-flash', name: 'GLM-5.3 Flash (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'minimax-m3', name: 'MiniMax M3 (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video'] }, status: 'available' },
+    { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code (Plan)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, status: 'available' },
+    { id: 'kimi-k3', name: 'Kimi K3 (Plan)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, status: 'available' },
+    // ── 通用 API Model ID（带日期版本号）：配普通方舟 API Key + 通用端点 /api/v3 ──
+    { id: 'doubao-seed-2-1-pro-260628', name: 'Doubao Seed 2.1 Pro (API)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 262144, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, cost: { input: 0.84, output: 4.2, cacheRead: 0.168 }, status: 'available' },
+    { id: 'doubao-seed-2-1-turbo-260628', name: 'Doubao Seed 2.1 Turbo (API)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 262144, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'deepseek-v4-pro-ga-260813', name: 'DeepSeek V4 Pro (API)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, reasoningEffort: 'max' },
+    { id: 'deepseek-v4-flash-ga-260731', name: 'DeepSeek V4 Flash (API)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, reasoningEffort: 'high' },
+    { id: 'deepseek-v4-1-flash-260910', name: 'DeepSeek V4.1 Flash (API)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, status: 'available', reasoning: true, reasoningEffort: 'high' },
+    { id: 'glm-5-3-flash-260828', name: 'GLM-5.3 Flash (API)', provider: 'volcengine', contextWindow: 1048576, maxOutputTokens: 262144, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'doubao-seed-2-0-lite-260428', name: 'Doubao Seed 2.0 Lite (API)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'doubao-seed-2-0-mini-260428', name: 'Doubao Seed 2.0 Mini (API)', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'available' },
+    { id: 'doubao-seed-1-6-250615', name: 'Doubao Seed 1.6', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'deprecated', replacedBy: 'doubao-seed-2-1-pro-260628' },
+    { id: 'doubao-seed-1-6-lite-250615', name: 'Doubao Seed 1.6 Lite', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'deprecated', replacedBy: 'doubao-seed-2-1-turbo-260628' },
   ],
 };
 

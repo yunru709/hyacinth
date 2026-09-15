@@ -1,7 +1,8 @@
 // ============================================================
 // ManifestLoader 测试 — 上下文清单加载器
 // ============================================================
-// 用真实临时文件系统驱动，覆盖：
+// 用真实临时文件系统驱动（mock homedir → 临时目录，因为 P-Config 收敛后
+// ManifestLoader 只读全局 ~/.agent/context-manifest.json），覆盖：
 //  1. load()：文件缺失 → 生成默认值并落盘；合法文件 → 读取
 //  2. load()：JSON 语法错误 → 降级默认值；版本不支持 → 抛错
 //  3. 查询：getZone / getEnabledZones（按序过滤）/ getSections（按优先级）/ isZoneEnabled
@@ -9,7 +10,7 @@
 //  5. reload()：文件变更后重新读取
 // ============================================================
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,19 @@ import { ManifestLoader } from './manifest-loader.js';
 import { DEFAULT_CONTEXT_MANIFEST } from './manifest-defaults.js';
 
 const tmpDirs: string[] = [];
+let homeDir: string;
+
+const { mockHomedir } = vi.hoisted(() => ({ mockHomedir: vi.fn(() => homeDir) }));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
+
+beforeEach(() => {
+  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manifest-loader-home-'));
+  tmpDirs.push(homeDir);
+});
 
 function tmpCwd(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manifest-loader-'));
@@ -24,14 +38,20 @@ function tmpCwd(): string {
   return dir;
 }
 
-function manifestPath(cwd: string): string {
-  return path.join(cwd, '.agent', 'context-manifest.json');
+function manifestPath(): string {
+  return path.join(homeDir, '.agent', 'context-manifest.json');
+}
+
+function writeManifest(content: string): void {
+  fs.mkdirSync(path.join(homeDir, '.agent'), { recursive: true });
+  fs.writeFileSync(manifestPath(), content, 'utf-8');
 }
 
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  vi.unstubAllGlobals();
 });
 
 describe('load()：加载与兜底', () => {
@@ -42,22 +62,17 @@ describe('load()：加载与兜底', () => {
 
     expect(m.version).toBe(1);
     expect(m.zones.zone1.enabled).toBe(true);
-    expect(fs.existsSync(manifestPath(cwd))).toBe(true);
+    expect(fs.existsSync(manifestPath())).toBe(true);
   });
 
-  it('合法文件 → 读取项目级覆盖', () => {
+  it('合法文件 → 读取全局覆盖', () => {
     const cwd = tmpCwd();
-    fs.mkdirSync(path.join(cwd, '.agent'), { recursive: true });
-    fs.writeFileSync(
-      manifestPath(cwd),
-      JSON.stringify({
-        version: 1,
-        zones: {
-          zone1: { name: 'Override', order: 1, enabled: false, sections: [{ name: 's1', source: 'x', priority: 0, type: 'static' }] },
-        },
-      }),
-      'utf-8',
-    );
+    writeManifest(JSON.stringify({
+      version: 1,
+      zones: {
+        zone1: { name: 'Override', order: 1, enabled: false, sections: [{ name: 's1', source: 'x', priority: 0, type: 'static' }] },
+      },
+    }));
 
     const loader = new ManifestLoader(cwd);
     const m = loader.load();
@@ -67,8 +82,7 @@ describe('load()：加载与兜底', () => {
 
   it('JSON 语法错误 → 降级默认值（不抛错）', () => {
     const cwd = tmpCwd();
-    fs.mkdirSync(path.join(cwd, '.agent'), { recursive: true });
-    fs.writeFileSync(manifestPath(cwd), '{ broken json', 'utf-8');
+    writeManifest('{ broken json');
 
     const loader = new ManifestLoader(cwd);
     const m = loader.load();
@@ -78,8 +92,7 @@ describe('load()：加载与兜底', () => {
 
   it('版本不支持 → 抛错', () => {
     const cwd = tmpCwd();
-    fs.mkdirSync(path.join(cwd, '.agent'), { recursive: true });
-    fs.writeFileSync(manifestPath(cwd), JSON.stringify({ version: 2, zones: {} }), 'utf-8');
+    writeManifest(JSON.stringify({ version: 2, zones: {} }));
 
     const loader = new ManifestLoader(cwd);
     expect(() => loader.load()).toThrow(/Unsupported manifest version/);
@@ -87,8 +100,7 @@ describe('load()：加载与兜底', () => {
 
   it('zone 缺少 enabled 布尔 → 抛错', () => {
     const cwd = tmpCwd();
-    fs.mkdirSync(path.join(cwd, '.agent'), { recursive: true });
-    fs.writeFileSync(manifestPath(cwd), JSON.stringify({ version: 1, zones: { zone1: { name: 'X', order: 1, sections: [] } } }), 'utf-8');
+    writeManifest(JSON.stringify({ version: 1, zones: { zone1: { name: 'X', order: 1, sections: [] } } }));
 
     const loader = new ManifestLoader(cwd);
     expect(() => loader.load()).toThrow(/missing "enabled" boolean/);
@@ -152,12 +164,12 @@ describe('setZoneEnabled：写入开关', () => {
     const cwd = tmpCwd();
     const loader = new ManifestLoader(cwd);
     loader.load(); // 先生成默认文件
-    const before = fs.readFileSync(manifestPath(cwd), 'utf-8');
+    const before = fs.readFileSync(manifestPath(), 'utf-8');
 
     expect(() => loader.setZoneEnabled('nope', true)).toThrow(/not found/);
 
     // 落盘内容不变
-    expect(fs.readFileSync(manifestPath(cwd), 'utf-8')).toBe(before);
+    expect(fs.readFileSync(manifestPath(), 'utf-8')).toBe(before);
   });
 });
 
@@ -168,9 +180,9 @@ describe('reload()：重新读取磁盘', () => {
     expect(loader.isZoneEnabled('zone1')).toBe(true);
 
     // 模拟外部进程直接改磁盘文件（不经过 loader，避免动到内存缓存引用）
-    const onDisk = JSON.parse(fs.readFileSync(manifestPath(cwd), 'utf-8'));
+    const onDisk = JSON.parse(fs.readFileSync(manifestPath(), 'utf-8'));
     onDisk.zones.zone1.enabled = false;
-    fs.writeFileSync(manifestPath(cwd), JSON.stringify(onDisk, null, 2), 'utf-8');
+    fs.writeFileSync(manifestPath(), JSON.stringify(onDisk, null, 2), 'utf-8');
 
     expect(loader.isZoneEnabled('zone1')).toBe(true); // 未 reload 仍是缓存
     loader.reload();

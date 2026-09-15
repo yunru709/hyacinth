@@ -134,6 +134,12 @@ export class ResilientProvider implements Provider {
     return this.cbState;
   }
 
+  /** 重置熔断器为 closed（降级链兜底回退主 provider 前调用，给予完整重试窗口） */
+  resetCircuitBreaker(): void {
+    this.cbState = 'closed';
+    this.failureCount = 0;
+  }
+
   async *createStream(
     messages: Message[],
     tools?: ToolDefinition[],

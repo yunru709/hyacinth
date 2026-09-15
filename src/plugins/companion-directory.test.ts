@@ -11,7 +11,7 @@
 // 使用真实插件文件（复制 plugins/companion 到临时项目），不内联重写。
 // ============================================================
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,19 @@ import { createContextModeService } from '../gateway/context-mode-service.js';
 import { WorldEngine } from '../world-engine/agent.js';
 import { switchRouter, getActiveRouterName } from '../context/profiles.js';
 import type { BypassManager } from '../bypass/manager.js';
+
+// P-Config 收敛后插件统一走全局 ~/.agent/plugins/ + ~/.agent/plugins.config.json：
+// mock homedir → 测试临时目录 tmp，tmp/.agent/ 即全局插件目录。
+// homeBox 容器规避 vi.mock 提升期 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +82,7 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cmp-dir-plugin-'));
+    homeBox.path = tmp; // homedir → tmp：tmp/.agent/plugins 即全局插件目录
     copyCompanionPlugin(tmp);
   });
 

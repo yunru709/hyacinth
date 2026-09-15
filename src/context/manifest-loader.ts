@@ -4,14 +4,14 @@
 //
 // 职责：加载 ContextManifest 定义，暴露查询接口。
 //
-// 加载优先级：
-//   {cwd}/.agent/context-manifest.json  ← 项目级覆盖（优先）
-//   manifest-defaults.ts                 ← 兜底默认（本模块生成）
+// 加载优先级（P-Config 收敛：项目级已取消，统一走全局）：
+//   ~/.agent/context-manifest.json        ← 用户全局覆盖
+//   manifest-defaults.ts                  ← 兜底默认（本模块生成）
 //
 // 与 Composer 的关系：
 //   Composer 通过 ManifestLoader 读取 section 列表和 zone 布局。
 //   Composer 不直接依赖 manifest-defaults.ts —— 始终走 loader，
-//   确保项目级覆盖能生效。热重载时 reload() 刷新缓存。
+//   确保全局覆盖能生效。热重载时 reload() 刷新缓存。
 //
 // 为什么用 loader 而不是直接 import 默认值：
 //   1. 支持用户覆盖（context-manifest.json）
@@ -21,6 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { DEFAULT_CONTEXT_MANIFEST } from './manifest-defaults.js';
 import type { ContextManifest, ZoneEntry, SectionEntry } from './manifest-types.js';
 import { createLogger } from '../logging/logger.js';
@@ -31,14 +32,14 @@ const MANIFEST_FILENAME = 'context-manifest.json';
 
 export class ManifestLoader {
   private manifest: ContextManifest | null = null;
-  private cwd: string;
 
   constructor(cwd: string) {
-    this.cwd = cwd;
+    // P-Config 收敛：项目级已取消，只读全局 ~/.agent/context-manifest.json。
+    // 构造参数 cwd 保留仅为调用方兼容，不再用于定位任何项目级文件。
   }
 
   private get manifestPath(): string {
-    return path.join(this.cwd, '.agent', MANIFEST_FILENAME);
+    return path.join(os.homedir(), '.agent', MANIFEST_FILENAME);
   }
 
   load(): ContextManifest {

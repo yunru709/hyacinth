@@ -6,12 +6,11 @@
  *
  * 所有后台进程在会话结束时由 LifecycleSupervisor 统一清理。
  */
-import { type ChildProcess, execSync } from 'node:child_process';
-import os from 'node:os';
+import { type ChildProcess } from 'node:child_process';
 import { createLogger } from '../logging/logger.js';
+import { killProcessTreeSync, spawnWatchdog } from '../lifecycle/watchdog.js';
 
 const logger = createLogger('background-registry');
-const isWindows = os.platform() === 'win32';
 
 export interface BackgroundProcessInfo {
   handle: string;
@@ -35,17 +34,9 @@ interface BackgroundEntry {
 
 let nextId = 1;
 
-/** 杀死进程树（同 BashTool） */
+/** 杀死进程树（统一走 lifecycle/watchdog.ts 的同步三级树杀） */
 function killProcessTree(pid: number): void {
-  try {
-    if (isWindows) {
-      execSync(`taskkill /T /F /PID ${pid}`, { stdio: 'ignore', windowsHide: true });
-    } else {
-      process.kill(-pid, 'SIGKILL');
-    }
-  } catch {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
-  }
+  killProcessTreeSync(pid);
 }
 
 export class BackgroundProcessRegistry {
@@ -100,9 +91,21 @@ export class BackgroundProcessRegistry {
       }
     });
 
+    // 父死自灭 watchdog：主进程被外部强杀时由 watchdog 杀掉本后台进程树
+    if (childProcess.pid) {
+      spawnWatchdog(childProcess.pid);
+    }
+
     this.entries.set(handle, entry);
     logger.debug(`Registered background process ${handle}: ${command.slice(0, 80)}`);
     return handle;
+  }
+
+  /** 注销一个后台进程（进程已自然结束时从注册表移除，避免残留） */
+  unregister(handle: string): boolean {
+    const had = this.entries.delete(handle);
+    if (had) logger.debug(`Unregistered background process ${handle}`);
+    return had;
   }
 
   /** 获取进程状态 */

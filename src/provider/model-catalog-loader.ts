@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MODEL_CATALOG, type ModelCatalogEntry, type ModelsCatalogConfig } from './model-types.js';
+import type { ProviderSampling } from './fields.js';
 
 export type { ModelCatalogEntry, ModelsCatalogConfig } from './model-types.js';
 
@@ -45,8 +46,10 @@ export class ModelCatalogLoader {
         for (const [pid, meta] of Object.entries(providers)) {
           const list = meta?.models;
           if (list && Array.isArray(list) && list.length > 0) {
-            // 兼容旧键名 maxTokens → maxOutputTokens
             for (const m of list) {
+              // 所属厂商由父键决定：models 条目缺省省略 provider 字段（改动一处声明即用）
+              if (!m.provider) m.provider = pid;
+              // 兼容旧键名 maxTokens → maxOutputTokens
               const legacy = m as ModelCatalogEntry & { maxTokens?: number };
               if (m.maxOutputTokens === undefined && typeof legacy.maxTokens === 'number') {
                 m.maxOutputTokens = legacy.maxTokens;
@@ -82,6 +85,14 @@ export class ModelCatalogLoader {
 
   getModel(id: string, provider: string): ModelCatalogEntry | undefined {
     return this.load().models.find((m) => m.id === id && m.provider === provider);
+  }
+
+  /**
+   * 模型级默认采样参数（三级兜底链的最底层）。
+   * 未在模型目录声明 sampling 时返回 undefined，交由厂商级/激活配置继续兜底。
+   */
+  getModelSampling(id: string, provider: string): ProviderSampling | undefined {
+    return this.getModel(id, provider)?.sampling;
   }
 
   reload(): ModelsCatalogConfig {

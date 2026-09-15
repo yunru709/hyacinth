@@ -10,7 +10,8 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { getProviderConfigLoader } from './config.js';
-import { DEFAULT_USER_ID } from './user-id.js';
+import { translateFields } from './fields.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 
@@ -42,6 +43,12 @@ export interface OpenAICompatibleOptions {
   headers?: Record<string, string>;
   /** DeepSeek 缓存隔离 ID，区分不同产品的缓存池。默认 "hyacinth"。 */
   userId?: string;
+  /** 通用字段（userId 归一入口；工厂层已把 config.userId 并入） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/penalties；翻译层注入请求 body） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（JSON 声明厂商 meta.fieldMap 传入） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }
 
 /**
@@ -53,6 +60,7 @@ export interface OpenAICompatibleOptions {
  *   - Mistral (api.mistral.ai)
  *   - OpenRouter (openrouter.ai)
  *   - Moonshot / Kimi (api.moonshot.cn)
+ *   - Volcengine / 火山方舟 (ark.cn-beijing.volces.com)
  *
  * 用法：通过工厂函数设置各自的默认值。
  */
@@ -66,7 +74,9 @@ export class OpenAICompatibleProvider implements Provider {
   private providerType: ProviderType;
   private thinkingEnabled = false;
   private reasoningEffort: DeepSeekReasoningEffort;
-  private userId: string;
+  private userId?: string;
+  private sampling?: ProviderSampling;
+  private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 
   constructor(opts: OpenAICompatibleOptions) {
     const apiKey = opts.apiKey ?? (opts.envKey ? process.env[opts.envKey] : undefined);
@@ -93,7 +103,9 @@ export class OpenAICompatibleProvider implements Provider {
       ?? 8192;                                              // ③ 兜底
     this.reasoningEffort = modelInfo?.reasoningEffort ?? 'high';
     this.providerType = opts.providerType;
-    this.userId = opts.userId ?? DEFAULT_USER_ID;
+    this.userId = opts.fields?.userId ?? opts.userId; // 缺省兜底在 translateFields（openai 协议）
+    this.sampling = opts.sampling ?? modelInfo?.sampling; // 三级兜底：激活配置 → 模型目录默认
+    this.fieldMap = opts.fieldMap;
   }
 
   getProviderType(): ProviderType {
@@ -142,8 +154,14 @@ export class OpenAICompatibleProvider implements Provider {
       stream: true,
       stream_options: { include_usage: true },
     };
-    // DeepSeek: user_id 放顶层 body 做缓存隔离
-    (params as unknown as Record<string, unknown>).user_id = this.userId;
+    // 通用字段翻译：user_id（DeepSeek 缓存隔离）+ 采样参数（temperature/topP/penalties）
+    // 缺省兜底 DEFAULT_USER_ID 在 translateFields 内完成（与旧行为一致，始终发隔离字段）
+    const { topLevel } = translateFields(
+      'openai',
+      { ...this.sampling, userId: this.userId },
+      this.fieldMap,
+    );
+    Object.assign(params as unknown as Record<string, unknown>, topLevel);
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
@@ -170,6 +188,11 @@ export class OpenAICompatibleProvider implements Provider {
 
         // usage
         if (chunk.usage) {
+          // TODO(缓存字段兼容): 此处仅读取 DeepSeek 官方 API 字段名
+          // prompt_cache_hit_tokens / prompt_cache_miss_tokens。其他 OpenAI 兼容
+          // 厂商（如火山方舟 volcengine）在 usage 中不返回这两个字段，缓存命中率
+          // 会整体缺失（TUI 显示 Cache: n/a）。后续需按厂商探测更多候选字段名
+          // （如 cached_tokens、cache_read_input_tokens 等）以扩展兼容性。
           yield {
             type: 'USAGE',
             input_tokens: chunk.usage.prompt_tokens,
@@ -388,8 +411,19 @@ export class OpenAICompatibleProvider implements Provider {
 
 // ===== 工厂函数 =====
 
-/** Groq — 高速推理 */
-export function createGroqProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
+/** 兼容族工厂参数（apiKey/model/userId + fields/sampling/maxOutputTokens/fieldMap 透传） */
+export interface CompatibleFactoryConfig {
+  apiKey?: string;
+  model?: string;
+  userId?: string;
+  maxOutputTokens?: number;
+  fields?: ProviderFields;
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
+}
+
+export function createGroqProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('groq');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -398,11 +432,15 @@ export function createGroqProvider(config?: { apiKey?: string; model?: string; u
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'groq',
     userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
   });
 }
 
 /** xAI / Grok */
-export function createXAIProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
+export function createXAIProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('xai');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -411,11 +449,15 @@ export function createXAIProvider(config?: { apiKey?: string; model?: string; us
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'xai',
     userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
   });
 }
 
 /** Mistral AI */
-export function createMistralProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
+export function createMistralProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('mistral');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -424,11 +466,15 @@ export function createMistralProvider(config?: { apiKey?: string; model?: string
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'mistral',
     userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
   });
 }
 
 /** OpenRouter — 聚合网关（200+ 模型） */
-export function createOpenRouterProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
+export function createOpenRouterProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('openrouter');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -437,6 +483,10 @@ export function createOpenRouterProvider(config?: { apiKey?: string; model?: str
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'openrouter',
     userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
     headers: {
       'HTTP-Referer': process.env.OPENROUTER_REFERER ?? 'http://localhost:3000',
       'X-Title': process.env.OPENROUTER_TITLE ?? 'Agent',
@@ -445,7 +495,7 @@ export function createOpenRouterProvider(config?: { apiKey?: string; model?: str
 }
 
 /** Moonshot / Kimi */
-export function createMoonshotProvider(config?: { apiKey?: string; model?: string; userId?: string }) {
+export function createMoonshotProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('moonshot');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
@@ -453,5 +503,31 @@ export function createMoonshotProvider(config?: { apiKey?: string; model?: strin
     baseUrl: provCfg?.baseUrl ?? 'https://api.moonshot.cn/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'moonshot',
+    userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
+  });
+}
+
+/** 火山引擎（火山方舟 Ark）— 豆包 / Doubao Seed 系列（OpenAI 兼容协议）。
+ *  默认走 Agent/Coding Plan 专属端点 + Plan 专属 Key + Plan 短名模型；
+ *  通用 API Key 用户需覆盖 baseUrl（VOLCENGINE_BASE_URL 或 providers.json）
+ *  为 https://ark.cn-beijing.volces.com/api/v3 并使用带日期后缀的 Model ID */
+export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
+  const provCfg = getProviderConfigLoader().getProvider('volcengine');
+  return new OpenAICompatibleProvider({
+    apiKey: config?.apiKey,
+    envKey: 'ARK_API_KEY',
+    baseUrl: provCfg?.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/plan/v3',
+    baseUrlEnv: 'VOLCENGINE_BASE_URL',
+    model: config?.model ?? provCfg?.defaultModel ?? 'deepseek-v4-flash',
+    providerType: 'volcengine',
+    userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
   });
 }

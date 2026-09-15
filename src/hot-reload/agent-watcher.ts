@@ -39,7 +39,7 @@ function arraysEqual(a: string[], b: string[]): boolean {
 /**
  * 监听 agents.json 配置文件变化，自动重载 Agent 定义。
  *
- * 监听路径（按优先级）：AGENTS_CONFIG_PATH 环境变量 > 项目 > 全局。
+ * P-Config 收敛：项目级已取消。监听路径：AGENTS_CONFIG_PATH 环境变量 > 全局。
  * 变更时重新加载配置并 diff：增量注册/注销/更新（added/removed/changed）。
  */
 export function watchAgentsJson(deps: AgentWatcherDeps): WatcherHandle[] {
@@ -50,7 +50,6 @@ export function watchAgentsJson(deps: AgentWatcherDeps): WatcherHandle[] {
       const watchPaths: string[] = [];
       const envPath = process.env['AGENTS_CONFIG_PATH'];
       if (envPath) watchPaths.push(path.resolve(envPath));
-      watchPaths.push(path.join(deps.cwd, '.agent', 'agents.json'));
       watchPaths.push(path.join(os.homedir(), '.agent', 'agents.json'));
       return [...new Set(watchPaths)];
     },

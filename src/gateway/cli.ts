@@ -22,6 +22,7 @@ import { SessionManager } from '../memory/session.js';
 import { AgentLoop } from '../orchestrator/loop.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import { LifecycleSupervisor } from '../supervisor/shutdown.js';
+import { installGlobalReaper } from '../lifecycle/global-registry.js';
 import { runTui } from './tui.js';
 import { createAgent } from './factory.js';
 import { ConfigManager, API_KEY_MAP, DEFAULT_MAX_CONTEXT_TOKENS } from '../setup/config.js';
@@ -29,6 +30,7 @@ import { getModelContextWindow } from '../setup/model-defaults.js';
 import { SetupWizard } from '../setup/wizard.js';
 import { runGenerationWizard } from '../setup/generation-wizard.js';
 import { PROVIDER_MODELS } from '../setup/model-defaults.js';
+import { getModelCatalogLoader } from '../provider/model-catalog-loader.js';
 import { DEFAULT_PERSONA_DIR, ensurePersonaFiles } from '../setup/persona-bootstrap.js';
 import {
   RESTART_SESSION_MARKER,
@@ -985,7 +987,9 @@ export async function runCli(): Promise<void> {
     .action(async (source: string) => {
       const fs = await import('node:fs');
       const path = await import('node:path');
-      const targetRoot = path.join(process.cwd(), '.agent', 'plugins');
+      const os = await import('node:os');
+      // P-Config 收敛：插件统一安装到全局 ~/.agent/plugins/
+      const targetRoot = path.join(os.homedir(), '.agent', 'plugins');
       fs.mkdirSync(targetRoot, { recursive: true });
       const tmpDir = path.join(targetRoot, `.installing-${Date.now()}`);
 
@@ -1277,6 +1281,11 @@ async function executeAction(
   // 初始化生命周期管理器
   const supervisor = new LifecycleSupervisor();
   const removeHandlers = supervisor.installSignalHandlers();
+  // 全局子进程收割器 + 启动清扫孤儿 watchdog（详见 tui.ts 同处注释）
+  installGlobalReaper();
+  void import('../mcp/orphan-sweeper.js').then(({ sweepOrphanedWatchdogs }) =>
+    sweepOrphanedWatchdogs().catch(() => {}),
+  );
   let loop: any;
   let sessionDir: string;
 
@@ -1581,12 +1590,19 @@ function getApiKeyForProvider(type: ProviderType): string {
  * 获取指定 Provider 的默认模型名称
  */
 function getDefaultModel(type: ProviderType): string {
-  // 优先从 PROVIDER_MODELS 获取该 provider 的第一个模型 ID
+  // 优先从模型目录获取该 provider 的第一个「可用」模型 ID
+  // （过滤 deprecated，防止退役模型被当作默认 → 必然 404/熔断）
+  try {
+    const entries = getModelCatalogLoader().getByProvider(type);
+    const firstAvailable = entries.find((m) => m.id !== '__default__' && m.status !== 'deprecated');
+    if (firstAvailable?.id) return firstAvailable.id;
+  } catch { /* loader 未初始化时回退旧路径 */ }
+  // 其次从 PROVIDER_MODELS 获取第一个模型 ID（兼容旧调用方）
   const models = PROVIDER_MODELS[type];
   if (models && models.length > 0) {
     return models[0].id;
   }
-  // 其次从 provider config loader 读取默认模型
+  // 再次从 provider config loader 读取默认模型
   const provCfg = getProviderConfigLoader().getProvider(type);
   if (provCfg?.defaultModel) return provCfg.defaultModel;
   // 最后按 provider 类型兜底

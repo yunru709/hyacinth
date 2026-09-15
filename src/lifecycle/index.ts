@@ -14,6 +14,12 @@ export type {
 // ProcessManager
 export { ProcessManager } from './manager.js';
 
+// 全局子进程注册表 + 退出收割
+export { installGlobalReaper, registerManager, unregisterManager, trackedManagerCount } from './global-registry.js';
+
+// 子进程树强杀 + 父死自灭 watchdog
+export { killProcessTreeSync, spawnWatchdog, buildWatchdogScript, WATCHDOG_MARK } from './watchdog.js';
+
 // ModelRegistry
 export { ModelRegistry } from '../local-model/model-registry.js';
 export type { ModelEntry, ModelBackend, ModelRegisterOptions } from '../local-model/model-registry.js';

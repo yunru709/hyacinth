@@ -173,10 +173,12 @@ export class SlashSubPanel {
       if (matchesKey(data, 'return') || matchesKey(data, 'enter') || matchesKey(data, 'space')) {
         const selected = this.selectList.getSelectedItem();
         if (selected) {
-          const parts = selected.value.split('/');
-          const childCmd = this.children.find((c) => c.name === parts[parts.length - 1]);
+          // items 与 children 同序构建 → 按索引反查，避免名称含 '/' 时尾段匹配失败
+          const idx = this.items.findIndex((i) => i.value === selected.value);
+          const childCmd = idx >= 0 ? this.children[idx] : undefined;
           if (childCmd) {
-            if (childCmd.children && childCmd.children.length > 0) {
+            // 有静态 children 或动态 childrenProvider → 都是可展开节点，打开下一级面板
+            if ((childCmd.children && childCmd.children.length > 0) || childCmd.childrenProvider) {
               // 1. Selected sub-command has children: open child panel
               this.openChild(childCmd);
             } else {

@@ -1,9 +1,11 @@
-import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createConnection } from 'node:net';
 import http from 'node:http';
 import os from 'node:os';
 import { createLogger } from '../logging/logger.js';
+import { killProcessTreeSync, spawnWatchdog } from './watchdog.js';
+import { registerManager, unregisterManager, installGlobalReaper } from './global-registry.js';
 
 const logger = createLogger('process-manager');
 import type {
@@ -45,7 +47,12 @@ export class ProcessManager {
   constructor(
     public readonly config: ManagedProcessConfig,
     private callbacks?: ProcessEventCallbacks,
-  ) {}
+  ) {
+    // 自动注册到全局注册表：无论本实例是否经过 LifecycleSupervisor，
+    // 进程退出路径都会被收割（防裸实例孤儿化）
+    registerManager(this);
+    installGlobalReaper();
+  }
 
   // ===== 公共 API =====
 
@@ -110,7 +117,15 @@ export class ProcessManager {
     const timeout = this.config.stopTimeoutMs ?? 10_000;
 
     try {
-      if (stopSignal !== 'SIGKILL') {
+      if (isWindows) {
+        // Windows 上必须「先树杀、再等退出」：shell:true 时 proc 是 cmd.exe
+        // 外壳，直杀外壳（proc.kill 即 TerminateProcess）会让孙进程（真实工作
+        // 进程）孤儿化——taskkill /T 依赖父链可走通，树根死了再补杀只会得到
+        // status=128 而整体失败，这正是全量测试跑一次泄漏一批 node 孤儿进程
+        // 的根源。趁树根存活时 taskkill /T /F 一次到位（Windows 无优雅终止，
+        // SIGTERM 与 SIGKILL 等价）。
+        this.killProcessTree(pid);
+      } else if (stopSignal !== 'SIGKILL') {
         this.proc.kill(stopSignal);
       }
 
@@ -150,6 +165,8 @@ export class ProcessManager {
   async destroy(): Promise<void> {
     await this.stop();
     this.callbacks = undefined;
+    // 从全局注册表注销：不再被退出收割器追踪
+    unregisterManager(this);
   }
 
   /** 合并回调（公开接口） */
@@ -181,6 +198,9 @@ export class ProcessManager {
 
     if (this.proc.pid) {
       this.childPids.add(this.proc.pid);
+      // 父死自灭 watchdog：主进程被外部强杀（TerminateProcess，JS 钩子
+      // 不触发）时由 watchdog 杀掉本进程树，防止孤儿化
+      spawnWatchdog(this.proc.pid);
     }
 
     this.proc.stdout?.on('data', (data: Buffer) => {
@@ -349,26 +369,11 @@ export class ProcessManager {
 
   /**
    * 杀死进程及其所有子进程（进程树）。
-   * Windows: taskkill /F /T /PID
-   * Unix:    kill -SIGKILL -pid (进程组)
+   * 统一走 lifecycle/watchdog.ts 的同步三级树杀
+   * （taskkill → PowerShell KT 递归 → process.kill）。
    */
   private killProcessTree(pid: number): void {
-    try {
-      if (isWindows) {
-        execSync(`taskkill /F /T /PID ${pid}`, {
-          stdio: 'ignore',
-          windowsHide: true,
-        });
-      } else {
-        process.kill(-pid, 'SIGKILL');
-      }
-    } catch {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // 进程已不存在
-      }
-    }
+    killProcessTreeSync(pid);
   }
 
   /**

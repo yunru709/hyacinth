@@ -26,8 +26,8 @@ export class ProviderConfigLoader {
   private configPath: string;
   private cache: ProvidersConfig = DEFAULT_PROVIDERS;
 
-  constructor(cwd: string) {
-    this.configPath = path.join(os.homedir(), '.agent', 'providers.json');
+  constructor(cwd: string, configPathOverride?: string) {
+    this.configPath = configPathOverride ?? path.join(os.homedir(), '.agent', 'providers.json');
   }
 
   async load(): Promise<ProvidersConfig> {
@@ -84,4 +84,14 @@ export function getProviderConfigLoader(cwd?: string): ProviderConfigLoader {
     throw new Error('ProviderConfigLoader not initialized. Call getProviderConfigLoader(cwd) first.');
   }
   return singleton;
+}
+
+/** 测试辅助：重置单例（配合构造注入 configPathOverride 使用隔离的 providers.json） */
+export function resetProviderConfigLoader(): void {
+  singleton = undefined;
+}
+
+/** 测试辅助：注入自定义 loader 实例（隔离测试用；传 undefined 还原单例） */
+export function __setProviderConfigLoaderForTest(loader: ProviderConfigLoader | undefined): void {
+  singleton = loader;
 }

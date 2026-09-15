@@ -114,25 +114,23 @@ describe('名单加载 loadExtensionManifest', () => {
     }
   });
 
-  it('项目级覆盖全局级；坏 JSON 记错不炸', () => {
+  it('只读全局名单；项目级已取消；坏 JSON 记错不炸', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-reg-'));
     fs.mkdirSync(path.join(dir, '.agent'), { recursive: true });
     fs.mkdirSync(path.join(os.homedir(), '.agent'), { recursive: true });
     const globalPath = path.join(os.homedir(), '.agent', 'extension-registry.json');
-    const projectPath = path.join(dir, '.agent', 'extension-registry.json');
     const hadGlobal = fs.existsSync(globalPath);
     const savedGlobal = hadGlobal ? fs.readFileSync(globalPath, 'utf-8') : null;
     try {
       fs.writeFileSync(globalPath, JSON.stringify({ plugins: [{ id: 'greeter', enabled: true }] }));
-      fs.writeFileSync(projectPath, JSON.stringify({ plugins: [{ id: 'greeter', enabled: false }] }));
       const { manifest, errors } = loadExtensionManifest(dir);
       expect(errors).toEqual([]);
-      expect(manifest.plugins).toEqual([{ id: 'greeter', enabled: false }]);
+      expect(manifest.plugins).toEqual([{ id: 'greeter', enabled: true }]);
 
-      fs.writeFileSync(projectPath, '{ broken');
+      fs.writeFileSync(globalPath, '{ broken');
       const bad = loadExtensionManifest(dir);
       expect(bad.errors).toHaveLength(1);
-      expect(bad.manifest.plugins).toEqual([{ id: 'greeter', enabled: true }]); // 回退全局层
+      expect(bad.manifest.plugins).toEqual([]); // 坏 JSON → 空名单
     } finally {
       if (hadGlobal) fs.writeFileSync(globalPath, savedGlobal!);
       else fs.rmSync(globalPath, { force: true });

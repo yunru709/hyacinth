@@ -20,6 +20,21 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { vi } from 'vitest';
+
+// P-Config 收敛后 ManifestLoader 只读全局 ~/.agent/context-manifest.json：
+// mock homedir → 临时空目录（无全局 manifest → 使用内置默认，zone1 enabled）。
+// homeBox 容器在 vi.hoisted 内创建，mock 闭包引用容器而非模块变量，规避 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
+homeBox.path = fs.mkdtempSync(path.join(os.tmpdir(), 'cache-test-home-'));
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 

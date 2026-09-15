@@ -5,6 +5,18 @@ import path from 'node:path';
 import { PluginManager } from './manager.js';
 import { ExtensionRegistry } from '../supervisor/extension-registry.js';
 
+// P-Config 收敛后插件统一走全局 ~/.agent/plugins/ + ~/.agent/plugins.config.json：
+// mock homedir → setupProject 的临时目录。homeBox 容器规避 vi.mock 提升期 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
+
 // =============================================================
 // 名单裁决（扩展注册表方案阶段 4）：名单 > plugins.config > enabledByDefault
 // =============================================================
@@ -19,9 +31,10 @@ const mockSkillRegistry = {
 };
 const mockContextComposer = { registerSource: vi.fn(), unregisterSource: vi.fn(), compose: vi.fn() };
 
-/** 临时项目：.agent/plugins/adjud-plugin（enabledByDefault: true） */
+/** 临时项目：.agent/plugins/adjud-plugin（enabledByDefault: true；homedir → dir） */
 function setupProject(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-adjud-'));
+  homeBox.path = dir; // homedir → dir：dir/.agent/plugins 即全局插件目录
   const pluginDir = path.join(dir, '.agent', 'plugins', 'adjud-plugin');
   fs.mkdirSync(pluginDir, { recursive: true });
   fs.writeFileSync(path.join(pluginDir, 'plugin.json'), JSON.stringify({

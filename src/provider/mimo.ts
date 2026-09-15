@@ -11,6 +11,7 @@
 import { AnthropicProvider } from './anthropic.js';
 import type { AnthropicProviderOptions } from './anthropic.js';
 import type { ProviderConfig } from '../types.js';
+import type { ProviderFields } from './fields.js';
 import { getProviderConfigLoader } from './config.js';
 
 export function createMiMoProvider(config?: {
@@ -18,6 +19,8 @@ export function createMiMoProvider(config?: {
   model?: string;
   baseUrl?: string;
   maxOutputTokens?: number;
+  /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }): AnthropicProvider {
   const provCfg = getProviderConfigLoader().getProvider('mimo');
   return new AnthropicProvider({
@@ -26,14 +29,19 @@ export function createMiMoProvider(config?: {
     model: config?.model ?? provCfg?.defaultModel ?? 'mimo-v2.5',
     maxOutputTokens: config?.maxOutputTokens,
     providerType: 'mimo',
+    fieldMap: config?.fieldMap,
   } satisfies AnthropicProviderOptions);
 }
 
-export function createMiMoFromConfig(config: ProviderConfig): AnthropicProvider {
+export function createMiMoFromConfig(
+  config: ProviderConfig,
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>,
+): AnthropicProvider {
   return createMiMoProvider({
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
     maxOutputTokens: config.maxOutputTokens,
+    fieldMap,
   });
 }

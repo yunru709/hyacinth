@@ -8,7 +8,7 @@
 - `switch_provider` — 切换模型，name 为 provider 类型
 - `switch_to_auto_route` — 切回自动路由
 
-**可用 provider：** `anthropic` | `openai` | `deepseek` | `gemini` | `groq` | `xai` | `mistral` | `openrouter` | `moonshot` | `qwen` | `zhipu` | `minimax` | `mimo` | `local`
+**可用 provider：** `anthropic` | `openai` | `deepseek` | `gemini` | `groq` | `xai` | `mistral` | `openrouter` | `moonshot` | `qwen` | `zhipu` | `minimax` | `mimo` | `volcengine` | `local`
 
 **本地模型 (`local`)：** 系统自动检测 Ollama 或 llama.cpp。切到本地时使用 `switch_provider name="local"`。无需指定后端或模型名——后端类型和连接地址由系统自动检测。本地模型数据不外传，适合隐私敏感任务。
 

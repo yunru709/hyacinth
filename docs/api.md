@@ -13,7 +13,7 @@ hyacinth serve --port 3000 --api-key <key> --webui --webui-port 3100
 | `--port` | `3000` | API 端口（占用即退出，单实例守卫） |
 | `--api-key` | 无 | Bearer 认证密钥；也可用环境变量 `HYACINTH_API_KEY` / `AGENT_API_KEY` |
 | `--cors-origin` | 无 | CORS 来源 |
-| `--provider` | auto | Provider 类型（anthropic/openai/deepseek/local/... 共 16 种） |
+| `--provider` | auto | Provider 类型（anthropic/openai/deepseek/local/... 共 17 种） |
 | `--model` | auto | 模型名 |
 | `--max-turns` | `100` | 单次 chat 请求最大轮数 |
 | `--max-context` | `200000` | 最大上下文 token |

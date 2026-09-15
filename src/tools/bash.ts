@@ -1,4 +1,4 @@
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +6,7 @@ import type { Tool } from './interface.js';
 import type { BackgroundProcessRegistry } from './background-registry.js';
 import { getToolConfig } from './tool-config.js';
 import { classifyCommand } from '../kernel/security/index.js';
+import { killProcessTreeSync, spawnWatchdog } from '../lifecycle/watchdog.js';
 
 /** 沙箱配置接口 — 限制 BashTool 可执行的命令 */
 export interface SandboxConfig {
@@ -105,6 +106,9 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
     stdio: [opts.stdin, 'pipe', 'pipe'],
     // shell: false — 不经过 cmd.exe，直接创建 powershell 进程
     windowsHide: true,
+    // signal 转发：abort 时由 Node 原生语义终止直子进程（此前 opts.signal
+    // 被静默丢弃，abort 只能依赖手动的 killProcessTree 监听器）
+    signal: opts.signal,
   });
 
   // 子进程退出后清理临时目录
@@ -200,27 +204,6 @@ export class BashTool implements Tool {
   /** 获取当前沙箱配置（只读） */
   getSandboxConfig(): Readonly<SandboxConfig> {
     return this.sandboxConfig;
-  }
-
-  /**
-   * 杀死进程树
-   * - Windows: 使用 taskkill /T /F /PID
-   * - Unix: 使用 process.kill(-pid) 杀进程组
-   */
-  private killProcessTree(pid: number): void {
-    try {
-      if (process.platform === 'win32') {
-        execSync(`taskkill /T /F /PID ${pid}`, { stdio: 'ignore' });
-      } else {
-        process.kill(-pid, 'SIGKILL');
-      }
-    } catch {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // 进程已退出，忽略
-      }
-    }
   }
 
   async execute(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
@@ -320,13 +303,17 @@ export class BashTool implements Tool {
           });
 
       const handle = this.backgroundRegistry.register('bash', command, childProcess);
+      // 父死自灭 watchdog：主进程被外部强杀时由 watchdog 杀掉本命令树
+      if (childProcess.pid) {
+        spawnWatchdog(childProcess.pid);
+      }
       const pid = childProcess.pid ?? '?';
 
       // 超时自动终止（和同步路径一致）
       const timeoutMs = timeout * 1000;
       const timer = setTimeout(() => {
         if (childProcess.pid) {
-          this.killProcessTree(childProcess.pid);
+          killProcessTreeSync(childProcess.pid);
         }
         this.backgroundRegistry?.kill(handle);
       }, timeoutMs);
@@ -347,6 +334,7 @@ export class BashTool implements Tool {
 
     return new Promise<string>((resolve, reject) => {
       const startTime = Date.now();
+      let settled = false;
 
       const childProcess = isWin
         ? spawnWindows(command, this.cwd, mergedEnv as NodeJS.ProcessEnv, {
@@ -365,6 +353,17 @@ export class BashTool implements Tool {
 
       let stdout = '';
       let stderr = '';
+
+      // 同步路径临时登记 + 父死自灭 watchdog：
+      // - 登记：主进程优雅退出（exit 钩子 forceKillAll）时能杀到本命令树
+      // - watchdog：主进程被外部强杀（TerminateProcess）时由 watchdog 杀掉本命令树
+      let syncHandle: string | null = null;
+      if (this.backgroundRegistry) {
+        syncHandle = this.backgroundRegistry.register('bash', command, childProcess);
+      }
+      if (childProcess.pid) {
+        spawnWatchdog(childProcess.pid);
+      }
 
       // 收集 stdout/stderr，超过上限后丢弃数据
       childProcess.stdout!.on('data', (data: Buffer | string) => {
@@ -389,25 +388,69 @@ export class BashTool implements Tool {
         }
       });
 
+      /** 统一 settle 出口：close / error / 看门狗三条路径都经过这里，幂等。
+       *  注意：不可在此移除 abort 监听器——abort() 同步分发时 Node 原生 signal
+       *  杀（直子进程）的 'error' 事件先于本文件 onAbort 触发，settle 若摘除
+       *  监听器，后续的 onAbort 树杀（taskkill/KT）会被跳过，孙代进程孤儿化。 */
+      let closeWatchdog: NodeJS.Timeout | undefined;
+      const settle = (ok: boolean, payload: string | Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(closeWatchdog);
+        // 同步路径临时登记的生命周期到此结束：从注册表移除
+        if (syncHandle) {
+          this.backgroundRegistry?.unregister(syncHandle);
+          syncHandle = null;
+        }
+        if (ok) resolve(payload as string);
+        else reject(payload as Error);
+      };
+
       // 超时处理
       const timer = setTimeout(() => {
         if (childProcess.pid) {
-          this.killProcessTree(childProcess.pid);
+          killProcessTreeSync(childProcess.pid);
         }
       }, timeout * 1000);
 
       // AbortSignal 监听
       const onAbort = () => {
         if (childProcess.pid) {
-          this.killProcessTree(childProcess.pid);
+          killProcessTreeSync(childProcess.pid);
         }
       };
       signal?.addEventListener('abort', onAbort, { once: true });
 
-      childProcess.on('close', (code) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
+      // ── close 看门狗（治本兜底）───────────────────────────────
+      // Windows 上 taskkill /T /F 可能半途失败（status=128：树中某成员已
+      // 消失即整体报错），幸存的孙代进程继承 stdio 管道 → 子进程 'exit'
+      // 已触发而 'close'（要求进程退出 + 全部 stdio 关闭）永不触发 →
+      // 本 Promise 挂死 → loop.run 挂死 → TUI 消息队列永不消费。
+      // 故 exit 触发后给 close 一个宽限期，超时则用已收集的输出强制
+      // settle，保证工具结果（含队列续跑）永不因管道悬挂而丢失。
+      const CLOSE_GRACE_MS = getToolConfig('bash.closeGraceMs', 3000);
+      let exitCode: number | null = null;
+      childProcess.on('exit', (code) => {
+        exitCode = code;
+        clearTimeout(closeWatchdog);
+        closeWatchdog = setTimeout(() => {
+          const elapsed = Date.now() - startTime;
+          const parts: string[] = [];
+          if (stdout) parts.push(stdout);
+          if (stderr) parts.push(stderr);
+          if (truncated) parts.push(`[Output truncated: exceeded ${LIMIT_KB}KB limit]`);
+          parts.push(`[Warning: descendant processes held stdio after exit; killed tree, forced after ${elapsed}ms]`);
+          const output = parts.join('\n');
+          if (exitCode === 0) {
+            settle(true, output);
+          } else {
+            settle(false, new Error(output || `Command failed with exit code ${exitCode}`));
+          }
+        }, CLOSE_GRACE_MS);
+      });
 
+      childProcess.on('close', (code) => {
         const parts: string[] = [];
         if (stdout) parts.push(stdout);
         if (stderr) parts.push(stderr);
@@ -421,9 +464,9 @@ export class BashTool implements Tool {
         if (code === 0) {
           const elapsed = Date.now() - startTime;
           if (output) {
-            resolve(output + `\n[Exit code: 0, ${elapsed}ms]`);
+            settle(true, output + `\n[Exit code: 0, ${elapsed}ms]`);
           } else {
-            resolve(`Command completed successfully [Exit code: 0, ${elapsed}ms]`);
+            settle(true, `Command completed successfully [Exit code: 0, ${elapsed}ms]`);
           }
         } else {
           const elapsed = Date.now() - startTime;
@@ -435,16 +478,15 @@ export class BashTool implements Tool {
           }
           const errOutput = parts.join('\n');
           if (errOutput) {
-            reject(new Error(errOutput));
+            settle(false, new Error(errOutput));
           } else {
-            reject(new Error(`Command failed with exit code ${code}`));
+            settle(false, new Error(`Command failed with exit code ${code}`));
           }
         }
       });
 
       childProcess.on('error', (err) => {
-        clearTimeout(timer);
-        reject(new Error(`Command failed: ${err.message}`));
+        settle(false, new Error(`Command failed: ${err.message}`));
       });
 
       // 关闭 stdin

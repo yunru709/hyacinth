@@ -36,6 +36,7 @@ import { ProviderManager } from '../provider/manager.js';
 import { LocalProvider } from '../provider/local.js';
 import { REPLACEABLE_POINTS, togglePluginInManifest, loadExtensionManifest } from '../supervisor/extension-registry.js';
 import { LifecycleSupervisor } from '../supervisor/shutdown.js';
+import { installGlobalReaper } from '../lifecycle/global-registry.js';
 import { createAgent } from './factory.js';
 import { DEFAULT_PERSONA_DIR } from '../setup/persona-bootstrap.js';
 import { createLogger } from '../logging/logger.js';
@@ -65,6 +66,7 @@ import { createInProcPair } from '../ui-protocol/adapter.js';
 import { UiProtocolSession, type UiProtocolSessionBackend } from '../channels/builtin/ui-protocol-session.js';
 import { UI_EVENT } from '../events.js';
 import type { UiMessage, UiEvent, UiResponse } from '../ui-protocol/types.js';
+import type { CacheStats } from '../ui-protocol/types.js';
 
 const logger = createLogger('tui');
 
@@ -145,6 +147,14 @@ export async function runTui(
   // ── Lifecycle ──
   const supervisor = new LifecycleSupervisor();
   supervisor.installSignalHandlers();
+  // 全局子进程收割器（ProcessManager 构造即注册，这里显式安装确保生效）：
+  // 进程以任何方式退出（含 process.exit / Ctrl+C）都同步收割全部受管子进程树
+  installGlobalReaper();
+  // 启动清扫上次会话强杀（TerminateProcess）残留的孤儿 watchdog 及其目标树
+  // （MCP 特征串模式由 MCPSystem.start() 负责，这里只清通用的 hyacinth-wd 标记）
+  void import('../mcp/orphan-sweeper.js').then(({ sweepOrphanedWatchdogs }) =>
+    sweepOrphanedWatchdogs().catch(() => {}),
+  );
 
   // ── Local Model ──
   const localModel = LocalModelModule.getInstance();
@@ -300,6 +310,9 @@ export async function runTui(
       if (info.cacheHistory && info.cacheHistory.length > 1) {
         ctxBar += theme.dim(` (${info.cacheHistory.length}t)`);
       }
+    } else {
+      // 数据源（厂商）不返回缓存命中字段（如火山方舟）→ 占位提醒，而非空白
+      ctxBar += theme.dim(' | Cache: n/a');
     }
     // Background process count
     if (backgroundRegistry) {
@@ -458,10 +471,12 @@ export async function runTui(
       }
 
       if (level === 'error') {
-        // 原始 API 错误细节走日志，TUI 只显示简洁消息
+        // 原始 API 错误细节转 stderr，TUI 内显示截断摘要（不伪造"auto-switching"文案）
         if (message.length > 150 || message.includes('{') || message.includes('\n')) {
           process.stderr.write(`[tui:error] ${message}\n`);
-          chatLog.addSystem(theme.errorBright('[Error] ') + theme.dim('Provider request failed, auto-switching...'));
+          const brief = message.replace(/\s+/g, ' ').trim().slice(0, 120);
+          const suffix = message.length > 120 ? '…' : '';
+          chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(brief + suffix) + theme.dim(' (full log in stderr)'));
         } else {
           chatLog.addSystem(theme.errorBright('[Error] ') + theme.error(message));
         }
@@ -469,9 +484,13 @@ export async function runTui(
         chatLog.addSystem(theme.warning(message));
       } else {
         chatLog.addSystem(theme.fg(message));
-        // 如果消息是 provider 切换，同步刷新 UI
+        // provider 切换 / 降级链降级恢复消息 → 同步刷新状态栏缓存
         // onStatus 是同步回调，不能 await；fire-and-forget（InProc 下协议发送同步完成）
-        if (message.startsWith('Provider switched to ')) {
+        if (
+          message.startsWith('Provider switched to ')
+          || message.startsWith('[Fallback]')
+          || message.startsWith('[Recovered]')
+        ) {
           // 经协议 state.get 刷新 modelName/providerTypeStart + 状态栏（不读 loop）
           void refreshStatusFromProtocol();
         }
@@ -654,9 +673,9 @@ export async function runTui(
    * loop.contextTokensUsed/turnNumber），用于命令处理后的通用状态刷新。
    * 注意：事件驱动渲染（onStatus 同步回调）与 stats 特定语义的刷新点不适用此 helper。
    */
-  async function refreshStatusFromProtocol(): Promise<void> {
+  async function refreshStatusFromProtocol(): Promise<import('../ui-protocol/types.js').StateSnapshot | undefined> {
     const snap = await protocolSend('state.get') as import('../ui-protocol/types.js').StateSnapshot | undefined;
-    if (!snap) return;
+    if (!snap) return undefined;
     // 同步更新 provider/model 本地缓存（provider 切换后状态栏与面板一致）
     if (snap.provider) providerTypeStart = snap.provider as typeof providerTypeStart;
     if (snap.model) modelName = snap.model;
@@ -669,7 +688,13 @@ export async function runTui(
       maxContextTokens: snap.maxContextTokens,
       compressCount: snap.compressCount,
       sessionId: snap.sessionId,
-    } as unknown as TurnInfo);
+      cacheHitTokens: snap.cacheHitTokens,
+      cacheMissTokens: snap.cacheMissTokens,
+      cacheHitRate: snap.cacheHitRate,
+      cacheHistory: snap.cacheHistory,
+    } as TurnInfo);
+    // 返回快照：切换类命令据此校验实际生效值（后端可能降级/重建失败）
+    return snap;
   }
 
   /** 经协议 schedule.runtime 刷新当前调度任务名（队列判断/状态栏；异步容错） */
@@ -719,10 +744,23 @@ export async function runTui(
       case UI_EVENT.MESSAGE_FLUSH: tuiHandler.onFlush?.(); break;
       case UI_EVENT.MESSAGE_INTERRUPT: tuiHandler.onInterrupt?.(); break;
       case UI_EVENT.MESSAGE_TURN_INFO: {
-        const info = p as { turnCount?: number; tokensUsed?: number };
+        // 协议层 payload = 完整 TurnInfo（loop.getTurnInfo 含 cache 字段），
+        // 直接透传以保留 cacheHitRate/cacheHistory（上下文缓存命中率显示）。
+        const info = p as unknown as TurnInfo;
         lastTurnCount = Number(info.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(info.tokensUsed ?? lastTokensUsed);
-        refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
+        refreshStatus({
+          turnCount: lastTurnCount,
+          maxTurns,
+          tokensUsed: lastTokensUsed,
+          maxContextTokens: maxContext,
+          sessionId: '',
+          compressCount: 0,
+          cacheHitTokens: info.cacheHitTokens,
+          cacheMissTokens: info.cacheMissTokens,
+          cacheHitRate: info.cacheHitRate,
+          cacheHistory: info.cacheHistory,
+        });
         break;
       }
       case UI_EVENT.MESSAGE_CONTEXT_UPDATE: {
@@ -747,6 +785,11 @@ export async function runTui(
         tuiAskUser.open(au.questions, { id: au.id });
         break;
       }
+      case UI_EVENT.MODEL_CHANGE:
+        // 模型/通道变更统一广播（model.switch / 降级链等）→ 刷新状态栏缓存；
+        // providerTypeStart/modelName 唯一更新入口即 refreshStatusFromProtocol(state.get)
+        void refreshStatusFromProtocol();
+        break;
       default: break;
     }
   };
@@ -866,8 +909,17 @@ export async function runTui(
     // client 端发送协议请求（request-response 映射：id → resolve 回调表，经 InProc 传输）
     protocolSend = (method: string, params?: unknown): Promise<unknown> => {
       const id = `tui_${Date.now()}_${++protocolSeq}`;
-      return new Promise((resolve) => {
-        pendingRequests.set(id, (resp) => resolve(resp.result));
+      return new Promise((resolve, reject) => {
+        // ok=false 必须 reject：旧实现只 resolve(resp.result)，错误响应的 result 是
+        // undefined，于是后端抛的错被静默吞掉，调用方只能看到"没生效"，
+        // 最终显示成含糊的 "Switch incomplete" 而看不到真因。
+        pendingRequests.set(id, (resp) => {
+          if (resp.ok === false) {
+            reject(new Error(resp.error?.message || `${method} failed (no message)`));
+          } else {
+            resolve(resp.result);
+          }
+        });
         protocolClient.send({ kind: 'request', id, method, params });
       });
     };
@@ -888,8 +940,15 @@ export async function runTui(
     // 远程模式：协议发送走 WS（/tui 端点，统一协议层，与本地模式对称）
     protocolSend = (method: string, params?: unknown): Promise<unknown> => {
       const id = `tui_${Date.now()}_${++protocolSeq}`;
-      return new Promise((resolve) => {
-        pendingRequests.set(id, (resp) => resolve(resp.result));
+      return new Promise((resolve, reject) => {
+        // 与本地模式对称：ok=false reject（详见本地模式同处注释）
+        pendingRequests.set(id, (resp) => {
+          if (resp.ok === false) {
+            reject(new Error(resp.error?.message || `${method} failed (no message)`));
+          } else {
+            resolve(resp.result);
+          }
+        });
         if (remoteWs && remoteWs.readyState === 1) {
           remoteWs.send(JSON.stringify({ kind: 'request', id, method, params }));
         } else {
@@ -1249,8 +1308,9 @@ export async function runTui(
           panel.show(tui, (result) => {
             slashSubPanelActive = false;
             if (result) {
-              // 如果叶子命令有 args 占位符 → 自动填充到输入框，让用户继续输入
-              const leafDef = CommandRegistry.getInstance().find(result.path);
+              // 叶子定义直接取面板结果：childrenProvider 展开出的多级路径
+              // （如 model/online/<p>/<m>）在 registry 静态 children 链上查不到
+              const leafDef = result.command;
               if (leafDef?.args && !leafDef.children && !leafDef.childrenProvider) {
                 editor.setText(`/${result.path} `);
                 updateTokenEstimate();
@@ -1288,8 +1348,7 @@ export async function runTui(
     /**
      * 经协议层写配置（config.set 自动持久化到 configCenter.save()，
      * 替代直连 cfg.set + cfg.save / persistConfigField 的组合）。
-     * 与直连期语义差异：持久化优先写项目级配置（ConfigManager 设计），
-     * 而非固定写全局 ~/.agent/config.json——与 cfg.save() 既有行为一致。
+     * P-Config 收敛后持久化统一写全局 ~/.agent/config.json（项目级已取消）。
      */
     async function setConfig(path: string, value: unknown): Promise<void> {
       await protocolSend('config.set', { path, value });
@@ -2196,7 +2255,7 @@ if (input.startsWith('/threshold ')) {
   // ── Initial render ──
   // 初始状态经协议 state.get 获取（启动同步 provider/model 缓存 + 状态栏）
   const snap0 = (await protocolSend('state.get')) as
-    | { provider?: string; model?: string; turnCount?: number; tokensUsed?: number; maxTurns?: number; maxContextTokens?: number; compressCount?: number; sessionId?: string }
+    | { provider?: string; model?: string; turnCount?: number; tokensUsed?: number; maxTurns?: number; maxContextTokens?: number; compressCount?: number; sessionId?: string; cacheHitTokens?: number; cacheMissTokens?: number; cacheHitRate?: number; cacheHistory?: CacheStats[] }
     | null
     | undefined;
   if (snap0?.provider) providerTypeStart = snap0.provider as typeof providerTypeStart;
@@ -2210,6 +2269,10 @@ if (input.startsWith('/threshold ')) {
         maxContextTokens: snap0.maxContextTokens ?? maxContext,
         compressCount: snap0.compressCount ?? 0,
         sessionId: snap0.sessionId ?? sessionDir,
+        cacheHitTokens: snap0.cacheHitTokens,
+        cacheMissTokens: snap0.cacheMissTokens,
+        cacheHitRate: snap0.cacheHitRate,
+        cacheHistory: snap0.cacheHistory,
       }
     : { turnCount: 0, tokensUsed: stats0.current_context_tokens ?? 0, maxTurns, maxContextTokens: maxContext, sessionId: sessionDir, compressCount: 0 };
   refreshStatus(initialInfo);

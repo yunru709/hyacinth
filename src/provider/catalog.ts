@@ -1,5 +1,6 @@
 import type { ProviderType } from '../types.js';
 import { getModelCatalogLoader, type ModelCatalogEntry } from './model-catalog-loader.js';
+import type { ProviderSampling } from './fields.js';
 
 /** 模型能力标记 */
 export interface ModelCapabilities {
@@ -33,6 +34,8 @@ export interface ModelInfo {
   replacedBy?: string;
   /** 推理/思考强度（仅支持 reasoning 的模型有效） */
   reasoningEffort?: 'high' | 'max';
+  /** 模型级默认采样参数（激活配置/厂商级未覆盖时生效） */
+  sampling?: ProviderSampling;
 }
 
 function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
@@ -53,6 +56,7 @@ function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
     cost: entry.cost ? { ...entry.cost } : undefined,
     status: entry.status as 'available' | 'preview' | 'deprecated' | 'disabled',
     replacedBy: entry.replacedBy,
+    sampling: entry.sampling ? { ...entry.sampling } : undefined,
   };
 }
 

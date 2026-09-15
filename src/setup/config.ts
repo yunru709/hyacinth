@@ -3,9 +3,9 @@
  *
  * 项目设计原则：所有可配置值必须通过配置体系读取，不得在代码中写死默认值。
  *
- * 配置层级：
+ * 配置层级（P-Config 收敛：已取消项目级配置，统一走全局）：
  *   内置默认值（src/runtime/defaults.ts）
- *   → 用户项目配置（.agent/config.json）
+ *   → 用户全局配置（~/.agent/config.json）
  *   → RuntimeConfigCenter（运行时读写，即时生效）
  *
  * 新增配置项：
@@ -18,7 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getLocalProviderConfigLoader } from '../provider/local-config.js';
-import { DEFAULT_PROVIDERS } from '../provider/config.js';
+import { DEFAULT_PROVIDERS, getProviderConfigLoader } from '../provider/config.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
 import { registerSecretKeys } from '../kernel/security/index.js';
 
@@ -158,6 +158,15 @@ export interface AgentConfig {
   }>;
   /** Fallback provider types (tried in order after primary fails) */
   fallbackProviders?: string[];
+  /** 降级候选探测配置（候选入链前验证 API 真实可用） */
+  probe?: Partial<{
+    timeoutMs: number;
+    cacheTtlMs: number;
+    failureCooldownMs: number;
+    uncertainCooldownMs: number;
+  }>;
+  /** 全部降级不可用时回到主 provider 再试一轮（默认 true） */
+  fallbackToPrimary?: boolean;
   /** Persona 模板文件目录 */
   personaDir?: string;
   /** 安全配置 */
@@ -264,31 +273,20 @@ export const API_KEY_MAP: Record<string, string> = Object.fromEntries(
 
 export class ConfigManager {
   private configDir: string;
-  private projectDir: string | undefined;
   /** 本进程从 .env 文件加载的键名集合（供安全内核注册，值不外传） */
   private loadedEnvKeyNames = new Set<string>();
 
   constructor(projectDir?: string) {
+    // 设计决策（P-Config 收敛）：取消项目级配置，一切配置只走全局 ~/.agent。
+    // 构造参数 projectDir 保留仅为调用方兼容（26 处 new ConfigManager(cwd)），
+    // 实际不再读取/写入任何项目级文件 —— 少一层合并，行为更可预期。
     this.configDir = path.join(os.homedir(), '.agent');
-    this.projectDir = projectDir;
   }
 
   getConfigDir(): string { return this.configDir; }
   getSessionsDir(): string { return path.join(this.configDir, 'sessions'); }
   getConfigPath(): string { return path.join(this.configDir, 'config.json'); }
   getEnvPath(): string { return path.join(this.configDir, '.env'); }
-
-  /** 获取项目级配置文件路径 */
-  getProjectConfigPath(): string | null {
-    if (!this.projectDir) return null;
-    return path.join(this.projectDir, '.agent', 'config.json');
-  }
-
-  /** 获取项目级 .env 文件路径 */
-  getProjectEnvPath(): string | null {
-    if (!this.projectDir) return null;
-    return path.join(this.projectDir, '.agent', '.env');
-  }
 
   /** 是否首次运行 */
   async isFirstRun(): Promise<boolean> {
@@ -307,11 +305,10 @@ export class ConfigManager {
   }
 
   /**
-   * 加载配置（合并层级：默认 → 全局 → 项目级）
-   * 项目级配置覆盖全局配置
+   * 加载全局配置（默认值 → 全局 config.json 覆盖）。
+   * 项目级配置已取消：不再有任何 <cwd>/.agent/config.json 参与合并。
    */
   async load(): Promise<AgentConfig> {
-    // 1. 加载全局配置
     let config = { ...DEFAULT_CONFIG };
     try {
       const content = await fs.readFile(this.getConfigPath(), 'utf-8');
@@ -320,47 +317,19 @@ export class ConfigManager {
     } catch {
       // 全局配置不存在，使用默认值
     }
-
-    // 2. 加载项目级配置（覆盖全局）
-    const projectConfigPath = this.getProjectConfigPath();
-    if (projectConfigPath) {
-      try {
-        const content = await fs.readFile(projectConfigPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        config = { ...config, ...parsed };
-      } catch {
-        // 项目级配置不存在，忽略
-      }
-    }
-
     return config;
   }
 
   /**
-   * 保存配置到合适的配置文件。
-   * 如果存在项目级配置文件，写入项目级（因为 load() 时项目级覆盖全局）；
-   * 否则写入全局配置文件。
+   * 保存配置到全局配置文件。
+   * 项目级配置已取消：统一写 ~/.agent/config.json。
    */
   async save(config: AgentConfig): Promise<void> {
     await this.ensureDir();
-    // ui 是用户偏好（主题等），不随项目级配置走：剥离出来单独写全局
+    // ui 是用户偏好（主题等），单独管理写全局
     const { ui, ...businessConfig } = config;
     if (ui !== undefined) {
       await this.saveUserSection({ ui } as Partial<AgentConfig>);
-    }
-    const projectConfigPath = this.getProjectConfigPath();
-    if (projectConfigPath) {
-      // 检查项目级配置文件是否存在
-      try {
-        await fs.access(projectConfigPath);
-        // 项目级配置存在 → 写入项目级（不含 ui 用户偏好）
-        const dir = path.dirname(projectConfigPath);
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(projectConfigPath, JSON.stringify(businessConfig, null, 2), 'utf-8');
-        return;
-      } catch {
-        // 项目级配置不存在，回退到全局
-      }
     }
     await fs.writeFile(this.getConfigPath(), JSON.stringify(businessConfig, null, 2), 'utf-8');
   }
@@ -382,29 +351,12 @@ export class ConfigManager {
     await fs.writeFile(globalPath, JSON.stringify(merged, null, 2), 'utf-8');
   }
 
-  /** 保存配置到项目级配置文件 */
-  async saveProjectConfig(config: Partial<AgentConfig>): Promise<void> {
-    const projectConfigPath = this.getProjectConfigPath();
-    if (!projectConfigPath) return;
-
-    const dir = path.dirname(projectConfigPath);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(projectConfigPath, JSON.stringify(config, null, 2), 'utf-8');
-  }
-
-  /** 从 .env 文件加载所有 API Key 到 process.env（全局 + 项目级） */
+  /** 从全局 .env 文件加载所有 API Key 到 process.env */
   async loadEnvKeys(): Promise<void> {
-    // 1. 加载全局 .env
     await this.loadEnvFile(this.getEnvPath());
 
-    // 2. 加载项目级 .env（覆盖全局）
-    const projectEnvPath = this.getProjectEnvPath();
-    if (projectEnvPath) {
-      await this.loadEnvFile(projectEnvPath);
-    }
-
-    // 3. 向安全内核注册秘密键名（只注册键名，值不经过内核）——
-    //    内核在 spawn/exec 边界剥离这些键，防止 .env 密钥泄入子进程
+    // 向安全内核注册秘密键名（只注册键名，值不经过内核）——
+    // 内核在 spawn/exec 边界剥离这些键，防止 .env 密钥泄入子进程
     registerSecretKeys(Object.keys(process.env).filter((k) => this.loadedEnvKeyNames.has(k)));
   }
 
@@ -419,7 +371,6 @@ export class ConfigManager {
         if (eqIndex === -1) continue;
         const key = trimmed.slice(0, eqIndex).trim();
         const value = trimmed.slice(eqIndex + 1).trim();
-        // 项目级 .env 覆盖全局（总是设置，不检查 process.env 是否已有）
         process.env[key] = value;
         this.loadedEnvKeyNames.add(key);
       }
@@ -430,7 +381,7 @@ export class ConfigManager {
 
   /** 保存 API Key 到全局 .env 文件（按 provider 映射 envKey） */
   async saveApiKey(provider: string, apiKey: string): Promise<void> {
-    const envKey = API_KEY_MAP[provider];
+    const envKey = this.resolveEnvKey(provider);
     if (!envKey) return;
     await this.saveApiKeyToEnv(envKey, apiKey);
   }
@@ -467,14 +418,24 @@ export class ConfigManager {
   /** 获取指定 Provider 的 API Key（从 .env 或环境变量） */
   async getApiKey(provider: string): Promise<string | undefined> {
     await this.loadEnvKeys();
-    const envKey = API_KEY_MAP[provider];
+    const envKey = this.resolveEnvKey(provider);
     return envKey ? process.env[envKey] : undefined;
   }
 
-  /** 获取 Provider 对应的 API Key 环境变量名 */
+  /**
+   * 解析 provider 对应的 API Key 环境变量名：
+   * providers.json 声明（含 JSON 直连厂商）优先，内置 API_KEY_MAP 兜底。
+   */
+  private resolveEnvKey(provider: string): string | undefined {
+    try {
+      return getProviderConfigLoader().getProvider(provider)?.envKey ?? API_KEY_MAP[provider];
+    } catch {
+      return API_KEY_MAP[provider];
+    }
+  }
 
   /** 获取 Provider 对应的 API Key 环境变量名 */
   getApiKeyEnvName(provider: string): string | undefined {
-    return API_KEY_MAP[provider];
+    return this.resolveEnvKey(provider);
   }
 }

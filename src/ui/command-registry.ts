@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createLogger } from '../logging/logger.js';
+import { getModelCatalogLoader, type ModelCatalogEntry } from '../provider/model-catalog-loader.js';
+import { PROVIDER_META } from '../provider/provider-meta.js';
 
 const logger = createLogger('command-registry');
 
@@ -55,6 +57,36 @@ export const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
 };
 
 // ─── Builtin Commands ───────────────────────────────────────────────
+
+/** 从统一模型目录（providers.json + 内置 MODEL_CATALOG）生成 /model online 子树 */
+function buildOnlineModelChildren(): SlashCommandDef[] {
+  const byProvider = new Map<string, ModelCatalogEntry[]>();
+  for (const entry of getModelCatalogLoader().getAll()) {
+    if (entry.id === '__default__' || entry.status === 'deprecated') continue;
+    const list = byProvider.get(entry.provider);
+    if (list) list.push(entry);
+    else byProvider.set(entry.provider, [entry]);
+  }
+  const children: SlashCommandDef[] = [];
+  for (const [provider, models] of byProvider) {
+    children.push({
+      name: provider,
+      description: PROVIDER_META[provider]?.name ?? provider,
+      icon: '\u25CF',
+      category: 'model',
+      children: [
+        ...models.map((m) => ({
+          name: m.id,
+          description: `切换至 ${m.name}`,
+          icon: '\u25C6',
+          category: 'model' as const,
+        })),
+        { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
+      ],
+    });
+  }
+  return children;
+}
 
 const BUILTIN_COMMANDS: SlashCommandDef[] = [
   {
@@ -157,156 +189,12 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
     children: [
       {
+        // 模型列表取自统一模型目录（providers.json + 内置 MODEL_CATALOG），面板打开时动态生成
         name: 'online',
         description: '切换在线模型...',
         icon: '\u{1F310}',
         category: 'model',
-        children: [
-          {
-            name: 'anthropic',
-            description: 'Anthropic (Claude)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'claude-sonnet-5', description: '切换至 Claude Sonnet 5', icon: '\u25C6', category: 'model' },
-              { name: 'claude-opus-5', description: '切换至 Claude Opus 5', icon: '\u25C6', category: 'model' },
-              { name: 'claude-haiku-4.5', description: '切换至 Claude Haiku 4.5', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'openai',
-            description: 'OpenAI',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'gpt-5.5', description: '切换至 GPT-5.5', icon: '\u25C6', category: 'model' },
-              { name: 'gpt-5.6-luna', description: '切换至 GPT-5.6 Luna', icon: '\u25C6', category: 'model' },
-              { name: 'gpt-5.4-mini', description: '切换至 GPT-5.4 Mini', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'deepseek',
-            description: 'DeepSeek',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'deepseek-v4-pro', description: '切换至 DeepSeek V4 Pro (1M上下文)', icon: '\u25C6', category: 'model' },
-              { name: 'deepseek-v4-flash-0731', description: '切换至 DeepSeek V4 Flash 0731 (1M上下文)', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'gemini',
-            description: 'Gemini',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'gemini-3.6-flash', description: '切换至 Gemini 3.6 Flash', icon: '\u25C6', category: 'model' },
-              { name: 'gemini-3.5-flash', description: '切换至 Gemini 3.5 Flash', icon: '\u25C6', category: 'model' },
-              { name: 'gemini-3.1-flash-lite', description: '切换至 Gemini 3.1 Flash Lite', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'groq',
-            description: 'Groq',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'llama-4-maverick', description: '切换至 Llama 4 Maverick', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'xai',
-            description: 'xAI (Grok)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'grok-4.5', description: '切换至 Grok 4.5', icon: '\u25C6', category: 'model' },
-              { name: 'grok-4.3', description: '切换至 Grok 4.3', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'mistral',
-            description: 'Mistral',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'mistral-large-2512', description: '切换至 Mistral Large 3', icon: '\u25C6', category: 'model' },
-              { name: 'mistral-medium-3-5', description: '切换至 Mistral Medium 3.5', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'openrouter',
-            description: 'OpenRouter',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'openrouter/auto', description: '切换至 OpenRouter Auto', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'moonshot',
-            description: 'Moonshot (Kimi)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'kimi-k3', description: '切换至 Kimi K3', icon: '\u25C6', category: 'model' },
-              { name: 'kimi-k2.5', description: '切换至 Kimi K2.5', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'qwen',
-            description: 'Qwen (阿里百炼)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'qwen3.7-plus', description: '切换至 Qwen3.7 Plus', icon: '\u25C6', category: 'model' },
-              { name: 'qwen3.8-max', description: '切换至 Qwen3.8 Max', icon: '\u25C6', category: 'model' },
-              { name: 'qwen3.7-flash', description: '切换至 Qwen3.7 Flash', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'zhipu',
-            description: 'Zhipu (智谱)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'glm-5.2', description: '切换至 GLM-5.2', icon: '\u25C6', category: 'model' },
-              { name: 'glm-5v-turbo', description: '切换至 GLM-5V Turbo', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'minimax',
-            description: 'MiniMax',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'MiniMax-M3', description: '切换至 MiniMax M3', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-          {
-            name: 'mimo',
-            description: 'MiMo (小米)',
-            icon: '\u25CF',
-            category: 'model',
-            children: [
-              { name: 'mimo-v2.5', description: '切换至 MiMo V2.5', icon: '\u25C6', category: 'model' },
-              { name: 'mimo-v2.5-pro', description: '切换至 MiMo V2.5 Pro', icon: '\u25C6', category: 'model' },
-              { name: 'config', description: '调整参数...', icon: '\u2699', category: 'model' },
-            ],
-          },
-        ],
+        childrenProvider: async () => buildOnlineModelChildren(),
       },
       {
         name: 'thinking',

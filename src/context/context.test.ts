@@ -1,7 +1,40 @@
 import { ToolOutputTrimmer } from './compressor.js';
 import { LayeredContextComposer } from './composer.js';
+import { DEFAULT_CONTEXT_MANIFEST } from './manifest-defaults.js';
 import type { ContextSource } from './interface.js';
 import type { Message, ToolResultContent, ToolUseContent } from '../types.js';
+import { vi } from 'vitest';
+
+// P-Config 收敛后 ManifestLoader 只读全局 ~/.agent/context-manifest.json：
+// mock homedir → 模块级临时空目录。homeBox 容器在 vi.hoisted 内创建，
+// mock 闭包引用容器而非模块变量，规避 TDZ。
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
+homeBox.path = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-test-home-'));
+// 预写全局 manifest：基于内置默认，zone1 补 runtime:env 段（对应原项目级
+// 配置的语义，使 previewZone 能通过 env-info source 渲染注册内容）。
+{
+  const manifest = structuredClone(DEFAULT_CONTEXT_MANIFEST);
+  manifest.zones.zone1.sections.push({
+    name: 'environment', source: 'runtime:env', priority: 2, type: 'runtime',
+  });
+  fs.mkdirSync(path.join(homeBox.path, '.agent'), { recursive: true });
+  fs.writeFileSync(
+    path.join(homeBox.path, '.agent', 'context-manifest.json'),
+    JSON.stringify(manifest),
+  );
+}
 
 // ─── ToolOutputTrimmer ─────────────────────────────────────────────────
 

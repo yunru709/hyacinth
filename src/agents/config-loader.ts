@@ -25,13 +25,12 @@ interface AgentsConfigFile {
 
 /**
  * 加载 Agent 配置
- * 
- * 加载顺序：
- * 1. AGENTS_CONFIG_PATH 环境变量（最高优先级）
- * 2. 项目级 .agent/agents.json
- * 3. 全局 ~/.agent/agents.json
- * 4. Fallback: 内置 builtins.ts 定义
- * 
+ *
+ * 加载顺序（P-Config 收敛：项目级已取消）：
+ * 1. 全局 ~/.agent/agents.json
+ * 2. AGENTS_CONFIG_PATH 环境变量（最高优先级）
+ * 3. Fallback: 内置 builtins.ts 定义
+ *
  * 合并策略：后加载的同名 agent 覆盖先加载的
  */
 export async function loadAgentConfigs(cwd: string, configOverride?: AgentsConfig): Promise<AgentDefinition[]> {
@@ -42,22 +41,18 @@ export async function loadAgentConfigs(cwd: string, configOverride?: AgentsConfi
   const globalPath = path.join(os.homedir(), '.agent', 'agents.json');
   await loadJsonConfig(globalPath, agentMap);
 
-  // 2. 加载项目级 agents.json（覆盖全局）
-  const projectPath = path.join(cwd, '.agent', 'agents.json');
-  await loadJsonConfig(projectPath, agentMap);
-
-  // 3. 环境变量覆盖路径（最高优先级）
+  // 2. 环境变量覆盖路径（最高优先级）
   const envPath = process.env['AGENTS_CONFIG_PATH'];
   if (envPath) {
     await loadJsonConfig(envPath, agentMap);
   }
 
-  // 4. 如果没有任何配置，fallback 到内置
+  // 3. 如果没有任何配置，fallback 到内置
   if (agentMap.size === 0) {
     return createBuiltinAgents(configOverride);
   }
 
-  // 5. 将配置转为 AgentDefinition
+  // 4. 将配置转为 AgentDefinition
   const agents: AgentDefinition[] = [];
   for (const [name, entry] of agentMap) {
     let systemPrompt: string;

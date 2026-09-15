@@ -1,5 +1,6 @@
 import { OpenAICompatibleProvider } from './compatible.js';
 import type { ProviderConfig } from '../types.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 import { getProviderConfigLoader } from './config.js';
 
 /**
@@ -20,6 +21,12 @@ export function createDeepSeekProvider(config?: {
   maxOutputTokens?: number;
   /** DeepSeek KVCache 隔离 ID。不同角色应使用不同的 userId。 */
   userId?: string;
+  /** 通用字段（userId 归一入口） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/penalties） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }): OpenAICompatibleProvider {
   const provCfg = getProviderConfigLoader().getProvider('deepseek');
   return new OpenAICompatibleProvider({
@@ -30,16 +37,25 @@ export function createDeepSeekProvider(config?: {
     providerType: 'deepseek',
     maxOutputTokens: config?.maxOutputTokens,
     userId: config?.userId,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
   });
 }
 
-/** 从 ProviderConfig 创建 */
-export function createDeepSeekFromConfig(config: ProviderConfig): OpenAICompatibleProvider {
+/** 从 ProviderConfig 创建（fieldMap 第二参：工厂层解析的厂商级 wire 覆盖） */
+export function createDeepSeekFromConfig(
+  config: ProviderConfig,
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>,
+): OpenAICompatibleProvider {
   return createDeepSeekProvider({
     apiKey: config.apiKey,
     model: config.model,
     baseUrl: config.baseUrl,
     maxOutputTokens: config.maxOutputTokens,
     userId: config.userId,
+    fields: config.fields,
+    sampling: config.sampling,
+    fieldMap,
   });
 }

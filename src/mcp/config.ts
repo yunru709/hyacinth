@@ -32,28 +32,22 @@ export interface MCPConfigEntry {
 
 /**
  * 返回所有候选 MCP 配置文件，按优先级从低到高：
- *   1. ~/.agent/mcp.json（用户级全局）
- *   2. <projectDir>/.mcp.json（项目级，Cursor/Claude 通用约定）
- *   3. <projectDir>/.agent/mcp.json（项目级，本仓库其余配置同样放在 .agent/ 下）
+ *   1. ~/.agent/mcp.json（用户级全局；P-Config 收敛后唯一来源）
  *
- * 注意：早期实现里项目级配置是「全局存在则完全跳过」的补充，
- * 导致 <project>/.agent/mcp.json 形同虚设。现在统一合并，同名以高优先级为准。
+ * 项目级配置（<projectDir>/.mcp.json、<projectDir>/.agent/mcp.json）已取消，
+ * 统一走全局 ~/.agent/mcp.json，减少配置层级。
  */
 export function getMCPConfigPaths(projectDir: string): { file: string; scope: MCPConfigScope }[] {
   return [
     { file: path.join(os.homedir(), '.agent', 'mcp.json'), scope: 'user' },
-    { file: path.join(projectDir, '.mcp.json'), scope: 'project' },
-    { file: path.join(projectDir, '.agent', 'mcp.json'), scope: 'project-agent' },
   ];
 }
 
 /**
  * MCPConfigLoader — 从配置文件加载 MCP Server 配置
  *
- * 查找顺序（后者覆盖同名项）：
+ * 查找来源（P-Config 收敛后唯一）：
  * 1. ~/.agent/mcp.json（用户级全局配置）
- * 2. <projectDir>/.mcp.json（项目级配置）
- * 3. <projectDir>/.agent/mcp.json（项目级配置，与本仓库 .agent/ 约定一致）
  */
 export class MCPConfigLoader {
   /**

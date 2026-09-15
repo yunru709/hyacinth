@@ -57,6 +57,10 @@ export { createMiMoProvider, createMiMoFromConfig } from './mimo.js';
 export { ProviderManager } from './manager.js';
 export type { ProviderManagerOptions } from './manager.js';
 
+// Embedding Provider（多能力厂商 capabilities.embedding 声明即用）
+export { OpenAICompatibleEmbeddingProvider, getEmbeddingProvider } from './embedding.js';
+export type { EmbeddingProvider, EmbeddingRequest, EmbeddingResult, EmbeddingUsage } from './embedding.js';
+
 // Resilience (retry + circuit breaker)
 export { ResilientProvider, DEFAULT_CB } from './resilient.js';
 export type { CircuitBreakerConfig } from './resilient.js';

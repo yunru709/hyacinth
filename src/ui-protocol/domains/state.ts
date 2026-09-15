@@ -64,7 +64,7 @@ export interface LoopLike {
   /** 中断当前回合（message.stop 用，可选） */
   interrupt?(): void;
   /** 切换主 provider（model.switch 用，可选；真实 AgentLoop.switchProvider） */
-  switchProvider?(providerName: string): Promise<void>;
+  switchProvider?(providerName: string, model?: string): Promise<void>;
   /** 循环切换主 provider（model.toggle 用，可选；真实 AgentLoop.toggleProvider） */
   toggleProvider?(): void;
   /** 切换当前会话目录（session.switch 用，可选；真实 AgentLoop.switchSession） */

@@ -31,7 +31,8 @@ export interface TuiModelLocalDeps {
   };
   protocolSend: (method: string, params?: unknown) => Promise<unknown>;
   setConfig: (path: string, value: unknown) => Promise<void>;
-  refreshStatusFromProtocol: () => Promise<void>;
+  /** fire-and-forget 语义：返回值（快照）由调用方自行取舍 */
+  refreshStatusFromProtocol: () => Promise<unknown>;
 }
 
 /** 创建 model/local/* 命令处理器 */

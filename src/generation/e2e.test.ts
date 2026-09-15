@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 端到端集成测试 — 真实 HTTP server 模拟火山 API，验证完整生成链路
  *
  * 与 volcengine.test.ts（mock fetch）的区别：
@@ -14,7 +14,7 @@
  *     → 文件 magic bytes 校验（确为 PNG）
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
@@ -22,6 +22,19 @@ import path from 'node:path';
 import os from 'node:os';
 import { GenerationRegistry, GenerationService } from './index.js';
 import { GenerateMediaTool } from '../tools/generate-media.js';
+
+// P-Config 收敛后 loadGenerationConfig 只读全局 ~/.agent/generation.json：
+// mock homedir → tmpDir，测试写入 tmpDir/.agent/generation.json 即全局配置。
+// homeBox 容器在 vi.hoisted 内创建，mock 闭包引用容器而非模块变量，规避 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
 
 /** 1x1 透明 PNG */
 const PNG_BYTES = Buffer.from(
@@ -81,6 +94,7 @@ describe('generation end-to-end (real HTTP)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-e2e-'));
+    homeBox.path = tmpDir; // homedir → tmpDir：全局配置路径 = tmpDir/.agent/generation.json
     lastGenBody = null;
   });
   afterEach(() => {

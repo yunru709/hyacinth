@@ -157,7 +157,14 @@ export interface ProviderConfig {
   maxOutputTokens?: number;
   /** DeepSeek KVCache 隔离 ID。不同角色应使用不同的 userId 避免缓存互相污染。 */
   userId?: string;
+  /** 通用字段（userId/采样参数等；工厂层归一 userId 进 fields） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/frequencyPenalty/presencePenalty；让配置生效） */
+  sampling?: ProviderSampling;
 }
+
+import type { ProviderFields, ProviderSampling } from './provider/fields.js';
+export type { ProviderFields, ProviderSampling } from './provider/fields.js';
 
 // === 依赖图谱 STUB ===
 export interface FilePosition {

@@ -17,6 +17,8 @@ import { theme } from '../ui/theme.js';
 import type { LocalModelModule } from '../local-model/index.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { execViaProtocol } from './tui-channel-cmds.js';
+import { CommandRegistry } from '../ui/command-registry.js';
+import type { StateSnapshot } from '../ui-protocol/types.js';
 
 /** model 非 local 命令的最小依赖面 */
 export interface TuiModelCmdDeps {
@@ -25,7 +27,8 @@ export interface TuiModelCmdDeps {
   localModel: Pick<LocalModelModule, 'list' | 'getActive' | 'getBridge' | 'switch'>;
   protocolSend: (method: string, params?: unknown) => Promise<unknown>;
   setConfig: (path: string, value: unknown) => Promise<void>;
-  refreshStatusFromProtocol: () => Promise<void>;
+  /** 经协议 state.get 刷新缓存并返回快照（切换后校验实际生效值用） */
+  refreshStatusFromProtocol: () => Promise<StateSnapshot | undefined>;
   /** 当前 provider 类型（本地缓存，由协议事件/命令维护；替代 getLoop().getActiveProvider） */
   getProviderType: () => string;
   /** 当前 model 名（本地缓存） */
@@ -59,10 +62,16 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
           return;
         }
         const providerType = getProviderType();
-        await setConfig(`provider.${providerType}.model`, restArgs);
-        chatLog.addSystem(
-          theme.success('Model name set to ') + theme.fg(String(restArgs)) + theme.dim(` (provider: ${providerType})`),
-        );
+        // 经协议切换：协议层是 provider 选择唯一写入口（含落盘 provider.<p>.model）。
+        // UI 不再自行 setConfig —— 直连 config 会绕过协议层的校验/持久化/通道同步。
+        try {
+          await protocolSend('model.switch', { provider: providerType, model: String(restArgs) });
+          chatLog.addSystem(
+            theme.success('Model name set to ') + theme.fg(String(restArgs)) + theme.dim(` (provider: ${providerType})`),
+          );
+        } catch (err) {
+          chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
+        }
         tui.requestRender();
         await refreshStatusFromProtocol();
         return;
@@ -72,7 +81,7 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
       case 'model/settings/provider':
       case 'model/provider': {
         if (!restArgs) {
-          chatLog.addSystem(theme.warning('Usage: /model provider <anthropic|openai|deepseek|gemini|groq|xai|mistral|openrouter|moonshot|qwen|zhipu|minimax|mimo|local>'));
+          chatLog.addSystem(theme.warning('Usage: /model provider <anthropic|openai|deepseek|gemini|groq|xai|mistral|openrouter|moonshot|qwen|zhipu|minimax|mimo|volcengine|local>'));
           tui.requestRender();
           return;
         }
@@ -88,8 +97,6 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
               // 本地模型已配置 → 直接切换（model.switch 委托 loop.switchProvider，含 registry 同步）
               try {
                 await protocolSend('model.switch', { provider: 'local' });
-                // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                await setConfig('provider.active', 'local');
                 chatLog.addSystem(theme.success(`Switched to local (${localCfg.baseUrl}, ${localCfg.defaultModel})`));
                 chatLog.addSystem(theme.dim('Register models via /model local/register for process management.'));
                 await refreshStatusFromProtocol();
@@ -116,8 +123,6 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
               await setConfig('provider.local.modelKey', targetName);
               try {
                 await protocolSend('model.switch', { provider: 'local' });
-                // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                await setConfig('provider.active', 'local');
                 chatLog.addSystem(theme.success(`Switched to local model: ${targetName} (port ${info.port})`));
                 await refreshStatusFromProtocol();
               } catch (swErr) {
@@ -136,9 +141,8 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
 
         localModel.getBridge().stopAll().catch(() => {});
         try {
+          // 协议层统一落盘 provider.active（UI 不再自行 setConfig）
           await protocolSend('model.switch', { provider: restArgs });
-          // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-          await setConfig('provider.active', restArgs);
         } catch (e) {
           chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
           tui.requestRender();
@@ -333,31 +337,64 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
 
       default:
         // ── 前缀匹配（非 case）：model/online/<p>/<m|config>、model/local_<name>、model/current_online ──
-        // 在线模型直接切换: model/online/<provider>/<modelName|config>
-        if (cmdPath.startsWith('model/online/')) {
-          const onlineParts = cmdPath.split('/');
-          if (onlineParts.length >= 4) {
-            const provider = onlineParts[2]!;
-            const sub = onlineParts[3]!;
-            if (sub === 'config') {
-              chatLog.addSystem(theme.accent(`Configure ${provider}: Use /context <tokens> to adjust context window`));
-              tui.requestRender();
-              return;
-            }
-            localModel.getBridge().stopAll().catch(() => {});
+        // 在线模型切换，两种入口统一：
+        //   a) 面板多级路径：model/online/<provider>/<model|config>
+        //   b) 直接命令：/model online <provider> <model>（cmdPath 为 'model/online'，参数在 restArgs）
+        if (cmdPath === 'model/online' || cmdPath.startsWith('model/online/')) {
+          const pathParts = cmdPath.startsWith('model/online/') ? cmdPath.split('/') : [];
+          const argParts = restArgs.split(/\s+/).filter(Boolean);
+          const provider = pathParts[2] ?? argParts[0];
+          const sub = pathParts[3] ?? argParts[1];
+          if (!provider || !sub) {
+            // 无参数：提示用法并列出可用厂商（与面板同源，经 childrenProvider 动态生成）
+            let providerNames = '';
             try {
-              await setConfig(`provider.${provider}.model`, sub);
-              await protocolSend('model.switch', { provider });
-              // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-              await setConfig('provider.active', provider);
-              chatLog.addSystem(theme.success(`Switched to ${provider}/${sub}`));
-              await refreshStatusFromProtocol();
-            } catch (err) {
-              chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-            }
+              const onlineDef = CommandRegistry.getInstance().find('model/online');
+              const children = onlineDef?.childrenProvider
+                ? await onlineDef.childrenProvider()
+                : (onlineDef?.children ?? []);
+              providerNames = children.map((c) => c.name).join(', ');
+            } catch { /* registry 未初始化等场景下降级为空列表 */ }
+            chatLog.addSystem(
+              theme.warning('Usage: /model online <provider> <model>') +
+              (providerNames ? theme.dim(`\nProviders: ${providerNames}`) : ''),
+            );
             tui.requestRender();
             return;
           }
+          if (sub === 'config') {
+            chatLog.addSystem(theme.accent(`Configure ${provider}: Use /context <tokens> to adjust context window`));
+            tui.requestRender();
+            return;
+          }
+          localModel.getBridge().stopAll().catch(() => {});
+          try {
+            // UI 不再写配置。协议层 model.switch 是 provider 选择**唯一**的写入口：
+            // 由它统一完成「应用运行时 + 落盘 provider.active/<p>.model/routeMode + 同步 main 通道」，
+            // 并返回**生效值**。UI 只渲染返回值，不再自行 setConfig、也不再发第二次
+            // state.get 回来比对——旧实现「先写盘 + 再发命令 + 再读回来校验」是三条写/读
+            // 路径并发，既是 Switch incomplete 误报的来源，也是运行时与配置分叉的根源。
+            const res = (await protocolSend('model.switch', { provider, model: sub })) as
+              | { provider?: string; model?: string }
+              | undefined;
+            const effProvider = res?.provider ?? '';
+            const effModel = res?.model ?? '';
+            if (effProvider === provider && effModel === sub) {
+              chatLog.addSystem(theme.success(`Switched to ${provider}/${sub}`));
+            } else if (effProvider) {
+              // 后端返回了生效值但与请求不符（如被路由改写）——如实报告，不掩盖
+              chatLog.addSystem(
+                theme.warning(`Switch incomplete: active ${effProvider}/${effModel || '?'}, requested ${provider}/${sub}`),
+              );
+            } else {
+              chatLog.addSystem(theme.error('Switch failed: backend returned no result'));
+            }
+            await refreshStatusFromProtocol();
+          } catch (err) {
+            chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
+          }
+          tui.requestRender();
+          return;
         }
         // 本地模型 L1 直接切换: model/local_<modelName>
         if (cmdPath.startsWith('model/local_')) {
@@ -375,8 +412,6 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
                 await setConfig('provider.local.modelKey', lmName);
                 try {
                   await protocolSend('model.switch', { provider: 'local' });
-                  // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-                  await setConfig('provider.active', 'local');
                   await refreshStatusFromProtocol();
                 } catch (swErr) {
                   chatLog.addSystem(theme.warning(`Switch to local: ${(swErr as Error).message}`));
@@ -407,3 +442,4 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
 }
 
 export type TuiModelCmds = ReturnType<typeof createModelCmds>;
+

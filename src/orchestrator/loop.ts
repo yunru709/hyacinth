@@ -855,12 +855,24 @@ export class AgentLoop {
     this.providerRouter?.register(name, provider);
   }
 
-  /** 切换到指定名称的 Provider（B4 拆出至 loop-provider.ts） */
-  async switchProvider(providerName: string): Promise<void> {
-    if (this.switchingProvider) return;
+  /** 切换到指定名称的 Provider（B4 拆出至 loop-provider.ts；并发经 switchQueue 串行化） */
+  async switchProvider(providerName: string, model?: string): Promise<void> {
+    // 串行队列：config watch 副作用（provider.*.model 变更自动切换）与显式
+    // model.switch 并发到达时，旧守卫 `if (this.switchingProvider) return` 会
+    // 静默丢弃后到者——UI 收到 ok 但切换丢失，状态栏停留旧模型。排队后两次
+    // 切换串行执行，第二次命中同 model 时幂等（不重建，仅 setDefault + 回写）。
+    const run = this.switchQueue.then(() => this.doSwitchProvider(providerName, model));
+    this.switchQueue = run.catch(() => { /* 单次失败不阻断后续排队切换 */ });
+    await run;
+  }
+
+  /** 切换串行队列：并发切换不再被静默丢弃（见 switchProvider） */
+  private switchQueue: Promise<void> = Promise.resolve();
+
+  private async doSwitchProvider(providerName: string, model?: string): Promise<void> {
     this.switchingProvider = true;
     try {
-      const r = await switchProvider(this.makeProviderDeps(), providerName);
+      const r = await switchProvider(this.makeProviderDeps(), providerName, model);
       // 回写可变状态
       this.provider = r.provider;
       this.activeProvider = undefined;
@@ -875,6 +887,13 @@ export class AgentLoop {
       if (r.needsCompression !== undefined) {
         this.clusterService.setNeedsCompression(r.needsCompression);
       }
+      // 切换消息必须在状态回写完成后发出：UI 收到消息会立即经 state.get 刷新
+      // 状态栏（getActiveProvider 读 this.activeProvider ?? this.provider），
+      // 若回写前发出，刷新会读到旧 provider（竞态：状态栏停留在旧模型）。
+      this.outputHandler?.onStatus?.(
+        `Provider switched to ${providerName} (${r.provider.getProviderType()}/${r.provider.getModel()})`,
+        'info',
+      );
     } finally {
       this.switchingProvider = false;
     }
@@ -888,7 +907,7 @@ export class AgentLoop {
   /** 订阅 RuntimeConfigCenter 变更，让 update_config 即时生效（B4 拆出） */
   subscribeConfig(): void {
     subscribeConfig(this.makeProviderDeps(), {
-      switchProvider: (name) => this.switchProvider(name),
+      switchProvider: (name, model) => this.switchProvider(name, model),
       setMaxTurns: (n) => { this.maxTurns = n; },
       setMaxContextTokens: (n) => { this.maxContextTokens = n; },
     });
@@ -1495,7 +1514,19 @@ export class AgentLoop {
     // 确定本轮实际使用的 Provider（路由决策前置，确保 compose 看到正确的 providerType）
     let activeProvider = this.provider;
     if (this.providerRouter) {
-      activeProvider = this.providerRouter.route({ complexity: 'medium' });
+      // manual 模式（用户在 /model 显式选择、持久化在 provider.active）：直接用被
+      // 钉住的实例，不走 route() 的自动路由 —— 否则启动时 defaultName 尚未设置，
+      // route() 会按「medium → 优先本地」抢走用户选择，导致重启后模型静默回退。
+      const routeMode = this.configCenter?.get<string>('provider.routeMode');
+      if (routeMode === 'manual') {
+        const pinnedName = this.configCenter?.get<string>('provider.active');
+        activeProvider =
+          (pinnedName ? this.providerRouter.get(pinnedName) : undefined) ??
+          this.providerRouter.get('main') ??
+          this.provider;
+      } else {
+        activeProvider = this.providerRouter.route({ complexity: 'medium' });
+      }
     }
     this.activeProvider = activeProvider;
 

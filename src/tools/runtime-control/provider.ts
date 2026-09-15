@@ -17,7 +17,7 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        name:       { type: 'string', description: 'Provider type: anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | groq | xai | mistral | openrouter | moonshot | local' },
+        name:       { type: 'string', description: 'Provider type: anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | volcengine | groq | xai | mistral | openrouter | moonshot | local' },
         api_key:    { type: 'string', description: 'Optional: API key. If not set, uses environment variable.' },
         model:      { type: 'string', description: 'Optional: model name. If not set, uses the provider\'s default model.' },
         max_tokens: { type: 'number', description: 'Optional: max output tokens for this provider. If not set, auto-detected from model catalog or provider config.' },

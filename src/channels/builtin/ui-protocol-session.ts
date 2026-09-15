@@ -208,7 +208,7 @@ export function createBackendExecutor(
         }
         const loop = getLoop();
         if (loop?.switchProvider) {
-          return loop.switchProvider(provider).then(() => {
+          return loop.switchProvider(provider, model).then(() => {
             // registry 同步是辅助：ProviderConfigLoader 未就绪时失败不阻断（loop 已真实切换）
             try {
               registry.setChannelModel('main', provider, model);
@@ -404,6 +404,10 @@ export class UiProtocolSession {
       configureLocalModel: backend.configureLocalModel,
       localModelOps: backend.localModelOps,
       emit: (type, payload) => this.server.broadcast(type, payload),
+      // 配置中心：model.switch 是 provider 选择唯一的写入口，由它把
+      // provider.active / provider.<name>.model / provider.routeMode 落盘
+      // （UI 不再自行 setConfig —— 两端各写一份是历史分叉的根源）。
+      configCenter: backend.configCenter,
       // 动态获取 loop：model.switch 委托 loop.switchProvider（真实来源），
       // loop 在 initialize 后才就绪，通过闭包延迟解析。
       getLoop: () => this.loop as unknown as LoopLike,

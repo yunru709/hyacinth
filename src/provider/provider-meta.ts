@@ -12,6 +12,23 @@
  */
 import { MODEL_CATALOG } from './model-types.js';
 import type { ModelCatalogEntry } from './model-types.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
+
+/** 非 chat 能力类型（chat 由 LLM 体系天然承载，无需声明） */
+export type VendorCapability = 'tts' | 'image' | 'video' | 'embedding' | 'rerank';
+
+/**
+ * 非 chat 能力声明（多能力厂商/中转站：一个 key 背后多个能力）。
+ * 声明后生成侧自动继承（vendor auto-materialize）：无需重复写 generation.json。
+ */
+export interface VendorCapabilitySpec {
+  /** 生成侧适配器类型；缺省：tts/image → 'openai-compatible'；video 无 OpenAI 标准，需显式 adapter */
+  adapter?: string;
+  /** 该能力默认模型 */
+  model?: string;
+  /** TTS 默认音色 */
+  voice?: string;
+}
 
 /** 厂商元数据（原 config.ts 的 ProviderMeta；DEFAULT_PROVIDERS 由此派生） */
 export interface ProviderFactoryMeta {
@@ -22,9 +39,20 @@ export interface ProviderFactoryMeta {
   envKey: string;
   /** 该厂商支持的模型列表（数据源：MODEL_CATALOG） */
   models?: ModelCatalogEntry[];
+  /**
+   * 兼容协议（仅 JSON 声明厂商使用；内置厂商由各自实现文件决定）。
+   * openai = OpenAI Chat Completions（默认），anthropic = Anthropic Messages API。
+   */
+  protocol?: 'openai' | 'anthropic';
+  /** 厂商级默认采样参数（JSON 声明厂商用；激活配置未覆盖时生效） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（如 OpenAI 兼容端点用标准 user：{ "userId": "user" }） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
+  /** 多能力声明（缺省 = 仅 chat）。声明后生成侧 auto-materialize 自动继承。 */
+  capabilities?: Partial<Record<VendorCapability, VendorCapabilitySpec>>;
 }
 
-/** 12 在线厂商元数据（local 三态不在列——不进 DEFAULT_PROVIDERS） */
+/** 14 在线厂商元数据（local 三态不在列——不进 DEFAULT_PROVIDERS） */
 export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
   anthropic: {
     id: 'anthropic',
@@ -89,6 +117,8 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'openrouter/auto',
     envKey: 'OPENROUTER_API_KEY',
     models: MODEL_CATALOG.openrouter,
+    /** OpenRouter 官方接受标准 user（而非 DeepSeek 的 user_id）——厂商级默认覆盖，可在 providers.json 改 */
+    fieldMap: { userId: 'user' },
   },
   moonshot: {
     id: 'moonshot',
@@ -129,5 +159,16 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'mimo-v2.5',
     envKey: 'MIMO_API_KEY',
     models: MODEL_CATALOG.mimo,
+  },
+  volcengine: {
+    id: 'volcengine',
+    name: 'Volcengine (火山方舟)',
+    // Agent/Coding Plan 专属端点：Plan 专属 API Key 仅在此端点生效（打通用端点报 401）。
+    // 通用 API Key 用户需覆盖 baseUrl 为 https://ark.cn-beijing.volces.com/api/v3，
+    // 并改用带日期后缀的 Model ID（如 doubao-seed-2-1-pro-260628）
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+    defaultModel: 'deepseek-v4-flash',
+    envKey: 'ARK_API_KEY',
+    models: MODEL_CATALOG.volcengine,
   },
 };

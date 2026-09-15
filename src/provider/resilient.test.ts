@@ -146,6 +146,20 @@ describe('ResilientProvider', () => {
       expect(r.getCircuitState()).toBe('open');
     });
 
+    it('resetCircuitBreaker 强制 closed，给予完整重试窗口', async () => {
+      const inner = createMockProvider({ behavior: 'fail-nonretryable' });
+      const r = new ResilientProvider(
+        inner,
+        { maxRetries: 0, baseDelayMs: 1, maxDelayMs: 10 },
+        { failureThreshold: 1, cooldownMs: 60000 },
+      );
+      await expect(collectStream(r, [msg])).rejects.toThrow();
+      expect(r.getCircuitState()).toBe('open');
+      // 兜底前重置 → closed，不再 fail-fast
+      r.resetCircuitBreaker();
+      expect(r.getCircuitState()).toBe('closed');
+    });
+
     it('throws circuit breaker message when open', async () => {
       const inner = createMockProvider({ behavior: 'fail-retryable' });
       const r = new ResilientProvider(
@@ -291,6 +305,8 @@ describe('FallbackProviderChain', () => {
     const chain = new FallbackProviderChain({
       providers: [primary, fallback],
       retry: { maxRetries: 0 },
+      // 关闭兜底：本用例聚焦「降级触发但 fallback 也失败」的降级/恢复语义
+      fallbackToPrimary: false,
       onFallback,
       onRecover,
     });

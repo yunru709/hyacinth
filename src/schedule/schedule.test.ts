@@ -13,6 +13,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { CronExpression } from './cron.js';
 import { HeartbeatScheduler } from './scheduler.js';
+import { SchedulePersistence } from './persistence.js';
 
 describe('CronExpression', () => {
   it('parses * * * * * (every minute)', () => {
@@ -385,4 +386,120 @@ describe('HeartbeatScheduler', () => {
 
     expect(task.nextRunAt).toBeDefined();
   });
+
+// ── SchedulePersistence 并发写安全 ──────────────────────────────────
+// 回归：writeChain 串行队列——并行 saveTask/deleteTask 时若各自基于旧快照
+// 整文件覆盖会互相丢失（后写覆盖先写）。本组用例验证并发写不丢更新。
+
+describe('SchedulePersistence 并发写', () => {
+  function makePersistence(): SchedulePersistence {
+    const p = new SchedulePersistence(
+      path.join(os.tmpdir(), `sched-persist-${crypto.randomUUID()}`, 'tasks.json'),
+    );
+    return p;
+  }
+
+  it('并发 saveTask 多个任务 → 全部保留（不丢失更新）', async () => {
+    const p = makePersistence();
+    const task = (name: string, i: number) => ({
+      id: `t-${i}`,
+      name,
+      scheduleType: 'interval' as const,
+      schedule: { intervalMs: 60000 },
+      action: { type: 'callback' as const, target: `handler-${i}` },
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastRunAt: null,
+      nextRunAt: null,
+      runCount: 0,
+      errorCount: 0,
+      tags: [],
+    });
+
+    // 同时发起 20 个不同任务的保存（Promise.all 并发）
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) => p.saveTask(task(`task-${i}`, i))),
+    );
+
+    const tasks = await p.getAllTasks();
+    expect(tasks).toHaveLength(20);
+    const ids = new Set(tasks.map(t => t.id));
+    expect(ids.size).toBe(20); // 无重复无丢失
+  });
+
+  it('并发 saveTask 同一任务 + 并发 deleteTask → 最终状态一致', async () => {
+    const p = makePersistence();
+    await p.saveTask({
+      id: 'a',
+      name: 'a',
+      scheduleType: 'interval',
+      schedule: { intervalMs: 60000 },
+      action: { type: 'callback', target: 'a' },
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastRunAt: null,
+      nextRunAt: null,
+      runCount: 0,
+      errorCount: 0,
+      tags: [],
+    });
+    await p.saveTask({
+      id: 'b',
+      name: 'b',
+      scheduleType: 'interval',
+      schedule: { intervalMs: 60000 },
+      action: { type: 'callback', target: 'b' },
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastRunAt: null,
+      nextRunAt: null,
+      runCount: 0,
+      errorCount: 0,
+      tags: [],
+    });
+
+    // 并发：改 a 的 enabled + 删 b
+    await Promise.all([
+      p.saveTask({
+        id: 'a',
+        name: 'a',
+        scheduleType: 'interval',
+        schedule: { intervalMs: 60000 },
+        action: { type: 'callback', target: 'a' },
+        enabled: false,
+        createdAt: new Date().toISOString(),
+        lastRunAt: null,
+        nextRunAt: null,
+        runCount: 0,
+        errorCount: 0,
+        tags: [],
+      }),
+      p.deleteTask('b'),
+    ]);
+
+    const tasks = await p.getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe('a');
+    expect(tasks[0].enabled).toBe(false);
+  });
+
+  it('并发 addRecord → 全部记录保留', async () => {
+    const p = makePersistence();
+    await Promise.all(
+      Array.from({ length: 15 }, (_, i) => p.addRecord({
+        taskId: `r-${i}`,
+        taskName: `rec-${i}`,
+        executedAt: new Date().toISOString(),
+        durationMs: 0,
+        success: true,
+      }, 1000)),
+    );
+
+    const records = await p.getRecentRecords(100);
+    expect(records).toHaveLength(15);
+    const ids = new Set(records.map(r => r.taskId));
+    expect(ids.size).toBe(15);
+  });
+});
+
 });

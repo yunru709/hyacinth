@@ -12,11 +12,10 @@ interface ChannelWatcherDeps {
 /**
  * 监听 .agent/model-channels.json 文件变化，自动热重载 ModelChannelRegistry。
  *
- * 监听两个文件：
- *   - ~/.agent/model-channels.json（全局配置）
- *   - <cwd>/.agent/model-channels.json（项目配置）
+ * P-Config 收敛后只监听全局文件：
+ *   - ~/.agent/model-channels.json（全局配置；项目级已取消）
  *
- * 任一文件发生变化时，debounce 后调用 channelRegistry.reload()。
+ * 文件变化时，debounce 后调用 channelRegistry.reload()。
  */
 export function watchModelChannels(deps: ChannelWatcherDeps): WatcherHandle[] {
   return createWatcher({
@@ -24,7 +23,6 @@ export function watchModelChannels(deps: ChannelWatcherDeps): WatcherHandle[] {
     debounceMs: deps.debounceMs,
     paths: () => [
       path.join(os.homedir(), '.agent', 'model-channels.json'),
-      path.join(deps.cwd, '.agent', 'model-channels.json'),
     ],
     reload: () => {
       deps.channelRegistry.reload();

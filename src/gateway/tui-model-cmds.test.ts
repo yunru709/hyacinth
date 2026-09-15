@@ -26,6 +26,8 @@ function setup() {
   };
   const protocolSend = vi.fn(async () => undefined);
   const setConfig = vi.fn(async () => undefined);
+  // 默认返回 undefined（协议不可用语义）→ 切换类命令走 "Switch incomplete" 警告分支；
+  // 需要断言成功/失败文案的用例自行 mockResolvedValue 快照
   const refreshStatusFromProtocol = vi.fn(async () => undefined);
   const getProviderType = vi.fn(() => 'deepseek');
   const getModelName = vi.fn(() => 'deepseek-chat');
@@ -45,18 +47,21 @@ function setup() {
 }
 
 describe('tui-model-cmds model 命令', () => {
-  it('model/switch：设置当前 provider 的模型名并刷新', async () => {
-    const { ctl, setConfig, refreshStatusFromProtocol } = setup();
+  it('model/switch：经协议切换当前 provider 的模型（UI 不再直写配置）', async () => {
+    const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
     await ctl.handle('model/switch', 'gpt-x');
-    expect(setConfig).toHaveBeenCalledWith('provider.deepseek.model', 'gpt-x');
+    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'deepseek', model: 'gpt-x' });
+    // 配置落盘由协议层统一负责（唯一写入口）
+    expect(setConfig).not.toHaveBeenCalledWith('provider.deepseek.model', 'gpt-x');
     expect(refreshStatusFromProtocol).toHaveBeenCalled();
   });
 
-  it('model/provider：切换非 local provider（协议 + 持久化 + 经协议刷新读回缓存）', async () => {
+  it('model/provider：切换非 local provider（协议层持久化，UI 不写配置）', async () => {
     const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
     await ctl.handle('model/provider', 'anthropic');
     expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'anthropic' });
-    expect(setConfig).toHaveBeenCalledWith('provider.active', 'anthropic');
+    // provider.active 由协议层落盘（唯一写入口），UI 不再直写
+    expect(setConfig).not.toHaveBeenCalledWith('provider.active', 'anthropic');
     expect(refreshStatusFromProtocol).toHaveBeenCalled();
   });
 
@@ -106,12 +111,14 @@ describe('tui-model-cmds model 命令', () => {
     expect(calls.join('\n')).toContain('Already using current online model');
   });
 
-  it('model/online/<p>/<m> → 切换在线模型（协议 + 持久化 + 经协议刷新读回缓存）', async () => {
+  it('model/online/<p>/<m> → 经协议切换在线模型（UI 不写配置）', async () => {
     const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
+    protocolSend.mockResolvedValue({ provider: 'anthropic', model: 'claude-x' } as never);
     await ctl.handle('model/online/anthropic/claude-x', '');
-    expect(setConfig).toHaveBeenCalledWith('provider.anthropic.model', 'claude-x');
-    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'anthropic' });
-    expect(setConfig).toHaveBeenCalledWith('provider.active', 'anthropic');
+    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'anthropic', model: 'claude-x' });
+    // 配置落盘由协议层统一负责（唯一写入口）
+    expect(setConfig).not.toHaveBeenCalledWith('provider.anthropic.model', 'claude-x');
+    expect(setConfig).not.toHaveBeenCalledWith('provider.active', 'anthropic');
     expect(refreshStatusFromProtocol).toHaveBeenCalled();
   });
 
@@ -120,6 +127,42 @@ describe('tui-model-cmds model 命令', () => {
     await ctl.handle('model/online/anthropic/config', '');
     expect(calls.join('\n')).toContain('Configure anthropic');
     expect(protocolSend).not.toHaveBeenCalled();
+  });
+
+  it('model/online + restArgs（直接命令入口）→ 经协议切换在线模型', async () => {
+    const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
+    protocolSend.mockResolvedValue({ provider: 'volcengine', model: 'doubao-x' } as never);
+    await ctl.handle('model/online', 'volcengine doubao-x');
+    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'volcengine', model: 'doubao-x' });
+    expect(setConfig).not.toHaveBeenCalledWith('provider.volcengine.model', 'doubao-x');
+    expect(setConfig).not.toHaveBeenCalledWith('provider.active', 'volcengine');
+    expect(refreshStatusFromProtocol).toHaveBeenCalled();
+  });
+
+  it('model/online 缺参 → usage（不再静默）', async () => {
+    const { ctl, calls, protocolSend } = setup();
+    await ctl.handle('model/online', '');
+    expect(calls.join('\n')).toContain('Usage: /model online');
+    expect(protocolSend).not.toHaveBeenCalled();
+  });
+
+  it('model/online 实际生效（协议返回生效值）→ success 文案', async () => {
+    const { ctl, calls, protocolSend } = setup();
+    // 生效值来自 model.switch 的返回值（UI 不再发第二次 state.get 自行比对）
+    protocolSend.mockResolvedValue({ provider: 'volcengine', model: 'glm-5.3-flash' } as never);
+    await ctl.handle('model/online', 'volcengine glm-5.3-flash');
+    expect(calls.join('\n')).toContain('Switched to volcengine/glm-5.3-flash');
+  });
+
+  it('model/online 实际未生效（协议返回旧模型）→ warning 报告实际值', async () => {
+    const { ctl, calls, protocolSend } = setup();
+    protocolSend.mockResolvedValue({ provider: 'volcengine', model: 'doubao-seed-evolving' } as never);
+    await ctl.handle('model/online', 'volcengine glm-5.3-flash');
+    const out = calls.join('\n');
+    expect(out).toContain('Switch incomplete');
+    expect(out).toContain('doubao-seed-evolving');
+    expect(out).toContain('requested volcengine/glm-5.3-flash');
+    expect(out).not.toContain('Switched to');
   });
 
   it('model/settings/context 缺参 → usage 含上下文窗口', async () => {

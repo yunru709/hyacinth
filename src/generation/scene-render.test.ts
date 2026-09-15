@@ -1,4 +1,4 @@
-/**
+﻿/**
  * scene_render 窄工具测试 — 陪伴模式场景渲染 + 签名去重
  *
  * 核心验证：
@@ -16,6 +16,19 @@ import os from 'node:os';
 import { executeSceneRender, SCENE_RENDER_TOOL } from './index.js';
 import type { SceneRenderDeps } from './index.js';
 
+// P-Config 收敛后 loadGenerationConfig 只读全局 ~/.agent/generation.json：
+// mock homedir → 每个测试的临时目录，writeGenerationConfig(tmpDir) 即写到全局路径。
+// homeBox 容器在 vi.hoisted 内创建，mock 闭包引用容器而非模块变量，规避 TDZ。
+const { mockHomedir, homeBox } = vi.hoisted(() => {
+  const homeBox = { path: '' };
+  return { homeBox, mockHomedir: vi.fn(() => homeBox.path) };
+});
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const mocked = { ...actual, homedir: mockHomedir };
+  return { ...mocked, default: mocked };
+});
+
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
   return vi.fn().mockResolvedValue({
     ok,
@@ -24,7 +37,7 @@ function mockFetchOnce(body: unknown, ok = true, status = 200) {
   } as unknown as Response);
 }
 
-/** 写入 .agent/generation.json 到 cwd */
+/** 写入全局 .agent/generation.json（mock homedir → tmpDir） */
 function writeGenerationConfig(cwd: string) {
   const agentDir = path.join(cwd, '.agent');
   fs.mkdirSync(agentDir, { recursive: true });
@@ -59,6 +72,7 @@ describe('executeSceneRender 签名去重', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scene-render-'));
+    homeBox.path = tmpDir; // homedir → tmpDir：全局配置路径 = tmpDir/.agent/generation.json
     writeGenerationConfig(tmpDir);
     deps = {
       characterName: '测试角色',

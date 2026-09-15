@@ -345,6 +345,10 @@ export function wireFallbackNotifications(deps: FallbackWiringDeps): void {
     setOnRecover?: (cb: (prov: unknown) => void) => void;
   };
   if (fallbackChain.setOnFallback) {
+    // 去重：一次 createStream 内可能多次 onFallback（primary→本地→候选），
+    // 只有降级目标「真正变化」时才写一次性通知，避免每轮刷屏。
+    let lastFrom = '';
+    let lastTo = '';
     fallbackChain.setOnFallback((from, to) => {
       const fromP = from as { getProviderType(): string; getModel(): string };
       const toProvider = to as { getProviderType(): string; getModel(): string };
@@ -359,9 +363,15 @@ export function wireFallbackNotifications(deps: FallbackWiringDeps): void {
           `Fallback context adapted: ${current.toLocaleString()} → ${newLimit.toLocaleString()} (${toProvider.getProviderType()}/${toProvider.getModel()})`,
         );
       }
-      // 一次性通知：下一次 runTurn 消费
+      // 一次性通知：下一次 runTurn 消费（同 from→to 组合只提示一次）
       if (loopRefBox.current) {
-        loopRefBox.current.pendingFallbackInfo = `[Fallback] "${fromP.getProviderType()}" unavailable — using "${toProvider.getProviderType()}". Check API key or quota.`;
+        const fromKey = `${fromP.getProviderType()}/${fromP.getModel()}`;
+        const toKey = `${toProvider.getProviderType()}/${toProvider.getModel()}`;
+        if (fromKey !== lastFrom || toKey !== lastTo) {
+          lastFrom = fromKey;
+          lastTo = toKey;
+          loopRefBox.current.pendingFallbackInfo = `[Fallback] "${fromP.getProviderType()}" unavailable — using "${toProvider.getProviderType()}". Check API key or quota.`;
+        }
       }
     });
   }

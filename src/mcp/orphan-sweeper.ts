@@ -1,23 +1,29 @@
 // ============================================================
-// 孤儿 MCP 子进程清扫器
+// 孤儿子进程清扫器（MCP 专用 + 通用 watchdog 兜底）
 // ============================================================
 // 背景：后端被外部强杀（Windows TerminateProcess，如 taskkill /F、
-// 任务管理器、agent 会话清理）时，'exit' 钩子无法拦截，其 stdio 型
-// MCP 子进程树会整体变成孤儿常驻（每棵 6 个进程量级）。
+// 任务管理器、agent 会话清理）时，'exit' 钩子无法拦截，其子进程树
+// （MCP Server / 本地模型 / bash 命令）会整体变成孤儿常驻。
 //
-// 策略：MCPSystem.start() 连接前执行一次清扫 ——
-//   枚举本机 node/python/cmd 进程，满足【命令行匹配当前配置中某个
-//   MCP Server 的特征串】且【父进程已死亡】的，判定为孤儿，按进程树
-//   taskkill /F /T。父进程存活的进程（其他在跑实例的子树）不受影响。
+// 两道清扫：
+//   1. MCP 特征串模式（原逻辑）—— MCPSystem.start() 连接前执行：
+//      枚举 node/python/cmd 进程，命令行匹配当前 MCP 配置特征串且
+//      父进程已死的判定为孤儿，按树 taskkill。特征串从配置 args
+//      推导（如 chrome-devtools-mcp），排除 npx/node/serve 等通用词；
+//      宁可漏杀不误杀。
+//   2. watchdog 标记模式（新增，通用兜底）—— lifecycle/watchdog.ts
+//      为每个受管子进程挂的守护进程命令行带 `hyacinth-wd:<pid>` 特征；
+//      若守护进程自身也孤儿化（父死但尚未完成杀树），下次启动时按
+//      该特征找到它，先杀目标树再杀守护进程，把强杀路径的最后漏洞
+//      补上（守护进程正常会在父死后 1.5s 内自行完成，此为兜底）。
 //
-// 安全约束：特征串从配置 args 推导（如 chrome-devtools-mcp、
-// windows_mcp），排除 npx/node/serve 等通用词；宁可漏杀不误杀。
 // 仅 Windows 执行（Unix 上孤儿由 init 收养，且 detached 进程组已可用）。
 // ============================================================
 
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger } from '../logging/logger.js';
+import { killProcessTreeSync, WATCHDOG_MARK } from '../lifecycle/watchdog.js';
 import type { MCPConfig } from '../types.js';
 
 const execAsync = promisify(execCb);
@@ -125,4 +131,69 @@ export async function sweepOrphanedMcpProcesses(configs: MCPConfig[]): Promise<n
     logger.info(`orphan sweep done: ${killed} processes killed`);
   }
   return killed;
+}
+
+/**
+ * 清扫孤儿 watchdog 及其目标进程树（通用兜底，不依赖 MCP 配置）。
+ *
+ * watchdog 守护进程（lifecycle/watchdog.ts 挂载）命令行带
+ * `hyacinth-wd:<childPid>` 特征；若其父进程已死（主进程被强杀）而
+ * watchdog 尚未完成杀树，则：
+ *   1. 先按标记解析出的 childPid 杀目标进程树（防目标残留）
+ *   2. 再杀 watchdog 自身
+ */
+export async function sweepOrphanedWatchdogs(): Promise<number> {
+  if (process.platform !== 'win32') return 0;
+
+  let processes: ProcessInfo[];
+  try {
+    processes = await enumerateProcesses();
+  } catch (err) {
+    logger.warn('watchdog sweep skipped (process enumeration failed)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
+
+  const alivePids = new Set(processes.map((p) => p.pid));
+  const markRe = new RegExp(`${WATCHDOG_MARK}:(\\d+)`);
+  const targets: Array<{ watchdogPid: number; childPid: number }> = [];
+
+  for (const proc of processes) {
+    if ((proc.name ?? '').toLowerCase() !== 'node.exe') continue;
+    const m = markRe.exec(proc.cmdline ?? '');
+    if (!m) continue;
+    // 父进程存活 → watchdog 仍受管（可能是当前在跑实例的守护），跳过
+    if (alivePids.has(proc.ppid)) continue;
+    targets.push({ watchdogPid: proc.pid, childPid: Number(m[1]) });
+  }
+
+  if (targets.length === 0) return 0;
+
+  let killed = 0;
+  for (const { watchdogPid, childPid } of targets) {
+    if (childPid > 0) {
+      killProcessTreeSync(childPid); // 先杀目标树（防残留）
+      killed++;
+    }
+    try {
+      await execAsync(`taskkill /F /T /PID ${watchdogPid}`, { windowsHide: true, timeout: 10_000 });
+      killed++;
+    } catch {
+      // watchdog 可能已在杀树后自行退出
+    }
+    logger.info('orphaned watchdog target killed', { watchdogPid, childPid });
+  }
+  return killed;
+}
+
+/**
+ * 通用孤儿子进程清扫入口：MCP 特征串模式 + watchdog 标记模式。
+ * 供 gateway 启动时调用（覆盖历史强杀残留 + 上次会话未收尾的守护进程）。
+ */
+export async function sweepOrphanedProcesses(configs: MCPConfig[]): Promise<number> {
+  let total = 0;
+  total += await sweepOrphanedMcpProcesses(configs);
+  total += await sweepOrphanedWatchdogs();
+  return total;
 }

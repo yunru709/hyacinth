@@ -16,7 +16,8 @@ export interface SkillWatcherDeps {
 }
 
 /**
- * 监视 skills 目录（用户级 + 项目级）的 .md 文件变更，自动重新加载 skill：
+ * 监视全局 skills 目录（~/.agent/skills）的 .md 文件变更，自动重新加载 skill：
+ * P-Config 收敛：技能统一走全局（个人助手定位，不再按项目隔离）。
  * 文件存在 → loadSkillFile 重载；文件已删除 → unregister。
  */
 export function watchSkills(deps: SkillWatcherDeps): WatcherHandle[] {
@@ -24,7 +25,6 @@ export function watchSkills(deps: SkillWatcherDeps): WatcherHandle[] {
   const { skillRegistry } = deps;
 
   const dirs = [path.join(homedir(), '.agent', 'skills')];
-  if (deps.cwd) dirs.push(path.join(deps.cwd, '.agent', 'skills'));
 
   // 先做一次初始扫描
   for (const dir of dirs) {

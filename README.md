@@ -58,9 +58,9 @@ Hyacinth 是一个可编程、可扩展的智能体框架。它把 Agent 的每�
 
 - **大结果不塞爆上下文**：超阈值自动写磁盘缓冲，回传指针消息引导模型分段读取
 
-### 多 Provider（16 种类型）
+### 多 Provider（17 种类型）
 
-anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / groq / xai / mistral / openrouter / moonshot / local（llama.cpp、Ollama、vLLM 三态）/ ollama / llamacpp。弹性链：重试 + 熔断 + 降级 + 工具参数自动恢复，运行时可 `registerProviderFactory()` 外置扩展厂商。
+anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / volcengine / groq / xai / mistral / openrouter / moonshot / local（llama.cpp、Ollama、vLLM 三态）/ ollama / llamacpp。弹性链：重试 + 熔断 + 降级 + 工具参数自动恢复，运行时可 `registerProviderFactory()` 外置扩展厂商。
 
 ### 多渠道
 
@@ -236,7 +236,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | <br />       | `update/` `diagnostics/`                            | 自更新；doctor 诊断 + 自动修复                                                                       |
 | <br />       | `setup/` `env/`                                     | 首启向导（含 persona 初始化）；环境采集                                                                   |
 | **内核执行链**    | `orchestrator/`                                     | AgentLoop 主循环 + 6 阶段 stages/ + TurnState + planner + plan-store                            |
-| <br />       | `provider/`                                         | 16 种 Provider 适配、路由、弹性链、模型目录                                                               |
+| <br />       | `provider/`                                         | 17 种 Provider 适配、路由、弹性链、模型目录                                                               |
 | <br />       | `context/`                                          | 5-Zone、manifest、composer、compressor、router、cache-strategy、tokenizer                        |
 | <br />       | `tools/`                                            | 内置工具 + 运行时控制工具族 + 注册表 / 执行器 / 沙箱 / 结果缓冲                                                    |
 | <br />       | `registry/`                                         | GenericRegistry 基座 + Tool / Skill / Agent 三注册表                                             |

@@ -10,7 +10,8 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
-import { DEFAULT_USER_ID } from './user-id.js';
+import { translateFields } from './fields.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 /** OpenAIProvider 构造选项 */
@@ -27,6 +28,12 @@ export interface OpenAIProviderOptions {
   maxTokens?: number;
   /** 缓存隔离 ID，区分不同产品的缓存池。默认 "hyacinth"。 */
   userId?: string;
+  /** 通用字段（userId 归一入口；工厂层已把 config.userId 并入） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/penalties；翻译层注入请求 body） */
+  sampling?: ProviderSampling;
+  /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
+  fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }
 
 /**
@@ -42,7 +49,9 @@ export class OpenAIProvider implements Provider {
   private model: string;
   private maxTokens: number;
   private thinkingEnabled = false;
-  private userId: string;
+  private userId?: string;
+  private sampling?: ProviderSampling;
+  private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 
   constructor(opts: OpenAIProviderOptions = {}) {
     const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY;
@@ -62,7 +71,9 @@ export class OpenAIProvider implements Provider {
       ?? opts.maxTokens                                            // 向后兼容
       ?? getModelInfo('openai', this.model)?.maxOutputTokens       // ② 本机模型目录
       ?? 8192;                                                      // ③ 兜底
-    this.userId = opts.userId ?? DEFAULT_USER_ID;
+    this.userId = opts.fields?.userId ?? opts.userId; // 缺省兜底在 translateFields（openaiUser 协议）
+    this.sampling = opts.sampling ?? getModelInfo('openai', this.model)?.sampling; // 三级兜底：激活配置 → 模型目录默认
+    this.fieldMap = opts.fieldMap;
   }
 
   getProviderType(): ProviderType {
@@ -118,8 +129,13 @@ export class OpenAIProvider implements Provider {
     (params as any).extra_body = {
       thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
     };
-    // 缓存隔离：同一 key 下不同 user_id 各自维护缓存池
-    (params as unknown as Record<string, unknown>).user_id = this.userId;
+    // 通用字段翻译：user（OpenAI 原生标准字段，滥用检测/按用户限流）+ 采样参数
+    const { topLevel } = translateFields(
+      'openaiUser',
+      { ...this.sampling, userId: this.userId },
+      this.fieldMap,
+    );
+    Object.assign(params as unknown as Record<string, unknown>, topLevel);
 
     // ---- 流式消费 ----
     // 追踪正在构建的 tool calls（OpenAI 的 tool call 是按 index 分片传输的）

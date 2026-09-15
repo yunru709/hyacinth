@@ -1,3 +1,17 @@
+import type { ProviderFields, ProviderSampling } from '../provider/fields.js';
+
+/** 单个厂商的激活配置（provider.<type> 内的可选项） */
+export interface ProviderVendorConfig {
+  model: string;
+  apiKeyEnv: string;
+  /** 单次请求最大输出 token 数（激活配置级覆盖模型目录默认） */
+  maxOutputTokens?: number;
+  /** 通用字段（userId 等；按协议翻译成各厂商 wire 字段，见 provider/fields.ts） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP/penalties；激活配置级覆盖厂商/模型默认） */
+  sampling?: ProviderSampling;
+}
+
 export interface FullConfig {
   provider: {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
@@ -23,10 +37,18 @@ export interface FullConfig {
     enableThinking: boolean; // 启用 thinking/reasoning 模式（启动时自动从 providers.json 读取模型 reasoningEffort）
     /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
-    anthropic: { model: string; apiKeyEnv: string };
-    openai: { model: string; apiKeyEnv: string };
-    deepseek: { model: string; apiKeyEnv: string };
-    gemini: { model: string; apiKeyEnv: string };
+    /** 通用字段（provider 顶层兜底；provider.<type>.fields 优先） */
+    fields?: ProviderFields;
+    /** 采样参数（provider 顶层兜底；provider.<type>.sampling 优先） */
+    sampling?: ProviderSampling;
+    /** 单次请求最大输出 token 数（provider 顶层兜底；provider.<type>.maxOutputTokens 优先） */
+    maxOutputTokens?: number;
+    anthropic: ProviderVendorConfig;
+    openai: ProviderVendorConfig;
+    deepseek: ProviderVendorConfig;
+    gemini: ProviderVendorConfig;
+    /** 可选：火山方舟（defaults 补段后 config.set 才可在其下写 model，否则抛 unknown path） */
+    volcengine?: ProviderVendorConfig;
     local: {
       model: string;
       baseUrl: string;
@@ -115,6 +137,22 @@ export interface FullConfig {
       cooldownMs: number; // 30000
     };
     fallbackChain: string[]; // []
+    /**
+     * 全部降级不可用时回到主 provider 再试一轮（默认 true）。
+     * 保护长任务：宁可等待重试也不中断。
+     */
+    fallbackToPrimary?: boolean; // true
+    /** 降级候选探测（入链前验证 API 真实可用） */
+    probe: {
+      /** 单次探测请求超时（ms） */
+      timeoutMs: number; // 5000
+      /** ok 结果缓存有效期（ms） */
+      cacheTtlMs: number; // 60000
+      /** unavailable 结果冷却期（ms），期间不重探 */
+      failureCooldownMs: number; // 30000
+      /** uncertain 结果冷却期（ms），期间不重探 */
+      uncertainCooldownMs: number; // 15000
+    };
   };
 
   agents: {
@@ -346,7 +384,7 @@ export interface FullConfig {
 
   /**
    * UI 用户偏好（跨项目、跨会话共享，始终持久化到全局配置 ~/.agent/config.json）。
-   * 与业务配置分离：不随项目级配置走，切换项目不丢失。
+   * P-Config 收敛后所有配置统一走全局，不再区分业务/偏好来源。
    */
   /** 陪伴模式 */
   companion?: {

@@ -28,10 +28,13 @@ Thumbs.db
 
 # 本地打包产物（npm pack 生成的 .tgz，不应提交）
 *.tgz
-# ���ɲ���û����� ~/.agent/generation��Դ��Ŀ¼��Ӧ������
+# ���ɲ���û����� ~/.agent/generation��Դ��Ŀ¼��Ӧ������
 /outputs/generation/
 tsconfig.tsbuildinfo
 
 # Training 数据库（本地运行产物）
 *.db
 !docs/**/*.db
+
+# 调试残留（vitest 输出重定向文件，不应提交）
+vt-*.txt

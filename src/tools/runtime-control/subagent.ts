@@ -335,8 +335,8 @@ async function persistSubAgent(
     // dist directory may not exist (e.g., dev mode); ignore
   }
 
-  // 3. Update project-level .agent/agents.json
-  const agentConfigPath = path.join(cwd, '.agent', 'agents.json');
+  // 3. Update global ~/.agent/agents.json（P-Config 收敛：agent 配置与自身强关联，不随项目）
+  const agentConfigPath = path.join(os.homedir(), '.agent', 'agents.json');
   let existing: { agents: any[] } = { agents: [] };
   try {
     const content = await fs.readFile(agentConfigPath, 'utf-8');
