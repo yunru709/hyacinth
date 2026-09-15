@@ -332,7 +332,8 @@ export interface SessionMeta {
   id: string;
   createdAt: string;
   updatedAt: string;
-  type?: 'normal' | 'precise' | 'companion';
+  /** 开放类型：内置 normal/precise/companion，插件渠道可扩展（如 hub） */
+  type?: string;
   channel?: string;
 }
 

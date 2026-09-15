@@ -21,6 +21,7 @@ import type {
   ChannelMessageEvent,
 } from './interface.js';
 import { createLogger } from '../logging/logger.js';
+import { registerChannelPrefix, unregisterChannelPrefix } from '../memory/session-channel.js';
 
 const logger = createLogger('channels');
 
@@ -40,12 +41,22 @@ export class ChannelManager {
       status: 'registered',
       config,
     });
+    // 渠道声明了 session 前缀 → 自动登记到前缀→渠道表（sessionId 推断渠道用）
+    if (handler.sessionPrefix) {
+      registerChannelPrefix(handler.sessionPrefix, handler.id);
+      logger.debug('registered channel session prefix', { id: handler.id, prefix: handler.sessionPrefix });
+    }
     logger.info('channel registered', { id: handler.id, name: handler.name });
   }
 
   /** 取消注册一个渠道（插件卸载时调用） */
   unregister(id: string): boolean {
+    const state = this.channels.get(id);
     const existed = this.channels.delete(id);
+    if (existed && state?.handler.sessionPrefix) {
+      unregisterChannelPrefix(state.handler.sessionPrefix);
+      logger.debug('unregistered channel session prefix', { id, prefix: state.handler.sessionPrefix });
+    }
     if (existed) logger.info('channel unregistered', { id });
     return existed;
   }

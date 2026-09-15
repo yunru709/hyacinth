@@ -13,6 +13,7 @@
 import { ConfigManager } from '../setup/config.js';
 import type { AgentConfig } from '../setup/config.js';
 import { SessionManager } from '../memory/session.js';
+import type { SessionType } from '../types.js';
 import { ProviderManager } from '../provider/manager.js';
 import type { Provider } from '../provider/interface.js';
 import { createLogger } from '../logging/logger.js';
@@ -36,7 +37,7 @@ export interface BootResult {
   sessionManager: SessionManager;
   sessionDir: string;
   currentSessionId: string;
-  sessionType: 'normal' | 'precise' | 'companion';
+  sessionType: SessionType;
 }
 
 /**
@@ -57,7 +58,7 @@ export async function boot(options: BootOptions): Promise<BootResult> {
   const sessionManager = options.sessionManager ?? new SessionManager(cwd);
   let sessionDir: string;
   let currentSessionId: string;
-  let sessionType: 'normal' | 'precise' | 'companion' = 'normal';
+  let sessionType: SessionType = 'normal';
 
   if (sessionId) {
     const session = await sessionManager.resume(sessionId);

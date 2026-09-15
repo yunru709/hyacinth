@@ -144,6 +144,12 @@ export interface ChannelHandler {
   readonly description: string;
   /** 是否由插件注册（vs 内置渠道） */
   readonly pluginId?: string;
+  /**
+   * 本渠道 sessionId 前缀（如 'hub_'）。注册渠道时自动登记到
+   * session-channel 前缀表，使该渠道的 sessionId 能被正确推断渠道。
+   * 缺省不注册（该渠道不通过 sessionId 前缀推断）。
+   */
+  readonly sessionPrefix?: string;
 
   /**
    * 启动渠道

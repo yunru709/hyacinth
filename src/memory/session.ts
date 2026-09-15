@@ -3,10 +3,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import type { Session } from '../types.js';
+import type { Session, SessionType } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 import { toProjectKey } from '../utils/misc.js';
 import { withSessionDirLock } from './session-lock.js';
+import { resolveChannelFromSessionId } from './session-channel.js';
 
 const logger = createLogger('session');
 
@@ -134,8 +135,9 @@ export class SessionManager {
 
   /**
    * 创建新 session（含物化写入）
+   * type 为开放 SessionType（内置 normal/precise/companion，插件可扩展）
    */
-  async create(type: 'normal' | 'precise' | 'companion' = 'normal', channel?: string): Promise<Session> {
+  async create(type: SessionType = 'normal', channel?: string): Promise<Session> {
     // 清理过期 session
     await this.cleanup();
 
@@ -171,11 +173,8 @@ export class SessionManager {
             await ensureFile(path.join(sessionDir, 'stats.json'));
 
             const now = new Date().toISOString();
-            // 检测 sessionId 前缀判断渠道来源
-            let channel: string | undefined;
-            if (sessionId.startsWith('feishu_')) channel = 'feishu';
-            else if (sessionId.startsWith('webui_') || sessionId.startsWith('ui_')) channel = 'webui'; // ui_ 为旧版 /ui 前缀（兼容存量）
-            else if (sessionId.startsWith('tui_')) channel = 'tui';
+            // 检测 sessionId 前缀判断渠道来源（注册表：内置 feishu_/webui_/ui_/tui_ + 插件扩展）
+            const channel = resolveChannelFromSessionId(sessionId);
             await fs.writeFile(
               path.join(sessionDir, 'meta.json'),
               JSON.stringify({ type: 'normal', createdAt: now, channel, projectKey: this.projectKey }),
@@ -204,7 +203,7 @@ export class SessionManager {
       }
 
       // 目录已存在 → 读取 meta.json
-      let type: 'normal' | 'precise' | undefined;
+      let type: SessionType | undefined;
       let createdAt = '';
       let projectKey = this.projectKey;
       let channel: string | undefined;
@@ -213,7 +212,8 @@ export class SessionManager {
         if (existsSync(metaPath)) {
           const meta = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
           createdAt = meta.createdAt ?? '';
-          if (meta.type === 'precise' || meta.type === 'normal') type = meta.type;
+          // 开放类型：接受任意合法字符串（含插件扩展的 session 类型）
+          if (typeof meta.type === 'string' && meta.type.length > 0) type = meta.type as SessionType;
           if (meta.projectKey) projectKey = meta.projectKey;
           if (typeof meta.channel === 'string') channel = meta.channel;
         }
@@ -254,13 +254,14 @@ export class SessionManager {
       try {
         const stat = await fs.stat(sessionDir);
         // 读取 session 元信息
-        let sessionType: 'normal' | 'precise' | undefined;
+        let sessionType: SessionType | undefined;
         let projectKey = '';
         let channel: string | undefined;
         try {
           const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
           const meta = JSON.parse(metaRaw);
-          if (meta.type === 'precise' || meta.type === 'normal') sessionType = meta.type;
+          // 开放类型：接受任意合法字符串（含插件扩展的 session 类型）
+          if (typeof meta.type === 'string' && meta.type.length > 0) sessionType = meta.type as SessionType;
           projectKey = meta.projectKey ?? '';
           channel = meta.channel;
         } catch { /* 旧 session 没有 meta.json，默认为 normal */ }

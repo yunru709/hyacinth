@@ -111,12 +111,25 @@ export type StreamEvent =
   | { type: 'STOP'; reason: string };
 
 // === Session 相关 ===
+
+/**
+ * 会话类型 —— 开放可扩展：
+ * 内置 normal / precise / companion 三种，插件/渠道可声明新类型（如 hub）。
+ * 用 `(string & {})` 保留字符串字面量提示，同时允许任意扩展名。
+ */
+export type SessionType = 'normal' | 'precise' | 'companion' | (string & {});
+
+/** 内置会话类型常量（供代码引用，避免魔法字符串） */
+export const SESSION_TYPE_NORMAL = 'normal';
+export const SESSION_TYPE_PRECISE = 'precise';
+export const SESSION_TYPE_COMPANION = 'companion';
+
 export interface Session {
   id: string;
   projectKey: string;
   createdAt: string;
   updatedAt: string;
-  type?: 'normal' | 'precise' | 'companion';
+  type?: SessionType;
   /** 创建此 session 的渠道：'webui' | 'tui' | 'feishu' 等 */
   channel?: string;
 }

@@ -18,6 +18,7 @@ import path from 'node:path';
 import type { DomainHandler } from '../server.js';
 import { UI_EVENT } from '../../events.js';
 import type { SessionMeta } from '../types.js';
+import type { SessionType } from '../../types.js';
 import type { LoopLike } from './state.js';
 import { buildZip } from '../util/zip.js';
 
@@ -31,12 +32,12 @@ export interface BackendSession {
   projectKey: string;
   createdAt: string;
   updatedAt: string;
-  type?: 'normal' | 'precise' | 'companion';
+  type?: SessionType;
   channel?: string;
 }
 
 export interface SessionManagerLike {
-  create(type?: 'normal' | 'precise' | 'companion', channel?: string): Promise<BackendSession>;
+  create(type?: SessionType, channel?: string): Promise<BackendSession>;
   resume(sessionId?: string): Promise<BackendSession>;
   list(): Promise<BackendSession[]>;
   getLatest(): Promise<BackendSession | null>;
@@ -136,7 +137,7 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
 
     // ── session.create ─────────────────────────────────────
     async create(params: unknown): Promise<SessionMeta> {
-      const { type, channel } = (params as { type?: 'normal' | 'precise' | 'companion'; channel?: string } | undefined) ?? {};
+      const { type, channel } = (params as { type?: SessionType; channel?: string } | undefined) ?? {};
       const session = await sessionManager.create(type, channel);
       const meta = toMeta(session);
       emit?.(UI_EVENT.SESSION_CHANGE, { action: 'create', session: meta });

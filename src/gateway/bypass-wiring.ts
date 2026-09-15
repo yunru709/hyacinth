@@ -16,6 +16,7 @@ import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ModelRouter } from '../provider/model-router.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { AgentConfig } from '../setup/config.js';
+import type { SessionType } from '../types.js';
 import type { BypassManager } from '../bypass/manager.js';
 import { createPermissionChainPlugin } from '../plugins/permission-chain.js';
 import { createBypassPlugin } from '../plugins/bypass-plugin.js';
@@ -29,7 +30,7 @@ export interface BypassWiringDeps {
   configCenter: RuntimeConfigCenter;
   modelRouter: ModelRouter;
   memoryFilePath: string;
-  sessionType: 'normal' | 'precise' | 'companion';
+  sessionType: SessionType;
 }
 
 /**
