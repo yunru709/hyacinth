@@ -799,10 +799,13 @@ export class AgentLoop {
     this.stageServices.set('bundleRegistry', registry);
   }
 
-  /** 运行时替换 outputHandler（用于 server 模式按请求切换流式输出）；askUserHandler 同步跟随 */
+  /** 运行时替换 outputHandler（用于 server 模式按请求切换流式输出）；askUserHandler 同步跟随。
+   *  同步 stageServices —— 否则 context 阶段 ctx.get('outputHandler') 仍指向构造时旧 handler，
+   *  压缩/状态提示会发给错误的输出目标（与 setBundleRegistry 同类问题）。 */
   setOutputHandler(handler: OutputHandler): void {
     this.outputHandler = handler;
     this.askUserHandler = (handler.onAskUser as ((questions: AskUserQuestion[]) => Promise<string>) | undefined) ?? null;
+    this.stageServices.set('outputHandler', handler);
   }
 
   /** 当前 loop 的用户交互 handler（ask_user 工具注入点：按实例而非全局单例） */
