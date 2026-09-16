@@ -1435,9 +1435,18 @@ async function executeAction(
     }
 
     // Session + 模块初始化（由工厂统一处理）
-    // 会话归属渠道：显式 --channel <id> 时，会话落 <id>_ 前缀（供识别来源 / 按渠道隔离恢复），
+    // 会话归属渠道：会话落 `<channel>_` 前缀（供识别来源 / 按渠道隔离恢复），
     // 并**注册该前缀**使 sessionId 能反查渠道 —— 注册式：核心不预置任何渠道前缀。
-    const cliChannel = options.channel as string | undefined;
+    //
+    // TUI 启动也必须带上渠道（'tui'）。此前这里只取显式 `--channel`，而 TUI 默认不传 →
+    // cliChannel=undefined → 会话落**裸 ID**（无前缀）→ 物化时前缀反解不出渠道 →
+    // meta.json 无 channel → 该会话对 `getLatestByChannel()` 永远不可见，只剩 boot 的
+    // 全局兜底可认领。偏偏本文件 1209 行的 `launchChannel` 又假定 TUI 渠道是 'tui'
+    // （用于读重启快照）—— 两侧对「TUI 的渠道」说法不一致，快照键自然对不上，
+    // 于是恢复也落进同一条兜底。实测事故：TUI / WebUI / 微信三方被认领进同一份对话历史。
+    // 现在两侧对齐：TUI ⇒ 'tui'。
+    const cliChannel = (options.channel as string | undefined)
+      ?? (options.tui ? 'tui' : undefined);
     if (cliChannel) {
       const { registerChannelPrefixes } = await import('../session-channel.js');
       registerChannelPrefixes(`${cliChannel}_`, cliChannel);

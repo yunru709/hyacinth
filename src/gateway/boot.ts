@@ -72,11 +72,31 @@ export async function boot(options: BootOptions): Promise<BootResult> {
     const channelSession = channel
       ? await sessionManager.getLatestByChannel(channel)
       : null;
-    const session = channelSession ?? (await sessionManager.resume());
-    sessionDir = sessionManager.getSessionDir(session.id);
-    currentSessionId = session.id;
-    sessionType = session.type ?? 'normal';
-    logger.info('Continued session', { sessionId: session.id, type: sessionType, channel: channel ?? '(global)' });
+    if (channelSession) {
+      sessionDir = sessionManager.getSessionDir(channelSession.id);
+      currentSessionId = channelSession.id;
+      sessionType = channelSession.type ?? 'normal';
+      logger.info('Continued session', { sessionId: currentSessionId, type: sessionType, channel });
+    } else if (channel) {
+      // ── fail-closed：渠道已声明，但本渠道没有存量会话 ──
+      // **绝不**回退到「全局最近」（旧写法 `channelSession ?? resume()`）。那条兜底
+      // 会把任何**无渠道归属**的会话 —— 测试泄漏目录、temp 项目会话、别渠道的会话 ——
+      // 认领给本渠道。实测事故：TUI / WebUI / 微信三方共用同一份对话历史。
+      // 宁可开新会话（最多丢一次续接），也不让两个渠道串上下文。
+      logger.warn('no session found for channel — starting a new one (fail-closed, no global fallback)', { channel });
+      const fresh = sessionManager.createLazy(channel);
+      await sessionManager.cleanup();
+      sessionDir = sessionManager.getSessionDir(fresh.id);
+      currentSessionId = fresh.id;
+      sessionType = fresh.type ?? 'normal';
+    } else {
+      // 未声明渠道（纯 CLI 交互模式）→ 才允许恢复全局最近
+      const session = await sessionManager.resume();
+      sessionDir = sessionManager.getSessionDir(session.id);
+      currentSessionId = session.id;
+      sessionType = session.type ?? 'normal';
+      logger.info('Continued session', { sessionId: session.id, type: sessionType, channel: '(global)' });
+    }
   } else {
     // 惰性新建：只生成 session id + 目录路径，不创建目录不写文件。
     // 首条用户消息到达时由 loop.run() 物化（写 meta/事件/stats）。
