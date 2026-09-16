@@ -27,3 +27,36 @@ export function averageHitRate(turns: readonly CacheTurnRecord[]): number | unde
   if (total <= 0) return undefined;
   return Math.round((hit / total) * 1000) / 10;
 }
+
+/**
+ * 把命中率数据格式化为**可直接显示的片段** —— 计算与口径选择全部在后端，
+ * UI 只做插值渲染（不再自己挑 turn/last/avg，也不再拼标签）。
+ *
+ * 口径优先级（后端决定）：turn（本回合加权均值，回合结束时给出）
+ * → last（最近一轮，逐轮刷新看即时效果）→ avg（会话级加权平均兜底）；
+ * 三者皆无 → 'n/a'（厂商不返回缓存字段时的诚实占位）。
+ *
+ * 逐轮刷新与回合结束的区别只在调用方传什么：回合进行中不传 turnAvg（尚未成立），
+ * 回合结束由 getTurnInfo 传入 turnAvg。
+ */
+export function formatCacheDisplay(input: {
+  /** 本回合加权均值（回合结束时才有） */
+  turnAvg?: number;
+  /** 最近一轮命中率（逐轮刷新） */
+  last?: number;
+  /** 会话级加权平均（兜底） */
+  avg?: number;
+  /** 已记录的轮次数（>1 时附带展示） */
+  turns?: number;
+}): string {
+  const pick = input.turnAvg != null
+    ? { v: input.turnAvg, tag: 'turn' }
+    : input.last != null
+      ? { v: input.last, tag: 'last' }
+      : input.avg != null
+        ? { v: input.avg, tag: 'avg' }
+        : null;
+  if (!pick) return 'n/a';
+  const turns = input.turns ?? 0;
+  return `${pick.v.toFixed(1)}% ${pick.tag}${turns > 1 ? ` (${turns}t)` : ''}`;
+}

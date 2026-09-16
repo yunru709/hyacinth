@@ -324,6 +324,8 @@ export interface StateSnapshot {
   cacheHitRate?: number;
   /** 会话级缓存命中率**加权平均**（0-100）—— UI 主显示口径（最近一轮噪声大） */
   cacheHitRateAvg?: number;
+  /** 命中率**显示片段**（后端已格式化，如 `95.2% turn (12t)` / `n/a`）；UI 只插值渲染 */
+  cacheDisplay?: string;
   cacheHistory?: CacheStats[];
   /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
   totalInputTokens?: number;

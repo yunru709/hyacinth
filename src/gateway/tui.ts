@@ -316,26 +316,9 @@ export async function runTui(
       updateHeaderText(statusContent);
     }
     let ctxBar = formatContextBar(info.tokensUsed, liveMaxContext);
-    // 命中率显示口径（短标签区分）：
-    //   turn —— 本回合加权均值（回合结束给出，评估"这次对话省了多少"）
-    //   last —— 最近一轮（逐轮推进时每轮刷新，看即时效果）
-    //   avg  —— 会话级加权平均（兜底）
-    const turnAvg = info.cacheHitRateTurnAvg;
-    const lastRate = info.cacheHitRate;
-    const avgRate = info.cacheHitRateAvg;
-    const shown = turnAvg != null ? { v: turnAvg, tag: ' turn' }
-      : lastRate != null ? { v: lastRate, tag: ' last' }
-      : avgRate != null ? { v: avgRate, tag: ' avg' }
-      : null;
-    if (shown) {
-      ctxBar += theme.dim(` | Cache: ${shown.v.toFixed(1)}%${shown.tag}`);
-      // 轮次计数：逐轮事件不带完整 history，故优先用轻量计数字段
-      const turns = info.cacheTurnsCount ?? info.cacheHistory?.length ?? 0;
-      if (turns > 1) ctxBar += theme.dim(` (${turns}t)`);
-    } else {
-      // 厂商不返回缓存字段（如火山方舟）或本会话尚无带缓存信息的轮次 → 占位提醒，而非空白
-      ctxBar += theme.dim(' | Cache: n/a');
-    }
+    // 命中率的**显示片段由后端提供**（`cacheDisplay`：口径选择与格式化都在后端完成）——
+    // UI 只做插值渲染，不再自行挑 turn/last/avg，也不再拼标签。
+    ctxBar += theme.dim(' | Cache: ' + (info.cacheDisplay ?? 'n/a'));
     // 会话累计输入/输出 token 总量（有 usage 字段的 provider 才显示，避免零值噪音）
     if ((info.totalInputTokens ?? 0) > 0 || (info.totalOutputTokens ?? 0) > 0) {
       ctxBar += theme.dim(' | ') + theme.accent(`↑${compactTokenCount(info.totalInputTokens ?? 0)}`) +

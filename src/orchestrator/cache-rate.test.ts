@@ -6,7 +6,7 @@
  * 必须按 token 量加权（等价于"整会话命中占比"）。
  */
 import { describe, it, expect } from 'vitest';
-import { averageHitRate } from './cache-rate.js';
+import { averageHitRate, formatCacheDisplay } from './cache-rate.js';
 import type { CacheTurnRecord } from './turn-state.js';
 
 const rec = (hitTokens: number, missTokens: number, turn = 1): CacheTurnRecord => ({
@@ -42,5 +42,28 @@ describe('averageHitRate（token 加权平均）', () => {
   it('保留 1 位小数（四舍五入）', () => {
     // 1/3 命中 ≈ 33.333% → 33.3
     expect(averageHitRate([rec(1, 2)])).toBe(33.3);
+  });
+});
+
+describe('formatCacheDisplay（口径选择在后端，UI 只渲染）', () => {
+  it('优先级：turn > last > avg', () => {
+    expect(formatCacheDisplay({ turnAvg: 90, last: 80, avg: 70 })).toBe('90.0% turn');
+    expect(formatCacheDisplay({ last: 80, avg: 70 })).toBe('80.0% last');
+    expect(formatCacheDisplay({ avg: 70 })).toBe('70.0% avg');
+  });
+
+  it('轮次 >1 时附带计数，1 轮或未传则不带', () => {
+    expect(formatCacheDisplay({ last: 80, turns: 12 })).toBe('80.0% last (12t)');
+    expect(formatCacheDisplay({ last: 80, turns: 1 })).toBe('80.0% last');
+    expect(formatCacheDisplay({ last: 80 })).toBe('80.0% last');
+  });
+
+  it('无任何可用数据 → n/a（不伪造 0）', () => {
+    expect(formatCacheDisplay({})).toBe('n/a');
+    expect(formatCacheDisplay({ turns: 5 })).toBe('n/a');
+  });
+
+  it('保留 1 位小数', () => {
+    expect(formatCacheDisplay({ last: 33.333 })).toBe('33.3% last');
   });
 });

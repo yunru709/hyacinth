@@ -37,7 +37,7 @@ import { removeLastRoundFromJsonl, cleanCompanionJsonl, removeTriggerFromJsonl }
 import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
 import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
-import { averageHitRate } from './cache-rate.js';
+import { averageHitRate, formatCacheDisplay } from './cache-rate.js';
 import { Pipeline, type SlotSpec } from '../kernel/pipeline.js';
 import { createKernel, DEFAULT_PIPELINE_SLOTS, type KernelComponents } from './create-kernel.js';
 import { StageServiceMap, StageServiceKey, KernelStageContext } from './stage-services.js';
@@ -130,6 +130,12 @@ export interface TurnInfo {
   cacheHitRateTurnAvg?: number;
   /** 已记录的缓存轮次数（逐轮事件用轻量计数，避免传整个 history） */
   cacheTurnsCount?: number;
+  /**
+   * 命中率**显示片段**（已格式化，如 `95.2% turn (12t)` / `n/a`）。
+   *
+   * 口径选择与格式化都在后端完成 —— UI 只做插值渲染，不再自行挑 turn/last/avg 或拼标签。
+   */
+  cacheDisplay?: string;
   /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
   totalInputTokens?: number;
   /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
@@ -707,6 +713,13 @@ export class AgentLoop {
       // 本回合（一次 run）加权均值 + 轮次数（轻量计数，供逐轮事件复用）
       cacheHitRateTurnAvg: averageHitRate(this.cacheTurns.slice(this.turnCacheFrom)),
       cacheTurnsCount: this.cacheTurns.length,
+      // 显示片段：口径选择 + 格式化都在后端完成，UI 只插值（回合结束优先"本回合均值"）
+      cacheDisplay: formatCacheDisplay({
+        turnAvg: averageHitRate(this.cacheTurns.slice(this.turnCacheFrom)),
+        last: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
+        avg: averageHitRate(this.cacheTurns),
+        turns: this.cacheTurns.length,
+      }),
       cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
       totalInputTokens: this.totalInputTokens,
       totalOutputTokens: this.totalOutputTokens,
@@ -1172,12 +1185,20 @@ export class AgentLoop {
           tokensUsed: this.lastContextTokens,
           totalInputTokens: this.totalInputTokens,
           totalOutputTokens: this.totalOutputTokens,
-          // 命中率与上下文量**同频**逐轮刷新（看即时效果）；本回合均值只在回合结束时给
+          // 命中率与上下文量**同频**逐轮刷新（看即时效果）。"本回合均值"只在回合结束时给，
+          // 故此处不传 turnAvg（回合尚未成立）；显示片段同样由后端格式化。
           cacheHitRate: this.cacheTurns.at(-1)
             ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
             : undefined,
           cacheHitRateAvg: averageHitRate(this.cacheTurns),
           cacheTurnsCount: this.cacheTurns.length,
+          cacheDisplay: formatCacheDisplay({
+            last: this.cacheTurns.at(-1)
+              ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
+              : undefined,
+            avg: averageHitRate(this.cacheTurns),
+            turns: this.cacheTurns.length,
+          }),
         });
 
         // ── 异步子Agent 结果回合内注入 ─────────────────────────
