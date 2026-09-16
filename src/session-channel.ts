@@ -69,6 +69,19 @@ export function resolveChannelFromSessionId(sessionId: string): string | undefin
   return best?.channel;
 }
 
+/**
+ * 该 sessionId 是否**属于**该渠道。
+ *
+ * 用途：「各渠道只持有自己前缀的会话」这条不变式的判定入口 —— 渠道恢复持久化的
+ * 会话映射时用它做归属校验，避免沿用旧版裸 ID / 别渠道 ID（实测：clawbot 曾持有
+ * 裸 ID `20260916-223857-0e9c`）。判据与 memory/session.ts 的 getLatestByChannel
+ * 兜底一致：前缀反解 === channel，或 ID 以 `<channel>_` 开头。
+ */
+export function sessionBelongsToChannel(sessionId: string, channel: string): boolean {
+  if (!sessionId || !channel) return false;
+  return resolveChannelFromSessionId(sessionId) === channel || sessionId.startsWith(`${channel}_`);
+}
+
 /** 列出全部已注册前缀（测试/诊断用） */
 export function listChannelPrefixes(): Array<{ prefix: string; channel: string }> {
   return [...channelPrefixMap.entries()].map(([prefix, channel]) => ({ prefix, channel }));

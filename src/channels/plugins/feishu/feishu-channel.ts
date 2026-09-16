@@ -49,6 +49,7 @@ import { sendText, sendCard, sendImage, getSenderInfo } from './feishu-send.js';
 import { ChannelSessionPool, createCollectHandler } from './feishu-session.js';
 import { FeishuMessageQueue } from './feishu-message-queue.js';
 import { generateSessionId } from '../../../memory/session.js';
+import { sessionBelongsToChannel } from '../../../session-channel.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
@@ -472,10 +473,21 @@ export class FeishuChannel implements ChannelHandler {
       }
       // 恢复 conversation→session 映射，确保同一对话重启后复用同一 session 目录
       if (data.sessions && typeof data.sessions === 'object') {
+        let dropped = 0;
         for (const [key, sid] of Object.entries(data.sessions)) {
-          if (typeof sid === 'string') {
+          if (typeof sid !== 'string') continue;
+          // 归属校验：只接受**本渠道前缀**的会话（`__shared__` 是 shared 模式的伪会话，豁免）。
+          // 旧版/异常数据里可能是裸 ID 或别渠道 ID，沿用会让飞书持有别人的会话。
+          // 注：这里**不做**「回落到本渠道最新会话」——飞书是 per_chat/per_user 多会话，
+          // 回落会把 A 对话的会话喂给 B 对话。未知对话一律新建（generateSessionId('feishu')）。
+          if (sid === '__shared__' || sessionBelongsToChannel(sid, 'feishu')) {
             this.conversationToSession.set(key, sid);
+          } else {
+            dropped++;
           }
+        }
+        if (dropped > 0) {
+          this.logger.info(`[session-ownership] dropped ${dropped} session mapping(s) not belonging to feishu`);
         }
         this.logger.info(`restored ${this.conversationToSession.size} session mapping(s)`);
       }

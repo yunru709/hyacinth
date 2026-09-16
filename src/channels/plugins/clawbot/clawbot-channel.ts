@@ -50,6 +50,8 @@ import { ClawbotAuthManager, type AuthCallbacks } from './clawbot-auth.js';
 import { ClawbotMessageQueue } from './clawbot-message-queue.js';
 import { createCollectHandler, type CollectHandler } from './clawbot-session.js';
 import { ClawbotTypingController } from './clawbot-typing.js';
+import { SessionManager } from '../../../memory/session.js';
+import { sessionBelongsToChannel } from '../../../session-channel.js';
 import { generateSessionId } from '../../../memory/session.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -301,11 +303,20 @@ export class ClawbotChannel implements ChannelHandler {
     try {
       const raw = await fs.readFile(this.persistSessionFile, 'utf-8');
       const data = JSON.parse(raw) as Record<string, string>;
+      let dropped = 0;
       for (const [userId, sid] of Object.entries(data)) {
-        if (typeof sid === 'string') {
-          this.sessionMap.set(sid, { userId, contextToken: '' });
-          this.sessionId = sid;
+        if (typeof sid !== 'string') continue;
+        // 归属校验：只接受**本渠道前缀**的会话。旧版/异常数据里可能是裸 ID 或别渠道 ID，
+        // 沿用会让 clawbot 持有别人的会话（实测：曾持有裸 ID 20260916-223857-0e9c）。
+        if (!sessionBelongsToChannel(sid, 'clawbot')) {
+          dropped++;
+          continue;
         }
+        this.sessionMap.set(sid, { userId, contextToken: '' });
+        this.sessionId = sid;
+      }
+      if (dropped > 0) {
+        this.logger.info(`[session-ownership] dropped ${dropped} persisted session(s) not belonging to clawbot`);
       }
       if (this.sessionId) {
         this.logger.info(`restored session: ${this.sessionId}`);
@@ -573,7 +584,11 @@ export class ClawbotChannel implements ChannelHandler {
     }
 
     if (!sessionId) {
-      sessionId = generateSessionId('clawbot');
+      // 本渠道**最新已有会话**优先：状态文件丢失、或记录被归属校验剔除后，
+      // 应延续「自己上一个 session」，而不是凭空新开一个
+      //（需求：在线渠道持有各自前缀的最新 session）。clawbot 是单会话渠道，回落安全。
+      const latest = await new SessionManager(process.cwd()).getLatestByChannel('clawbot');
+      sessionId = latest?.id ?? generateSessionId('clawbot');
       this.sessionMap.set(sessionId, { userId, contextToken });
       this.persistSession().catch(() => {});  // 持久化新 session，重启后复用
     }
