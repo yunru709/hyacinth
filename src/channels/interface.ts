@@ -135,6 +135,32 @@ export type ReplyFn = (reply: ChannelReply) => Promise<void>;
  *   4. reply() → Gateway 调此方法向用户发送回复
  *   5. stop() → 停止渠道
  */
+/**
+ * 渠道能力声明（定时任务路由 / 陪伴推送用）。
+ *
+ * 目的：让**核心按能力路由，而不是按渠道名**。历史上核心把渠道名写死在业务逻辑里
+ * —— 定时任务兜底链写死 `'feishu'`、本地主 loop 写死 `'tui'`、陪伴广播固定挑飞书
+ * —— 新增渠道无法参与这套决策。现在由渠道在注册自己的 loop 条目时声明能力，
+ * 核心只认能力。
+ */
+export interface ChannelLoopCapabilities {
+  /** 持久消息渠道：用户离线也能收到 → 定时任务最后兜底 + 陪伴推送目标 */
+  persistent?: boolean;
+  /** 本地默认渠道（本地 loop / TUI）：不作主动推送目标 */
+  localDefault?: boolean;
+  /** 兜底优先级（大者优先，缺省 0）；多个持久渠道同时在线时据此裁决 */
+  fallbackPriority?: number;
+}
+
+/** `__channelLoopRegistry` 条目：渠道自己注册的 loop 能力面（定时任务路由消费） */
+export interface ChannelLoopEntry {
+  notifyTaskFired(name: string, sessionId?: string): Promise<void>;
+  /** 主动推送（持久渠道才有）；缺省表示不支持主动推送 */
+  sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+  /** 能力声明，见 `ChannelLoopCapabilities` */
+  capabilities?: ChannelLoopCapabilities;
+}
+
 export interface ChannelHandler {
   /** 唯一渠道 ID */
   readonly id: string;

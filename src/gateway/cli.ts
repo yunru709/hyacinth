@@ -190,6 +190,7 @@ export async function runCli(): Promise<void> {
     .option('--start-model', '启动本地模型（配合 --provider local 使用）')
     .option('--skip-setup', '跳过首次启动引导 (Skip first-run setup)')
     .option('--local-model <name>', '本地模型名称（用于压缩通道）')
+    .option('--channel <id>', '会话归属渠道标识（缺省无渠道 → 裸日期 ID）。供其他 Agent/脚本经 bash 派发时标记来源，使会话带 <id>_ 前缀并可被按渠道恢复')
     .argument('[prompt]', '单次执行的 prompt')
     .action(async (prompt: string | undefined, options: Record<string, unknown>) => {
       try {
@@ -1434,6 +1435,14 @@ async function executeAction(
     }
 
     // Session + 模块初始化（由工厂统一处理）
+    // 会话归属渠道：显式 --channel <id> 时，会话落 <id>_ 前缀（供识别来源 / 按渠道隔离恢复），
+    // 并**注册该前缀**使 sessionId 能反查渠道 —— 注册式：核心不预置任何渠道前缀。
+    const cliChannel = options.channel as string | undefined;
+    if (cliChannel) {
+      const { registerChannelPrefixes } = await import('../session-channel.js');
+      registerChannelPrefixes(`${cliChannel}_`, cliChannel);
+    }
+
     const agentResult = await createAgent(
       {
         cwd: process.cwd(),
@@ -1445,6 +1454,7 @@ async function executeAction(
         shouldContinue,
         maxMessages,
         localModelProvider,
+        channel: cliChannel,
       },
       supervisor,
     );

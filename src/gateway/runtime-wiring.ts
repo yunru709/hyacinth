@@ -78,23 +78,40 @@ export interface ResolvedChannelLoop {
  * 渠道 Loop/Session 注册表（globalThis 单例，跨进程共享）。
  * 返回 resolveChannelLoop 供定时任务降级链使用。
  */
+/**
+ * 找「持久消息渠道」里优先级最高的一个 —— 定时任务最后兜底 + 陪伴推送目标。
+ *
+ * **按能力选择，不按渠道名**：历史实现把 `'feishu'` 写死在定时任务兜底链与陪伴广播里，
+ * 新增渠道无法参与。现由渠道在注册自己 loop 条目时声明
+ * `capabilities.persistent / fallbackPriority`，本函数据此裁决（同优先级先注册者胜）。
+ * 定时任务处理器与 resolveChannelLoop 共用本函数（同一处策略，避免两处各写一遍）。
+ */
+export function findPersistentChannelLoop(
+  channelLoops: Map<string, import('../channels/interface.js').ChannelLoopEntry>,
+): { name: string; entry: import('../channels/interface.js').ChannelLoopEntry } | null {
+  type Entry = import('../channels/interface.js').ChannelLoopEntry;
+  const priorityOf = (e: Entry): number => e.capabilities?.fallbackPriority ?? 0;
+  let best: { name: string; entry: Entry } | null = null;
+  for (const [name, entry] of channelLoops) {
+    if (!entry.capabilities?.persistent) continue;
+    if (!best || priorityOf(entry) > priorityOf(best.entry)) best = { name, entry };
+  }
+  return best;
+}
+
 export function setupChannelRegistries(
   loop: AgentLoop,
   channel: string | undefined,
   configCenter: RuntimeConfigCenter,
 ): { registries: ChannelRegistries; resolveChannelLoop: (task: import('../schedule/types.js').ScheduledTask) => ResolvedChannelLoop } {
   // ── 渠道 Loop 注册表（定时任务渠道感知路由） ──
-  // 导出为模块级单例，供 feishu-channel 等渠道在 start() 时自行注册
+  // 导出为模块级单例，供 feishu-channel / clawbot-channel 等渠道在 start() 时自行注册。
+  // 条目带 capabilities（能力声明）—— 核心**只按能力选择，不写死渠道名**。
+  type LoopEntry = import('../channels/interface.js').ChannelLoopEntry;
   if (!(globalThis as any).__channelLoopRegistry) {
-    (globalThis as any).__channelLoopRegistry = new Map<string, {
-      notifyTaskFired(name: string, sessionId?: string): Promise<void>;
-      sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
-    }>();
+    (globalThis as any).__channelLoopRegistry = new Map<string, LoopEntry>();
   }
-  const channelLoops: Map<string, {
-    notifyTaskFired(name: string, sessionId?: string): Promise<void>;
-    sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
-  }> = (globalThis as any).__channelLoopRegistry;
+  const channelLoops: Map<string, LoopEntry> = (globalThis as any).__channelLoopRegistry;
 
   // ── 渠道 Session 注册表（重启前快照，重启后按渠道恢复） ──
   // 各渠道把「获取自己当前 sessionId 的 getter」注册进来（而非静态值），
@@ -111,8 +128,16 @@ export function setupChannelRegistries(
     channelSessions.set(channel, () => path.basename((loop as any).sessionDir));
   }
 
-  // 主 loop 注册为 'tui'（TUI 本地模式的默认渠道）
-  channelLoops.set('tui', loop);
+  // 本地主 loop 注册为「本地默认渠道」：渠道名取启动渠道（TUI 模式 = 'tui'），
+  // 未声明渠道的启动方式（CLI / serve）回落 'local'。
+  // 用薄壳而不是裸 loop：既避免把能力声明塞进业务实例，也让本条目同样走
+  // capabilities.localDefault —— 下游路由/推送判定只认能力，不认渠道名。
+  // 注：AgentLoop.notifyTaskFired 只收 taskName（用 loop 自身的当前会话）。
+  const localChannelName = channel ?? 'local';
+  channelLoops.set(localChannelName, {
+    notifyTaskFired: (name: string) => loop.notifyTaskFired(name),
+    capabilities: { localDefault: true },
+  });
 
   /** 按降级链查找第一个在线的渠道 Loop */
   const resolveChannelLoop = (task: import('../schedule/types.js').ScheduledTask): ResolvedChannelLoop => {
@@ -131,10 +156,18 @@ export function setupChannelRegistries(
       }
     }
 
-    // 3) 最后兜底：飞书（持久消息渠道），再不行才用本地 loop
-    const feishuLoop = channelLoops.get('feishu');
-    if (feishuLoop) return { loop: feishuLoop, channel: 'feishu', level: 'last-resort' as const };
-    return { loop: loop as unknown as ResolvedChannelLoop['loop'], channel: 'tui', level: 'last-resort' as const };
+    // 3) 最后兜底：**按能力**挑优先级最高的持久消息渠道（用户离线也能收到）；
+    //    没有持久渠道时才回落本地默认渠道。
+    //    历史实现写死 'feishu' 再回落 'tui' —— 新增渠道无法参与这套决策。
+    const persistent = findPersistentChannelLoop(channelLoops);
+    if (persistent) {
+      return {
+        loop: persistent.entry as unknown as ResolvedChannelLoop['loop'],
+        channel: persistent.name,
+        level: 'last-resort' as const,
+      };
+    }
+    return { loop: loop as unknown as ResolvedChannelLoop['loop'], channel: localChannelName, level: 'last-resort' as const };
   };
 
   return { registries: { channelLoops, channelSessions }, resolveChannelLoop };
@@ -180,12 +213,13 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
       return;
     }
 
-    // 陪伴模式：广播到所有活跃渠道（TUI + 飞书共享同一对话）
+    // 陪伴模式：广播到所有活跃渠道（本地 + 持久渠道共享同一对话）
     if (task.mode === 'companion') {
-      const feishuEntry = channelLoops.get('feishu');
+      // 推送目标 = **按能力**选出的持久消息渠道（历史写死 'feishu'）
+      const pushTarget = findPersistentChannelLoop(channelLoops);
       const collectedTexts: string[] = [];
 
-      // 在 TUI loop 上运行 Agent，同时收集输出用于飞书推送
+      // 在本地 loop 上运行 Agent，同时收集输出用于推送
       const originalHandler = (loop as any).outputHandler;
       if (originalHandler) {
         const dualHandler = {
@@ -206,13 +240,13 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
         }
       }
 
-      // 将 Agent 回复推送到飞书
-      if (feishuEntry?.sendProactiveMessage && collectedTexts.length > 0) {
+      // 将 Agent 回复推送到持久渠道（按能力选，不写死渠道名）
+      if (pushTarget?.entry.sendProactiveMessage && collectedTexts.length > 0) {
         const response = collectedTexts.join('').trim();
         if (response) {
-          const feishuSessionId = (task as any).sessionId as string | undefined;
-          await feishuEntry.sendProactiveMessage(feishuSessionId ?? '', response).catch((err: Error) =>
-            logger.error(`Companion task feishu push failed: ${task.name}`, err)
+          const pushSessionId = (task as any).sessionId as string | undefined;
+          await pushTarget.entry.sendProactiveMessage(pushSessionId ?? '', response).catch((err: Error) =>
+            logger.error(`Companion task push failed (channel: ${pushTarget.name}): ${task.name}`, err)
           );
         }
       }
@@ -227,11 +261,16 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
       logger.warn(`Task "${task.name}" channel "${task.channel}" and all fallbacks offline, last-resort to "${usedChannel}"`, { taskId: task.id });
     }
 
-    // 非 TUI 渠道（飞书等）：主动推送模式
-    // handleTaskNotification 内部会运行 Agent、收集输出、发送到飞书聊天
+    // 主动推送模式判定 —— **按能力，不按渠道名**：
+    // 支持主动推送且不是本地默认渠道（历史写死 `usedChannel !== 'tui'`）→ 推送模式，
+    // handleTaskNotification 内部会运行 Agent、收集输出、发送到该渠道聊天。
     const sessionId = (task as any).sessionId as string | undefined;
-    const entry = targetEntry as { notifyTaskFired: Function; sendProactiveMessage?: Function };
-    if (entry.sendProactiveMessage && usedChannel !== 'tui') {
+    const entry = targetEntry as {
+      notifyTaskFired: Function;
+      sendProactiveMessage?: Function;
+      capabilities?: { localDefault?: boolean };
+    };
+    if (entry.sendProactiveMessage && entry.capabilities?.localDefault !== true) {
       await entry.notifyTaskFired(task.name, sessionId);
     } else {
       entry.notifyTaskFired(task.name).catch((err: Error) =>

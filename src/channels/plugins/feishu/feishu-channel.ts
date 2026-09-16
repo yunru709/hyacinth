@@ -145,6 +145,7 @@ export class FeishuChannel implements ChannelHandler {
     const registry = (globalThis as any).__channelLoopRegistry as Map<string, {
       notifyTaskFired(name: string, sessionId?: string): Promise<void>;
       sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+      capabilities?: { persistent?: boolean; localDefault?: boolean; fallbackPriority?: number };
     }> | undefined;
     if (registry) {
       registry.set('feishu', {
@@ -154,6 +155,10 @@ export class FeishuChannel implements ChannelHandler {
         sendProactiveMessage: async (sessionId: string, text: string) => {
           await this.sendProactiveMessage(sessionId, text);
         },
+        // 能力声明（核心据此选择，不再写死 'feishu'）：飞书是持久消息渠道 ——
+        // 用户离线也能收到，故作为定时任务最后兜底 + 陪伴推送目标；
+        // fallbackPriority 10：多个持久渠道同时在线时优先飞书。
+        capabilities: { persistent: true, fallbackPriority: 10 },
       });
       this.logger.info('registered in channelLoop registry for scheduled task routing');
     }

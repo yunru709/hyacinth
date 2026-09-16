@@ -1598,11 +1598,21 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
   创建 Agent 时传 `channel: 'webui'`，使 WebUI 会话落 `webui_` 前缀并启用渠道隔离恢复。
   **历史缺口**：这两处曾不传 channel，WebUI 会话落成裸日期 ID，与 CLI/serve 的裸会话混在
   同一命名空间 —— 既分不清来源、也无法按渠道恢复。
-- **已知残留（下一步）**：`gateway/runtime-wiring.ts` 仍把渠道名写死在核心逻辑里 ——
-  `channelLoops.set('tui', loop)`（把主 loop 当作 tui）与定时任务兜底链
-  `channelLoops.get('feishu')`（写死飞书为最后兜底），以及陪伴模式广播固定挑飞书。
-  这些属「渠道能力声明」范畴（谁是持久消息渠道 / 谁是本地默认），应改为渠道注册时声明能力、
-  核心按能力选择，而不是写死渠道名。
+- **渠道能力声明（核心不再按渠道名路由）**：渠道向 `__channelLoopRegistry` 注册自己的 loop 条目时
+  声明 `capabilities`（`channels/interface.ts` 的 `ChannelLoopCapabilities`）：
+  - `persistent` + `fallbackPriority` —— 持久消息渠道（用户离线也能收到）。定时任务降级链的
+    **最后兜底**与陪伴模式的**推送目标**统一由 `findPersistentChannelLoop()` 按能力选（优先级大者胜），
+    不再写死 `'feishu'`。当前飞书 `priority 10`、微信 ClawBot `priority 5`：两者同时在线仍优先飞书
+    （与历史行为一致），飞书离线时 ClawBot 顶上（比原先回落到本地 loop 更合理）。
+  - `localDefault` —— 本地主 loop 注册为本地默认渠道（渠道名取启动渠道，CLI/serve 回落 `'local'`）；
+    主动推送模式判定也改为看能力，不再写死 `usedChannel !== 'tui'`。
+- **测试隔离**：会话根目录支持环境变量覆盖 `HYACINTH_SESSIONS_ROOT`（`memory/session.ts`）；
+  `vitest.config.ts` 经 `src/test-setup.ts` 把它指向临时目录（按 worker 分目录）。此前测试会在
+  **用户真实** `~/.agent/sessions` 下建会话目录，每次全量跑都新增裸日期垃圾 —— 已实证修复
+  （跑测试前后目录数不变）。生产行为不变，仅显式设置该变量时才改路径。
+- **CLI 渠道标记**：`hyacinth "<prompt>" --channel <id>` 供其他 Agent / 脚本经 bash 派发时标记来源 ——
+  会话落 `<id>_` 前缀，并注册该前缀使 sessionId 能反查渠道，从而可按渠道隔离恢复、与人类手动
+  CLI 会话区分开。缺省仍无渠道（裸日期 ID，设计如此）。
 
 ---
 

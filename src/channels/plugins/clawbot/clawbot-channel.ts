@@ -190,6 +190,7 @@ export class ClawbotChannel implements ChannelHandler {
     const registry = (globalThis as any).__channelLoopRegistry as Map<string, {
       notifyTaskFired(name: string, sessionId?: string): Promise<void>;
       sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+      capabilities?: { persistent?: boolean; localDefault?: boolean; fallbackPriority?: number };
     }> | undefined;
     if (registry) {
       registry.set('clawbot', {
@@ -199,6 +200,10 @@ export class ClawbotChannel implements ChannelHandler {
         sendProactiveMessage: async (sessionId: string, text: string) => {
           await this.sendProactiveMessage(sessionId, text);
         },
+        // 能力声明（核心据此选择，不再写死渠道名）：微信同为持久消息渠道，
+        // 但 fallbackPriority 5 < 飞书 10 —— 两者同时在线时仍优先飞书（与历史行为一致），
+        // 飞书不在线时才顶上来做兜底（这比原先回落到本地 loop 更合理）。
+        capabilities: { persistent: true, fallbackPriority: 5 },
       });
       this.logger.info('registered in channelLoop registry for scheduled task routing');
     }

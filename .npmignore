@@ -48,3 +48,7 @@ Thumbs.db
 
 # Debug residue (vitest output redirect files; gitignored but must also be npmignored)
 vt-*.txt
+
+# Test-only setup helpers (vitest bootstrap, compiled into dist) - not for the published package
+dist/test-setup.js
+dist/test-setup.d.ts

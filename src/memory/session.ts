@@ -77,6 +77,12 @@ export async function materializeLazySession(sessionDir: string, session: Sessio
  * 获取 sessions 根目录：~/.agent/sessions/
  */
 function getSessionsRoot(): string {
+  // 测试隔离（HYACINTH_SESSIONS_ROOT）：把 sessions 根目录重定向到临时目录。
+  // 背景：本函数原先硬编码 ~/.agent/sessions，导致测试（http-webhook / 装配类用例）
+  // 在**用户真实目录**里建会话目录 —— 每次全量跑都会新增若干裸日期目录，长期成垃圾。
+  // 生产行为不变：只有显式设置该环境变量时才改路径。
+  const override = process.env.HYACINTH_SESSIONS_ROOT;
+  if (override && override.trim().length > 0) return override;
   return path.join(os.homedir(), '.agent', 'sessions');
 }
 
