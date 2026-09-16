@@ -17,8 +17,8 @@ const TOOL_WINDOW = 6;
 const TOOL_THRESHOLD = 3;
 const TEXT_WINDOW = 6;
 const TEXT_THRESHOLD = 3;
-const TEXT_MIN_LENGTH = 30;       // 短于 30 字符不检测
-const TEXT_SIMILARITY = 0.90;     // Jaccard 相似度阈值（LLM 循环时输出高度一致）
+const TEXT_MIN_LENGTH = 15;       // 短于 15 字符不检测（循环短句也能被捕捉）
+const TEXT_SIMILARITY = 0.70;     // 综合相似度阈值（单词 Jaccard 与字符 bigram 取大者）
 
 const MCP_SIDE_EFFECT_KEYWORDS = new Set([
   'navigate', 'create', 'delete', 'open', 'write', 'execute',
@@ -102,6 +102,31 @@ function wordJaccard(a: string, b: string): number {
   return intersection.size / union.size;
 }
 
+/**
+ * 字符级 bigram Jaccard 相似度。
+ * 对中文等无空格语言友好（英文分词器按空格/标点切分会把整句中文
+ * 当成一个 token，相似度失真）；对"时间戳/编号微变"的循环也能捕捉。
+ */
+function charBigramJaccard(a: string, b: string): number {
+  const bigrams = (s: string) => {
+    const t = s.toLowerCase().replace(/\s+/g, '');
+    const out = new Set<string>();
+    for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
+    return out;
+  };
+  const sa = bigrams(a);
+  const sb = bigrams(b);
+  if (sa.size === 0 || sb.size === 0) return 0;
+  const intersection = new Set([...sa].filter(x => sb.has(x)));
+  const union = new Set([...sa, ...sb]);
+  return intersection.size / union.size;
+}
+
+/** 综合相似度：单词 Jaccard 与字符 bigram Jaccard 取较大者（中英文循环均能捕捉） */
+function textSimilarity(a: string, b: string): number {
+  return Math.max(wordJaccard(a, b), charBigramJaccard(a, b));
+}
+
 // ── TextGuard ──────────────────────────────────────────────────────────
 
 export class TextGuard {
@@ -126,11 +151,11 @@ export class TextGuard {
     if (!this.config.enabled) return false;
     if (!text || text.length < this.config.minLength) return false;
 
-    // 与窗口内已有文本对比
+    // 与窗口内已有文本对比（综合相似度：单词 Jaccard ∪ 字符 bigram，兼容中文/微变循环）
     let maxSim = 0;
     for (const prev of this.window) {
       // 完全一致 → 1.0
-      const sim = text === prev ? 1.0 : wordJaccard(text, prev);
+      const sim = text === prev ? 1.0 : textSimilarity(text, prev);
       maxSim = Math.max(maxSim, sim);
     }
 

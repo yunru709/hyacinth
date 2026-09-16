@@ -83,6 +83,40 @@ describe('LoopGuard', () => {
       guard2.check(text);
       expect(guard2.check(text)).toBe(true);
     });
+
+    it('detects loop with only minor variation (time-stamp / numbering changes)', () => {
+      // 真实循环形态：文本几乎相同但时间戳/编号微变（修复前 0.90 阈值 + 单词 Jaccard 漏拦）
+      const guard = new TextGuard({ enabled: true, windowSize: 6, threshold: 3, minLength: 15, similarity: 0.70 });
+      const mk = (ts: string) => `收到（${ts}）。继续实施 token 总量显示——最后接上 TUI。`;
+      guard.check(mk('15:34'));
+      guard.check(mk('15:35'));
+      guard.check(mk('15:36'));
+      guard.check(mk('15:37'));
+      expect(guard.check(mk('15:38'))).toBe(true); // 微变循环第 5 次应触发
+    });
+
+    it('detects Chinese short-text loop (CJK bigram similarity)', () => {
+      // 中文短句循环：英文单词 Jaccard 失真，字符 bigram 兜底
+      const guard = new TextGuard({ enabled: true, windowSize: 6, threshold: 2, minLength: 8, similarity: 0.70 });
+      const text = '让我重试一下这个操作';
+      guard.check(text);
+      guard.check(text);
+      expect(guard.check(text)).toBe(true); // 3 次相同 → 触发
+    });
+
+    it('does not false-positive on distinct text (lowered threshold still safe)', () => {
+      const guard = new TextGuard({ enabled: true, windowSize: 6, threshold: 3, minLength: 15, similarity: 0.70 });
+      const distinct = [
+        'The system is processing the request and analyzing the output data from the previous step.',
+        'Now I will write the configuration file and then verify the changes are applied correctly.',
+        'The error message indicates a network timeout when connecting to the remote server.',
+        'Let me check the git log to understand what changed in the last few commits.',
+        'I found the bug in the loop logic and will apply a fix to the retry mechanism.',
+      ];
+      for (const t of distinct) {
+        expect(guard.check(t)).toBe(false);
+      }
+    });
   });
 
   describe('isMutating', () => {
