@@ -42,10 +42,13 @@ export class ChannelManager {
       config,
     });
     // 渠道声明了 session 前缀 → 自动登记到前缀→渠道表（sessionId 推断渠道用）。
-    // 支持多前缀（如 webui 的 webui_ + 旧版 ui_）：string | readonly string[]。
+    // 支持多前缀（如 WebUI 的 webui_ + 旧版 ui_）：string | readonly string[]。
+    // 映射目标是**会话归属渠道名**（sessionChannel，缺省 = handler id）—— 必须与
+    // 创建 Agent 时传的 channel 选项一致，否则「按渠道恢复最近会话」匹配不上。
     if (handler.sessionPrefix) {
-      registerChannelPrefixes(handler.sessionPrefix, handler.id);
-      logger.debug('registered channel session prefix', { id: handler.id, prefix: handler.sessionPrefix });
+      const channelName = handler.sessionChannel ?? handler.id;
+      registerChannelPrefixes(handler.sessionPrefix, channelName);
+      logger.debug('registered channel session prefix', { id: handler.id, channel: channelName, prefix: handler.sessionPrefix });
     }
     logger.info('channel registered', { id: handler.id, name: handler.name });
   }

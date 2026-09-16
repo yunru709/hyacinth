@@ -8,7 +8,11 @@ import type {
   AgentFactory,
   ReplyFn,
 } from '../interface.js';
-import { TUI_SESSION_PREFIX } from '../../session-channel.js';
+/**
+ * TUI 渠道 sessionId 前缀（**渠道自管**：定义在本渠道模块内，核心注册表零渠道知识）。
+ * 该渠道被 register 到 ChannelManager 时由框架自动登记，无需任何核心侧改动。
+ */
+export const TUI_SESSION_PREFIX = 'tui_';
 
 /**
  * TUI Channel — 将终端界面包装为标准渠道

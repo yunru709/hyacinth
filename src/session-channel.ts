@@ -1,27 +1,32 @@
 // ============================================================
-// session-channel.ts —— sessionId 前缀 → 渠道 注册表（根级中立契约）
+// session-channel.ts —— sessionId 前缀 → 渠道 注册表（纯注册表 · 零渠道知识）
 // ============================================================
 //
 // 【为什么在根级而不是 memory/】
 // 本文件既不是业务逻辑也不是存储实现，只是一张"前缀 → 渠道"映射表 + 纯函数。
 // 早期版本放在 memory/（业务核心）下，导致 UI 适配层（channels/…）引用它时，
-// 被 verify:layers 规则 5 判为"UI 直连业务核心"违规 —— 因为白名单只减不增，
-// 这种引用永远无法合法登记。上移到 src/ 根级后与 events.ts / types.ts 同级，
-// 属规则内明确豁免的"根级基础文件"，双方引用均合法。
+// verify:layers 规则 5 判为"UI 直连业务核心"违规 —— 白名单只减不增，这类引用
+// 永远无法合法登记。上移到 src/ 根级后与 events.ts / types.ts 同级，属规则内
+// 明确豁免的"根级基础文件"，双方引用均合法。
 //
-// 【单一真源，杜绝硬编码漂移】
-// 内置渠道前缀只在下面的 BUILTIN_CHANNEL_PREFIXES 里写一次；各内置渠道 handler
-// 声明自己的 sessionPrefix 时必须**引用本表导出的常量**，不得各写字面量。
-// 反面教材：本表曾经的形态是散落在本文件里的 4 行 registerChannelPrefix 字面量，
-// 且与渠道实现分家 —— 结果插件渠道 clawbot 在生产侧 generateSessionId('clawbot')
-// 造得出 clawbot_xxx，注册表里却没有 clawbot_，会话归属永远推断不出来。
-// 新增内置渠道 = 本表加一行 + handler 引用该常量（guard 测试会校验两者一致）。
+// 【注册式：核心不认识任何渠道】
+// 本文件**只提供注册/解析能力，不预置任何渠道前缀**（不含 tui_/webui_/feishu_
+// 之类字面量）。前缀一律由渠道**自己在注册时声明**并自动就位：
+//   - 内置渠道：handler 在自己模块内定义前缀常量、挂到 sessionPrefix 字段；
+//     该渠道被注册进 ChannelManager 时（tui.ts / server.ts 各自的注册点）自动登记。
+//   - 插件渠道：同上；另在 ChannelPlugin.autoRegister 开头额外登记一次
+//     （该钩子对每个已发现插件都会执行、与 enabled 无关，保证插件被禁用时
+//     存量会话仍可反推渠道）。
+// 验收标准：**新增渠道 = 渠道模块内声明前缀，零核心改动**。
+// 反面教材：前缀曾是散落在核心的字面量表、与渠道实现分家 —— 结果插件渠道 clawbot
+// 生产侧 generateSessionId('clawbot') 造得出 clawbot_xxx，注册表里却从来没有
+// clawbot_，会话归属永远推断不出、渠道隔离失效。
 //
-// 【插件渠道如何接入】
-// 插件渠道不在本表里，走运行时契约：ChannelHandler.sessionPrefix
-// （string | readonly string[]），由 ChannelManager.register 注册、unregister 注销。
-// 插件被禁用（autoRegister 提前 return、渠道未注册）时，由 channels/auto-detect.ts
-// 的 discoverPlugins 在**发现阶段**注册其声明的前缀，保证存量会话 ID 仍可推断渠道。
+// 【代价（有意为之）】
+// 某渠道在本进程未被注册（如 TUI 模式下未加载 WebUI 渠道），其前缀在本进程
+// 解析不到。影响面仅限"为缺 meta.json 的存量会话反推渠道"这一兜底路径
+// （memory/session.ts 的 legacy 补写 + loop.materializeSessionIfNeeded）；
+// 新建会话的 channel 由 createLazy(channel) 直接落盘，不依赖前缀解析。
 // ============================================================
 
 /** 前缀 → 渠道 映射（Map 保序：前缀长的优先匹配在 resolve 里判定） */
@@ -33,13 +38,13 @@ export function registerChannelPrefix(prefix: string, channel: string): void {
   channelPrefixMap.set(prefix, channel);
 }
 
-/** 批量注册（一个渠道可声明多个前缀，如 webui 的 webui_ + 旧版 ui_） */
+/** 批量注册（一个渠道可声明多个前缀，如 WebUI 的 webui_ + 旧版 ui_） */
 export function registerChannelPrefixes(prefixes: string | readonly string[], channel: string): void {
   const list = typeof prefixes === 'string' ? [prefixes] : prefixes;
   for (const p of list) registerChannelPrefix(p, channel);
 }
 
-/** 注销前缀映射（渠道卸载时清理） */
+/** 注销前缀映射（渠道 unregister 时清理） */
 export function unregisterChannelPrefix(prefix: string): boolean {
   return channelPrefixMap.delete(prefix);
 }
@@ -67,35 +72,4 @@ export function resolveChannelFromSessionId(sessionId: string): string | undefin
 /** 列出全部已注册前缀（测试/诊断用） */
 export function listChannelPrefixes(): Array<{ prefix: string; channel: string }> {
   return [...channelPrefixMap.entries()].map(([prefix, channel]) => ({ prefix, channel }));
-}
-
-// ────────────────────────────────────────────────────────────
-// 内置渠道前缀（单一真源）
-// 各内置 handler 的 sessionPrefix 必须引用这里的常量，不得写重复字面量。
-// ────────────────────────────────────────────────────────────
-
-/** TUI 渠道前缀（channels/builtin/tui-channel.ts 引用） */
-export const TUI_SESSION_PREFIX = 'tui_';
-/** WebUI 渠道前缀（channels/builtin/http-webhook.ts 引用）；ui_ 为旧版 /ui 前缀，兼容存量 */
-export const WEBUI_SESSION_PREFIXES = ['webui_', 'ui_'] as const;
-
-/**
- * 内置渠道前缀表：[前缀, 渠道]（新增内置渠道在此加一行）
- *
- * 本表**只放内置渠道**。插件渠道（feishu / clawbot / 第三方）前缀由插件自管：
- * 常量定义在插件自己的模块里，并在 ChannelPlugin.autoRegister 开头无条件调用
- * registerChannelPrefixes —— 该钩子对每个已发现插件都会执行（与 enabled 无关），
- * 所以插件被禁用时前缀依旧可解析（否则存量会话 ID 会推断不出渠道）。
- * 方向约束：核心不反向依赖插件，故插件渠道绝不登记在本表内。
- */
-const BUILTIN_CHANNEL_PREFIXES: Array<[string | readonly string[], string]> = [
-  [TUI_SESSION_PREFIX, 'tui'],
-  [WEBUI_SESSION_PREFIXES, 'webui'],
-];
-
-// 模块加载即注册（与历史行为一致）：内置前缀的**可解析性不依赖渠道是否启用/加载**，
-// 这样即使某渠道被禁用（如 feishu enabled=false）或用另一模式启动（如 TUI 模式下
-// 未加载 webui 渠道），存量会话 ID 依然能推断出渠道。
-for (const [prefix, channel] of BUILTIN_CHANNEL_PREFIXES) {
-  registerChannelPrefixes(prefix, channel);
 }

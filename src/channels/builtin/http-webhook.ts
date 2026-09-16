@@ -7,7 +7,11 @@
 // Chat 为同步 request-response 模式。
 // ============================================================
 
-import { WEBUI_SESSION_PREFIXES } from '../../session-channel.js';
+/**
+ * WebUI 渠道 sessionId 前缀（**渠道自管**：定义在本渠道模块内，核心注册表零渠道知识）。
+ * `ui_` 是旧版 `/ui` 前缀，用于兼容存量会话；多前缀通过 sessionPrefix 的数组形态声明。
+ */
+export const WEBUI_SESSION_PREFIXES = ['webui_', 'ui_'] as const;
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type {
   ChannelHandler,
@@ -157,8 +161,14 @@ export class HttpWebhookChannel implements ChannelHandler {
   readonly name = 'HTTP Webhook';
   readonly description = '内建 HTTP REST API 渠道，支持 POST /api/chat webhook 接入（Bearer Token 认证）';
   readonly pluginId = undefined;
-  /** sessionId 前缀（引用 src/session-channel.ts 内置前缀常量，勿写字面量） */
+  /** sessionId 前缀（引用本模块常量，勿写字面量） */
   readonly sessionPrefix = WEBUI_SESSION_PREFIXES;
+  /**
+   * 会话归属渠道名：本 handler 的 id 是 `http-webhook`（服务形态命名），
+   * 但它承载的是 WebUI，会话记录 / 前端展示 / 按渠道恢复统一用 `webui`。
+   * 该值必须与创建 Agent 时传的 `channel: 'webui'` 一致。
+   */
+  readonly sessionChannel = 'webui';
 
   private app: FastifyInstance | null = null;
   private status: ChannelStatus = 'registered';

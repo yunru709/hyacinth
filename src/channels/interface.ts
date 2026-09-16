@@ -158,6 +158,18 @@ export interface ChannelHandler {
   readonly sessionPrefix?: string | readonly string[];
 
   /**
+   * 写入会话归属（`meta.json` 的 `channel` 字段）时使用的渠道名。
+   *
+   * 缺省 = handler id。仅当「渠道 id」与「会话归属渠道名」不一致时才需显式声明
+   * —— 典型：`HttpWebhookChannel.id = 'http-webhook'`，但它承载的是 WebUI，
+   * 会话记录/前端展示统一用 `'webui'`。
+   *
+   * 该值同时决定前缀解析结果（`sessionPrefix` → 本字段），因此**必须**与
+   * 创建 Agent 时传的 `channel` 选项一致，否则「按渠道恢复最近会话」会匹配不上。
+   */
+  readonly sessionChannel?: string;
+
+  /**
    * 启动渠道
    * 渠道在此方法中建立连接、启动监听、注册路由等
    */
