@@ -49,6 +49,7 @@ import { ClawbotClient, ClawbotAPIError, type ClawbotIncomingMessage } from './c
 import { ClawbotAuthManager, type AuthCallbacks } from './clawbot-auth.js';
 import { ClawbotMessageQueue } from './clawbot-message-queue.js';
 import { createCollectHandler, type CollectHandler } from './clawbot-session.js';
+import { ClawbotTypingController } from './clawbot-typing.js';
 import { generateSessionId } from '../../../memory/session.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -114,8 +115,15 @@ export class ClawbotChannel implements ChannelHandler {
   private sessionId: string | null = null;
 
   // ── typing 状态 ──────────────────────────────────────────────
+  /**
+   * typing_ticket（per-user，由 getConfig 取得）。
+   * 空串 = 不可用 → 整条 typing 链路静默降级为 no-op，绝不影响消息收发。
+   */
   private typingTicket = '';
-  private typingConfigFetched = false;
+  /** 已成功取得 ticket 的对端 userId；与当前 userId 不符时需重新获取 */
+  private typingTicketUserId = '';
+  /** typing 控制器：会话期间维持「正在输入」状态（本渠道单会话，故仅需一个实例） */
+  private typingController: ClawbotTypingController | null = null;
 
   // ── TUI 同步 ─────────────────────────────────────────────────
   private onUserMessage: ((label: string, content: string) => void) | null = null;
@@ -220,8 +228,10 @@ export class ClawbotChannel implements ChannelHandler {
       this.logger.info('registered in channelLoop registry for scheduled task routing');
     }
 
-    // ── 预取 typing ticket ──
-    this.fetchTypingConfig().catch(() => {});
+    // ── typing 提示 ──
+    // 注意：typing_ticket 是 **per-user** 的（官方 getconfig 要求 ilink_user_id），
+    // 启动时尚无对端 userId，无法预取。改为在首条消息到达时按需获取，
+    // 见 handleMessage → ensureTypingTicket()。
 
     // ── 恢复持久化的 session 映射 ──
     await this.restoreSession();
@@ -398,6 +408,9 @@ export class ClawbotChannel implements ChannelHandler {
     this.agentFactory = agentFactory;
 
     const userId = (event.metadata?.userId as string) ?? event.userId;
+    // typing_ticket 是 per-user 的；官方 getconfig 还接受 context_token
+    const contextToken =
+      this.sessionMap.get(event.sessionId)?.contextToken ?? this.sessionInfo?.contextToken;
 
     // TUI 同步
     if (this.config.tuiSync && this.onUserMessage) {
@@ -421,6 +434,10 @@ export class ClawbotChannel implements ChannelHandler {
       this.collectHandler.reset();
       if (event.images?.length) (this.loop as any).channelImages = event.images;
 
+      // ── 开始「正在输入」──
+      // 拿不到 ticket 时静默 no-op，绝不影响下面的主流程
+      await this.startTyping(userId, contextToken);
+
       await this.loop.run(event.content);
       const response = this.collectHandler.getResponse();
 
@@ -436,6 +453,9 @@ export class ClawbotChannel implements ChannelHandler {
       try {
         await replyFn({ content: `处理出错: ${err instanceof Error ? err.message : String(err)}` });
       } catch { /* ignore */ }
+    } finally {
+      // 必须放在 finally：异常路径同样要收尾，否则会留下永久「正在输入」
+      this.stopTyping();
     }
   }
 
@@ -682,20 +702,80 @@ export class ClawbotChannel implements ChannelHandler {
     }
   }
 
-  // ── typing 提示 ───────────────────────────────────────────────
+  // ── typing 提示（「对方正在输入」） ────────────────────────────
+  //
+  // 协议：POST /ilink/bot/sendtyping，需先由 /ilink/bot/getconfig 取得 typing_ticket。
+  // 细节见桌面交接文档《微信typing-交接》；控制器实现见 clawbot-typing.ts。
+  //
+  // 设计约束：
+  //   1. typing_ticket 是 **per-user** 的 → 首条消息到达后才能获取，启动时无法预取
+  //   2. 全链路**静默降级**：拿不到 ticket 或发送失败，只记日志，绝不阻断消息收发
 
-  /** 获取 typing_ticket（预取一次，缓存使用） */
-  private async fetchTypingConfig(): Promise<void> {
-    if (!this.client || this.typingConfigFetched) return;
+  /** 当前 controller 绑定的对端 userId（换人时需重建 controller） */
+  private typingBoundUserId = '';
+
+  /**
+   * 确保 typing_ticket 就绪（按 userId 缓存）。
+   * @returns ticket；不可用时返回空串（调用方据此降级为 no-op）
+   */
+  private async ensureTypingTicket(userId: string, contextToken?: string): Promise<string> {
+    if (!this.client) return '';
+
+    // 同一用户且已有 ticket → 复用
+    if (this.typingTicket && this.typingTicketUserId === userId) {
+      return this.typingTicket;
+    }
+
     try {
-      const cfg = await this.client.getConfig();
+      const cfg = await this.client.getConfig(userId, contextToken);
       if (cfg.typing_ticket) {
         this.typingTicket = cfg.typing_ticket;
-        this.typingConfigFetched = true;
+        this.typingTicketUserId = userId;
+        return this.typingTicket;
       }
-    } catch {
-      // 非关键，失败不影响功能
+      this.logger.info('getConfig returned no typing_ticket — typing disabled');
+    } catch (err) {
+      // 非关键：失败仅降级，不影响消息收发
+      this.logger.info(`getConfig failed (typing disabled): ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    this.typingTicket = '';
+    this.typingTicketUserId = '';
+    return '';
+  }
+
+  /**
+   * 开始「正在输入」状态。
+   * 拿不到 ticket 时静默 no-op —— typing 永远是「锦上添花」，不得影响主流程。
+   */
+  private async startTyping(userId: string, contextToken?: string): Promise<void> {
+    const client = this.client;
+    if (!client) return;
+
+    const ticket = await this.ensureTypingTicket(userId, contextToken);
+    if (!ticket) return;
+
+    // 换了对端用户 → 重建 controller（单会话渠道，平时不会走到）
+    if (this.typingController && this.typingBoundUserId !== userId) {
+      this.typingController.stop();
+      this.typingController = null;
+    }
+
+    if (!this.typingController) {
+      this.typingController = new ClawbotTypingController({
+        // ticket 动态读取（可能被刷新），避免闭包捕获旧值
+        send: (status) => client.sendTyping(userId, this.typingTicket, status),
+        log: (msg) => this.logger.info(msg),
+      });
+      this.typingBoundUserId = userId;
+    }
+
+    this.typingController.start();
+  }
+
+  /** 停止「正在输入」。幂等 —— 调用方必须放在 finally 中。 */
+  private stopTyping(): void {
+    this.typingController?.stop();
   }
 
   // ── 工具 ──────────────────────────────────────────────────────

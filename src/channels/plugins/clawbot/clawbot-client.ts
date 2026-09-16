@@ -132,9 +132,37 @@ export interface SendMessageResponse {
   errmsg?: string;
 }
 
+/**
+ * getconfig 请求体。
+ *
+ * ⚠️ 官方插件此处用 `ilink_user_id`（typing_ticket 是 per-user 的），
+ * **不是** sendMessage 的 `to_user_id`。早期实现传了空 body `{}`，
+ * 故拿不到有效 ticket（2026-09-17 对照官方源码修正）。
+ */
+export interface GetConfigRequest {
+  ilink_user_id: string;
+  context_token?: string;
+  base_info?: { channel_version?: string };
+}
+
 export interface GetConfigResponse {
   ret: number;
   typing_ticket?: string;
+}
+
+/**
+ * sendtyping 请求体。
+ *
+ * ⚠️ 字段名与 sendMessage 不同：官方用顶层 `ilink_user_id` + `status`，
+ * 而非 `to_user_id` + `context_token`。早期实现误用了后者，
+ * 且该方法从未被任何代码调用，故字段错误长期未暴露（2026-09-17 修正）。
+ */
+export interface SendTypingRequest {
+  ilink_user_id: string;
+  typing_ticket: string;
+  /** 1=开始输入，2=取消输入（见 clawbot-typing.ts 的 TYPING_STATUS） */
+  status?: number;
+  base_info?: { channel_version?: string };
 }
 
 export interface GetUploadUrlRequest {
@@ -478,25 +506,48 @@ export class ClawbotClient {
 
   /**
    * 向用户发送「正在输入」状态提示。
-   * 需要先调用 getConfig 获取 typing_ticket。
+   *
+   * ⚠️ 字段名与 sendMessage 不同：官方此处用顶层 `ilink_user_id` + `status`，
+   * 而非 sendMessage 的 `msg.to_user_id` + `context_token`。
+   * 早期实现误用了后者，且本方法从未被调用过，故错误长期未暴露
+   * （2026-09-17 对照官方 @tencent-weixin/openclaw-weixin 源码修正）。
+   *
+   * @param ilinkUserId 对端用户 ID（= 入站消息 from_user_id，格式 xxx@im.wechat）
+   * @param typingTicket 由 getConfig 取得（per-user）
+   * @param status 1=开始输入，2=取消输入（见 clawbot-typing.ts 的 TYPING_STATUS）
    */
   async sendTyping(
-    toUserId: string,
-    contextToken: string,
+    ilinkUserId: string,
     typingTicket: string,
+    status: number = 1,
   ): Promise<void> {
-    await this.post('/ilink/bot/sendtyping', {
-      to_user_id: toUserId,
-      context_token: contextToken,
+    const body: SendTypingRequest = {
+      ilink_user_id: ilinkUserId,
       typing_ticket: typingTicket,
-    });
+      status,
+      base_info: { channel_version: this.channelVersion },
+    };
+    await this.post('/ilink/bot/sendtyping', body);
   }
 
   // ── 6. 获取配置 ────────────────────────────────────────────
 
-  /** 获取服务端配置（含 typing_ticket），用于 sendTyping */
-  async getConfig(): Promise<GetConfigResponse> {
-    return this.post<GetConfigResponse>('/ilink/bot/getconfig', {});
+  /**
+   * 获取服务端配置（含 typing_ticket），用于 sendTyping。
+   *
+   * ⚠️ 官方要求传 `ilink_user_id`；早期实现传空 body `{}`，拿不到有效 ticket
+   * （2026-09-17 修正）。
+   */
+  async getConfig(
+    ilinkUserId: string,
+    contextToken?: string,
+  ): Promise<GetConfigResponse> {
+    const body: GetConfigRequest = {
+      ilink_user_id: ilinkUserId,
+      base_info: { channel_version: this.channelVersion },
+    };
+    if (contextToken) body.context_token = contextToken;
+    return this.post<GetConfigResponse>('/ilink/bot/getconfig', body);
   }
 
   // ── 7. 获取媒体上传地址 ────────────────────────────────────
