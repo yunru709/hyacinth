@@ -316,19 +316,21 @@ export async function runTui(
       updateHeaderText(statusContent);
     }
     let ctxBar = formatContextBar(info.tokensUsed, liveMaxContext);
-    // 命中率显示口径：**优先会话级加权平均**（回答"缓存到底省了多少"），
-    // 无轮次历史时退化为"最近一轮"，两者都拿不到才算 n/a。
-    // 平均值依赖轮次历史 —— llm 阶段现在始终记录（不再受 logging.logCacheHits 开关控制）。
-    const avgRate = info.cacheHitRateAvg;
+    // 命中率显示口径（短标签区分）：
+    //   turn —— 本回合加权均值（回合结束给出，评估"这次对话省了多少"）
+    //   last —— 最近一轮（逐轮推进时每轮刷新，看即时效果）
+    //   avg  —— 会话级加权平均（兜底）
+    const turnAvg = info.cacheHitRateTurnAvg;
     const lastRate = info.cacheHitRate;
-    const cumulativeRate = (info.cacheHitTokens != null && info.cacheMissTokens != null)
-      ? (() => { const t = info.cacheHitTokens + info.cacheMissTokens; return t > 0 ? (info.cacheHitTokens / t * 100) : null; })()
+    const avgRate = info.cacheHitRateAvg;
+    const shown = turnAvg != null ? { v: turnAvg, tag: ' turn' }
+      : lastRate != null ? { v: lastRate, tag: ' last' }
+      : avgRate != null ? { v: avgRate, tag: ' avg' }
       : null;
-    const shownRate = avgRate ?? lastRate ?? cumulativeRate;
-    if (shownRate != null) {
-      const label = avgRate != null ? ' avg' : lastRate != null ? ' last' : '';
-      ctxBar += theme.dim(` | Cache: ${shownRate.toFixed(1)}%${label}`);
-      const turns = info.cacheHistory?.length ?? 0;
+    if (shown) {
+      ctxBar += theme.dim(` | Cache: ${shown.v.toFixed(1)}%${shown.tag}`);
+      // 轮次计数：逐轮事件不带完整 history，故优先用轻量计数字段
+      const turns = info.cacheTurnsCount ?? info.cacheHistory?.length ?? 0;
       if (turns > 1) ctxBar += theme.dim(` (${turns}t)`);
     } else {
       // 厂商不返回缓存字段（如火山方舟）或本会话尚无带缓存信息的轮次 → 占位提醒，而非空白
@@ -781,10 +783,19 @@ export async function runTui(
         break;
       }
       case UI_EVENT.MESSAGE_CONTEXT_UPDATE: {
-        // 迭代级上下文占用推送：即时刷新进度条，不表示回合结束（无 busy/streaming 副作用）
-        // 该事件每轮迭代都发、比 turn_info 频繁，payload 必须带总量，否则会把已经渲染出来的
-        // ↑/↓ 抹掉（refreshStatus 虽然做了粘性兜底，这里仍如实透传，保持数据通路一致）。
-        const ctx = p as { turnCount?: number; tokensUsed?: number; totalInputTokens?: number; totalOutputTokens?: number };
+        // 迭代级推送：即时刷新上下文占用 + 缓存命中率（与上下文量同频），不表示回合结束。
+        // payload 必须带会话累计 token 总量，否则会把已渲染的 ↑/↓ 抹掉（refreshStatus 有粘性
+        // 兜底，这里仍如实透传，保持数据通路一致）。
+        const ctx = p as {
+          turnCount?: number;
+          tokensUsed?: number;
+          totalInputTokens?: number;
+          totalOutputTokens?: number;
+          cacheHitRate?: number;
+          cacheHitRateAvg?: number;
+          cacheHitRateTurnAvg?: number;
+          cacheTurnsCount?: number;
+        };
         lastTurnCount = Number(ctx.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(ctx.tokensUsed ?? lastTokensUsed);
         refreshStatus({
@@ -796,6 +807,11 @@ export async function runTui(
           compressCount: 0,
           totalInputTokens: ctx.totalInputTokens,
           totalOutputTokens: ctx.totalOutputTokens,
+          // 命中率逐轮刷新：回合内显示 last，回合结束由 turn_info 给出本回合均值
+          cacheHitRate: ctx.cacheHitRate,
+          cacheHitRateAvg: ctx.cacheHitRateAvg,
+          cacheHitRateTurnAvg: ctx.cacheHitRateTurnAvg,
+          cacheTurnsCount: ctx.cacheTurnsCount,
         });
         break;
       }

@@ -126,6 +126,10 @@ export interface TurnInfo {
    * 无轮次历史 / 厂商不返回缓存字段时为 undefined。
    */
   cacheHitRateAvg?: number;
+  /** 本回合（一次 run）缓存命中率加权均值（0-100）—— 回合结束时给出 */
+  cacheHitRateTurnAvg?: number;
+  /** 已记录的缓存轮次数（逐轮事件用轻量计数，避免传整个 history） */
+  cacheTurnsCount?: number;
   /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
   totalInputTokens?: number;
   /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
@@ -322,6 +326,8 @@ export class AgentLoop {
   /** 会话累计输出 token 总量（llm 阶段逐轮累加，TUI 显示用） */
   private totalOutputTokens = 0;
   private cacheTurns: CacheTurnRecord[] = [];
+  /** 本回合（一次 run）的缓存记录起点索引 —— 用于在回合结束时算"本回合均值" */
+  private turnCacheFrom = 0;
   private logCacheHits: boolean;
   private currentTurn = 0;
   /** 公开只读访问器 — 供 TurnRecorder / RollbackTool 等查询当前回合号 */
@@ -698,6 +704,9 @@ export class AgentLoop {
       cacheMissTokens: hasCache ? this.cacheMissTokens : undefined,
       cacheHitRate: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
       cacheHitRateAvg: averageHitRate(this.cacheTurns),
+      // 本回合（一次 run）加权均值 + 轮次数（轻量计数，供逐轮事件复用）
+      cacheHitRateTurnAvg: averageHitRate(this.cacheTurns.slice(this.turnCacheFrom)),
+      cacheTurnsCount: this.cacheTurns.length,
       cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
       totalInputTokens: this.totalInputTokens,
       totalOutputTokens: this.totalOutputTokens,
@@ -978,6 +987,8 @@ export class AgentLoop {
   async run(userInput: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this._runMutex = this._runMutex.then(async () => {
+        // 记录本回合缓存记录起点（回合结束时据此算"本回合加权均值"）
+        this.turnCacheFrom = this.cacheTurns.length;
         try {
           await this._runInternal(userInput);
           resolve();
@@ -1161,6 +1172,12 @@ export class AgentLoop {
           tokensUsed: this.lastContextTokens,
           totalInputTokens: this.totalInputTokens,
           totalOutputTokens: this.totalOutputTokens,
+          // 命中率与上下文量**同频**逐轮刷新（看即时效果）；本回合均值只在回合结束时给
+          cacheHitRate: this.cacheTurns.at(-1)
+            ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
+            : undefined,
+          cacheHitRateAvg: averageHitRate(this.cacheTurns),
+          cacheTurnsCount: this.cacheTurns.length,
         });
 
         // ── 异步子Agent 结果回合内注入 ─────────────────────────
