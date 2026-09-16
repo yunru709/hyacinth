@@ -436,6 +436,8 @@ export class UiProtocolSession {
       const result = await agentFactory.createAgent({
         sessionId: this.sessionId,
         outputHandler: this.outputHandler as unknown as ChannelOutputHandler,
+        // WebUI 渠道标识（与 http-webhook 同源）：WebUI 会话落 webui_ 前缀
+        channel: 'webui',
       });
       this.components = result;
       this.loop = (result as { loop: AgentLoop }).loop;

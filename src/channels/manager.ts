@@ -21,7 +21,7 @@ import type {
   ChannelMessageEvent,
 } from './interface.js';
 import { createLogger } from '../logging/logger.js';
-import { registerChannelPrefix, unregisterChannelPrefix } from '../memory/session-channel.js';
+import { registerChannelPrefixes, unregisterChannelPrefixes } from '../session-channel.js';
 
 const logger = createLogger('channels');
 
@@ -41,9 +41,10 @@ export class ChannelManager {
       status: 'registered',
       config,
     });
-    // 渠道声明了 session 前缀 → 自动登记到前缀→渠道表（sessionId 推断渠道用）
+    // 渠道声明了 session 前缀 → 自动登记到前缀→渠道表（sessionId 推断渠道用）。
+    // 支持多前缀（如 webui 的 webui_ + 旧版 ui_）：string | readonly string[]。
     if (handler.sessionPrefix) {
-      registerChannelPrefix(handler.sessionPrefix, handler.id);
+      registerChannelPrefixes(handler.sessionPrefix, handler.id);
       logger.debug('registered channel session prefix', { id: handler.id, prefix: handler.sessionPrefix });
     }
     logger.info('channel registered', { id: handler.id, name: handler.name });
@@ -54,7 +55,7 @@ export class ChannelManager {
     const state = this.channels.get(id);
     const existed = this.channels.delete(id);
     if (existed && state?.handler.sessionPrefix) {
-      unregisterChannelPrefix(state.handler.sessionPrefix);
+      unregisterChannelPrefixes(state.handler.sessionPrefix);
       logger.debug('unregistered channel session prefix', { id, prefix: state.handler.sessionPrefix });
     }
     if (existed) logger.info('channel unregistered', { id });

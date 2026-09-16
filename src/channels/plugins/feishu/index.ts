@@ -7,7 +7,8 @@
 //   channelManager.register(createFeishuChannel(), feishuConfig);
 // ============================================================
 
-import { FeishuChannel } from './feishu-channel.js';
+import { FeishuChannel, FEISHU_SESSION_PREFIX } from './feishu-channel.js';
+import { registerChannelPrefixes } from '../../../session-channel.js';
 import type { ChannelPlugin } from '../../auto-detect.js';
 import type { ChannelManager } from '../../manager.js';
 import type { ChannelsInfo } from '../../../env/index.js';
@@ -87,6 +88,11 @@ export const feishuChannelPlugin: ChannelPlugin = {
     config: unknown,
     channelsInfo: ChannelsInfo[],
   ): Promise<void> {
+    // ── session 前缀登记（**必须在 enabled/appId 判断之前**）──
+    // 飞书未启用时渠道不注册，但存量 feishu_xxx 会话仍要能推断出渠道归属，
+    // 故此处无条件登记。本钩子对每个已发现插件都会执行，与 enabled 无关。
+    registerChannelPrefixes(FEISHU_SESSION_PREFIX, 'feishu');
+
     const feishuConfig = config as FeishuChannelConfigEntry | undefined;
     const shouldRun = feishuConfig?.enabled !== false && feishuConfig?.appId && feishuConfig?.appSecret;
 

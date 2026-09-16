@@ -8,6 +8,7 @@ import type {
   AgentFactory,
   ReplyFn,
 } from '../interface.js';
+import { TUI_SESSION_PREFIX } from '../../session-channel.js';
 
 /**
  * TUI Channel — 将终端界面包装为标准渠道
@@ -20,6 +21,8 @@ export class TuiChannel implements ChannelHandler {
   readonly name = 'TUI Terminal';
   readonly description = '内建终端用户界面，通过 blessed 渲染';
   readonly pluginId = undefined;
+  /** sessionId 前缀（引用 src/session-channel.ts 内置前缀表的常量，勿写字面量） */
+  readonly sessionPrefix = TUI_SESSION_PREFIX;
 
   private status: ChannelStatus = 'registered';
   private eventHandler: ((event: ChannelEvent) => Promise<void>) | null = null;

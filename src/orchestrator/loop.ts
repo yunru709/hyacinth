@@ -986,8 +986,8 @@ export class AgentLoop {
     try {
       const pathMod = await import('node:path');
       const sid = pathMod.basename(this.sessionDir);
-      // 渠道从 session id 前缀推断（注册表：内置 feishu_/webui_/ui_/tui_ + 插件扩展）
-      const { resolveChannelFromSessionId } = await import('../memory/session-channel.js');
+      // 渠道从 session id 前缀推断（注册表：内置 tui_/webui_/ui_/feishu_/clawbot_ + 插件扩展）
+      const { resolveChannelFromSessionId } = await import('../session-channel.js');
       const channel = resolveChannelFromSessionId(sid);
       const { materializeLazySession } = await import('../memory/session.js');
       await materializeLazySession(this.sessionDir, {

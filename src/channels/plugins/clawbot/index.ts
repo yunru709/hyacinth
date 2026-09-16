@@ -15,7 +15,8 @@ import type { ChannelPlugin } from '../../auto-detect.js';
 import type { ChannelManager } from '../../manager.js';
 import type { ChannelsInfo } from '../../../env/index.js';
 import type { ClawbotChannelConfigEntry } from '../../../setup/config.js';
-import { createClawbotChannel, ClawbotChannel } from './clawbot-channel.js';
+import { createClawbotChannel, ClawbotChannel, CLAWBOT_SESSION_PREFIX } from './clawbot-channel.js';
+import { registerChannelPrefixes } from '../../../session-channel.js';
 import { createLogger } from '../../../logging/logger.js';
 
 const logger = createLogger('clawbot-plugin');
@@ -58,6 +59,11 @@ export const clawbotChannelPlugin: ChannelPlugin = {
     config: unknown,
     channelsInfo: ChannelsInfo[],
   ): Promise<void> {
+    // ── session 前缀登记（**必须在 enabled 判断之前**）──
+    // 插件被禁用时渠道不注册，但存量 clawbot_xxx 会话仍要能推断出渠道归属，
+    // 故此处无条件登记。本钩子对每个已发现插件都会执行，与 enabled 无关。
+    registerChannelPrefixes(CLAWBOT_SESSION_PREFIX, 'clawbot');
+
     const clawbotConfig = config as ClawbotChannelConfigEntry | undefined;
     const shouldRun = clawbotConfig?.enabled !== false;
 

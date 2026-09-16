@@ -12,6 +12,12 @@
 //   5. stop() → 断开 WebSocket 连接
 // ============================================================
 
+/**
+ * 飞书渠道 sessionId 前缀（**插件自管**：常量定义在插件内，核心不反向依赖插件）。
+ * 由 feishuChannelPlugin.autoRegister 开头无条件登记 —— 该钩子与 enabled 无关，
+ * 因此即使飞书渠道被禁用，存量 feishu_xxx 会话仍能推断出渠道归属。
+ */
+export const FEISHU_SESSION_PREFIX = 'feishu_';
 import type {
   ChannelHandler,
   ChannelEvent,
@@ -67,6 +73,8 @@ export class FeishuChannel implements ChannelHandler {
   readonly name = 'Feishu (飞书)';
   readonly description = '飞书企业即时通讯渠道，支持 WebSocket 长连接收发消息';
   readonly pluginId = undefined;
+  /** sessionId 前缀（引用 src/session-channel.ts 内置前缀常量，勿写字面量） */
+  readonly sessionPrefix = FEISHU_SESSION_PREFIX;
 
   private status: ChannelStatus = 'registered';
   private config!: FeishuChannelConfig;

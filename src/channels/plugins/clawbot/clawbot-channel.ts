@@ -21,6 +21,14 @@
 //   5. stop() → 停止长轮询 → 清理资源
 // ============================================================
 
+/**
+ * 微信 ClawBot 渠道 sessionId 前缀（**插件自管**）。
+ *
+ * 修复的正是"产得出来、认不出来"缺口：生产侧 generateSessionId('clawbot') 一直
+ * 造得出 clawbot_xxx，但注册表里从来没有 clawbot_，导致会话归属永远推断不出、
+ * 渠道隔离失效。现由插件在 autoRegister 开头无条件登记（与 enabled 无关）。
+ */
+export const CLAWBOT_SESSION_PREFIX = 'clawbot_';
 import type {
   ChannelHandler,
   ChannelEvent,
@@ -75,6 +83,8 @@ export class ClawbotChannel implements ChannelHandler {
   readonly name = '微信 ClawBot';
   readonly description = '微信官方 AI 助手连接插件，支持 HTTP 长轮询收发消息';
   readonly pluginId = undefined;
+  /** sessionId 前缀（引用 src/session-channel.ts 内置前缀常量，勿写字面量） */
+  readonly sessionPrefix = CLAWBOT_SESSION_PREFIX;
 
   private status: ChannelStatus = 'registered';
   private config!: ClawbotChannelConfig;

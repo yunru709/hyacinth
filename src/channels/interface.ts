@@ -145,11 +145,17 @@ export interface ChannelHandler {
   /** 是否由插件注册（vs 内置渠道） */
   readonly pluginId?: string;
   /**
-   * 本渠道 sessionId 前缀（如 'hub_'）。注册渠道时自动登记到
-   * session-channel 前缀表，使该渠道的 sessionId 能被正确推断渠道。
+   * 本渠道 sessionId 前缀（单前缀如 'hub_，或多前缀如 ['webui_', 'ui_']）。
+   *
+   * 注册渠道时由 ChannelManager.register 自动登记到 session-channel 前缀表，
+   * 使该渠道的 sessionId 能被正确推断渠道；unregister 时同步注销。
    * 缺省不注册（该渠道不通过 sessionId 前缀推断）。
+   *
+   * 内置渠道请引用 src/session-channel.ts 里内置前缀表的常量（单一真源），
+   * 不要写重复字面量 —— 曾经手写字面量导致 clawbot_ 漏注册、会话归属推断失效。
+   * 插件渠道直接声明自己的前缀；插件被禁用时由 auto-detect 的发现阶段兜底注册。
    */
-  readonly sessionPrefix?: string;
+  readonly sessionPrefix?: string | readonly string[];
 
   /**
    * 启动渠道

@@ -1553,6 +1553,40 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 - 向外（被使用）：`gateway/tui.ts`、`gateway/server.ts` 是主要调用方（注册/启动渠道、注册 send_channel_message 工具、注入 TuiChannel 回调、创建 UiProtocolSession 本地模式）。
 - 向内（引用）：`logging/logger`（manager）、`setup/config`（auto-detect）、`env/index`（ChannelsInfo）、`tools/interface` 类型（dispatcher）、`provider/interface`、`memory/session`（sessionId/sessionManager）、`orchestrator/loop`（OutputHandler）、`gateway/factory`（createAgent/AgentComponents）、`runtime/config-center`、`runtime/defaults`、`provider/model-channel-registry`、`provider/config`、`local-model`、`context/profiles`（switchRouter）、`prompts/loader`、`memory/events`、`companion/*`、`memory/stats`、`hot-reload/manifest-watcher`、`tools/ask-user`、`logging/logger`、`ui-protocol/*`（server/adapter/transport/domains/types）、`ui/command-registry`。
 
+### 2.9 sessionId 前缀 → 渠道 契约（`src/session-channel.ts`，根级中立契约）
+
+会话目录名形如 `{channel}_YYYYMMDD-HHMMSS-XXXX`；无渠道启动（CLI 单发 / serve）则是
+**裸日期 ID**（如 `20260916-170213-1bfa`）。"前缀 → 渠道"映射用于**从 sessionId 反推渠道**：
+`resolveChannelFromSessionId()` 由 `memory/session.ts`（为缺 meta 的存量会话补写 channel）与
+`orchestrator/loop.ts`（`materializeSessionIfNeeded`）消费，也是**渠道隔离恢复**
+（`SessionManager.getLatestByChannel`）与 `ChannelManager` 前缀登记的同一张表。
+
+**为什么放在根级而非 `memory/`**：该文件只是一张映射表 + 纯函数（无业务逻辑）。早期放在
+`memory/`（业务核心）下时，`channels/manager.ts` 引用它会被 `verify:layers` 规则 5 判为
+"UI 直连业务核心"，而该白名单**只减不增** —— 这种引用永远无法合法登记。上移到 `src/` 根级后
+与 `events.ts`/`types.ts` 同级，属规则内明确豁免的"根级基础文件"，双方引用均合法。
+
+**单一真源 + 插件自管**（历史事故：前缀是散落在核心里的字面量、与渠道实现分家，导致插件渠道
+`clawbot` 生产侧一直 `generateSessionId('clawbot')` 造得出 `clawbot_xxx`，注册表里却从来没有
+`clawbot_`，会话归属永远推断不出、渠道隔离失效）：
+
+| 渠道类型 | 前缀声明位置 | 登记时机 |
+|---|---|---|
+| 内置（tui / webui） | `src/session-channel.ts` 的 `TUI_SESSION_PREFIX` / `WEBUI_SESSION_PREFIXES` —— **单一真源**，handler 只引用常量、不得写字面量 | 模块加载即登记（与渠道是否启用/加载无关，保证任何模式下存量会话都可解析） |
+| 插件（feishu / clawbot / 第三方） | 插件自己的 `*_SESSION_PREFIX` 常量 + `handler.sessionPrefix` 字段 | `ChannelManager.register()` 自动登记；**并在 `ChannelPlugin.autoRegister` 开头无条件登记**（早于 `enabled` 判断 —— 该钩子对每个已发现插件都会执行，所以插件被禁用时前缀依旧可解析） |
+
+- 契约字段：`ChannelHandler.sessionPrefix?: string | readonly string[]`（多前缀场景，如 WebUI 的
+  `webui_` + 旧版 `ui_`；`ui_` 是历史 `/ui` 前缀，用于兼容存量会话）。
+- 方向约束：**核心不反向依赖插件** —— 插件渠道绝不登记进内置前缀表。
+- 新增内置渠道 = 前缀表加一行 + handler 引用该常量；新增插件渠道 = 插件内声明常量 + autoRegister 登记。
+- 守卫测试：`src/session-channel.test.ts`（注册表语义：最长前缀优先 / 多前缀 / 幂等 / 注销）+
+  `src/channels/session-prefix-contract.guard.test.ts`（内置 handler 必须引用常量；插件前缀登记
+  必须早于 `enabled` 判断）。
+- WebUI 会话前缀：`http-webhook.ts`（REST `/api/chat`）与 `ui-protocol-session.ts`（WS/UI 协议会话）
+  创建 Agent 时传 `channel: 'webui'`，使 WebUI 会话落 `webui_` 前缀并启用渠道隔离恢复。
+  **历史缺口**：这两处曾不传 channel，WebUI 会话落成裸日期 ID，与 CLI/serve 的裸会话混在
+  同一命名空间 —— 既分不清来源、也无法按渠道恢复。
+
 ---
 
 ## 三、src/ui/ —— TUI 组件库

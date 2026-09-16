@@ -7,7 +7,7 @@ import type { Session, SessionType } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 import { toProjectKey } from '../utils/misc.js';
 import { withSessionDirLock } from './session-lock.js';
-import { resolveChannelFromSessionId } from './session-channel.js';
+import { resolveChannelFromSessionId } from '../session-channel.js';
 
 const logger = createLogger('session');
 
