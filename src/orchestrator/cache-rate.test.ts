@@ -52,15 +52,12 @@ describe('formatCacheDisplay（口径选择在后端，UI 只渲染）', () => {
     expect(formatCacheDisplay({ avg: 70 })).toBe('70.0% avg');
   });
 
-  it('轮次 >1 时附带计数，1 轮或未传则不带', () => {
-    expect(formatCacheDisplay({ last: 80, turns: 12 })).toBe('80.0% last (12t)');
-    expect(formatCacheDisplay({ last: 80, turns: 1 })).toBe('80.0% last');
+  it('不附带轮次计数（(Nt) 已移除）', () => {
     expect(formatCacheDisplay({ last: 80 })).toBe('80.0% last');
   });
 
   it('无任何可用数据 → n/a（不伪造 0）', () => {
     expect(formatCacheDisplay({})).toBe('n/a');
-    expect(formatCacheDisplay({ turns: 5 })).toBe('n/a');
   });
 
   it('保留 1 位小数', () => {

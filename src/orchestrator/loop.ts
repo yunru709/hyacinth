@@ -718,7 +718,6 @@ export class AgentLoop {
         turnAvg: averageHitRate(this.cacheTurns.slice(this.turnCacheFrom)),
         last: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
         avg: averageHitRate(this.cacheTurns),
-        turns: this.cacheTurns.length,
       }),
       cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
       totalInputTokens: this.totalInputTokens,
@@ -1197,7 +1196,6 @@ export class AgentLoop {
               ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
               : undefined,
             avg: averageHitRate(this.cacheTurns),
-            turns: this.cacheTurns.length,
           }),
         });
 

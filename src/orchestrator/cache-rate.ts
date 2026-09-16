@@ -46,8 +46,6 @@ export function formatCacheDisplay(input: {
   last?: number;
   /** 会话级加权平均（兜底） */
   avg?: number;
-  /** 已记录的轮次数（>1 时附带展示） */
-  turns?: number;
 }): string {
   const pick = input.turnAvg != null
     ? { v: input.turnAvg, tag: 'turn' }
@@ -57,6 +55,6 @@ export function formatCacheDisplay(input: {
         ? { v: input.avg, tag: 'avg' }
         : null;
   if (!pick) return 'n/a';
-  const turns = input.turns ?? 0;
-  return `${pick.v.toFixed(1)}% ${pick.tag}${turns > 1 ? ` (${turns}t)` : ''}`;
+  // 不附带轮次计数（`(Nt)` 已按用户要求移除：占宽且语义不直观）
+  return `${pick.v.toFixed(1)}% ${pick.tag}`;
 }
