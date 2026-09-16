@@ -143,6 +143,9 @@ describe('subscribeConfig — 切换失败必须带出真实原因（不再吞 e
   it('provider.active 变更触发切换失败 → onStatus 文案包含底层 message', async () => {
     const router = new ProviderRouter();
     router.register('main', fakeProvider('volcengine'));
+    // 关键：把 openai 变成**可服务**目标（已在路由器中）——否则会被"可服务性守卫"提前拦下
+    // （那是下一条用例覆盖的路径），根本走不到"切换失败"的文案断言。
+    router.register('openai', fakeProvider('openai'));
     const cc = fakeConfigCenter({
       'provider.routeMode': 'auto',
       'provider.active': 'volcengine',
@@ -175,5 +178,63 @@ describe('subscribeConfig — 切换失败必须带出真实原因（不再吞 e
     expect(calls[0]).toContain('Config changed provider to "openai" but switch failed');
     // 核心回归：真实原因（缺 key → Provider not found）必须在文案里
     expect(calls[0]).toContain('Provider "openai" not found');
+  });
+});
+
+describe('subscribeConfig — provider.active 指向"不可服务"名字时忽略并告警（治本）', () => {
+  function depsWithSink(
+    router: ProviderRouter,
+    cc: unknown,
+    sink: Array<[string, string]>,
+  ): ProviderDeps {
+    return {
+      ...makeDeps(router, cc),
+      outputHandler: { onStatus: (m: string, l: string) => sink.push([m, l]) },
+    } as unknown as ProviderDeps;
+  }
+
+  it('不在路由器、也构造不出（无 provider.<name> 段）→ 不切换、只 warn 一次', () => {
+    const router = new ProviderRouter();
+    router.register('main', fakeProvider('deepseek'));
+    const cc = fakeConfigCenter({ 'provider.active': 'deepseek' });
+    const status: Array<[string, string]> = [];
+    const counter = { n: 0 };
+
+    subscribeConfig(depsWithSink(router, cc, status), {
+      ...hooks,
+      switchProvider: async () => {
+        counter.n++;
+      },
+    });
+    counter.n = 0;
+    status.length = 0;
+
+    cc._emit('provider.active', 'openai');
+    cc._emit('provider.active', 'openai'); // 同一无效值不重复告警
+
+    expect(counter.n).toBe(0);
+    const warns = status.filter(([, lvl]) => lvl === 'warn');
+    expect(warns).toHaveLength(1);
+    expect(warns[0][0]).toContain('openai');
+  });
+
+  it('路由器已注册的名字（通道 main）→ 照常切换', () => {
+    const router = new ProviderRouter();
+    router.register('main', fakeProvider('deepseek'));
+    const cc = fakeConfigCenter({ 'provider.active': 'deepseek' });
+    const status: Array<[string, string]> = [];
+    const counter = { n: 0 };
+
+    subscribeConfig(depsWithSink(router, cc, status), {
+      ...hooks,
+      switchProvider: async () => {
+        counter.n++;
+      },
+    });
+    counter.n = 0;
+
+    cc._emit('provider.active', 'main');
+    expect(counter.n).toBe(1);
+    expect(status.filter(([, lvl]) => lvl === 'error')).toHaveLength(0);
   });
 });

@@ -373,6 +373,9 @@ export function subscribeConfig(
    */
   const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+  /** 已对"不可服务"的名字告警过（同一值不重复刷屏） */
+  const warnedUnservable = new Set<string>();
+
   // provider.active 变更 → 自动切换 provider
   configCenter.watch('provider.active', (event) => {
     const name = event.newValue as string;
@@ -380,10 +383,32 @@ export function subscribeConfig(
     // 守卫：如果与当前 provider 相同，跳过，避免重复切换
     const currentType = deps.getActiveProvider().getProviderType();
     if (name === currentType) return;
-    // 直接委托 switchProvider(name, model)：内部在 router 未注册类型名时，
-    // 会从 configCenter 的 provider.<name> 段 tryCreateProviderFromConfig 创建
-    // 并 register。旧实现用 `providerRouter.get(name)` 做守卫——类型名（volcengine
-    // /deepseek…）初始未注册（router 只有 main/local），导致「改 active 但首选不跟随」。
+
+    // ── 可服务性守卫（治本）──
+    // provider.active 常被"非用户本意"的值写回：schema 默认段（如 openai）、通道模式下的
+    // 遗留值、其他会话写下的旧值……。这类名字既不在路由器里（路由器只有通道名 + local），
+    // 也构造不出 provider（`provider.<name>` 段缺失或 apiKeyEnv 未配置）→ 切换注定失败。
+    // 历史表现：启动/热重载时刷一条 error（`Provider "openai" not found`），用户无从下手，
+    // 还会盖掉真正需要关注的状态。改为**忽略 + 一次性 warn**。
+    let target = providerRouter?.get?.(name);
+    if (!target) {
+      const created = tryCreateProviderFromConfig(deps, name);
+      if (!created) {
+        if (!warnedUnservable.has(name)) {
+          warnedUnservable.add(name);
+          outputHandler?.onStatus?.(
+            `已忽略 provider.active="${name}"：该名字不在路由器中，且 provider.${name} 段缺失或 apiKeyEnv 未配置；` +
+              `当前 provider 仍由模型通道 / 现有配置提供`,
+            'warn',
+          );
+        }
+        return;
+      }
+      // 先建后换（与下方 model 变更路径一致）：避免路由表出现悬空 defaultName
+      target = created;
+      providerRouter?.register?.(name, created);
+    }
+
     hooks.switchProvider(name, configCenter.get<string>(`provider.${name}.model`)).catch((err) => {
       outputHandler?.onStatus?.(
         `Config changed provider to "${name}" but switch failed: ${errText(err)}`,
