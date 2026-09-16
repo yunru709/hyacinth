@@ -8,9 +8,10 @@
  *   三方被认领进同一份对话历史（同一 conversation.jsonl）。
  *
  * 现在的不变式：
- *   ① 已声明渠道 + 本渠道有会話   → 恢复它
- *   ② 已声明渠道 + 本渠道无会話   → **开新会话**（绝不落全局兜底）
+ *   ① 已声明渠道 + 本渠道有会话   → 恢复它
+ *   ② 已声明渠道 + 本渠道无会话   → **开新会话**（绝不落全局兜底）
  *   ③ 未声明渠道（纯 CLI 交互）   → 才允许恢复全局最近
+ *   ④ 显式指定 sessionId          → 尊重调用方（跨渠道加载由 switch_session 显式完成）
  */
 import { describe, it, expect } from 'vitest';
 import os from 'node:os';
@@ -37,7 +38,11 @@ describe('boot() 恢复策略', () => {
     const foreign = await sm.create('normal', 'webui');
 
     const result = await boot({
-      cwd, shouldContinue: true, channel: 'tui', sessionManager: sm,
+      cwd,
+      sessionId: undefined,
+      shouldContinue: true,
+      channel: 'tui',
+      sessionManager: sm,
     });
 
     // 关键断言：没有被认领
@@ -56,7 +61,11 @@ describe('boot() 恢复策略', () => {
     await sm.create('normal', 'webui');
 
     const result = await boot({
-      cwd, shouldContinue: true, channel: 'tui', sessionManager: sm,
+      cwd,
+      sessionId: undefined,
+      shouldContinue: true,
+      channel: 'tui',
+      sessionManager: sm,
     });
 
     expect(result.currentSessionId).toBe(mine.id);
@@ -69,7 +78,11 @@ describe('boot() 恢复策略', () => {
     const latest = await sm.create('normal', 'feishu');
 
     const result = await boot({
-      cwd, shouldContinue: true, sessionManager: sm,
+      cwd,
+      sessionId: undefined,
+      shouldContinue: true,
+      channel: undefined,
+      sessionManager: sm,
     });
 
     expect(result.currentSessionId).toBe(latest.id);
@@ -81,7 +94,11 @@ describe('boot() 恢复策略', () => {
     const foreign = await sm.create('normal', 'webui');
 
     const result = await boot({
-      cwd, sessionId: foreign.id, shouldContinue: true, channel: 'tui', sessionManager: sm,
+      cwd,
+      sessionId: foreign.id,
+      shouldContinue: true,
+      channel: 'tui',
+      sessionManager: sm,
     });
 
     // 显式指定 ⇒ 尊重调用方（跨渠道加载由 switch_session 等显式动作负责）
