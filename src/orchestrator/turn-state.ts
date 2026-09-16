@@ -156,6 +156,10 @@ export interface TurnState {
   inlineToolExecuted: boolean;
   inlineToolResults: Map<string, InlineToolResult>;
   cacheStats: CacheStats;
+  /** 本轮输入 token（USAGE 事件；未提供时 0） */
+  usageInput?: number;
+  /** 本轮输出 token（USAGE 事件；未提供时 0） */
+  usageOutput?: number;
   /** 降级链 fallback 通知（一次性消费） */
   fallbackInfo: string | null;
   /** 降级恢复通知（一次性消费） */

@@ -111,6 +111,14 @@ export function formatContextBar(tokensUsed: number, maxTokens: number, width: n
   return theme.dim('Context: ') + colorFn(bar) + ' ' + theme.fg(pct) + theme.dim(` (${usedK} / ${maxK} tokens)`);
 }
 
+/** 大数友好缩写：≥1e6 → M，≥1e3 → K，否则原样（token 总量显示用） */
+export function compactTokenCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(Math.round(n));
+}
+
 // ─── Event Replay ─────────────────────────────────────────────────────────
 
 /**

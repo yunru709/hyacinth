@@ -315,6 +315,8 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
         cacheStats,
         inlineToolExecuted,
         inlineToolResults,
+        usageInput,
+        usageOutput,
       };
     },
   };

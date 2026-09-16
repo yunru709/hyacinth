@@ -36,6 +36,10 @@ export interface TurnInfoLike {
   cacheMissTokens?: number;
   cacheHitRate?: number;
   cacheHistory?: CacheStats[];
+  /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalInputTokens?: number;
+  /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalOutputTokens?: number;
 }
 
 /** provider 路由信息（对应 loop.getProviderRoutingInfo 返回） */

@@ -76,6 +76,7 @@ import {
   truncateByVisualWidth,
   formatStatusBar,
   formatContextBar,
+  compactTokenCount,
   replayEvents,
   detectLegacyTerminal,
 } from './tui-format.js';
@@ -313,6 +314,11 @@ export async function runTui(
     } else {
       // 数据源（厂商）不返回缓存命中字段（如火山方舟）→ 占位提醒，而非空白
       ctxBar += theme.dim(' | Cache: n/a');
+    }
+    // 会话累计输入/输出 token 总量（有 usage 字段的 provider 才显示，避免零值噪音）
+    if ((info.totalInputTokens ?? 0) > 0 || (info.totalOutputTokens ?? 0) > 0) {
+      ctxBar += theme.dim(' | ') + theme.accent(`↑${compactTokenCount(info.totalInputTokens ?? 0)}`) +
+        theme.dim(' ') + theme.accent(`↓${compactTokenCount(info.totalOutputTokens ?? 0)}`);
     }
     // Background process count
     if (backgroundRegistry) {
@@ -692,6 +698,8 @@ export async function runTui(
       cacheMissTokens: snap.cacheMissTokens,
       cacheHitRate: snap.cacheHitRate,
       cacheHistory: snap.cacheHistory,
+      totalInputTokens: snap.totalInputTokens,
+      totalOutputTokens: snap.totalOutputTokens,
     } as TurnInfo);
     // 返回快照：切换类命令据此校验实际生效值（后端可能降级/重建失败）
     return snap;

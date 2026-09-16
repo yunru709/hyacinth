@@ -323,6 +323,10 @@ export interface StateSnapshot {
   /** 当前轮次缓存命中率（0-100） */
   cacheHitRate?: number;
   cacheHistory?: CacheStats[];
+  /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalInputTokens?: number;
+  /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalOutputTokens?: number;
   /** 最近一次状态更新时间（ISO） */
   updatedAt: string;
 }

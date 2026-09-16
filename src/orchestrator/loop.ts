@@ -118,6 +118,10 @@ export interface TurnInfo {
   cacheHitRate?: number;
   /** 所有轮次的缓存记录（用于分析缓存稳定性） */
   cacheHistory?: CacheTurnRecord[];
+  /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalInputTokens?: number;
+  /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
+  totalOutputTokens?: number;
 }
 
 // ── 半块 Unicode 字符画 ─────────────────────────────────────────────
@@ -305,6 +309,10 @@ export class AgentLoop {
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
   private cacheMissTokens = 0;
+  /** 会话累计输入 token 总量（llm 阶段逐轮累加，TUI 显示用） */
+  private totalInputTokens = 0;
+  /** 会话累计输出 token 总量（llm 阶段逐轮累加，TUI 显示用） */
+  private totalOutputTokens = 0;
   private cacheTurns: CacheTurnRecord[] = [];
   private logCacheHits: boolean;
   private currentTurn = 0;
@@ -680,6 +688,8 @@ export class AgentLoop {
       cacheMissTokens: hasCache ? this.cacheMissTokens : undefined,
       cacheHitRate: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
       cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
+      totalInputTokens: this.totalInputTokens,
+      totalOutputTokens: this.totalOutputTokens,
     };
   }
 
@@ -1651,6 +1661,10 @@ export class AgentLoop {
     this.cacheTurns = lt.cacheStats.turns;
     this.logCacheHits = lt.cacheStats.logHits;
     this.inlineToolExecuted = lt.inlineToolExecuted;
+    // 累计输入/输出 token 总量（stats 只落盘会话累计；这里维护 loop 生命周期内
+    // 的真实累计，供 TUI 显示。usage 缺失（provider 不返回）时维持原值）
+    if (typeof lt.usageInput === 'number' && lt.usageInput > 0) this.totalInputTokens += lt.usageInput;
+    if (typeof lt.usageOutput === 'number' && lt.usageOutput > 0) this.totalOutputTokens += lt.usageOutput;
     stateRef = lt;
 
     // 如果有工具调用，执行工具并将结果追加到 conversation
