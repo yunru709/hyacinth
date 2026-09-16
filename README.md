@@ -1,6 +1,6 @@
 # Hyacinth
 
-> npm v0.9.47 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 17 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
+> npm v0.9.48 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 17 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
 
 **Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在飞书 / 微信 / WebUI 等渠道之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
 
