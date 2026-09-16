@@ -92,6 +92,37 @@ export function formatStatusBar(
   return parts.join('');
 }
 
+/**
+ * 把迭代级事件（`MESSAGE_CONTEXT_UPDATE`）的 payload 归一为状态栏所需的 `TurnInfo`。
+ *
+ * **整体透传** payload 字段（含后端算好的 `cacheDisplay`），而不是逐字段白名单 ——
+ * 白名单每加一个字段都要手工补一处，漏补即 UI 静默缺失。历史事故：0.9.52 把口径选择与
+ * 格式化下沉到后端、payload 新增 `cacheDisplay` 后，TUI 侧白名单未同步，导致 loop 迭代
+ * 期间 Cache 段恒显示 'n/a'（回合结束的 `MESSAGE_TURN_INFO` 走整体透传才恢复，表现即
+ * "loop 中消失、loop 结束又出现"）。抽成纯函数以便单测守住该契约。
+ *
+ * 只覆盖 6 个"本地跟踪/占位"字段：turnCount/tokensUsed 用 TUI 侧粘性值，
+ * maxTurns/maxContextTokens 用实时配置，sessionId/compressCount 为占位。
+ *
+ * @param payload 协议 payload（字段均可缺省；undefined/null 视为空对象）
+ * @param resolved TUI 侧解析出的本地值
+ */
+export function iterationStatusInput(
+  payload: Partial<TurnInfo> | null | undefined,
+  resolved: { turnCount: number; tokensUsed: number; maxTurns: number; maxContextTokens: number },
+): TurnInfo {
+  const p = (payload ?? {}) as Partial<TurnInfo>;
+  return {
+    ...p,
+    turnCount: resolved.turnCount,
+    tokensUsed: resolved.tokensUsed,
+    maxTurns: resolved.maxTurns,
+    maxContextTokens: resolved.maxContextTokens,
+    sessionId: '',
+    compressCount: 0,
+  };
+}
+
 /** 上下文用量条（█ ░ 填充 + 颜色随占比变化） */
 export function formatContextBar(tokensUsed: number, maxTokens: number, width: number = 40): string {
   const ratio = Math.min(tokensUsed / maxTokens, 1);

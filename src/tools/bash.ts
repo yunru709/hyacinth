@@ -28,9 +28,19 @@ const DEFAULT_BLOCKED_COMMANDS: string[] = [
 ];
 
 /** 词边界正则黑名单 — 匹配独立危险命令。
- *  (?!-) 确保 format 不误杀 PowerShell 的 Format-List/Format-Table/Format-Hex 等 cmdlet */
-const BLOCKED_COMMAND_REGEX: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\bformat\b(?!-)/i, label: 'format' },
+ *
+ *  `format` 的匹配刻意收窄为「命令起始位置 + 盘符目标」：
+ *  - 旧实现 `\bformat\b(?!-)` 只排除了 PowerShell 的 Format-List/Format-Table 等 cmdlet；
+ *    但 `-` / `.` / `/` 都是词边界，于是**任何含该词的文件名/路径/参数**都被误杀
+ *    （如 `dist/gateway/tui-format.js`、`--grep format`、`npm run format`），
+ *    正常工作被反复阻断。
+ *  - 危险用法只有 `format <盘符>:`（格式化磁盘），故要求该词位于命令起始处
+ *    （行首或 `;` `&` `|` 换行之后），且其参数中出现盘符目标才拦截。
+ *  - 代价：放弃了「被引号包裹 / 变量拼接」等间接形式 —— 有意的误报↔漏报取舍。
+ *  - 导出以便单测直接验证模式（不实际执行任何命令）。
+ */
+export const BLOCKED_COMMAND_REGEX: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /(?:^|[;&|\n]\s*)format(?:\.com)?\b(?!-)[^|;&\n]*\b[a-zA-Z]:/i, label: 'format' },
 ];
 
 /**

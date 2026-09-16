@@ -79,6 +79,7 @@ import {
   compactTokenCount,
   replayEvents,
   detectLegacyTerminal,
+  iterationStatusInput,
 } from './tui-format.js';
 import { createTuiSearch } from './tui-search.js';
 import { createTuiPermission } from './tui-permission.js';
@@ -260,12 +261,28 @@ export async function runTui(
   let lastTotalInputTokens = 0;
   let lastTotalOutputTokens = 0;
 
+  /**
+   * 命中率显示片段（粘性缓存）。与 token 总量同因：并非所有 refreshStatus 调用点都带
+   * `cacheDisplay`（压缩后刷新、会话切换、启动首帧都不带），缺失时沿用上次已知值，
+   * 否则 Cache 段会闪成 'n/a'。
+   * 但命中率是**会话相关**的 —— 切到别的会话必须清空，否则会显示上一会话的数字，
+   * 故下方按 sessionId 变更检测重置（空串表示"未声明会话"的常规刷新，不触发重置）。
+   */
+  let lastCacheDisplay: string | undefined;
+  let lastCacheSessionId = '';
+
   function refreshStatus(info: TurnInfo): void {
     // ── Track last known values for /provider handler ──
     lastTurnCount = info.turnCount;
     lastTokensUsed = info.tokensUsed;
     if (typeof info.totalInputTokens === 'number') lastTotalInputTokens = info.totalInputTokens;
     if (typeof info.totalOutputTokens === 'number') lastTotalOutputTokens = info.totalOutputTokens;
+    // 会话切换 → 清空命中率粘性缓存（避免跨会话串味）
+    if (info.sessionId && info.sessionId !== lastCacheSessionId) {
+      lastCacheSessionId = info.sessionId;
+      lastCacheDisplay = undefined;
+    }
+    if (typeof info.cacheDisplay === 'string') lastCacheDisplay = info.cacheDisplay;
 
     // ── Read live config (overrides startup defaults) ──
     const liveCfg = RuntimeConfigCenter.getInstance();
@@ -318,11 +335,16 @@ export async function runTui(
     let ctxBar = formatContextBar(info.tokensUsed, liveMaxContext);
     // 命中率的**显示片段由后端提供**（`cacheDisplay`：口径选择与格式化都在后端完成）——
     // UI 只做插值渲染，不再自行挑 turn/last/avg，也不再拼标签。
-    ctxBar += theme.dim(' | Cache: ' + (info.cacheDisplay ?? 'n/a'));
+    // 粘性兜底：不带 cacheDisplay 的刷新路径（压缩后、会话切换、启动）沿用上次已知值，
+    // 否则这些刷新会把刚渲染的 Cache 段抹成 'n/a'。
+    ctxBar += theme.dim(' | Cache: ' + (info.cacheDisplay ?? lastCacheDisplay ?? 'n/a'));
     // 会话累计输入/输出 token 总量（有 usage 字段的 provider 才显示，避免零值噪音）
-    if ((info.totalInputTokens ?? 0) > 0 || (info.totalOutputTokens ?? 0) > 0) {
-      ctxBar += theme.dim(' | ') + theme.accent(`↑${compactTokenCount(info.totalInputTokens ?? 0)}`) +
-        theme.dim(' ') + theme.accent(`↓${compactTokenCount(info.totalOutputTokens ?? 0)}`);
+    // 同样经粘性值解析：此处原先直读原始 info，导致省略总量的刷新路径会把 ↑/↓ 抹掉。
+    const totalIn = info.totalInputTokens ?? lastTotalInputTokens;
+    const totalOut = info.totalOutputTokens ?? lastTotalOutputTokens;
+    if (totalIn > 0 || totalOut > 0) {
+      ctxBar += theme.dim(' | ') + theme.accent(`↑${compactTokenCount(totalIn)}`) +
+        theme.dim(' ') + theme.accent(`↓${compactTokenCount(totalOut)}`);
     }
     // Background process count
     if (backgroundRegistry) {
@@ -769,33 +791,20 @@ export async function runTui(
         // 迭代级推送：即时刷新上下文占用 + 缓存命中率（与上下文量同频），不表示回合结束。
         // payload 必须带会话累计 token 总量，否则会把已渲染的 ↑/↓ 抹掉（refreshStatus 有粘性
         // 兜底，这里仍如实透传，保持数据通路一致）。
-        const ctx = p as {
-          turnCount?: number;
-          tokensUsed?: number;
-          totalInputTokens?: number;
-          totalOutputTokens?: number;
-          cacheHitRate?: number;
-          cacheHitRateAvg?: number;
-          cacheHitRateTurnAvg?: number;
-          cacheTurnsCount?: number;
-        };
+        // 与 MESSAGE_TURN_INFO 同理：**整体透传**协议 payload，而非逐字段白名单。
+        // 白名单每加一个字段都要手工补一处，漏补即 UI 静默缺失 —— 0.9.52 就踩过：
+        // 口径/格式化下沉后端后 payload 多了 `cacheDisplay`，但此处白名单未同步，
+        // 导致 loop 迭代期间 Cache 段恒显示 'n/a'（回合结束的 turn_info 走整体透传才恢复，
+        // 表现即"loop 中消失、loop 结束又出现"）。
+        const ctx = p as Partial<TurnInfo> & { turnCount?: number; tokensUsed?: number };
         lastTurnCount = Number(ctx.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(ctx.tokensUsed ?? lastTokensUsed);
-        refreshStatus({
+        refreshStatus(iterationStatusInput(ctx, {
           turnCount: lastTurnCount,
-          maxTurns,
           tokensUsed: lastTokensUsed,
+          maxTurns,
           maxContextTokens: maxContext,
-          sessionId: '',
-          compressCount: 0,
-          totalInputTokens: ctx.totalInputTokens,
-          totalOutputTokens: ctx.totalOutputTokens,
-          // 命中率逐轮刷新：回合内显示 last，回合结束由 turn_info 给出本回合均值
-          cacheHitRate: ctx.cacheHitRate,
-          cacheHitRateAvg: ctx.cacheHitRateAvg,
-          cacheHitRateTurnAvg: ctx.cacheHitRateTurnAvg,
-          cacheTurnsCount: ctx.cacheTurnsCount,
-        });
+        }));
         break;
       }
       case UI_EVENT.PERMISSION_REQUEST: {

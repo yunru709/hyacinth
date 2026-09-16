@@ -4,7 +4,59 @@ import {
   truncateByVisualWidth,
   formatContextBar,
   detectLegacyTerminal,
+  iterationStatusInput,
 } from './tui-format.js';
+
+describe('iterationStatusInput（MESSAGE_CONTEXT_UPDATE 归一化）', () => {
+  const resolved = { turnCount: 7, tokensUsed: 12345, maxTurns: 50, maxContextTokens: 128000 };
+
+  it('**透传 cacheDisplay**（回归守卫：0.9.52 曾因白名单漏掉该字段，loop 中 Cache 段恒为 n/a）', () => {
+    const out = iterationStatusInput({ cacheDisplay: '90.0% last' }, resolved);
+    expect(out.cacheDisplay).toBe('90.0% last');
+  });
+
+  it('透传其他非白名单字段（新增后端字段不应再被静默丢弃）', () => {
+    const out = iterationStatusInput(
+      {
+        totalInputTokens: 111,
+        totalOutputTokens: 222,
+        cacheHitRate: 88.8,
+        cacheHitRateAvg: 77.7,
+        cacheTurnsCount: 3,
+        cacheDisplay: '77.7% avg',
+      },
+      resolved,
+    );
+    expect(out.totalInputTokens).toBe(111);
+    expect(out.totalOutputTokens).toBe(222);
+    expect(out.cacheHitRate).toBe(88.8);
+    expect(out.cacheHitRateAvg).toBe(77.7);
+    expect(out.cacheTurnsCount).toBe(3);
+  });
+
+  it('本地值覆盖 payload 中的 turnCount/tokensUsed，并补齐占位字段', () => {
+    const out = iterationStatusInput(
+      { turnCount: 999, tokensUsed: 888, sessionId: 'leaked', compressCount: 5 },
+      resolved,
+    );
+    expect(out.turnCount).toBe(7);
+    expect(out.tokensUsed).toBe(12345);
+    expect(out.maxTurns).toBe(50);
+    expect(out.maxContextTokens).toBe(128000);
+    // 占位字段固定，不被 payload 污染（sessionId 走 '' 表示"未声明会话"）
+    expect(out.sessionId).toBe('');
+    expect(out.compressCount).toBe(0);
+  });
+
+  it('payload 为 undefined / null 时只产出占位（不抛错）', () => {
+    for (const bad of [undefined, null]) {
+      const out = iterationStatusInput(bad as never, resolved);
+      expect(out.turnCount).toBe(7);
+      expect(out.cacheDisplay).toBeUndefined();
+      expect(out.sessionId).toBe('');
+    }
+  });
+});
 
 describe('visualWidth', () => {
   it('ASCII 每字符计 1', () => {
