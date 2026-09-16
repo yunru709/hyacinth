@@ -9,6 +9,7 @@ import type { Provider, ProviderCapabilities } from './interface.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { dropOrphanToolMessages } from './message-sanitize.js';
 
 /** LocalProvider 构造选项 */
 export interface LocalProviderOptions {
@@ -280,7 +281,7 @@ export class LocalProvider implements Provider {
       }
     }
 
-    return result;
+    return dropOrphanToolMessages(result);
   }
 
   private convertTools(tools: ToolDefinition[]): OpenAI.ChatCompletionTool[] {

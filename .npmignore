@@ -45,3 +45,6 @@ tsconfig.tsbuildinfo
 # OS
 .DS_Store
 Thumbs.db
+
+# Debug residue (vitest output redirect files; gitignored but must also be npmignored)
+vt-*.txt

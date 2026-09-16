@@ -14,6 +14,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { dropOrphanToolMessages } from './message-sanitize.js';
 
 /** media_type → OpenAI input_audio format（仅支持 wav/mp3，其余归 wav） */
 function audioInputFormat(mediaType: string): 'wav' | 'mp3' {
@@ -394,7 +395,7 @@ export class OpenAICompatibleProvider implements Provider {
       }
     }
 
-    return result;
+    return dropOrphanToolMessages(result);
   }
 
   private convertTools(tools: ToolDefinition[]): OpenAI.ChatCompletionTool[] {

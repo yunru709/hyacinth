@@ -14,6 +14,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { dropOrphanToolMessages } from './message-sanitize.js';
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {
   /** 必须提供 apiKey，或通过 OPENAI_API_KEY 环境变量自动读取 */
@@ -326,7 +327,7 @@ export class OpenAIProvider implements Provider {
       }
     }
 
-    return result;
+    return dropOrphanToolMessages(result);
   }
 
   /** 将内部 ToolDefinition[] 转换为 OpenAI ChatCompletionTool[] */

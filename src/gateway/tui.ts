@@ -752,8 +752,9 @@ export async function runTui(
       case UI_EVENT.MESSAGE_FLUSH: tuiHandler.onFlush?.(); break;
       case UI_EVENT.MESSAGE_INTERRUPT: tuiHandler.onInterrupt?.(); break;
       case UI_EVENT.MESSAGE_TURN_INFO: {
-        // 协议层 payload = 完整 TurnInfo（loop.getTurnInfo 含 cache 字段），
-        // 直接透传以保留 cacheHitRate/cacheHistory（上下文缓存命中率显示）。
+        // 协议层 payload = 完整 TurnInfo（loop.getTurnInfo 含 cache/token 字段），
+        // 直接透传以保留 cacheHitRate/cacheHistory（上下文缓存命中率显示）
+        // 和 totalInputTokens/totalOutputTokens（会话累计 token 总量显示）。
         const info = p as unknown as TurnInfo;
         lastTurnCount = Number(info.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(info.tokensUsed ?? lastTokensUsed);
@@ -768,6 +769,8 @@ export async function runTui(
           cacheMissTokens: info.cacheMissTokens,
           cacheHitRate: info.cacheHitRate,
           cacheHistory: info.cacheHistory,
+          totalInputTokens: info.totalInputTokens,
+          totalOutputTokens: info.totalOutputTokens,
         });
         break;
       }
@@ -1320,7 +1323,10 @@ export async function runTui(
               // （如 model/online/<p>/<m>）在 registry 静态 children 链上查不到
               const leafDef = result.command;
               if (leafDef?.args && !leafDef.children && !leafDef.childrenProvider) {
-                editor.setText(`/${result.path} `);
+                // 只把**第一段**斜杠换成空格（`session/<id>/load` → `/session <id>/load `）：
+                // 斜杠全保留的旧写法（`/session/<id>/load `）无法被命令解析器识别，
+                // 回车后既切不了会话，还会把整串当普通消息发给模型。
+                editor.setText(`/${result.path.replace('/', ' ')} `);
                 updateTokenEstimate();
                 return;
               }
@@ -1334,15 +1340,53 @@ export async function runTui(
         const subSpaceIdx = args.indexOf(' ');
         const subCmdName = subSpaceIdx > 0 ? args.slice(0, subSpaceIdx) : args;
         const subArgs = subSpaceIdx > 0 ? args.slice(subSpaceIdx + 1) : '';
-        const subCmd = cmdDef?.children?.find(
-          (c: { name: string }) => c.name.toLowerCase() === subCmdName.toLowerCase(),
-        );
-        if (subCmd) {
-          handleSlashSubCommand(`${cmdName}/${subCmd.name}`, subArgs);
+
+        // 子命令候选集：静态 children 优先；没有静态子树时再展开 childrenProvider。
+        // 会话 ID 这类**动态子命令**只存在于 childrenProvider 里，静态链上永远查不到 ——
+        // 旧实现只查 cmdDef.children，导致 `/session <id>/load`（session list 里教用户
+        // 的写法、二级面板选出来的路径）一律报 Unknown sub-command。
+        let subCmds: SlashCommandDef[] = cmdDef?.children ?? [];
+        if (subCmds.length === 0 && cmdDef?.childrenProvider) {
+          try {
+            subCmds = await cmdDef.childrenProvider();
+          } catch {
+            subCmds = [];
+          }
+        }
+
+        // 逐段下钻，支持多级路径：`/session <id>/load`（两段）与 `/model switch`（单段）
+        const segs = subCmdName.split('/').filter(Boolean);
+        const pathSegs: string[] = [];
+        let node: SlashCommandDef | undefined;
+        for (const seg of segs) {
+          const pool = node ? (node.children ?? []) : subCmds;
+          const next = pool.find((c: { name: string }) => c.name.toLowerCase() === seg.toLowerCase());
+          if (!next) break;
+          node = next;
+          pathSegs.push(next.name);
+        }
+
+        if (node && pathSegs.length === segs.length) {
+          // 命中的节点仍有子树时，允许把「参数首段」当作下一级
+          // （`/session <id> load` 等价于 `/session <id>/load`）
+          let restArgs = subArgs;
+          if (node.children?.length && restArgs) {
+            const sp = restArgs.indexOf(' ');
+            const head = sp > 0 ? restArgs.slice(0, sp) : restArgs;
+            const child = node.children.find(
+              (c: { name: string }) => c.name.toLowerCase() === head.toLowerCase(),
+            );
+            if (child) {
+              node = child;
+              pathSegs.push(child.name);
+              restArgs = sp > 0 ? restArgs.slice(sp + 1) : '';
+            }
+          }
+          handleSlashSubCommand(`${cmdName}/${pathSegs.join('/')}`, restArgs);
           return;
         }
 
-        const childNames = (cmdDef?.children ?? []).map((c: { name: string }) => c.name).join(', ');
+        const childNames = subCmds.map((c: { name: string }) => c.name).join(', ');
         chatLog.addSystem(
           theme.warning(`Unknown sub-command: /${cmdName} ${subCmdName}`) +
             theme.dim(`\nAvailable: /${cmdName} ${childNames}`),

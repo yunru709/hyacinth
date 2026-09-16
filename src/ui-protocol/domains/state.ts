@@ -135,6 +135,8 @@ export function buildStateSnapshot(
     cacheMissTokens: info.cacheMissTokens,
     cacheHitRate: info.cacheHitRate,
     cacheHistory: info.cacheHistory,
+    totalInputTokens: info.totalInputTokens,
+    totalOutputTokens: info.totalOutputTokens,
     updatedAt: new Date().toISOString(),
   };
 }
