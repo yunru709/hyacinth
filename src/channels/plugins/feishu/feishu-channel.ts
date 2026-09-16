@@ -12,6 +12,8 @@
 //   5. stop() → 断开 WebSocket 连接
 // ============================================================
 
+import os from 'node:os';
+
 /**
  * 飞书渠道 sessionId 前缀（**插件自管**：常量定义在插件内，核心不反向依赖插件）。
  * 由 feishuChannelPlugin.autoRegister 开头无条件登记 —— 该钩子与 enabled 无关，
@@ -105,7 +107,8 @@ export class FeishuChannel implements ChannelHandler {
   private lastUsedSessionId: string | null = null;
 
   // chatId 持久化（重启后无需等待用户先发消息即可主动推送）
-  private persistChatIdFile = path.join(process.cwd(), '.agent', 'feishu_chat.json');
+  // 家目录（与其余 ~/.agent 配置一致）：渠道状态不应跟 process.cwd() 走
+  private persistChatIdFile = path.join(os.homedir(), '.agent', 'feishu_chat.json');
 
   // tuiSync 回调（由 start() 的 config 注入）
   private onUserMessage: ((label: string, content: string) => void) | null = null;

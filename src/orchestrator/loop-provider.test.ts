@@ -129,3 +129,51 @@ describe('subscribeConfig — routeMode 电平触发（重启后持久化选择�
     expect(router.getRoutingInfo().mode).toBe('auto');
   });
 });
+
+/**
+ * 守卫（2026-09-17）：配置驱动的自动切换失败时，必须把底层错误原因带进状态栏。
+ *
+ * 背景：旧实现 `.catch(() => { ... })` 丢弃 err，只报
+ * `Config changed provider to "X" but switch failed`。用户实际遇到的是
+ * 「config 里 provider.active = openai，但环境没有 OPENAI_API_KEY」→
+ * tryCreateProviderFromConfig 返回 undefined → switchProvider 抛
+ * `Provider "openai" not found`，而这句话在旧实现里被吞掉，导致只能靠翻源码定位。
+ */
+describe('subscribeConfig — 切换失败必须带出真实原因（不再吞 err.message）', () => {
+  it('provider.active 变更触发切换失败 → onStatus 文案包含底层 message', async () => {
+    const router = new ProviderRouter();
+    router.register('main', fakeProvider('volcengine'));
+    const cc = fakeConfigCenter({
+      'provider.routeMode': 'auto',
+      'provider.active': 'volcengine',
+      'provider.openai.model': 'gpt-5.5',
+    });
+
+    const calls: string[] = [];
+    const deps: ProviderDeps = {
+      ...makeDeps(router, cc),
+      outputHandler: {
+        onStatus: (message: string, level?: string) => {
+          calls.push(`${level ?? 'info'}:${message}`);
+        },
+      } as ProviderDeps['outputHandler'],
+    };
+
+    subscribeConfig(deps, {
+      ...hooks,
+      switchProvider: async () => {
+        throw new Error('Provider "openai" not found. Available in router: main.');
+      },
+    });
+
+    // 当前 provider 类型是 volcengine，故 'openai' 不会被同类型守卫挡掉
+    cc._emit('provider.active', 'openai');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('error:');
+    expect(calls[0]).toContain('Config changed provider to "openai" but switch failed');
+    // 核心回归：真实原因（缺 key → Provider not found）必须在文案里
+    expect(calls[0]).toContain('Provider "openai" not found');
+  });
+});

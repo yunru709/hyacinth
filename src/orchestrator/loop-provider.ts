@@ -364,6 +364,15 @@ export function subscribeConfig(
   const { providerRouter, configCenter, outputHandler } = deps;
   if (!configCenter) return;
 
+  /**
+   * 把 catch 到的 err 归一成可读后缀。
+   * 只报「switch failed」会丢掉真实原因——最常见的两种是「该厂商 apiKeyEnv 未配置」
+   * （tryCreateProviderFromConfig 返回 undefined → switchProvider 抛
+   * `Provider "X" not found`）与「provider.<name> 配置段缺失」。带出 message
+   * 才能让用户直接看懂该去配 key 还是改 active。
+   */
+  const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
   // provider.active 变更 → 自动切换 provider
   configCenter.watch('provider.active', (event) => {
     const name = event.newValue as string;
@@ -375,8 +384,11 @@ export function subscribeConfig(
     // 会从 configCenter 的 provider.<name> 段 tryCreateProviderFromConfig 创建
     // 并 register。旧实现用 `providerRouter.get(name)` 做守卫——类型名（volcengine
     // /deepseek…）初始未注册（router 只有 main/local），导致「改 active 但首选不跟随」。
-    hooks.switchProvider(name, configCenter.get<string>(`provider.${name}.model`)).catch(() => {
-      outputHandler?.onStatus?.(`Config changed provider to "${name}" but switch failed`, 'error');
+    hooks.switchProvider(name, configCenter.get<string>(`provider.${name}.model`)).catch((err) => {
+      outputHandler?.onStatus?.(
+        `Config changed provider to "${name}" but switch failed: ${errText(err)}`,
+        'error',
+      );
     });
   });
 
@@ -408,15 +420,19 @@ export function subscribeConfig(
     const created = tryCreateProviderFromConfig(deps, activeName, newModel);
     if (!created) {
       outputHandler?.onStatus?.(
-        `Config changed model for "${activeName}" but provider rebuild failed`,
+        `Config changed model for "${activeName}" but provider rebuild failed: ` +
+          `config section "provider.${activeName}" is missing or has no resolvable API key (apiKeyEnv)`,
         'error',
       );
       return;
     }
     providerRouter.register(activeName, created);
 
-    hooks.switchProvider(activeName, newModel).catch(() => {
-      outputHandler?.onStatus?.(`Config changed model for "${activeName}" but switch failed`, 'error');
+    hooks.switchProvider(activeName, newModel).catch((err) => {
+      outputHandler?.onStatus?.(
+        `Config changed model for "${activeName}" but switch failed: ${errText(err)}`,
+        'error',
+      );
     });
   });
 

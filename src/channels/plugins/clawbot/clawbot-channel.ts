@@ -21,6 +21,8 @@
 //   5. stop() → 停止长轮询 → 清理资源
 // ============================================================
 
+import os from 'node:os';
+
 /**
  * 微信 ClawBot 渠道 sessionId 前缀（**插件自管**）。
  *
@@ -132,7 +134,8 @@ export class ClawbotChannel implements ChannelHandler {
   private onAgentReply: ((content: string) => void) | null = null;
 
   // ── Session 持久化 ───────────────────────────────────────────
-  private persistSessionFile = path.join(process.cwd(), '.agent', 'clawbot_session.json');
+  // 家目录（与其余 ~/.agent 配置一致）：不跟 process.cwd() 走，否则换启动目录即失联
+  private persistSessionFile = path.join(os.homedir(), '.agent', 'clawbot_session.json');
 
   // ── 定时器 ───────────────────────────────────────────────────
   /** 每日 token 过期检查定时器 */

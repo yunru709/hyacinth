@@ -38,8 +38,12 @@ const QR_MAX_POLL_MS = 3 * 60 * 1000;
 
 // ── 持久化文件 ────────────────────────────────────────────────
 
+// 凭证路径必须落在**家目录**（与其余 103 处 ~/.agent 配置一致）。
+// 历史实现用 process.cwd()：换个启动目录就读不到 token → 每次重启都要重新扫码。
+import os from 'node:os';
+
 function getTokenFilePath(): string {
-  return path.join(process.cwd(), '.agent', 'clawbot_token.json');
+  return path.join(os.homedir(), '.agent', 'clawbot_token.json');
 }
 
 interface TokenCache {
