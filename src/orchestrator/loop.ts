@@ -1143,9 +1143,13 @@ export class AgentLoop {
 
         // ── 迭代级上下文占用推送（UI 即时刷新进度条，无需等整轮结束） ──
         // 与回合级 MESSAGE_TURN_INFO 语义区分：本事件不表示回合结束。
+        // 必带会话累计 token 总量：本事件比 turn_info 频繁（每轮迭代都发），
+        // 若不带这两个字段，UI 侧后发的刷新会把刚渲染的总量覆盖掉（表现"时有时无"）。
         this.emitUiEvent(UI_EVENT.MESSAGE_CONTEXT_UPDATE, {
           turnCount: this.turnNumber,
           tokensUsed: this.lastContextTokens,
+          totalInputTokens: this.totalInputTokens,
+          totalOutputTokens: this.totalOutputTokens,
         });
 
         // ── 异步子Agent 结果回合内注入 ─────────────────────────

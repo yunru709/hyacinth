@@ -249,10 +249,23 @@ export async function runTui(
   let pendingTaskLocal: string | null = null;
   let isThinking = false;
 
+  /**
+   * 会话累计输入/输出 token 总量（粘性缓存）。
+   *
+   * loop 只在 turn_info 路径透传这两个字段，而 MESSAGE_CONTEXT_UPDATE（每轮迭代都发，
+   * 比 turn_info 频繁）、压缩后刷新、启动初始渲染等 refreshStatus 调用点都只更新上下文
+   * 占用、不带总量。若照入参直接覆盖，后发的刷新会把刚渲染的 ↑/↓ 抹掉 —— 表现为
+   * "时有时无 / 看不到"。这两个值在进程生命周期内单调不减，缺失时沿用上次已知值是对的。
+   */
+  let lastTotalInputTokens = 0;
+  let lastTotalOutputTokens = 0;
+
   function refreshStatus(info: TurnInfo): void {
     // ── Track last known values for /provider handler ──
     lastTurnCount = info.turnCount;
     lastTokensUsed = info.tokensUsed;
+    if (typeof info.totalInputTokens === 'number') lastTotalInputTokens = info.totalInputTokens;
+    if (typeof info.totalOutputTokens === 'number') lastTotalOutputTokens = info.totalOutputTokens;
 
     // ── Read live config (overrides startup defaults) ──
     const liveCfg = RuntimeConfigCenter.getInstance();
@@ -262,6 +275,9 @@ export async function runTui(
     const activeInfo: TurnInfo = {
       ...info,
       maxTurns: liveMaxTurns,
+      // 缺失时补上粘性缓存值：任何刷新路径都不会把 token 总量抹掉
+      totalInputTokens: lastTotalInputTokens,
+      totalOutputTokens: lastTotalOutputTokens,
     };
 
     // Compaction detection
@@ -776,10 +792,21 @@ export async function runTui(
       }
       case UI_EVENT.MESSAGE_CONTEXT_UPDATE: {
         // 迭代级上下文占用推送：即时刷新进度条，不表示回合结束（无 busy/streaming 副作用）
-        const ctx = p as { turnCount?: number; tokensUsed?: number };
+        // 该事件每轮迭代都发、比 turn_info 频繁，payload 必须带总量，否则会把已经渲染出来的
+        // ↑/↓ 抹掉（refreshStatus 虽然做了粘性兜底，这里仍如实透传，保持数据通路一致）。
+        const ctx = p as { turnCount?: number; tokensUsed?: number; totalInputTokens?: number; totalOutputTokens?: number };
         lastTurnCount = Number(ctx.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(ctx.tokensUsed ?? lastTokensUsed);
-        refreshStatus({ turnCount: lastTurnCount, maxTurns, tokensUsed: lastTokensUsed, maxContextTokens: maxContext, sessionId: '', compressCount: 0 });
+        refreshStatus({
+          turnCount: lastTurnCount,
+          maxTurns,
+          tokensUsed: lastTokensUsed,
+          maxContextTokens: maxContext,
+          sessionId: '',
+          compressCount: 0,
+          totalInputTokens: ctx.totalInputTokens,
+          totalOutputTokens: ctx.totalOutputTokens,
+        });
         break;
       }
       case UI_EVENT.PERMISSION_REQUEST: {
