@@ -243,3 +243,55 @@ describe('反硬编码守卫：核心不得按渠道名路由', () => {
     expect(src).toContain('registerChannelPrefixes(`${cliChannel}_`, cliChannel)');
   });
 });
+
+describe('陪伴模式推送目标：按能力选（历史写死 feishu）', () => {
+  it('陪伴任务 → 本地 loop 跑一轮，把输出推给**按能力选中的**持久渠道', async () => {
+    // 模式隔离检查（isCompanionModeActive）为模块级全局，测试期间临时置位并在 finally 复位。
+    // 用动态 import 取值，避免为一行 import 再改文件头部。
+    const { setCompanionModeActive } = await import('../context/profiles.js');
+    setCompanionModeActive(true);
+    try {
+      const loop: Any = {
+        // 被 installSchedulerHandler 包成 dualHandler 后，onText 的输出会被收集为待推送文本
+        outputHandler: { onText: () => {} },
+        notifyTaskFired: async () => {
+          loop.outputHandler.onText('陪伴回复内容');
+        },
+        sessionDir: path.join(os.tmpdir(), 'sessions', 'tui_companion'),
+      };
+
+      const { resolveChannelLoop, registries } = setupChannelRegistries(loop, 'tui', makeConfigCenter());
+
+      // 两个持久渠道，仅记录"谁收到了主动推送"
+      const pushes: Array<{ channel: string; args: unknown[] }> = [];
+      const registry = (globalThis as Any).__channelLoopRegistry as Map<string, ChannelLoopEntry>;
+      for (const [name, priority] of [['clawbot', 5], ['feishu', 10]] as const) {
+        registry.set(name, {
+          notifyTaskFired: async () => {},
+          sendProactiveMessage: async (...args: unknown[]) => {
+            pushes.push({ channel: name, args });
+          },
+          capabilities: { persistent: true, fallbackPriority: priority },
+        });
+      }
+
+      const { scheduler, fire } = makeScheduler();
+      installSchedulerHandler({
+        heartbeatScheduler: scheduler,
+        loop,
+        channelLoops: registries.channelLoops,
+        resolveChannelLoop,
+        configCenter: makeConfigCenter(),
+      } as Any);
+
+      await fire({ name: 'C1', mode: 'companion', action: { type: 'agent', target: 'x' } });
+
+      // 推送目标是能力选出的优先级最高持久渠道（feishu 10 > clawbot 5），而非写死的渠道名
+      expect(pushes).toHaveLength(1);
+      expect(pushes[0].channel).toBe('feishu');
+      expect(pushes[0].args[1]).toBe('陪伴回复内容');
+    } finally {
+      setCompanionModeActive(false);
+    }
+  });
+});

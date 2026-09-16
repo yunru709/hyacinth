@@ -14,6 +14,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages } from './message-sanitize.js';
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {
@@ -153,12 +154,15 @@ export class OpenAIProvider implements Provider {
 
         // ---- 处理 usage（最后一个 chunk） ----
         if (chunk.usage) {
+          // 缓存字段按厂商候选名探测（见 usage-cache.ts；历史只认 DeepSeek 官方字段名
+          // → 其他厂商一律 Cache: n/a）
+          const cache = extractCacheUsage(chunk.usage, chunk.usage.prompt_tokens);
           yield {
             type: 'USAGE',
             input_tokens: chunk.usage.prompt_tokens,
             output_tokens: chunk.usage.completion_tokens,
-            cache_hit_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_hit_tokens as number | undefined,
-            cache_miss_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_miss_tokens as number | undefined,
+            cache_hit_tokens: cache?.hit,
+            cache_miss_tokens: cache?.miss,
           };
         }
 

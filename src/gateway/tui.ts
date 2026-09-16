@@ -316,19 +316,22 @@ export async function runTui(
       updateHeaderText(statusContent);
     }
     let ctxBar = formatContextBar(info.tokensUsed, liveMaxContext);
-    // 优先使用最新轮次的缓存命中率，否则从累计值计算
-    const hitRate = info.cacheHitRate != null
-      ? info.cacheHitRate.toFixed(1)
-      : (info.cacheHitTokens != null && info.cacheMissTokens != null)
-        ? (() => { const t = info.cacheHitTokens + info.cacheMissTokens; return t > 0 ? (info.cacheHitTokens / t * 100).toFixed(1) : null; })()
-        : null;
-    if (hitRate != null) {
-      ctxBar += theme.dim(` | Cache: ${hitRate}%`);
-      if (info.cacheHistory && info.cacheHistory.length > 1) {
-        ctxBar += theme.dim(` (${info.cacheHistory.length}t)`);
-      }
+    // 命中率显示口径：**优先会话级加权平均**（回答"缓存到底省了多少"），
+    // 无轮次历史时退化为"最近一轮"，两者都拿不到才算 n/a。
+    // 平均值依赖轮次历史 —— llm 阶段现在始终记录（不再受 logging.logCacheHits 开关控制）。
+    const avgRate = info.cacheHitRateAvg;
+    const lastRate = info.cacheHitRate;
+    const cumulativeRate = (info.cacheHitTokens != null && info.cacheMissTokens != null)
+      ? (() => { const t = info.cacheHitTokens + info.cacheMissTokens; return t > 0 ? (info.cacheHitTokens / t * 100) : null; })()
+      : null;
+    const shownRate = avgRate ?? lastRate ?? cumulativeRate;
+    if (shownRate != null) {
+      const label = avgRate != null ? ' avg' : lastRate != null ? ' last' : '';
+      ctxBar += theme.dim(` | Cache: ${shownRate.toFixed(1)}%${label}`);
+      const turns = info.cacheHistory?.length ?? 0;
+      if (turns > 1) ctxBar += theme.dim(` (${turns}t)`);
     } else {
-      // 数据源（厂商）不返回缓存命中字段（如火山方舟）→ 占位提醒，而非空白
+      // 厂商不返回缓存字段（如火山方舟）或本会话尚无带缓存信息的轮次 → 占位提醒，而非空白
       ctxBar += theme.dim(' | Cache: n/a');
     }
     // 会话累计输入/输出 token 总量（有 usage 字段的 provider 才显示，避免零值噪音）
@@ -703,20 +706,13 @@ export async function runTui(
     if (snap.model) modelName = snap.model;
     void refreshBgCountFromProtocol();
     void refreshPendingTaskFromProtocol();
+    // **整体透传**快照，而不是逐字段白名单 —— 后者每加一个字段都要手工补一处，
+    // 漏补即 UI 静默缺失（历史事故：会话累计 token 总量、命中率平均值都曾如此）。
     refreshStatus({
+      ...(snap as unknown as TurnInfo),
       turnCount: snap.turnCount,
       tokensUsed: snap.tokensUsed,
-      maxTurns: snap.maxTurns,
-      maxContextTokens: snap.maxContextTokens,
-      compressCount: snap.compressCount,
-      sessionId: snap.sessionId,
-      cacheHitTokens: snap.cacheHitTokens,
-      cacheMissTokens: snap.cacheMissTokens,
-      cacheHitRate: snap.cacheHitRate,
-      cacheHistory: snap.cacheHistory,
-      totalInputTokens: snap.totalInputTokens,
-      totalOutputTokens: snap.totalOutputTokens,
-    } as TurnInfo);
+    });
     // 返回快照：切换类命令据此校验实际生效值（后端可能降级/重建失败）
     return snap;
   }
@@ -768,25 +764,19 @@ export async function runTui(
       case UI_EVENT.MESSAGE_FLUSH: tuiHandler.onFlush?.(); break;
       case UI_EVENT.MESSAGE_INTERRUPT: tuiHandler.onInterrupt?.(); break;
       case UI_EVENT.MESSAGE_TURN_INFO: {
-        // 协议层 payload = 完整 TurnInfo（loop.getTurnInfo 含 cache/token 字段），
-        // 直接透传以保留 cacheHitRate/cacheHistory（上下文缓存命中率显示）
-        // 和 totalInputTokens/totalOutputTokens（会话累计 token 总量显示）。
+        // 协议层 payload 就是完整 TurnInfo（loop.getTurnInfo）—— **整体透传**而非逐字段白名单：
+        // 白名单每加一个字段都要手工补一处，漏补即 UI 静默缺失（历史事故：会话累计 token 总量、
+        // 命中率平均值都曾如此）。这里只覆盖 4 个"本地跟踪/占位"字段。
         const info = p as unknown as TurnInfo;
         lastTurnCount = Number(info.turnCount ?? lastTurnCount);
         lastTokensUsed = Number(info.tokensUsed ?? lastTokensUsed);
         refreshStatus({
+          ...info,
           turnCount: lastTurnCount,
-          maxTurns,
           tokensUsed: lastTokensUsed,
           maxContextTokens: maxContext,
           sessionId: '',
           compressCount: 0,
-          cacheHitTokens: info.cacheHitTokens,
-          cacheMissTokens: info.cacheMissTokens,
-          cacheHitRate: info.cacheHitRate,
-          cacheHistory: info.cacheHistory,
-          totalInputTokens: info.totalInputTokens,
-          totalOutputTokens: info.totalOutputTokens,
         });
         break;
       }

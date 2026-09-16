@@ -9,6 +9,7 @@ import type { Provider, ProviderCapabilities } from './interface.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages } from './message-sanitize.js';
 
 /** LocalProvider 构造选项 */
@@ -112,12 +113,14 @@ export class LocalProvider implements Provider {
 
         // usage — 部分本地推理服务不输出，可选
         if (chunk.usage) {
+          // 缓存字段按厂商候选名探测（见 usage-cache.ts）
+          const cache = extractCacheUsage(chunk.usage, chunk.usage.prompt_tokens);
           yield {
             type: 'USAGE',
             input_tokens: chunk.usage.prompt_tokens ?? 0,
             output_tokens: chunk.usage.completion_tokens ?? 0,
-            cache_hit_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_hit_tokens as number | undefined,
-            cache_miss_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_miss_tokens as number | undefined,
+            cache_hit_tokens: cache?.hit,
+            cache_miss_tokens: cache?.miss,
           };
         }
 

@@ -35,6 +35,8 @@ export interface TurnInfoLike {
   cacheHitTokens?: number;
   cacheMissTokens?: number;
   cacheHitRate?: number;
+  /** 会话级缓存命中率加权平均（0-100） */
+  cacheHitRateAvg?: number;
   cacheHistory?: CacheStats[];
   /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
   totalInputTokens?: number;
@@ -134,6 +136,7 @@ export function buildStateSnapshot(
     cacheHitTokens: info.cacheHitTokens,
     cacheMissTokens: info.cacheMissTokens,
     cacheHitRate: info.cacheHitRate,
+    cacheHitRateAvg: info.cacheHitRateAvg,
     cacheHistory: info.cacheHistory,
     totalInputTokens: info.totalInputTokens,
     totalOutputTokens: info.totalOutputTokens,

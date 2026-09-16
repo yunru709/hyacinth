@@ -37,6 +37,7 @@ import { removeLastRoundFromJsonl, cleanCompanionJsonl, removeTriggerFromJsonl }
 import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
 import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
+import { averageHitRate } from './cache-rate.js';
 import { Pipeline, type SlotSpec } from '../kernel/pipeline.js';
 import { createKernel, DEFAULT_PIPELINE_SLOTS, type KernelComponents } from './create-kernel.js';
 import { StageServiceMap, StageServiceKey, KernelStageContext } from './stage-services.js';
@@ -118,6 +119,13 @@ export interface TurnInfo {
   cacheHitRate?: number;
   /** 所有轮次的缓存记录（用于分析缓存稳定性） */
   cacheHistory?: CacheTurnRecord[];
+  /**
+   * 会话级缓存命中率**平均值**（按 token 量加权，0-100）。
+   *
+   * 与 `cacheHitRate`（仅最近一轮、噪声大）互补：判断"缓存到底省了多少"应看平均值。
+   * 无轮次历史 / 厂商不返回缓存字段时为 undefined。
+   */
+  cacheHitRateAvg?: number;
   /** 会话累计输入 token 总量（无 usage 字段的 provider 为 undefined） */
   totalInputTokens?: number;
   /** 会话累计输出 token 总量（无 usage 字段的 provider 为 undefined） */
@@ -673,7 +681,9 @@ export class AgentLoop {
       ).length;
     }
     const hasCache = this.cacheHitTokens > 0 || this.cacheMissTokens > 0;
-    // Latest turn cache hit rate
+    // 命中率两个口径并存：
+    //   cacheHitRate    —— 最近一轮（噪声大，用于诊断"刚发生了什么"）
+    //   cacheHitRateAvg —— 会话级 token 加权平均（UI 主显示，回答"缓存到底省了多少"）
     const latestTurn = this.cacheTurns.at(-1);
     return {
       turnCount,
@@ -687,6 +697,7 @@ export class AgentLoop {
       cacheHitTokens: hasCache ? this.cacheHitTokens : undefined,
       cacheMissTokens: hasCache ? this.cacheMissTokens : undefined,
       cacheHitRate: latestTurn ? Math.round(latestTurn.hitRate * 10) / 10 : undefined,
+      cacheHitRateAvg: averageHitRate(this.cacheTurns),
       cacheHistory: this.cacheTurns.length > 0 ? [...this.cacheTurns] : undefined,
       totalInputTokens: this.totalInputTokens,
       totalOutputTokens: this.totalOutputTokens,

@@ -14,6 +14,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
+import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages } from './message-sanitize.js';
 
 /** media_type → OpenAI input_audio format（仅支持 wav/mp3，其余归 wav） */
@@ -189,17 +190,18 @@ export class OpenAICompatibleProvider implements Provider {
 
         // usage
         if (chunk.usage) {
-          // TODO(缓存字段兼容): 此处仅读取 DeepSeek 官方 API 字段名
-          // prompt_cache_hit_tokens / prompt_cache_miss_tokens。其他 OpenAI 兼容
-          // 厂商（如火山方舟 volcengine）在 usage 中不返回这两个字段，缓存命中率
-          // 会整体缺失（TUI 显示 Cache: n/a）。后续需按厂商探测更多候选字段名
-          // （如 cached_tokens、cache_read_input_tokens 等）以扩展兼容性。
+          // 缓存字段**按厂商候选名探测**（DeepSeek 官方 prompt_cache_hit_tokens/miss、
+          // OpenAI 系 prompt_tokens_details.cached_tokens、以及兼容层里复用的
+          // cached_tokens / cache_read_input_tokens）。
+          // 历史实现只认 DeepSeek 官方字段名，其他厂商一律取不到 → 全链路 hit/miss 为
+          // undefined → TUI 长期显示 `Cache: n/a`。
+          const cache = extractCacheUsage(chunk.usage, chunk.usage.prompt_tokens);
           yield {
             type: 'USAGE',
             input_tokens: chunk.usage.prompt_tokens,
             output_tokens: chunk.usage.completion_tokens,
-            cache_hit_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_hit_tokens as number | undefined,
-            cache_miss_tokens: (chunk.usage as unknown as Record<string, unknown>).prompt_cache_miss_tokens as number | undefined,
+            cache_hit_tokens: cache?.hit,
+            cache_miss_tokens: cache?.miss,
           };
         }
 

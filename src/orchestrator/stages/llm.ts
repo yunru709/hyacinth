@@ -30,6 +30,15 @@ import type { TurnState, CacheStats, CacheTurnRecord } from '../turn-state.js';
 
 export const LLM_STAGE_ID = 'builtin:provider-stream';
 
+/**
+ * 逐轮缓存记录的环形上限。
+ *
+ * 命中率平均值与 `(Nt)` 轮次计数依赖轮次历史（`cacheStats.turns`）。该历史现在**始终记录**
+ * （不再受 `logging.logCacheHits` 开关控制，见 onUsage 处注释），因此需要一个上限避免超长
+ * 会话内存无界增长：只保留最近 200 轮。200 轮足以让平均值稳定，且每轮记录仅一个小对象。
+ */
+export const CACHE_TURNS_MAX = 200;
+
 export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
   return {
     id: LLM_STAGE_ID,
@@ -139,20 +148,27 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
           cacheStats.hitTokens = effectiveHit;
           cacheStats.missTokens = effectiveMiss;
 
-          if (cacheStats.logHits) {
-            const total = effectiveHit + effectiveMiss;
-            const hitRate = total > 0 ? (effectiveHit / total) * 100 : 0;
+          // 逐轮缓存记录**始终记录**（与日志开关解耦）：
+          //   1) 命中率平均值需要轮次历史，否则 UI 只能看到"最近一轮"（噪声大）；
+          //   2) UI 的 `(Nt)` 轮次计数同样依赖它；
+          //   3) 记录体积极小（每轮一个对象），因此用环形上限控制，而不是用开关一刀切。
+          // `logging.logCacheHits` 保留其**日志/落盘**语义（见下方 stats 记账处的 gate），
+          // 不再作为历史记录的门 —— 历史上它默认为 false，导致 (Nt) 与平均值全程不可用。
+          const total = effectiveHit + effectiveMiss;
+          const hitRate = total > 0 ? (effectiveHit / total) * 100 : 0;
 
-            const record: CacheTurnRecord = {
-              turn: state.turn,
-              timestamp: new Date().toISOString(),
-              inputTokens,
-              outputTokens,
-              hitTokens: effectiveHit,
-              missTokens: effectiveMiss,
-              hitRate: Math.round(hitRate * 100) / 100,
-            };
-            cacheStats.turns.push(record);
+          const record: CacheTurnRecord = {
+            turn: state.turn,
+            timestamp: new Date().toISOString(),
+            inputTokens,
+            outputTokens,
+            hitTokens: effectiveHit,
+            missTokens: effectiveMiss,
+            hitRate: Math.round(hitRate * 100) / 100,
+          };
+          cacheStats.turns.push(record);
+          if (cacheStats.turns.length > CACHE_TURNS_MAX) {
+            cacheStats.turns.splice(0, cacheStats.turns.length - CACHE_TURNS_MAX);
           }
         }
       };
