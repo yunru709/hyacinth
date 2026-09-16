@@ -195,6 +195,45 @@ describe('ResilientProvider', () => {
       expect(r.getCircuitState()).toBe('closed');
     });
   });
+
+  describe('idle timeout（流挂起不无限等待）', () => {
+    it('底层流无事件超时 → 抛可重试错误（不依赖底层响应 abort）', async () => {
+      // 挂起流：yield 一个事件后永久挂起（模拟网络半开：连接建立但不再推数据）
+      const hangProvider: Provider = {
+        getProviderType: () => 'anthropic',
+        getModel: () => 'claude-hang',
+        createStream: vi.fn(async function* () {
+          yield { type: 'TEXT' as const, content: 'start' };
+          await new Promise(() => {}); // 永不 resolve
+        }),
+      };
+      // idleTimeoutMs=50ms：很快触发空闲超时
+      const r = new ResilientProvider(hangProvider, undefined, {
+        failureThreshold: 100,
+        cooldownMs: 0,
+        idleTimeoutMs: 50,
+      });
+      const events: StreamEvent[] = [];
+      // 已 yield 过 → 空闲超时后 hasYielded=true → 直接抛错（不重试）
+      await expect(async () => {
+        for await (const ev of r.createStream([msg])) {
+          events.push(ev);
+        }
+      }).rejects.toThrow(/idle timeout/);
+      expect(events.length).toBeGreaterThanOrEqual(1); // 收到过 start
+    });
+
+    it('idleTimeoutMs=0 禁用 → 正常流走完不抛空闲超时错误', async () => {
+      const okProvider = createMockProvider(); // 正常 success 流
+      const r = new ResilientProvider(okProvider, { maxRetries: 0 }, {
+        failureThreshold: 100,
+        cooldownMs: 0,
+        idleTimeoutMs: 0, // 禁用
+      });
+      const events = await collectStream(r, [msg]);
+      expect(events).toHaveLength(2); // TEXT + STOP，正常完成
+    });
+  });
 });
 
 // ── FallbackProviderChain Tests ───────────────────────────────────
