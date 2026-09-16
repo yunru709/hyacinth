@@ -306,8 +306,19 @@ export class SessionManager {
    */
   async getLatestByChannel(channel: string): Promise<Session | null> {
     const sessions = await this.list();
-    // list() 已按 createdAt 降序，取第一个匹配渠道的即为该渠道最近 session
-    return sessions.find((s) => s.channel === channel) ?? null;
+    // list() 已按 createdAt 降序，第一个匹配的即该渠道最近 session。
+    // 判据三重（②③ 为兜底，专治「meta.json 缺 channel 的存量会话」）：
+    //   ① meta.channel 精确匹配
+    //   ② ID 前缀反解（注册表，能识别 webui_/ui_ 这类一渠道多前缀）
+    //   ③ ID 前缀字面量 `<channel>_`
+    // 需要 ②③ 的原因：channel 是后加的字段，2026-09-17 之前由 UI 入口创建的
+    // webui_*/ui_* 会话 meta 里没有它（当时前缀未登记、反解失败）。只认 ① 会让
+    // 这些会话**永远**恢复不到 ⇒ 每次重启都新开一个会话。
+    return sessions.find((s) =>
+      s.channel === channel
+      || resolveChannelFromSessionId(s.id) === channel
+      || s.id.startsWith(`${channel}_`),
+    ) ?? null;
   }
 
   /**

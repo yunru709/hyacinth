@@ -859,6 +859,11 @@ export async function runTui(
     // kb / process / orchestrator 域依赖 agent 组件（initialize 后才就绪）：可变引用延迟解析
     const uiSession = new UiProtocolSession(protocolServer, sessionId ?? 'tui', {
       cwd: process.cwd(),
+      // TUI 本地模式的会话归属渠道恒为 'tui'：不能沿用 ui-protocol 的 'webui' 缺省，
+      // 否则 TUI 会话被贴成 webui_ 前缀（标签漂移）→ 重启快照键（'webui'）与 cli.ts 的
+      // launchChannel（'tui'）对不上、前缀反解也失败（meta.channel 缺失）
+      // → TUI 恢复不到自己的会话（2026-09-17 跨渠道串台事故）。
+      channel: 'tui',
       configCenter: RuntimeConfigCenter.getInstance() as unknown as UiProtocolSessionBackend['configCenter'],
       sessionStore: sessionManager,
       registry,

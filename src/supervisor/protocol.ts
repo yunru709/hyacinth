@@ -137,6 +137,106 @@ export function readRestartReason(): RestartReason | null {
 
 // ─── 会话快照 ───────────────────────────────────────────────────────
 
+// ─── 重启续工指令（v2：带渠道归属，定向注入）────────────────────────
+//
+// v1 只存裸文本 —— 启动侧「谁先起来就注入给谁」。实测事故（2026-09-17）：重启由
+// 微信会话触发，重启后先起来的是 UI/TUI 进程，「请在微信里发一条消息…」这段续工
+// 指令被注入到新建的 UI 会话，用户侧表现为「跨渠道串台」。
+// v2 记录触发重启时所在的渠道与会话，启动侧据此判定该不该注入（见 shouldInjectContinuation）。
+
+/** 重启续工指令（v2） */
+export interface RestartContinuation {
+  /** 触发重启时所在的渠道；缺省 = 无渠道归属（纯 CLI 启动 / v1 旧标记） */
+  channel?: string;
+  /** 触发重启时所在的会话 */
+  sessionId?: string;
+  /** 重启后要自动发送的消息 */
+  message: string;
+  /** 写入时间（ISO） */
+  createdAt: string;
+}
+
+/** 序列化续工指令 */
+export function serializeRestartContinuation(c: RestartContinuation): string {
+  return JSON.stringify(c);
+}
+
+/** 解析续工指令；兼容 v1（裸文本 = 无渠道归属） */
+export function parseRestartContinuation(raw: string): RestartContinuation {
+  const text = raw.trim();
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text) as Partial<RestartContinuation>;
+      if (parsed && typeof parsed.message === 'string') {
+        return {
+          channel: typeof parsed.channel === 'string' && parsed.channel ? parsed.channel : undefined,
+          sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId ? parsed.sessionId : undefined,
+          message: parsed.message,
+          createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : '',
+        };
+      }
+    } catch { /* 非法 JSON → 落到 v1 裸文本分支 */ }
+  }
+  return { message: text, createdAt: '' };
+}
+
+/**
+ * 反查持有该 sessionId 的渠道（遍历 __channelSessionRegistry 的 getter）。
+ * 注册表只登记「显式声明渠道」的启动方式（见 gateway/runtime-wiring.ts）；查不到即无归属。
+ */
+export function detectChannelBySessionId(sessionId?: string): string | undefined {
+  if (!sessionId) return undefined;
+  const registry = (globalThis as { __channelSessionRegistry?: Map<string, () => string> })
+    .__channelSessionRegistry;
+  if (!registry) return undefined;
+  for (const [channel, getter] of registry) {
+    try {
+      if (getter() === sessionId) return channel;
+    } catch { /* 单个 getter 失败不影响反查 */ }
+  }
+  return undefined;
+}
+
+/**
+ * 判定续工指令是否该在「本次启动」注入。命中任一即注入：
+ *   1. 指令无渠道归属（v1 / 纯 CLI）—— 兼容旧行为
+ *   2. 本次恢复的会话 == 指令记录的会话 —— 位置没变，注入安全
+ *   3. 指令渠道 == 本次启动渠道
+ * 否则**不注入** —— 调用方须保留标记，等对应启动模式接手。
+ */
+export function shouldInjectContinuation(
+  continuation: RestartContinuation,
+  ctx: { launchChannel?: string; sessionId?: string },
+): { inject: boolean; reason: 'no-channel' | 'same-session' | 'same-channel' | 'channel-mismatch' } {
+  if (!continuation.channel) return { inject: true, reason: 'no-channel' };
+  if (continuation.sessionId && ctx.sessionId && continuation.sessionId === ctx.sessionId) {
+    return { inject: true, reason: 'same-session' };
+  }
+  if (ctx.launchChannel && continuation.channel === ctx.launchChannel) {
+    return { inject: true, reason: 'same-channel' };
+  }
+  return { inject: false, reason: 'channel-mismatch' };
+}
+
+/**
+ * 一次性取用重启续工指令（含渠道判定）。**判定失败时不消费** —— 把标记原样写回，
+ * 留给对应启动模式接手（否则指令会被无关渠道吃掉，正是串台事故的成因）。
+ */
+export function takeRestartContinuation(ctx: {
+  launchChannel?: string;
+  sessionId?: string;
+}): { message?: string; skippedChannel?: string } {
+  const raw = consumeMarker(RESTART_CONTINUATION_MARKER);
+  if (raw === null) return {};
+  const parsed = parseRestartContinuation(raw);
+  const decision = shouldInjectContinuation(parsed, ctx);
+  if (!decision.inject) {
+    writeMarker(RESTART_CONTINUATION_MARKER, raw);
+    return { skippedChannel: parsed.channel };
+  }
+  return { message: parsed.message.trim() || undefined };
+}
+
 /**
  * 采集多渠道会话快照（供重启前写入 .restart-session）。
  *

@@ -74,6 +74,16 @@ export interface UiProtocolSessionBackend {
   getRuntimeRegistry?: () => ModelRegistryLike | null;
   /** 工作目录（context 域 manifest 读写 / 场景读取用；可选）。 */
   cwd?: string;
+  /**
+   * 本 UI 会话承载的**会话归属渠道**（决定 Agent 会话的前缀、meta.channel
+   * 以及「按渠道恢复」的键）。缺省 'webui'（WebUI / 浏览器端，与 http-webhook 同源）。
+   * **TUI 本地模式必须显式传 'tui'**：此前这里对 TUI 与 WebUI 一律硬编码 'webui'，
+   * TUI 的会话因此被贴成 webui_ 前缀（标签漂移）—— 重启快照的键（注册表里存 'webui'）
+   * 与 cli.ts 的 launchChannel（'tui'）对不上、且 TUI 进程内没有登记 webui_ 前缀
+   * （meta.channel 反解失败）⇒ TUI 恢复不到自己的会话 ⇒ 每次重启都新开会话。
+   * 2026-09-17「跨渠道串台」事故的直接成因。
+   */
+  channel?: string;
   /** 提供商元数据列表（model.listProviders 数据源，可选） */
   listProvidersMeta?: () => ProviderMetaLike[];
   /** 本地模型列表（model.listLocalModels 数据源；对应 LocalModelModule.list，可选） */
@@ -436,8 +446,9 @@ export class UiProtocolSession {
       const result = await agentFactory.createAgent({
         sessionId: this.sessionId,
         outputHandler: this.outputHandler as unknown as ChannelOutputHandler,
-        // WebUI 渠道标识（与 http-webhook 同源）：WebUI 会话落 webui_ 前缀
-        channel: 'webui',
+        // 会话归属渠道：由调用方决定 —— TUI 本地模式传 'tui'，浏览器 WebUI 走缺省 'webui'
+        // （与 http-webhook 同源）。不得硬编码，理由见 UiProtocolSessionBackend.channel。
+        channel: this.backend.channel ?? 'webui',
       });
       this.components = result;
       this.loop = (result as { loop: AgentLoop }).loop;

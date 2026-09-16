@@ -54,6 +54,21 @@ export async function boot(options: BootOptions): Promise<BootResult> {
   const defaultMode: 'normal' | 'companion' =
     startupMode?.defaultMode === 'companion' ? 'companion' : 'normal';
 
+  // ── 渠道前缀登记（注册式：核心不预置任何渠道前缀）────────────────
+  // 必须在会话恢复/物化**之前**，因为有两条下游依赖：
+  //   ① `getLatestByChannel()` 的前缀兜底（见 memory/session.ts）
+  //   ② loop 物化 meta.json 时靠 `resolveChannelFromSessionId()` 反解渠道
+  // 不登记 ⇒ 会话 ID 虽有 `<channel>_` 前缀却反解不出渠道 ⇒ meta.json 缺 channel
+  // 字段 ⇒ 该会话对「按渠道恢复」永远不可见 ⇒ 每次重启都走 fail-closed 开新会话。
+  // 实测事故（2026-09-17）：UI 入口（ui-protocol-session / http-webhook）传
+  // channel:'webui' 却从不登记前缀 —— cli.ts 只在 CLI 启动路径补过这一句、UI 路径漏了，
+  // 于是 webui_*/ui_* 会话的 meta 全无 channel；TUI 重启后恢复不到自己的会话，
+  // 而重启续工指令（来自微信那条线）落进了新建的会话 —— 表现为「跨渠道串台」。
+  if (channel) {
+    const { registerChannelPrefixes } = await import('../session-channel.js');
+    registerChannelPrefixes(`${channel}_`, channel);
+  }
+
   // ── Session ──────────────────────────────────────────────────────
   const sessionManager = options.sessionManager ?? new SessionManager(cwd);
   let sessionDir: string;

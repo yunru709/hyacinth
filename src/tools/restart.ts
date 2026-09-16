@@ -4,6 +4,8 @@ import {
   RESTART_CONTINUATION_MARKER,
   writeMarker,
   prepareShellRestart,
+  serializeRestartContinuation,
+  detectChannelBySessionId,
 } from '../supervisor/protocol.js';
 
 export class RestartTool implements Tool {
@@ -38,8 +40,16 @@ export class RestartTool implements Tool {
       });
 
       // 如果传了 message，保存续工指令
+      // v2 结构化落盘：带上触发重启时所在的渠道/会话，启动侧据此**定向注入** ——
+      // 渠道优先取构造期注入的 this.channel，回退按 sessionId 反查渠道会话注册表。
+      // 两者都拿不到 = 无渠道归属（纯 CLI），此时任何启动模式都可注入（v1 旧行为）。
       if (message) {
-        writeMarker(RESTART_CONTINUATION_MARKER, message);
+        writeMarker(RESTART_CONTINUATION_MARKER, serializeRestartContinuation({
+          channel: this.channel ?? detectChannelBySessionId(this.sessionId),
+          sessionId: this.sessionId,
+          message,
+          createdAt: new Date().toISOString(),
+        }));
       }
     } catch {}
 

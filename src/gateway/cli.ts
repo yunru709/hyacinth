@@ -41,6 +41,7 @@ import {
   markerIsFresh,
   removeMarker,
   writeRestartReason,
+  takeRestartContinuation,
 } from '../supervisor/protocol.js';
 import { createLogger } from '../logging/logger.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
@@ -1205,7 +1206,12 @@ async function executeAction(
   // 避免把其他渠道（如飞书）的 session 恢复给 CLI 交互。
   let restartSessionId: string | undefined;
   let restartContinue = false;
-  // 当前启动渠道：TUI 模式为 'tui'，否则不启用渠道恢复
+  // 当前启动渠道（决定「按渠道恢复」「按渠道注入」用哪个键）：TUI 模式 = 'tui'。
+  // 必须与 TUI 的 loop 实际使用的渠道一致：TUI 的 loop 由 ui-protocol-session 创建，
+  // 其渠道由**调用方**给出（tui.ts 传 'tui'；浏览器 WebUI 走缺省 'webui'）。
+  // 不一致的后果（0.9.56 曾把两侧写成 'tui' 而 ui-protocol 硬编码 'webui'）：
+  //   ① 快照键取不到本会话（`snapshot['tui']` 恒缺）→ 连 /session 显式切过的会话都会丢；
+  //   ② 续工指令被判「渠道不符」而搁置（用户自己发起的 TUI 重启反而收不到续工）。
   const launchChannel = options.tui ? 'tui' : undefined;
   // 防陈旧：崩溃残留的 marker 不应让下次正常启动误入旧会话。
   // 超过 10 分钟的 marker 视为陈旧 → 直接删除并按无 marker 处理。
@@ -1414,11 +1420,16 @@ async function executeAction(
     // TUI mode — use blessed full-screen UI
     if (useTui) {
       // 检测重启续工指令（TUI 模式下需在进入前读取）
+      // 按渠道判定：指令若属于别的渠道（如微信），**不消费** —— 原样留待对应启动模式接手，
+      // 否则会把别渠道的上下文注入本渠道会话（2026-09-17 串台事故的直接成因）。
       let continuationMessage: string | undefined;
-      const continuationRaw = consumeMarker(RESTART_CONTINUATION_MARKER);
-      if (continuationRaw !== null) {
-        continuationMessage = continuationRaw.trim() || undefined;
+      const continuation = takeRestartContinuation({ launchChannel, sessionId });
+      if (continuation.skippedChannel) {
+        process.stderr.write(
+          `[hyacinth] 重启续工指令属于渠道 "${continuation.skippedChannel}"，本次启动渠道不同 —— 保留待其接手\n`,
+        );
       }
+      continuationMessage = continuation.message;
       await runTui(
         provider,
         sessionId,
@@ -1438,13 +1449,12 @@ async function executeAction(
     // 会话归属渠道：会话落 `<channel>_` 前缀（供识别来源 / 按渠道隔离恢复），
     // 并**注册该前缀**使 sessionId 能反查渠道 —— 注册式：核心不预置任何渠道前缀。
     //
-    // TUI 启动也必须带上渠道（'tui'）。此前这里只取显式 `--channel`，而 TUI 默认不传 →
-    // cliChannel=undefined → 会话落**裸 ID**（无前缀）→ 物化时前缀反解不出渠道 →
-    // meta.json 无 channel → 该会话对 `getLatestByChannel()` 永远不可见，只剩 boot 的
-    // 全局兜底可认领。偏偏本文件 1209 行的 `launchChannel` 又假定 TUI 渠道是 'tui'
-    // （用于读重启快照）—— 两侧对「TUI 的渠道」说法不一致，快照键自然对不上，
-    // 于是恢复也落进同一条兜底。实测事故：TUI / WebUI / 微信三方被认领进同一份对话历史。
-    // 现在两侧对齐：TUI ⇒ 'tui'。
+    // TUI 模式下**本分支不会走到**（1422 行已 return，loop 交给 runTui/ui-protocol 创建），
+    // 这里给 TUI 注册 'tui_' 只为让**存量** tui_ 会话仍能反解出渠道（历史兼容）。
+    // TUI 实际的**会话归属渠道是 'webui'**（ui-protocol-session 传 channel:'webui'，
+    // tui.ts 的 factory 原样透传），与上面 launchChannel 的取值同源 —— 两者必须一致：
+    // 不一致则重启快照键取不到本会话、续工指令也会被判「渠道不符」而搁置（见 launchChannel 注释）。
+    // 历史事故：TUI / WebUI / 微信三方被认领进同一份对话历史。
     const cliChannel = (options.channel as string | undefined)
       ?? (options.tui ? 'tui' : undefined);
     if (cliChannel) {
@@ -1474,12 +1484,18 @@ async function executeAction(
     // 注入 LifecycleSupervisor，实现运行时 provider 切换时自动管理本地模型进程
     loop.setLifecycleSupervisor(supervisor);
 
-    // 检测重启续工指令
+    // 检测重启续工指令（与 TUI 模式同一策略：按渠道判定，不匹配则不消费、原样留待接手）
     if (!prompt) {
-      const continuationRaw = consumeMarker(RESTART_CONTINUATION_MARKER);
-      if (continuationRaw !== null) {
-        prompt = continuationRaw.trim() || undefined;
+      const continuation = takeRestartContinuation({
+        launchChannel,
+        sessionId: path.basename(sessionDir),
+      });
+      if (continuation.skippedChannel) {
+        process.stderr.write(
+          `[hyacinth] 重启续工指令属于渠道 "${continuation.skippedChannel}"，本次启动渠道不同 —— 保留待其接手\n`,
+        );
       }
+      prompt = continuation.message;
     }
 
   // 决定运行模式
