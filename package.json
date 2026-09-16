@@ -1,6 +1,6 @@
 {
   "name": "hyacinth-ai",
-  "version": "0.9.54",
+  "version": "0.9.55",
   "description": "Hyacinth 🪻 — multi-provider AI agent with tool system and context management",
   "type": "module",
   "main": "dist/index.js",

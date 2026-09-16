@@ -67,10 +67,15 @@ export const clawbotChannelPlugin: ChannelPlugin = {
     const clawbotConfig = config as ClawbotChannelConfigEntry | undefined;
     const shouldRun = clawbotConfig?.enabled !== false;
 
-    if (!shouldRun) {
-      return;
-    }
-
+    // ── 无条件注册（注册 ≠ 连接）──
+    // 早先 `enabled: false` 直接 return，渠道不进注册表 → `/clawbot/login` 分派不到
+    // （通道分派要 channelManager.get('clawbot')）→ 报 Unknown sub-command。而登录
+    // 命令恰恰是「从零授权」的入口，于是构成鸡生蛋死结：不先启用就登不进去，可登录
+    // 本身又不需要事先启用。
+    // 现在始终注册并交 ChannelManager 托管启动 —— 注意这里的 `enabled: true` 指
+    // **是否纳入生命周期管理**，不是用户配置里的那个 enabled。是否真正连接微信由
+    // `autoConnect` 决定：shouldRun=false → 只建好扫码授权通道，不恢复 token、
+    // 不连接、不轮询。于是 /clawbot login 恒定可达，用户显式登录后即直接接入。
     logger.info('auto-detected clawbot channel, registering...');
 
     channelManager.register(createClawbotChannel(), {
@@ -84,16 +89,24 @@ export const clawbotChannelPlugin: ChannelPlugin = {
       httpTimeoutMs: clawbotConfig?.httpTimeoutMs ?? 30_000,
       pollTimeoutSec: clawbotConfig?.pollTimeoutSec ?? 28,
       pollRetryIntervalMs: clawbotConfig?.pollRetryIntervalMs ?? 3000,
+      // 纳入生命周期管理（始终启动），连接与否见 autoConnect
+      enabled: true,
+      // 用户配置的 enabled 直通渠道：false 时 start() 只备授权通道、不连接
+      autoConnect: shouldRun,
     });
 
-    channelsInfo.push({
-      name: 'clawbot',
-      displayName: '微信 ClawBot',
-      connectionMode: 'http-polling',
-      dmPolicy: 'open',
-      groupPolicy: 'disabled',
-      requireMention: false,
-    });
+    // 未启用时不对外宣告该渠道（channelsInfo 会注入 System Prompt，避免误导模型
+    // 以为微信已可用）
+    if (shouldRun) {
+      channelsInfo.push({
+        name: 'clawbot',
+        displayName: '微信 ClawBot',
+        connectionMode: 'http-polling',
+        dmPolicy: 'open',
+        groupPolicy: 'disabled',
+        requireMention: false,
+      });
+    }
   },
 };
 

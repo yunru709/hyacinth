@@ -158,6 +158,18 @@ export class ClawbotChannel implements ChannelHandler {
 
     this.auth = new ClawbotAuthManager(baseUrl, this.config.httpTimeoutMs!, authCallbacks);
 
+    // ── 未启用（autoConnect: false）：备好授权通道，但不连接 ──
+    // 渠道此时仍会被注册/启动 —— 唯有如此 `/clawbot login` 才可达（插件侧始终注册
+    // 并通过本字段传达用户的 enabled）。此处刻意不恢复缓存 token、不建立长轮询，
+    // 用户配置 enabled:false 的意图得以保留。
+    // 而用户显式执行 `/clawbot login` 授权成功后，triggerAuth() 会走 activateClient()
+    // 正式接入 —— 显式动作覆盖被动默认，登录即用，无需再改配置重启。
+    if ((config as Record<string, unknown>).autoConnect === false) {
+      this.logger.info('ClawBot channel not auto-connected (disabled) — use /clawbot login to authorize');
+      this.status = 'active'; // 渠道已就绪但未连接（与下方「无 token」分支同语义）
+      return;
+    }
+
     // 尝试从缓存恢复 token
     const restored = await this.auth.restoreFromCache();
 
