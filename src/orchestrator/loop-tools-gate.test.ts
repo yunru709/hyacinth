@@ -92,3 +92,61 @@ describe('runToolDispatch 安全门禁（beforeToolExecute 消费）', () => {
     expect(outcomes.every((o) => o.ok)).toBe(true);
   });
 });
+
+describe('runToolDispatch 执行侧工具包对称校验（治本）', () => {
+  let sessionDir: string;
+  let ctx: ToolExecContext;
+
+  beforeAll(() => {
+    sessionDir = mkdtempSync(path.join(os.tmpdir(), 'bundle-gate-'));
+    const registry = new ToolRegistry();
+    registry.register(stubTool('echo') as never);  // 激活包内
+    registry.register(stubTool('other') as never); // 激活包外
+    const active = new Set(['echo']);
+    ctx = {
+      outputHandler: null,
+      sessionDir,
+      turn: 1,
+      gitManager: { getRepoPath: () => sessionDir } as never,
+      conversationStore: new ConversationStore(),
+      configCenter: undefined,
+      toolExecutor: new ToolExecutor(registry, 5000),
+      toolRegistry: registry,
+      resultBuffer: { getBufferDir: () => sessionDir, maybeBuffer: (s: string) => s } as never,
+      abortController: null,
+      dangerousTools: new Set(),
+      allowlistTools: new Set(),
+      allowedCommands: new Set(),
+      loopGuard: new LoopGuard(),
+      getUnrestricted: () => false,
+      setUnrestricted: () => {},
+      getPendingImpact: () => null,
+      setPendingImpact: () => {},
+      markMutation: () => {},
+      hadMutation: () => false,
+      addEvidence: () => {},
+      evidenceCount: () => 0,
+      inlineToolResults: new Map(),
+      // 模拟 bundleRegistry 注入：仅 echo 在激活包内
+      isToolAllowedByBundle: (name: string) => active.has(name),
+    };
+  });
+
+  it('激活包外的工具被拦截不执行，写回明确的 bundle blocked 结果', async () => {
+    const outcomes = await runToolDispatch(ctx, [makeCall('echo'), makeCall('other')]);
+    const byId = new Map(outcomes.map((o) => [o.name, o]));
+    expect(byId.get('echo')?.ok).toBe(true);
+    expect(byId.get('other')?.ok).toBe(false);
+
+    const transcript = readFileSync(path.join(sessionDir, 'conversation.jsonl'), 'utf-8');
+    expect(transcript).toContain('ran:echo');   // 包内工具实际执行
+    expect(transcript).not.toContain('ran:other'); // 包外工具未执行
+    expect(transcript).toContain('not in the active tool bundle'); // 明确拒绝原因
+  });
+
+  it('isToolAllowedByBundle 未注入（undefined）时不拦截，保持既有行为', async () => {
+    const ctx2: ToolExecContext = { ...ctx, isToolAllowedByBundle: undefined, sessionDir: mkdtempSync(path.join(os.tmpdir(), 'bundle-gate-')) };
+    const outcomes = await runToolDispatch(ctx2, [makeCall('echo'), makeCall('other')]);
+    expect(outcomes.every((o) => o.ok)).toBe(true);
+  });
+});

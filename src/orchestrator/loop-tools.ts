@@ -73,6 +73,14 @@ export interface ToolExecContext {
   hadMutation(): boolean;
   addEvidence(): void;
   evidenceCount(): number;
+  /**
+   * 执行侧工具包对称校验（治本）：工具实际执行前的最终防线。
+   * 组装侧（context 阶段）负责"不可见"，这里负责"不可执行"——
+   * 即使模型幻觉/被诱导调用了激活包之外的工具，也在执行前拦截。
+   * 返回 true = 允许执行；undefined（未注入）或返回 true = 放行。
+   * 由 loop.makeToolExecContext 从 bundleRegistry 派生注入。
+   */
+  isToolAllowedByBundle?: (name: string) => boolean;
 }
 
 /** Check if a bash command matches any allowedCommands glob pattern */
@@ -124,6 +132,32 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
       ctx.outputHandler?.onToolResult?.(`Blocked by security gate: ${tc.name}`, true, tc.id);
     }
     effectiveCalls = gated.calls;
+  }
+
+  // ── 执行侧工具包对称校验（治本）：激活包之外的工具，即使被模型调用也拦截 ──
+  // 组装侧（context 阶段）让包外工具对 LLM 不可见；这里补上执行侧最终防线——
+  // 只要工具不在激活包内（isToolAllowedByBundle 返回 false），一律不执行。
+  if (ctx.isToolAllowedByBundle) {
+    const allowedCalls: ToolCall[] = [];
+    for (const tc of effectiveCalls) {
+      if (ctx.isToolAllowedByBundle(tc.name)) {
+        allowedCalls.push(tc);
+      } else {
+        outcomes.push({ id: tc.id, name: tc.name, ok: false });
+        const blockedMsg: Message = {
+          role: 'user',
+          content: {
+            type: 'tool_result',
+            tool_use_id: tc.id,
+            content: `Tool "${tc.name}" is not in the active tool bundle. Enable the bundle that contains it (or switch to all mode) before calling it.`,
+            is_error: true,
+          } as ToolResultContent,
+        };
+        await ctx.conversationStore.append(ctx.sessionDir, blockedMsg);
+        ctx.outputHandler?.onToolResult?.(`Blocked by tool bundle: ${tc.name}`, true, tc.id);
+      }
+    }
+    effectiveCalls = allowedCalls;
   }
 
   for (const tc of effectiveCalls) {
@@ -349,6 +383,21 @@ export async function runToolInline(
   const tool = ctx.toolRegistry.get(name);
   if (!tool) {
     const errContent = `Unknown tool: ${name}`;
+    ctx.outputHandler?.onToolResult?.(errContent, true, id);
+    ctx.inlineToolResults.set(id, { content: errContent, isError: true });
+    appendEvent(ctx.sessionDir, {
+      type: 'tool_result',
+      tool_use_id: id,
+      name,
+      content: errContent,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+    return;
+  }
+
+  // ── 执行侧工具包对称校验（治本）：流内路径与批量路径同权拦截 ──
+  if (ctx.isToolAllowedByBundle && !ctx.isToolAllowedByBundle(name)) {
+    const errContent = `Tool "${name}" is not in the active tool bundle. Enable the bundle that contains it (or switch to all mode) before calling it.`;
     ctx.outputHandler?.onToolResult?.(errContent, true, id);
     ctx.inlineToolResults.set(id, { content: errContent, isError: true });
     appendEvent(ctx.sessionDir, {

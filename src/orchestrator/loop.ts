@@ -1812,6 +1812,17 @@ export class AgentLoop {
       addEvidence: () => { this.turnEvidenceCount += 1; },
       evidenceCount: () => this.turnEvidenceCount,
       inlineToolResults: this.inlineToolResults,
+      // 执行侧工具包对称校验（治本）：从 bundleRegistry 派生"是否在激活包内"。
+      // undefined（未注入 bundleRegistry，如子 Agent）→ 不拦截，保持既有行为。
+      isToolAllowedByBundle: this.bundleRegistry
+        ? (name: string) => {
+            // 全量模式（无限制）或激活包为空 → 放行（与组装侧 context.ts 语义一致）
+            if (this.bundleRegistry!.isAllMode()) return true;
+            const active = this.bundleRegistry!.getActiveToolNames();
+            if (active.length === 0) return true;
+            return active.includes(name);
+          }
+        : undefined,
     };
   }
 
