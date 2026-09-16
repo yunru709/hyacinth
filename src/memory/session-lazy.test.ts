@@ -83,3 +83,28 @@ describe('SessionManager.create（回归：仍完整物化）', () => {
     expect(meta.channel).toBe('tui');
   });
 });
+
+/**
+ * 会话根目录隔离（HYACINTH_SESSIONS_ROOT）。
+ *
+ * 这条断言同时是「测试隔离」的不变量护栏：vitest 经 src/test-setup.ts 把根目录指向临时目录，
+ * 因此任何走默认根的 SessionManager 都必须落在临时目录内，**绝不能**在用户真实 ~/.agent 下建目录
+ * （此前每次全量跑都会在真实目录新增裸日期垃圾 —— projectKey 指向 Temp 的孤儿会话目录）。
+ */
+describe('会话根目录隔离（HYACINTH_SESSIONS_ROOT）', () => {
+  it('不显式传 root 时跟随环境变量覆盖点，且绝不落在用户真实 ~/.agent 下', () => {
+    const override = process.env.HYACINTH_SESSIONS_ROOT;
+    expect(override, '测试应由 src/test-setup.ts 设置 HYACINTH_SESSIONS_ROOT').toBeTruthy();
+
+    const sm = new SessionManager(process.cwd());
+    const dir = sm.getSessionDir('some-session-id');
+
+    expect(dir.startsWith(override as string)).toBe(true);
+    expect(dir).not.toContain('.agent');
+  });
+
+  it('显式传入 root 时优先于环境变量（用例自建临时目录仍可用）', () => {
+    const sm = new SessionManager(process.cwd(), root);
+    expect(sm.getSessionDir('x').startsWith(root)).toBe(true);
+  });
+});

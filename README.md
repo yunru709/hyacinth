@@ -280,7 +280,7 @@ cd hyacinth
 pnpm install
 pnpm build          # tsc + copy-prompts + copy-webui + clean-tests + clean-maps
 pnpm dev            # watch 模式
-pnpm test           # vitest（143 个测试套件）
+pnpm test           # vitest（144 个测试套件）
 pnpm smoke          # 真实装配链冒烟（stub provider）
 pnpm verify:layers  # 分层约束机器校验
 ```
