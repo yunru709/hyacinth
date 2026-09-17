@@ -254,6 +254,34 @@ describe('permission / ask_user 请求-应答关联', () => {
     expect(pending.has(reqId)).toBe(false);
   });
 
+  // 回归（2026-09-18）：AgentLoop 会把 outputHandler.onAskUser「摘」下来存成
+  // askUserHandler（loop.ts:519/891），工具侧裸调用 handler(questions)。
+  // 若 onAskUser 是普通方法，this 丢失 → "Cannot read properties of undefined
+  // (reading 'pending')"，TUI 里 ask_user 直接报错。此处锁定摘取后仍可用。
+  it('回归：onAskUser / onPermissionRequest 摘取后裸调用不丢 this', async () => {
+    const { outputHandler, pending, events, flush } = setup();
+
+    // 模拟 loop 的存储方式：摘成变量后裸调用（不保留接收者）
+    const detachedAsk = outputHandler.onAskUser;
+    const detachedPerm = outputHandler.onPermissionRequest;
+
+    detachedAsk([{ question: '待答问题', options: ['A', 'B'] }]);
+    await flush();
+    const askReq = events.find((e) => e.type === 'message.ask_user');
+    expect(askReq).toBeTruthy();
+    expect(pending.has((askReq!.payload as { id: string }).id)).toBe(true);
+
+    detachedPerm('bash', { cmd: 'ls' });
+    await flush();
+    const permReq = events.find((e) => e.type === 'permission.request');
+    expect(permReq).toBeTruthy();
+    expect(pending.has((permReq!.payload as { id: string }).id)).toBe(true);
+
+    // 清理挂起请求（上面两个 promise 无人应答，避免留脏状态）
+    pending.clear();
+    expect(pending.size).toBe(0);
+  });
+
   it('permission.resolve 用不存在的 id → 错误', async () => {
     const { client, responses, flush } = setup();
     client.send({ kind: 'request', id: 'x1', method: 'permission.resolve', params: { id: 'nope', result: 'yes' } });

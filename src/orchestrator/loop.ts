@@ -60,7 +60,7 @@ import { LoopGuard, isMutating, ToolGuard } from '../repair/loop-guard.js';
 import { deriveDangerousTools } from '../tools/side-effect.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
-import { getActiveRouter, type ContextProfile } from '../context/profiles.js';
+import { getActiveRouter, getRouterForChannel, channelKeyOf, type ContextProfile } from '../context/profiles.js';
 import type { IContextRouter } from '../context/router.js';
 import { NormalRouter } from '../context/router.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -516,7 +516,11 @@ export class AgentLoop {
     this.pipeline = kernel.pipeline;
     this.orchestrator = orchestrator;
     this.outputHandler = outputHandler ?? null;
-    this.askUserHandler = (outputHandler?.onAskUser as ((questions: AskUserQuestion[]) => Promise<string>) | undefined) ?? null;
+    // 回调所有权转移：显式 bind —— 摘取方法后工具侧是裸调用（handler(questions)），
+    // 若实现类是普通方法且依赖 this（如 ProtocolOutputHandler.pending），this 会丢。
+    this.askUserHandler = outputHandler?.onAskUser
+      ? (outputHandler.onAskUser.bind(outputHandler) as (questions: AskUserQuestion[]) => Promise<string>)
+      : null;
     this.agentRegistry = agentRegistry;
     // MachineRegistry 由 factory.ts 注入，不创建默认实例（空注册表无实际作用）
     this.flowRegistry = flowRegistry!;
@@ -824,12 +828,24 @@ export class AgentLoop {
 
 
   /**
-   * 同步全局 Router 到当前 loop。
-   * 每轮 runTurn 开头调用，所有渠道的 loop 自动切换会话和上下文行为。
+   * 本渠道标识（渠道级模式隔离的 key）。
+   * 首次访问（必然发生在 session 被切换**之前**）时惰性确定并缓存 —— sessionDir 会随
+   * 陪伴切换改变，必须在切换前锁定，否则渠道会漂移（例如切到陪伴目录后推导不出前缀）。
+   */
+  private _channelKey: string | null = null;
+  get channelKey(): string {
+    if (!this._channelKey) this._channelKey = channelKeyOf(this.sessionDir);
+    return this._channelKey;
+  }
+
+  /**
+   * 同步**本渠道**的 Router 到当前 loop。
+   * 每轮 runTurn 开头调用。模式按渠道隔离：只跟随本渠道（this.channelKey）的 Router，
+   * 某个渠道进入/退出陪伴不会波及其它渠道的 session 与模式。
    */
   async syncRouter(): Promise<void> {
-    const globalRouter = getActiveRouter();
-    if (this.activeRouter?.name === globalRouter.name) return;
+    const targetRouter = getRouterForChannel(this.channelKey);
+    if (this.activeRouter?.name === targetRouter.name) return;
 
     // 切出旧 Router
     if (this.activeRouter) {
@@ -837,7 +853,7 @@ export class AgentLoop {
     }
 
     // 切入新 Router
-    this.activeRouter = globalRouter;
+    this.activeRouter = targetRouter;
     await this.activeRouter.onActivate?.(this);
   }
 
@@ -876,7 +892,10 @@ export class AgentLoop {
    *  压缩/状态提示会发给错误的输出目标（与 setBundleRegistry 同类问题）。 */
   setOutputHandler(handler: OutputHandler): void {
     this.outputHandler = handler;
-    this.askUserHandler = (handler.onAskUser as ((questions: AskUserQuestion[]) => Promise<string>) | undefined) ?? null;
+    // 同构造路径：显式 bind，保证摘取后的 handler 裸调用不丢 this（见构造处注释）
+    this.askUserHandler = handler.onAskUser
+      ? (handler.onAskUser.bind(handler) as (questions: AskUserQuestion[]) => Promise<string>)
+      : null;
     this.stageServices.set('outputHandler', handler);
   }
 

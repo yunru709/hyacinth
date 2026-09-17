@@ -113,24 +113,32 @@ export class ProtocolOutputHandler implements OutputHandler {
     this.emit(UI_EVENT.MESSAGE_INTERRUPT);
   }
 
-  onPermissionRequest(
+  // ⚠ 以下两个必须写成箭头函数字段，不能写成普通方法（2026-09-18 实修）：
+  // AgentLoop 构造 / setOutputHandler 会把 outputHandler.onAskUser「摘」下来
+  // 存进 this.askUserHandler（loop.ts:519 / :891），工具侧裸调用
+  // handler(questions)（tools/ask-user.ts）时接收者已丢失。
+  // 普通方法的 this 依赖调用接收者 → this===undefined →
+  // "Cannot read properties of undefined (reading 'pending')"。
+  // 箭头字段把 this 词法绑定在实例上，怎么传递/摘取都安全。
+
+  onPermissionRequest = (
     toolName: string,
     input: Record<string, unknown>,
-  ): Promise<PermissionResult> {
+  ): Promise<PermissionResult> => {
     const id = this.pending.create();
     this.emit(UI_EVENT.PERMISSION_REQUEST, { id, toolName, input });
     return new Promise<PermissionResult>((resolve) => {
       this.pending.register(id, resolve);
     });
-  }
+  };
 
-  onAskUser(questions: AskUserQuestion[]): Promise<string> {
+  onAskUser = (questions: AskUserQuestion[]): Promise<string> => {
     const id = this.pending.create();
     this.emit(UI_EVENT.MESSAGE_ASK_USER, { id, questions });
     return new Promise<string>((resolve) => {
       this.pending.register(id, resolve);
     });
-  }
+  };
 }
 
 // ────────────────────────────────────────────────────────────
