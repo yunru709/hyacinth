@@ -134,8 +134,31 @@ export class NormalRouter implements IContextRouter {
   readonly skipRuntimeSources: readonly string[] = [];
   readonly sourceOverrides: Readonly<Record<string, SourceOverride>> = {};
 
+  /** 上次时间戳实际注入的时刻（按会话隔离）——驱动间隔概率 */
+  private readonly _lastTimestampInjectAt = new Map<string, number>();
+
   filterHistory(history: Message[]): Message[] {
     return history;
+  }
+
+  /**
+   * 时间戳概率注入（正常模式专属）。
+   * 概率由「距上次实际注入的间隔」决定（见 timestampInjectProbability）：
+   * 未命中 → 返回 null 跳过该 section；命中 → 推进时间基准并放行正常解析。
+   */
+  async beforeSection(sec: SectionEntry, ctx: ResolverContext): Promise<string | null | undefined> {
+    if (sec.name !== 'timestamp') return undefined;
+
+    const key = ctx.sessionDir ?? '__default__';
+    const now = parseLocalTimestamp(ctx.timestamp) ?? Date.now();
+    const last = this._lastTimestampInjectAt.get(key);
+    const gapMs = last === undefined ? Number.POSITIVE_INFINITY : Math.max(0, now - last);
+
+    if (Math.random() < timestampInjectProbability(gapMs)) {
+      this._lastTimestampInjectAt.set(key, now); // 命中才推进基准
+      return undefined;                          // 放行 → 正常生成时间戳文本
+    }
+    return null;                                 // 未命中 → 本轮不注入
   }
 
   getTaskPrompt(taskName: string): string {
@@ -178,30 +201,35 @@ const COMPANION_TOOL_PROMPT =
   '写东西喽（write）。' +
   '得改一下了（edit）。';
 
-// ── 时间戳概率注入 ────────────────────────────────────────
-// 从 section-resolver.ts 迁移至此。模拟人对时间的不经意感知：
-//   首条消息 / 用户主动问时间 → 100% 注入
-//   连续对话中的随机轮次 → 10% 概率注入
+// ── 时间戳概率注入（仅普通模式） ──────────────────────────────
+// 不按「轮次」也不按固定概率，而是按「距上次实际注入的间隔」动态给概率：
+//   Δ ≤ 1 分钟 → 50%
+//   Δ ≥ 5 分钟 → 100%
+//   1~5 分钟之间线性平滑：p = 0.5 + (Δ - 60s) / 240s × 0.5
+//
+// 语义：刚告知过时间就无需重复（省 token、少噪音）；间隔越久越该刷新模型的
+// 时间感。因为基准只在「实际注入」时推进（未命中不推进），未命中的轮次会
+// 持续抬高下一轮的概率，不会长期不注入。首次（无记录）视为间隔无限大 → 必注入。
+//
+// 归属：只有 NormalRouter 调用；陪伴模式一律不注入时间戳（见 CompanionRouter）。
 
-const TIMESTAMP_INJECT_PROBABILITY = 0.30;
-const FIRST_CONTACT_THRESHOLD = 4;
-const TIME_QUERY_RE = /时间|几点|什么时候|时候|几点了|现在几点|什么时候了|几点钟|现在时间|现在什么时候|这会儿几点|多晚了/;
+const TIMESTAMP_GAP_FLOOR_MS = 60_000;      // 1 分钟——概率下限
+const TIMESTAMP_GAP_CEIL_MS = 5 * 60_000;   // 5 分钟——概率上限（必然注入）
+const TIMESTAMP_PROB_FLOOR = 0.5;
 
-function countUserMessages(history?: Message[]): number {
-  if (!history) return 0;
-  return history.filter(m => m.role === 'user').length;
+/** 距上次注入的间隔（ms）→ 本轮注入概率（线性平滑） */
+export function timestampInjectProbability(gapMs: number): number {
+  if (gapMs <= TIMESTAMP_GAP_FLOOR_MS) return TIMESTAMP_PROB_FLOOR;
+  if (gapMs >= TIMESTAMP_GAP_CEIL_MS) return 1;
+  const t = (gapMs - TIMESTAMP_GAP_FLOOR_MS) / (TIMESTAMP_GAP_CEIL_MS - TIMESTAMP_GAP_FLOOR_MS);
+  return TIMESTAMP_PROB_FLOOR + t * (1 - TIMESTAMP_PROB_FLOOR);
 }
 
-function shouldInjectTimestamp(ctx: ResolverContext): boolean {
-  // 首次接触：每轮都注入时间，帮助建立时间感
-  const userMsgCount = countUserMessages(ctx.history);
-  if (userMsgCount <= FIRST_CONTACT_THRESHOLD) return true;
-
-  // 用户主动问时间 → 必须注入
-  if (ctx.userInput && TIME_QUERY_RE.test(ctx.userInput)) return true;
-
-  // 连续对话：掷骰子
-  return Math.random() < TIMESTAMP_INJECT_PROBABILITY;
+/** 解析 ctx.timestamp（'YYYY-MM-DD HH:mm'，本地时区）为 epoch ms；失败返回 null */
+function parseLocalTimestamp(ts: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts ?? '');
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
 }
 
 /** 取某角色最后一条消息里的纯文本（供世界引擎观察上一轮对话） */
@@ -303,24 +331,19 @@ export class CompanionRouter implements IContextRouter {
         return '';
       }
     }
-    // 时间戳 section：
-    // 世界引擎旁白已由 BypassManager.preTurn → bypassInjections 处理，
-    // 此处只处理时间戳概率注入（世界引擎未启用/世界为空时的回落逻辑）。
+    // 时间戳 section：仅普通模式注入（NormalRouter 的间隔概率注入）。
+    // 陪伴模式一律不注入时间戳，此处只保留两件事：
+    //   ① 纯旁白轮——环境信息已由 transformUserInput 作为本轮 user 输入带入，槽位留空
+    //   ② 世界引擎启用——让旁白经 bypassInjections 的 replace 顶替该槽位（并标记以改 role）
     if (sec.name === 'timestamp') {
       this._timestampIsNarration = false;
-      // 纯旁白轮跳过
       if (this._pureNarrationTurn) {
         return null;
       }
-      // 世界引擎启用 → 旁白由 bypassInjections 处理，此处跳过正常时间戳
       if (this.worldEngineEnabled) {
-        this._timestampIsNarration = true;
-        return null; // 让 bypassInjections 的 replace 模式接管
+        this._timestampIsNarration = true; // 旁白顶替槽位 → roleForSection 改以 assistant 注入
       }
-      // 无世界引擎 → 正常时间戳概率注入
-      if (!shouldInjectTimestamp(ctx)) {
-        return null;
-      }
+      return null; // 陪伴模式不注入时间戳
     }
     return undefined; // 其他 section：继续正常解析
   }

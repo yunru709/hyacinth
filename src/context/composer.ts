@@ -237,6 +237,7 @@ export class LayeredContextComposer implements ContextComposer {
       selectedAgents: options.selectedAgents,
       gitManager: options.gitManager,
       tokenCounter: this.tokenCounter,
+      sessionDir: options.sessionDir,
       activeConditions: this.activeConditions,
       profile: options.profile ?? NORMAL_PROFILE,
       router: getActiveRouter(),

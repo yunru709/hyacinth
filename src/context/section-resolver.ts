@@ -32,6 +32,8 @@ import { getGlobalPersonaDir } from '../setup/persona-bootstrap.js';
 
 export interface ResolverContext {
   cwd: string;
+  /** 当前会话目录——供 Router 按会话隔离内部状态（如时间戳注入的时间基准） */
+  sessionDir?: string;
   tools: Array<{ name: string }>;
   userInput: string;
   timestamp: string;
@@ -200,8 +202,9 @@ async function resolveRuntime(
     return ctx.historySummary ? `[Context Summary]\n${ctx.historySummary}` : undefined;
   }
   if (src === 'runtime:timestamp') {
-    // 时间戳的条件注入由 Router.beforeSection 控制（如 CompanionRouter 的概率注入）。
-    // 此处无条件生成时间戳文本——如果 beforeSection 返回了 null，此代码不会执行。
+    // 时间戳的条件注入由 Router.beforeSection 控制：NormalRouter 按「距上次注入的
+    // 间隔」给概率（1 分钟内 50%，5 分钟以上 100%，中间线性）；陪伴模式一律跳过。
+    // 此处无条件生成时间戳文本——若 beforeSection 返回 null，此代码不会执行。
     // # currentDate 是系统元数据标记（非用户输入），模型训练数据中识别为背景信息
     const [datePart, timePart] = ctx.timestamp.split(' ');
     const dateSlash = datePart.replace(/-/g, '/');
