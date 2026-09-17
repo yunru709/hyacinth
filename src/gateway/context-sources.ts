@@ -27,7 +27,7 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
-import { getActiveRouter } from '../context/profiles.js';
+// companion_memory 现按「当前 loop 的 activeRouter」判定，不再需要全局 getActiveRouter
 
 export interface ContextSourceDeps {
   contextComposer: LayeredContextComposer;
@@ -107,8 +107,12 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     cacheability: 'manifest',
     description: '陪伴模式专属记忆（按角色隔离）',
     getContent: () => {
-      const router = getActiveRouter();
-      const name = (router as unknown as Record<string, unknown>)?.activeCompanionName;
+      // 渠道级：读取**当前 loop** 的 Router —— 只有该 loop 处于陪伴模式时才注入角色记忆，
+      // 避免某个渠道进入陪伴后把角色记忆泄漏到其它渠道的上下文。
+      const router = (deps.loop as unknown as {
+        activeRouter?: { name?: string; activeCompanionName?: string };
+      }).activeRouter;
+      const name = router?.name === 'companion' ? router.activeCompanionName : '';
       if (typeof name !== 'string' || !name) return '';
       const file = path.join(os.homedir(), '.agent', 'companion', name, 'memory.md');
       try {

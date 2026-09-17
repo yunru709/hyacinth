@@ -58,6 +58,58 @@ export function getActiveRouterName(): string {
   return _activeRouterName;
 }
 
+// ── 渠道级模式隔离 ──────────────────────────────────────────
+// 每个渠道可拥有独立的 Router（模式）。某个渠道进入陪伴模式时，只切换该渠道
+// 自己的 session，其它渠道保持各自的模式与 session（不再「切一个渠道、全渠道串台」）。
+// 未显式设置模式的渠道回退到全局默认（_activeRouterName）。
+/** 渠道 → Router 名称 */
+const _channelRouterNames = new Map<string, string>();
+
+/**
+ * 设置指定渠道的激活 Router（channel 为空时退回全局默认）。
+ * 与 switchRouter 的区别：只影响单个渠道，不会波及其它渠道。
+ */
+export function switchRouterForChannel(channel: string | undefined, name: string): IContextRouter {
+  const router = routerRegistry.get(name);
+  if (!router) {
+    throw new Error(`Unknown router: ${name}. Available: ${[...routerRegistry.keys()].join(', ')}`);
+  }
+  if (channel) _channelRouterNames.set(channel, name);
+  else _activeRouterName = name;
+  return router;
+}
+
+/** 获取指定渠道当前激活的 Router（该渠道未设置时用全局默认） */
+export function getRouterForChannel(channel: string | undefined): IContextRouter {
+  const name = (channel && _channelRouterNames.has(channel))
+    ? _channelRouterNames.get(channel)!
+    : _activeRouterName;
+  return routerRegistry.get(name) ?? new NormalRouter();
+}
+
+/** 查询指定渠道当前激活的 Router 名称 */
+export function getRouterNameForChannel(channel: string | undefined): string {
+  return (channel && _channelRouterNames.has(channel))
+    ? _channelRouterNames.get(channel)!
+    : _activeRouterName;
+}
+
+/** 清除指定渠道的模式覆盖（回退到全局默认） */
+export function clearChannelRouter(channel: string | undefined): void {
+  if (channel) _channelRouterNames.delete(channel);
+}
+
+/**
+ * 由 session 目录 / 会话 ID 推导渠道标识（渠道级隔离的稳定 key 来源）。
+ * 会话 ID 形如 `<channel>_YYYYMMDD-HHMMSS-xxxx`；无前缀（纯 CLI 交互）回退 fallback。
+ */
+export function channelKeyOf(sessionDirOrId: string | undefined, fallback = 'tui'): string {
+  if (!sessionDirOrId) return fallback;
+  const base = sessionDirOrId.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+  const m = /^([a-z][a-z0-9-]*)_/.exec(base);
+  return m ? m[1]! : fallback;
+}
+
 // ── 启动时注册内置 Router ──────────────────────────────────
 registerRouter(new NormalRouter());
 registerRouter(new CompanionRouter());
@@ -121,7 +173,11 @@ let _companionModeActive = false;
  * @deprecated 使用 getActiveRouter().name === 'companion' 替代
  */
 export function isCompanionModeActive(): boolean {
-  return _activeRouterName === 'companion';
+  if (_activeRouterName === 'companion') return true;
+  for (const n of _channelRouterNames.values()) {
+    if (n === 'companion') return true;
+  }
+  return false;
 }
 
 /**

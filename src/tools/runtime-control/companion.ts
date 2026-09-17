@@ -2,7 +2,7 @@ import type { Tool } from '../interface.js';
 import type { AgentLoop } from '../../orchestrator/loop.js';
 import type { CompanionSessionManager } from '../../memory/companion-session.js';
 import { clearPromptCache } from '../../prompts/loader.js';
-import { switchRouter } from '../../context/profiles.js';
+import { switchRouter, switchRouterForChannel } from '../../context/profiles.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -120,7 +120,7 @@ export function createCompanionModeTool(
             }
 
             // 拿到 CompanionRouter 单例
-            const companionRouter = switchRouter('companion');
+            const companionRouter = switchRouterForChannel(loop.channelKey, 'companion');
 
             if (loop.activeRouter.name === 'companion') {
               // 已在陪伴模式 → 同角色提示，不同角色手动 deactivate→activate
@@ -190,7 +190,7 @@ export function createCompanionModeTool(
             }
 
             // 创建完直接激活
-            const companionRouter = switchRouter('companion');
+            const companionRouter = switchRouterForChannel(loop.channelKey, 'companion');
             if (loop.activeRouter.name === 'companion') {
               // 已在陪伴模式 → 手动 deactivate→activate（syncRouter 检测不到 router 名变化）
               await loop.activeRouter.onDeactivate?.(loop);
@@ -245,7 +245,7 @@ export function createCompanionModeTool(
             } catch { /* 文件操作失败不阻塞 */ }
 
             // 通过 Router 切换模式（自动恢复 normal session）
-            switchRouter('normal');
+            switchRouterForChannel(loop.channelKey, 'normal');
             await loop.syncRouter();
             clearPromptCache();
 

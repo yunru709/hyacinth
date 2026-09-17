@@ -15,6 +15,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Message } from '../types.js';
 import type { SectionEntry } from './manifest-types.js';
 import type { ResolverContext } from './section-resolver.js';
@@ -248,6 +249,34 @@ function lastTextByRole(history: Message[], role: 'user' | 'assistant'): string 
   return '';
 }
 
+/** 解析 loop 所属渠道标识（渠道级 session 隔离；优先 loop.channelKey，其次由 session 目录推导） */
+function resolveChannelKey(loop: any): string {
+  const key = (loop && typeof loop.channelKey === 'string' && loop.channelKey) ? loop.channelKey : '';
+  if (key) return key;
+  const base = path.basename((loop && loop.sessionDir) || '');
+  const m = /^([a-z][a-z0-9-]*)_/.exec(base);
+  return m ? m[1]! : 'tui';
+}
+
+/** 陪伴切换前的 session 记录文件（对齐 restart 工具的落盘思路，跨 loop / 跨进程恢复） */
+function companionSessionsPath(): string {
+  return path.join(os.homedir(), '.agent', 'companion', '.active-sessions.json');
+}
+function readActiveSessions(): Record<string, string> {
+  try {
+    const obj = JSON.parse(readFileSync(companionSessionsPath(), 'utf-8'));
+    return obj && typeof obj === 'object' ? (obj as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+function writeActiveSessions(map: Record<string, string>): void {
+  try {
+    mkdirSync(path.dirname(companionSessionsPath()), { recursive: true });
+    writeFileSync(companionSessionsPath(), JSON.stringify(map, null, 2), 'utf-8');
+  } catch { /* 写入失败不影响切换 */ }
+}
+
 export class CompanionRouter implements IContextRouter {
   readonly name = 'companion';
   readonly toolAllowlist = COMPANION_TOOL_ALLOWLIST;
@@ -368,10 +397,21 @@ export class CompanionRouter implements IContextRouter {
     if (!this.activeCompanionName) return;
     const name = this.activeCompanionName;
 
+    // 渠道级隔离：只有**发起切换的那个渠道**会切换 session（其它渠道经 getRouterForChannel
+    // 拿到各自的 Router，不会跟随，也不再被「带过去」）。
+    const channelKey = resolveChannelKey(loop);
+
     // 保存正常 session 路径（用于 deactivate 时切换回去）
     if (!(loop as any)._normalSessionDir) {
       (loop as any)._normalSessionDir = loop.sessionDir;
     }
+    // 持久化该渠道切换前的 session —— loop 被重建 / 进程重启后仍能恢复
+    // （对齐 restart 工具把恢复所需状态落盘的思路）
+    try {
+      const map = readActiveSessions();
+      map[channelKey] = (loop as any)._normalSessionDir as string;
+      writeActiveSessions(map);
+    } catch { /* ignore */ }
     const sm = CompanionSessionManager.getInstance();
     sm.setCharacter(name);
     const companionDir = sm.getOrCreate();
@@ -410,8 +450,15 @@ export class CompanionRouter implements IContextRouter {
     } catch { /* 忽略 */ }
     this.worldEngineAgent = null;
 
+    const channelKey = resolveChannelKey(loop);
+
     let normalDir = (loop as any)._normalSessionDir as string | undefined;
-    // Fallback：从存档恢复的陪伴会话没有保存 _normalSessionDir，需要创建新 normal session
+    // Fallback 1：loop 被重建 / 内存中无记录时，从持久化状态恢复该渠道切换前的 session
+    if (!normalDir) {
+      const map = readActiveSessions();
+      if (typeof map[channelKey] === 'string' && map[channelKey]) normalDir = map[channelKey];
+    }
+    // Fallback 2：确实没有记录（如从存档恢复的陪伴会话）→ 才创建新 normal session
     if (!normalDir) {
       const { SessionManager } = await import('../memory/session.js');
       const sm = new SessionManager(process.cwd());
@@ -420,6 +467,15 @@ export class CompanionRouter implements IContextRouter {
     }
     await loop.switchSession(normalDir);
     (loop as any)._normalSessionDir = undefined;
+
+    // 清除该渠道的持久化记录
+    try {
+      const map = readActiveSessions();
+      if (map[channelKey]) {
+        delete map[channelKey];
+        writeActiveSessions(map);
+      }
+    } catch { /* ignore */ }
 
     // 恢复到普通模式的 KVCache 隔离 ID（主Agent + 旁路）
     loop.setActiveUserId(mainUserId(path.basename(normalDir)));
