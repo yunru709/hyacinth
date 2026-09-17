@@ -124,6 +124,8 @@ function highlightCode(code: string): string[] {
 export const theme = {
   fg: fg(palette.text),
   assistantText: (text: string) => text,
+  /** say 交付块（模型的"嘴"）—— 与普通 assistant 文本区分，用强调色 */
+  delivered: fg(palette.accent),
   dim: fg(palette.dim),
   thinking: fg(palette.thinking),
   accent: fg(palette.accent),

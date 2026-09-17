@@ -747,6 +747,11 @@ export async function runTui(
     const p = (ev.payload ?? {}) as Record<string, unknown>;
     switch (ev.type) {
       case UI_EVENT.MESSAGE_TEXT: tuiHandler.onText?.(String(p.content ?? '')); break;
+      case UI_EVENT.MESSAGE_SAY:
+        // say 交付块（模型的"嘴"）：不经流式累积，直接以强调色落定，
+        // 与普通 assistant 输出在视觉上区分开。
+        chatLog.addDelivered(String(p.content ?? ''));
+        break;
       case UI_EVENT.COMPANION_SAY:
         // 陪伴表达：与普通回复同形展示（payload.text 已是 [动作]（心声）话术 渲染结果）
         tuiHandler.onText?.(String(p.text ?? ''));

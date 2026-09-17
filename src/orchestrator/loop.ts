@@ -88,6 +88,9 @@ export interface OutputHandler {
   /** Ask the user structured questions with options. Each question supports multi-select and custom input.
    *  Returns a JSON string mapping question index → selected answers. */
   onAskUser?(questions: AskUserQuestion[]): Promise<string>;
+  /** say 工具交付内容（模型的"嘴"）。可选：实现方可用不同样式渲染，
+   *  未实现时回退 onText（见 takeSayStatus）。 */
+  onSay?(content: string): void;
   /** 通用事件通道（陪伴语音等非 message 正文的后端推送；协议层转发给 UI） */
   onEvent?(type: string, payload?: unknown): void;
 }
@@ -328,6 +331,8 @@ export class AgentLoop {
   /** say 工具：连续校验失败次数（report 失败时 toolCalled 仍为 true，会重置
    *  idleTurnCount 使空转兜底失效，故需独立上限，防空转到 maxTurns） */
   private sayFailureCount = 0;
+  /** say 待落盘的交付正文（延后到 tool_result 之后落盘，见 takeSayStatus 注释） */
+  private sayPendingContent: string | null = null;
   private compressCount = 0;
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
@@ -910,20 +915,24 @@ export class AgentLoop {
   }
 
   /**
-   * say 工具提交入口：校验 → 落 assistant 文本 + 屏显 → 置回合结束标志。
+   * say 工具提交入口：校验 → 暂存交付正文 → 置回合结束标志。
+   * 落盘与屏显**不在这里**做（2026-09-18 实测修正）：此刻 tool_result 尚未写入
+   * （loop-tools 在工具返回后才追加），若现在 append assistant 文本，历史尾部会
+   * 停在 user(tool_result)，用户下一条消息即构成"连续 user"、被严格厂商整请求拒绝。
+   * 故正文暂存到 sayPendingContent，由 takeSayStatus() 在 tool_result 之后统一落盘 + 屏显。
    *
-   * 为什么落 assistant 消息而非只留工具形态（2026-09-18 分析）：
+   * 为什么最终仍要落成 assistant 消息（而非只留工具形态）：
    *   - 压缩 Phase 4 的规则裁剪（trimToolResults / dedup / truncateLargeToolCalls）
    *     只作用于 tool 消息，assistant 文本不受影响
    *   - 摘要输入里自然语言比 [ToolUse] JSON 形态更不易被略写
-   *   - 历史尾部不会停在 user(tool_result)，避免严格厂商拒绝"连续 user 消息"
+   *   - 历史尾部以 assistant 文本收尾（延后落盘后成立），避免"连续 user 消息"
    * 返回 ok=false 时由工具层抛错 → is_error → loop 自动续轮让模型重写。
    */
   async submitSay(content: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const text = (content ?? '').trim();
     if (!text) {
       this.sayFailureCount++;
-      // 连续 3 次空内容即中止：report 失败时 toolCalled 仍为 true 会重置
+      // 连续 3 次空内容即中止：say 失败时 toolCalled 仍为 true 会重置
       // idleTurnCount，空转兜底失效，只能靠 maxTurns —— 故此处独立设限。
       if (this.sayFailureCount >= 3) {
         this.sayStatus = 'aborted';
@@ -938,27 +947,44 @@ export class AgentLoop {
       };
     }
 
-    try {
-      await this.conversationStore.append(this.sessionDir, {
-        role: 'assistant',
-        content: [{ type: 'text', text }],
-      });
-    } catch (err) {
-      // 落盘失败不阻断交付（屏显仍应发生），但记下便于排查
-      this.logger?.warn?.('submitSay: append assistant message failed', {
-        error: (err as Error).message,
-      });
-    }
-    this.outputHandler?.onText?.(text);
+    // 暂存正文：落盘与屏显延后到 takeSayStatus()（tool_result 落盘之后）
+    this.sayPendingContent = text;
     this.sayStatus = 'submitted';
     return { ok: true };
   }
 
-  /** 消费 report 状态（预填进 TurnState；消费即重置，供每回合独立判定） */
-  private takeSayStatus(): 'submitted' | 'aborted' | undefined {
+  /**
+   * 消费 say 状态（预填进 TurnState；消费即重置，供每回合独立判定）。
+   *
+   * 顺序要点：本方法在工具执行（含 tool_result 落盘）之后、finalize 之前被调用，
+   * 因此交付正文的落盘与屏显放在这里 —— 历史才会以 assistant 文本收尾，
+   * 而不是停在 user(tool_result)（否则用户下一条消息构成"连续 user"）。
+   */
+  private async takeSayStatus(): Promise<'submitted' | 'aborted' | undefined> {
     const status = this.sayStatus;
+    const pending = this.sayPendingContent;
     this.sayStatus = null;
+    this.sayPendingContent = null;
     this.sayFailureCount = 0;
+
+    if (status === 'submitted' && pending) {
+      try {
+        await this.conversationStore.append(this.sessionDir, {
+          role: 'assistant',
+          content: [{ type: 'text', text: pending }],
+        });
+      } catch (err) {
+        // 落盘失败不阻断交付（屏显仍应发生），但记下便于排查
+        this.logger?.warn?.('takeSayStatus: append assistant message failed', {
+          error: (err as Error).message,
+        });
+      }
+      // 走专用通道（onSay）：UI 可据此把"交付"与普通输出分开渲染；
+      // 未实现 onSay 的渠道回退 onText，保持兼容。
+      if (this.outputHandler?.onSay) this.outputHandler.onSay(pending);
+      else this.outputHandler?.onText?.(pending);
+    }
+
     return status ?? undefined;
   }
 
@@ -1849,7 +1875,7 @@ export class AgentLoop {
       await this.checkTextLoop(textParts);
       // ── P1 M3：finalize 阶段（endTurn + stop 判定，经内核管道执行） ──
       // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成
-      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: this.takeSayStatus() }, this.makeStageCtx());
+      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus() }, this.makeStageCtx());
       // ── 钩子：迭代结束（stop 判定已出） ──
       await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finA.stop, stopReason: finA.stopReason });
       // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──

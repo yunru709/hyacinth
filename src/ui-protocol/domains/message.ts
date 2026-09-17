@@ -64,6 +64,11 @@ export class ProtocolOutputHandler implements OutputHandler {
     this.emit(UI_EVENT.MESSAGE_TEXT, { content });
   }
 
+  /** say 交付（模型的"嘴"）：独立事件，UI 据此用不同样式渲染 */
+  onSay(content: string): void {
+    this.emit(UI_EVENT.MESSAGE_SAY, { content });
+  }
+
   onThinking(content: string): void {
     this.emit(UI_EVENT.MESSAGE_THINKING, { content });
   }

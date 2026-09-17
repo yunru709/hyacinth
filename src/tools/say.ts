@@ -59,7 +59,10 @@ export function createSayTool(submit: SaySubmitFn): Tool {
         // 抛错 → 框架落 is_error tool_result → toolCalled=true → loop 自动续轮重试
         throw new Error(result.error);
       }
-      return '已交付：结论已说给用户，本回合到此结束。';
+      // 最小返回值：Tool.execute 必须返回 string，且 tool_result 不可缺失
+      // （缺失会被严格厂商判为孤儿 tool_use、整请求拒绝），所以只能精简不能删。
+      // 内容越短，UI 与历史里的噪音越小。
+      return 'ok';
     },
   };
 }

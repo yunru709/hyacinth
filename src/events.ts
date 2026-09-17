@@ -43,6 +43,8 @@ export const UI_EVENT = {
   UI_ERROR: 'ui.error',
   // message 域事件（后端 → UI 推送）
   MESSAGE_TEXT: 'message.text',
+  /** say 工具交付的结论（与普通 assistant 文本区分渲染：强调色"交付块"） */
+  MESSAGE_SAY: 'message.say',
   MESSAGE_THINKING: 'message.thinking',
   MESSAGE_TOOL_USE: 'message.tool_use',
   MESSAGE_TOOL_RESULT: 'message.tool_result',

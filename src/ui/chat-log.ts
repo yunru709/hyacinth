@@ -98,6 +98,14 @@ export class ChatLog extends Container {
     this.appendNonSystem(new UserMessageComponent(text));
   }
 
+  /**
+   * say 交付块：模型的"嘴"说给用户的内容，用强调色渲染以区别于普通输出。
+   * 不经流式累积（交付是完整一块），直接落定。
+   */
+  addDelivered(text: string) {
+    this.appendNonSystem(new AssistantMessageComponent(text, theme.delivered));
+  }
+
   private resolveRunId(runId?: string) {
     return runId ?? 'default';
   }

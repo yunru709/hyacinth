@@ -10,7 +10,7 @@ describe('say 工具', () => {
     const out = await tool.execute({ content: '任务已完成，产出如下…' });
 
     expect(submit).toHaveBeenCalledWith('任务已完成，产出如下…');
-    expect(out).toContain('已交付');
+    expect(out).toBe('ok');
   });
 
   it('提交方拒绝（ok:false）→ 抛错（框架落 is_error → loop 自动续轮重试）', async () => {
@@ -24,7 +24,7 @@ describe('say 工具', () => {
     const submit = vi.fn().mockResolvedValue({ ok: true });
     const tool = createSayTool(submit);
 
-    await expect(tool.execute({ content: 'x' })).resolves.toContain('已交付');
+    await expect(tool.execute({ content: 'x' })).resolves.toBe('ok');
   });
 
   it('缺省 content 视为空串（交给 submit 校验，工具自身不判空）', async () => {
