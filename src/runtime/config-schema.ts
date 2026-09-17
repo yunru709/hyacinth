@@ -73,6 +73,8 @@ export interface FullConfig {
     maxMessages: number; // 10000
     /** 响应超时（秒） */
     responseTimeoutSec: number;
+    /** 每渠道会话策略（SessionService 注入源）：sessionKey: conversation|single|explicit；sharedLoop?: boolean */
+    channelPolicies: Record<string, { sessionKey: 'conversation' | 'single' | 'explicit'; sharedLoop?: boolean }>;
   };
 
   safety: {

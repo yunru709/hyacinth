@@ -29,8 +29,6 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['channels/auto-detect.ts', new Set(['setup'])],
   ['channels/builtin/http-webhook.ts', new Set(['context', 'gateway', 'local-model', 'prompts', 'runtime', 'setup'])],
   ['channels/builtin/ui-protocol-session.ts', new Set(['companion', 'generation', 'hot-reload'])],
-  ['channels/plugins/clawbot/clawbot-channel.ts', new Set(['memory'])],
-  ['channels/plugins/feishu/feishu-channel.ts', new Set(['memory'])],
   ['gateway/agent-assembly.ts', new Set(['agents', 'dependency', 'evolution', 'memory', 'orchestrator', 'provider', 'skills', 'supervisor', 'tools'])],
   ['gateway/arch-assembly.ts', new Set(['context', 'supervisor'])],
   ['gateway/base-contributions.ts', new Set(['evolution', 'machine', 'rollback'])],

@@ -15,7 +15,7 @@ import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
-import { dropOrphanToolMessages } from './message-sanitize.js';
+import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {
   /** 必须提供 apiKey，或通过 OPENAI_API_KEY 环境变量自动读取 */
@@ -331,7 +331,8 @@ export class OpenAIProvider implements Provider {
       }
     }
 
-    return dropOrphanToolMessages(result);
+    // 两向兜底：先剥「无回应的 tool_calls」（严格厂商 400 的主因），再丢「无主的 tool」
+  return dropOrphanToolMessages(dropOrphanToolCalls(result));
   }
 
   /** 将内部 ToolDefinition[] 转换为 OpenAI ChatCompletionTool[] */

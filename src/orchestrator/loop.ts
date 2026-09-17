@@ -404,6 +404,12 @@ export class AgentLoop {
   private inlineToolExecuted = false;
   /** Stores results from inline tool execution, keyed by tool_use_id */
   private inlineToolResults: Map<string, { content: string; isError: boolean }> = new Map();
+  /**
+   * 待应用的会话切换目标（switch_session 登记，**轮次边界**才真正生效）。
+   * 见 switchSession() 的说明：切换若在工具执行中途生效，本轮 tool_result 会落进
+   * 目标会话，原会话留下孤儿 tool_use（严格厂商 400 → 切换"做一半" → agent 反复补做）。
+   */
+  private pendingSessionDir: string | null = null;
   /** Tools that require user confirmation before execution */
   private dangerousTools: Set<string>;
   /** Tools whitelisted by user (skip confirmation — session-level, from 'always' response) */
@@ -729,9 +735,33 @@ export class AgentLoop {
     return this.recentToolNames;
   }
 
-  /** 就地切换到指定 session，无需重启进程 */
+  /**
+   * 就地切换到指定 session（**延迟生效**）。
+   *
+   * 只登记目标，真正切换发生在本轮所有落盘完毕后的轮次边界
+   * （主循环 → applyPendingSessionSwitch）。
+   *
+   * 为什么不能立即切：本轮 tool_result 必须落在**发起调用的会话**里。若当场改
+   * this.sessionDir，工具结果 flush 时用的是下一轮 ctx 的新目录 → 结果写进目标
+   * 会话、原会话留下孤儿 tool_use → 严格厂商（DeepSeek/OpenAI）整请求 400 →
+   * 该会话不可用，且 agent 会认为切换"没做成"而在后续轮次反复补做（2026-09-17
+   * 实测：微信渠道因此被反复切走、与 TUI 串台）。
+   */
   async switchSession(newSessionDir: string): Promise<void> {
-    this.sessionDir = newSessionDir;
+    this.pendingSessionDir = newSessionDir;
+  }
+
+  /**
+   * 应用待切换的会话（轮次边界调用）。此处才真正改 sessionDir 并重置会话态 ——
+   * 此时本轮 tool_result 已全部落盘，不存在写错目录的风险。
+   */
+  private async applyPendingSessionSwitch(): Promise<void> {
+    const next = this.pendingSessionDir;
+    if (!next) return;
+    this.pendingSessionDir = null;
+    if (next === this.sessionDir) return;
+
+    this.sessionDir = next;
     this.currentSummary = undefined;
     this.compressCount = 0;
     this.needsAggressiveCompress = false;
@@ -1158,6 +1188,10 @@ export class AgentLoop {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
           break;
         }
+
+        // ── 应用待切换的会话（switch_session 登记，延迟到轮次边界）──
+        // 上一轮的 tool_result 已全部落盘，此处切换不会写错目录。
+        await this.applyPendingSessionSwitch();
 
         const result = await this.runTurn();
         turnCount++;

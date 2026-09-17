@@ -131,10 +131,13 @@ export type HostChannelEvent =
 /** 用户消息事件 */
 export interface HostChannelMessageEvent {
   type: 'message';
-  sessionId: string;
+  /** 显式会话 ID：协议自带会话的渠道填；缺省 = 内核按 identity 解析 */
+  sessionId?: string;
   userId: string;
   content: string;
   channel: string;
+  /** 平台身份：内核 identity→sessionId 解析输入 */
+  identity?: { userId?: string; chatId?: string; threadId?: string; isGroup?: boolean };
   /** 图片数据（base64 + MIME）。各渠道自行下载后填入，可选 */
   images?: Array<{ data: string; media_type: string }>;
   metadata?: Record<string, unknown>;
@@ -230,18 +233,26 @@ export interface HostChannelHandler {
   onEvent(handler: (event: HostChannelEvent) => Promise<void>): void;
   /** 发送回复（Gateway 调此方法把 Agent 回复发回给用户） */
   reply(sessionId: string, reply: HostChannelReply): Promise<void>;
-  /** 处理消息（渠道自行管理 session、AgentLoop、回复） */
-  handleMessage(
-    event: HostChannelMessageEvent,
-    replyFn: HostReplyFn,
-    agentFactory: HostAgentFactory,
-  ): Promise<void>;
+  /** 纯转发钩子（可选）：仅「把消息原样转发给协议层/上层」的渠道实现；缺省 = 内核编排 */
+  onInboundMessage?(event: HostChannelMessageEvent): Promise<void>;
+  /** 自定义输出处理器（可选）：逐 token 渲染的渠道实现；可为异步；缺省 = 内核 collectHandler + reply() 一次性发送 */
+  createOutputHandler?(sessionId: string, metadata?: Record<string, unknown>): HostChannelOutputHandler | Promise<HostChannelOutputHandler | undefined> | undefined;
+  /** 会话绑定通知（可选）：内核解析出 sessionId 后回调，渠道据此记录传输态回复目标 */
+  onSessionBound?(sessionId: string, event: HostChannelMessageEvent): Promise<void> | void;
+  /** loop 生命周期通知（可选）：内核编排在 loop.run 开始前回调（如「正在输入」） */
+  onLoopStart?(event: HostChannelMessageEvent, sessionId: string): Promise<void> | void;
+  /** loop 生命周期通知（可选）：内核编排在 loop.run 结束后回调；error 非空 = 运行异常 */
+  onLoopEnd?(sessionId: string, error?: unknown): Promise<void> | void;
+  /** 本渠道 loop 能力声明（定时任务路由/陪伴推送用）；缺省 = 无能力 */
+  readonly loopCapabilities?: { persistent?: boolean; localDefault?: boolean; fallbackPriority?: number };
   /** 配置热更新（可选） */
   updateConfig?(newConfig: Record<string, unknown>): Promise<void>;
   /** 处理 TUI 子命令（可选），如 /<channelId>/<subCmd> */
   handleTuiCommand?(cmdPath: string, args: string): Promise<string | null>;
   /** 获取渠道状态 */
   getStatus(): HostChannelStatus;
+  /** 主动发送消息（传输能力，可选）：定时任务结果推送等主动消息的出口 */
+  sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
   /** 主动发送消息（跨渠道借用能力入口，可选） */
   send?(target: HostChannelTarget, content: HostChannelReply): Promise<string>;
 }

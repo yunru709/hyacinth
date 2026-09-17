@@ -17,6 +17,7 @@ import type { SessionType } from '../types.js';
 import { ProviderManager } from '../provider/manager.js';
 import type { Provider } from '../provider/interface.js';
 import { createLogger } from '../logging/logger.js';
+import { resolveChannelSession } from '../session-channel.js';
 
 const logger = createLogger('factory');
 
@@ -84,26 +85,25 @@ export async function boot(options: BootOptions): Promise<BootResult> {
   } else if (shouldContinue) {
     // 渠道隔离恢复：TUI 与飞书共享进程时，重启应恢复各自渠道的 session，
     // 而非全局最近（否则会把飞书 session 恢复给 TUI）。跨渠道加载由 switch_session 显式完成。
-    const channelSession = channel
-      ? await sessionManager.getLatestByChannel(channel)
-      : null;
-    if (channelSession) {
-      sessionDir = sessionManager.getSessionDir(channelSession.id);
-      currentSessionId = channelSession.id;
-      sessionType = channelSession.type ?? 'normal';
-      logger.info('Continued session', { sessionId: currentSessionId, type: sessionType, channel });
-    } else if (channel) {
-      // ── fail-closed：渠道已声明，但本渠道没有存量会话 ──
-      // **绝不**回退到「全局最近」（旧写法 `channelSession ?? resume()`）。那条兜底
-      // 会把任何**无渠道归属**的会话 —— 测试泄漏目录、temp 项目会话、别渠道的会话 ——
-      // 认领给本渠道。实测事故：TUI / WebUI / 微信三方共用同一份对话历史。
-      // 宁可开新会话（最多丢一次续接），也不让两个渠道串上下文。
-      logger.warn('no session found for channel — starting a new one (fail-closed, no global fallback)', { channel });
-      const fresh = sessionManager.createLazy(channel);
-      await sessionManager.cleanup();
-      sessionDir = sessionManager.getSessionDir(fresh.id);
-      currentSessionId = fresh.id;
-      sessionType = fresh.type ?? 'normal';
+    //
+    // 恢复策略**唯一实现**在 session-channel.resolveChannelSession（快照 → 最近 → 新建），
+    // 与 SessionService 共用，避免两侧各写一份而产生行为分歧。
+    const resolved = channel ? await resolveChannelSession(sessionManager, channel) : null;
+    if (resolved) {
+      sessionDir = sessionManager.getSessionDir(resolved.id);
+      currentSessionId = resolved.id;
+      sessionType = (resolved.type as SessionType | undefined) ?? 'normal';
+      if (resolved.source === 'new') {
+        // ── fail-closed：渠道已声明，但本渠道没有存量会话 ──
+        // **绝不**回退到「全局最近」（旧写法 `channelSession ?? resume()`）。那条兜底
+        // 会把任何**无渠道归属**的会话 —— 测试泄漏目录、temp 项目会话、别渠道的会话 ——
+        // 认领给本渠道。实测事故：TUI / WebUI / 微信三方共用同一份对话历史。
+        // 宁可开新会话（最多丢一次续接），也不让两个渠道串上下文。
+        logger.warn('no session found for channel — starting a new one (fail-closed, no global fallback)', { channel });
+        await sessionManager.cleanup();
+      } else {
+        logger.info('Continued session', { sessionId: currentSessionId, type: sessionType, channel, source: resolved.source });
+      }
     } else {
       // 未声明渠道（纯 CLI 交互模式）→ 才允许恢复全局最近
       const session = await sessionManager.resume();

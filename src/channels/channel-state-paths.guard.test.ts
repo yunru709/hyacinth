@@ -17,7 +17,8 @@ const read = (rel: string): string => fs.readFileSync(path.join(process.cwd(), r
 describe('渠道凭证/状态文件必须落家目录（不得跟 process.cwd 走）', () => {
   it.each([
     ['src/channels/plugins/clawbot/clawbot-auth.ts', 'clawbot_token.json'],
-    ['src/channels/plugins/clawbot/clawbot-channel.ts', 'clawbot_session.json'],
+    // 注：clawbot 曾额外持久化 clawbot_session.json（会话映射）。该"第二份状态"已移除，
+    // 会话改由会话目录单点决定（见 session-channel-ownership.test.ts），故不再列此项。
     ['src/channels/plugins/feishu/feishu-channel.ts', 'feishu_chat.json'],
   ])('%s：%s 使用 homedir 而非 cwd', (rel, fileName) => {
     const src = read(rel);

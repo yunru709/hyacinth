@@ -21,14 +21,13 @@
 //   5. stop() → 停止长轮询 → 清理资源
 // ============================================================
 
-import os from 'node:os';
 
 /**
  * 微信 ClawBot 渠道 sessionId 前缀（**插件自管**）。
  *
- * 修复的正是"产得出来、认不出来"缺口：生产侧 generateSessionId('clawbot') 一直
- * 造得出 clawbot_xxx，但注册表里从来没有 clawbot_，导致会话归属永远推断不出、
- * 渠道隔离失效。现由插件在 autoRegister 开头无条件登记（与 enabled 无关）。
+ * 修复的正是"产得出来、认不出来"缺口：生产侧一直造得出 clawbot_xxx（会话归属前缀），
+ * 但注册表里从来没有 clawbot_，导致会话归属永远推断不出、渠道隔离失效。
+ * 现由插件在 autoRegister 开头无条件登记（与 enabled 无关）。
  */
 export const CLAWBOT_SESSION_PREFIX = 'clawbot_';
 import type {
@@ -38,10 +37,6 @@ import type {
   ChannelConfig,
   ChannelStatus,
   ChannelMessageEvent,
-  AgentFactory,
-  ReplyFn,
-  ChannelOutputHandler,
-  ChannelSessionRunner,
 } from '../../interface.js';
 import {
   resolveClawbotConfig,
@@ -50,13 +45,7 @@ import {
 import { ClawbotClient, ClawbotAPIError, type ClawbotIncomingMessage } from './clawbot-client.js';
 import { ClawbotAuthManager, type AuthCallbacks } from './clawbot-auth.js';
 import { ClawbotMessageQueue } from './clawbot-message-queue.js';
-import { createCollectHandler, type CollectHandler } from './clawbot-session.js';
 import { ClawbotTypingController } from './clawbot-typing.js';
-import { SessionManager } from '../../../memory/session.js';
-import { sessionBelongsToChannel } from '../../../session-channel.js';
-import { generateSessionId } from '../../../memory/session.js';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 
 // ── 日志 ──────────────────────────────────────────────────────
 
@@ -90,6 +79,8 @@ export class ClawbotChannel implements ChannelHandler {
   readonly pluginId = undefined;
   /** sessionId 前缀（引用 src/session-channel.ts 内置前缀常量，勿写字面量） */
   readonly sessionPrefix = CLAWBOT_SESSION_PREFIX;
+  /** 能力声明：微信同为持久消息渠道，fallbackPriority 5 < 飞书 10（两者在线时优先飞书） */
+  readonly loopCapabilities = { persistent: true, fallbackPriority: 5 } as const;
 
   private status: ChannelStatus = 'registered';
   private config!: ClawbotChannelConfig;
@@ -99,7 +90,6 @@ export class ClawbotChannel implements ChannelHandler {
   private client: ClawbotClient | null = null;
   private auth: ClawbotAuthManager | null = null;
   private messageQueue = new ClawbotMessageQueue();
-  private agentFactory: AgentFactory | null = null;
 
   // ── 长轮询状态 ────────────────────────────────────────────────
   private polling = false;
@@ -107,16 +97,9 @@ export class ClawbotChannel implements ChannelHandler {
   /** getUpdates 的 opaque blob，首次空字符串，后续回传上次返回值 */
   private getUpdatesBuf = '';
 
-  // ── 会话状态 ──────────────────────────────────────────────────
+  // ── 会话状态（传输态：只记「往哪发」，不解析/不创建会话） ──────
   /** 单会话信息（ClawBot 只有一个会话） */
   private sessionInfo: SessionInfo | null = null;
-  /** sessionId → SessionInfo 映射（兼容多 session 接口） */
-  private sessionMap = new Map<string, SessionInfo>();
-
-  // ── AgentLoop 引用 ───────────────────────────────────────────
-  private loop: ChannelSessionRunner | null = null;
-  private collectHandler: CollectHandler | null = null;
-  private sessionId: string | null = null;
 
   // ── typing 状态 ──────────────────────────────────────────────
   /**
@@ -132,10 +115,6 @@ export class ClawbotChannel implements ChannelHandler {
   // ── TUI 同步 ─────────────────────────────────────────────────
   private onUserMessage: ((label: string, content: string) => void) | null = null;
   private onAgentReply: ((content: string) => void) | null = null;
-
-  // ── Session 持久化 ───────────────────────────────────────────
-  // 家目录（与其余 ~/.agent 配置一致）：不跟 process.cwd() 走，否则换启动目录即失联
-  private persistSessionFile = path.join(os.homedir(), '.agent', 'clawbot_session.json');
 
   // ── 定时器 ───────────────────────────────────────────────────
   /** 每日 token 过期检查定时器 */
@@ -211,35 +190,14 @@ export class ClawbotChannel implements ChannelHandler {
     this.config.botId = this.auth.botIdentifier;
     this.config.userId = this.auth.userIdentifier;
 
-    // ── 注册到 channelLoop 注册表（供定时任务路由） ──
-    const registry = (globalThis as any).__channelLoopRegistry as Map<string, {
-      notifyTaskFired(name: string, sessionId?: string): Promise<void>;
-      sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
-      capabilities?: { persistent?: boolean; localDefault?: boolean; fallbackPriority?: number };
-    }> | undefined;
-    if (registry) {
-      registry.set('clawbot', {
-        notifyTaskFired: async (name: string, sessionId?: string) => {
-          await this.handleTaskNotification(name, sessionId);
-        },
-        sendProactiveMessage: async (sessionId: string, text: string) => {
-          await this.sendProactiveMessage(sessionId, text);
-        },
-        // 能力声明（核心据此选择，不再写死渠道名）：微信同为持久消息渠道，
-        // 但 fallbackPriority 5 < 飞书 10 —— 两者同时在线时仍优先飞书（与历史行为一致），
-        // 飞书不在线时才顶上来做兜底（这比原先回落到本地 loop 更合理）。
-        capabilities: { persistent: true, fallbackPriority: 5 },
-      });
-      this.logger.info('registered in channelLoop registry for scheduled task routing');
-    }
+    // ── 会话恢复由内核 SessionService 统一负责（manager.startChannel → bindChannel）──
+    // 渠道不再持有 sessionId：单会话策略（identity→default 键）由内核身份映射持久化，
+    // 重启后首条消息自动复用恢复的会话目录。本渠道不再自行解析/持久化会话。
 
     // ── typing 提示 ──
     // 注意：typing_ticket 是 **per-user** 的（官方 getconfig 要求 ilink_user_id），
     // 启动时尚无对端 userId，无法预取。改为在首条消息到达时按需获取，
-    // 见 handleMessage → ensureTypingTicket()。
-
-    // ── 恢复持久化的 session 映射 ──
-    await this.restoreSession();
+    // 见 handleIncomingMessage → ensureTypingTicket()。
 
     // ── 启动长轮询 ──
     this.polling = true;
@@ -289,44 +247,6 @@ export class ClawbotChannel implements ChannelHandler {
     };
   }
 
-  // ── Session 持久化 ─────────────────────────────────────────────
-
-  private async persistSession(): Promise<void> {
-    try {
-      const data: Record<string, string> = {};
-      for (const [sid, info] of this.sessionMap) {
-        data[info.userId] = sid;
-      }
-      await fs.mkdir(path.dirname(this.persistSessionFile), { recursive: true });
-      await fs.writeFile(this.persistSessionFile, JSON.stringify(data), 'utf-8');
-    } catch { /* 写入失败不阻塞 */ }
-  }
-
-  private async restoreSession(): Promise<void> {
-    try {
-      const raw = await fs.readFile(this.persistSessionFile, 'utf-8');
-      const data = JSON.parse(raw) as Record<string, string>;
-      let dropped = 0;
-      for (const [userId, sid] of Object.entries(data)) {
-        if (typeof sid !== 'string') continue;
-        // 归属校验：只接受**本渠道前缀**的会话。旧版/异常数据里可能是裸 ID 或别渠道 ID，
-        // 沿用会让 clawbot 持有别人的会话（实测：曾持有裸 ID 20260916-223857-0e9c）。
-        if (!sessionBelongsToChannel(sid, 'clawbot')) {
-          dropped++;
-          continue;
-        }
-        this.sessionMap.set(sid, { userId, contextToken: '' });
-        this.sessionId = sid;
-      }
-      if (dropped > 0) {
-        this.logger.info(`[session-ownership] dropped ${dropped} persisted session(s) not belonging to clawbot`);
-      }
-      if (this.sessionId) {
-        this.logger.info(`restored session: ${this.sessionId}`);
-      }
-    } catch { /* 首次启动无文件，正常 */ }
-  }
-
   /** ChannelHandler: 处理 TUI 子命令（/clawbot/login, /clawbot/status） */
   async handleTuiCommand(cmdPath: string, _args: string): Promise<string | null> {
     if (cmdPath === 'clawbot/login') {
@@ -359,10 +279,7 @@ export class ClawbotChannel implements ChannelHandler {
     }
 
     this.messageQueue.clear();
-    this.sessionMap.clear();
-    this.loop = null;
-    this.collectHandler = null;
-    this.sessionId = null;
+    this.sessionInfo = null;
     this.status = 'stopped';
     this.logger.info('channel stopped');
   }
@@ -380,9 +297,10 @@ export class ClawbotChannel implements ChannelHandler {
       return;
     }
 
-    const session = this.sessionMap.get(sessionId);
+    // 单会话渠道：回复目标恒为当前对端会话
+    const session = this.sessionInfo;
     if (!session) {
-      this.logger.error(`reply failed: session ${sessionId} not found`);
+      this.logger.error(`reply failed: no active conversation for ${sessionId}`);
       return;
     }
 
@@ -397,6 +315,11 @@ export class ClawbotChannel implements ChannelHandler {
         text,
         this.config.textChunkLimit ?? 2000,
       );
+
+      // TUI 同步（回复文本）
+      if (this.config.tuiSync && this.onAgentReply) {
+        this.onAgentReply(text);
+      }
     } catch (err) {
       this.logger.error(`reply failed: ${err instanceof Error ? err.message : String(err)}`);
 
@@ -410,67 +333,6 @@ export class ClawbotChannel implements ChannelHandler {
 
   getStatus(): ChannelStatus {
     return this.status;
-  }
-
-  // ── handleMessage ──────────────────────────────────────────────
-
-  async handleMessage(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    agentFactory: AgentFactory,
-  ): Promise<void> {
-    this.agentFactory = agentFactory;
-
-    const userId = (event.metadata?.userId as string) ?? event.userId;
-    // typing_ticket 是 per-user 的；官方 getconfig 还接受 context_token
-    const contextToken =
-      this.sessionMap.get(event.sessionId)?.contextToken ?? this.sessionInfo?.contextToken;
-
-    // TUI 同步
-    if (this.config.tuiSync && this.onUserMessage) {
-      const label = '微信';
-      this.onUserMessage(label, event.content);
-    }
-
-    try {
-      // 获取或创建 AgentLoop
-      if (!this.loop || !this.collectHandler) {
-        this.collectHandler = createCollectHandler();
-        this.sessionId = event.sessionId;
-        const { loop } = await agentFactory.createAgent({
-          outputHandler: this.collectHandler,
-          sessionId: event.sessionId,
-          channel: 'clawbot',
-        });
-        this.loop = loop;
-      }
-
-      this.collectHandler.reset();
-      if (event.images?.length) (this.loop as any).channelImages = event.images;
-
-      // ── 开始「正在输入」──
-      // 拿不到 ticket 时静默 no-op，绝不影响下面的主流程
-      await this.startTyping(userId, contextToken);
-
-      await this.loop.run(event.content);
-      const response = this.collectHandler.getResponse();
-
-      if (response) {
-        await replyFn({ content: response });
-      }
-
-      if (this.config.tuiSync && this.onAgentReply && response) {
-        this.onAgentReply(response);
-      }
-    } catch (err) {
-      this.logger.error(`handleMessage error: ${String(err instanceof Error ? err.message : err)}`);
-      try {
-        await replyFn({ content: `处理出错: ${err instanceof Error ? err.message : String(err)}` });
-      } catch { /* ignore */ }
-    } finally {
-      // 必须放在 finally：异常路径同样要收尾，否则会留下永久「正在输入」
-      this.stopTyping();
-    }
   }
 
   // ── 长轮询 ────────────────────────────────────────────────────
@@ -569,42 +431,27 @@ export class ClawbotChannel implements ChannelHandler {
 
     if (!content && images.length === 0) return;
 
-    // ── 更新会话信息 ──
+    // ── 更新会话信息（传输态：回复目标绑定） ──
     const userId = msg.from_user_id;
     const contextToken = msg.context_token;
 
     this.sessionInfo = { userId, contextToken };
 
-    // 生成或复用 sessionId
-    let sessionId: string | undefined;
-    for (const [sid, info] of this.sessionMap) {
-      if (info.userId === userId) {
-        sessionId = sid;
-        // 更新 contextToken（始终使用最新一条的 token）
-        info.contextToken = contextToken;
-        break;
-      }
+    // TUI 同步（用户消息）
+    if (this.config.tuiSync && this.onUserMessage) {
+      this.onUserMessage('微信', content);
     }
-
-    if (!sessionId) {
-      // 本渠道**最新已有会话**优先：状态文件丢失、或记录被归属校验剔除后，
-      // 应延续「自己上一个 session」，而不是凭空新开一个
-      //（需求：在线渠道持有各自前缀的最新 session）。clawbot 是单会话渠道，回落安全。
-      const latest = await new SessionManager(process.cwd()).getLatestByChannel('clawbot');
-      sessionId = latest?.id ?? generateSessionId('clawbot');
-      this.sessionMap.set(sessionId, { userId, contextToken });
-      this.persistSession().catch(() => {});  // 持久化新 session，重启后复用
-    }
-
-    this.sessionId = sessionId;
 
     // ── 构造 ChannelMessageEvent ──
+    // 会话主控权归内核（SessionService 单点解析）：渠道只提供身份（userId），
+    // **不解析/不决定 sessionId**。单会话策略由内核按 identity 派生（default 键），
+    // 重启后首条消息自动复用恢复的会话目录。
     const channelEvent: ChannelEvent = {
       type: 'message',
-      sessionId,
       userId,
       content,
       channel: this.id,
+      identity: { userId },
       images: images.length > 0 ? images : undefined,
       metadata: {
         userId,
@@ -613,8 +460,8 @@ export class ClawbotChannel implements ChannelHandler {
       },
     };
 
-    // 入队（立即返回，不阻塞轮询循环）
-    this.messageQueue.enqueue(sessionId, channelEvent);
+    // 入队（立即返回，不阻塞轮询循环）；单会话渠道队列键恒为 'default'
+    this.messageQueue.enqueue('default', channelEvent);
   }
 
   // ── Token 过期处理 ────────────────────────────────────────────
@@ -650,7 +497,8 @@ export class ClawbotChannel implements ChannelHandler {
       return;
     }
 
-    const session = this.sessionMap.get(sessionId) ?? this.sessionInfo;
+    // 单会话渠道：目标恒为当前对端
+    const session = this.sessionInfo;
     if (!session) {
       this.logger.error('sendProactiveMessage: no session available');
       return;
@@ -666,57 +514,6 @@ export class ClawbotChannel implements ChannelHandler {
       this.logger.info(`proactive message sent to ${sessionId.slice(0, 16)}...`);
     } catch (err) {
       this.logger.error(`sendProactiveMessage failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  /**
-   * 处理定时任务通知。
-   * 运行 Agent 并将结果主动推送到 ClawBot 会话。
-   */
-  async handleTaskNotification(taskName: string, sessionId?: string): Promise<void> {
-    const effectiveSessionId = sessionId ?? this.sessionId;
-    if (!effectiveSessionId) {
-      this.logger.error('handleTaskNotification: no session available');
-      return;
-    }
-
-    const loop = this.loop;
-    if (!loop) {
-      this.logger.error('handleTaskNotification: no loop available — no message has been processed yet');
-      return;
-    }
-
-    const queued = await this.hasQueuedMessage(effectiveSessionId);
-    if (queued) {
-      this.logger.info(`handleTaskNotification: session ${effectiveSessionId.slice(0, 16)}... has queued messages, skipping task`);
-      return;
-    }
-
-    const prompt = `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered via WeChat ClawBot. Execute it now and respond naturally. If this was a one-shot task, it has completed — no need to reschedule.`;
-
-    const texts: string[] = [];
-    const taskHandler: ChannelOutputHandler = {
-      onTurnStart: () => { texts.length = 0; },
-      onText: (text) => { texts.push(text); },
-      onStatus: (msg, level) => { this.logger.info(`[clawbot-task] ${level}: ${msg}`); },
-    };
-
-    loop.setOutputHandler(taskHandler);
-    try {
-      await loop.run(prompt);
-      const response = texts.join('').trim();
-      if (response) {
-        await this.sendProactiveMessage(effectiveSessionId, response);
-      } else {
-        this.logger.info(`handleTaskNotification: task "${taskName}" produced no text output`);
-      }
-    } catch (err) {
-      this.logger.error(`handleTaskNotification error: ${String(err instanceof Error ? err.message : err)}`);
-    } finally {
-      // 恢复原 handler
-      if (this.collectHandler) {
-        loop.setOutputHandler(this.collectHandler);
-      }
     }
   }
 
@@ -796,11 +593,21 @@ export class ClawbotChannel implements ChannelHandler {
     this.typingController?.stop();
   }
 
-  // ── 工具 ──────────────────────────────────────────────────────
+  // ── loop 生命周期钩子（内核编排回调；替代旧 handleMessage 里的 startTyping/stopTyping） ──
 
-  private async hasQueuedMessage(sessionId: string): Promise<boolean> {
-    return this.messageQueue.getQueueSize(sessionId) > 0;
+  /** 内核在 loop.run 前回调：开始「正在输入」 */
+  async onLoopStart(event: ChannelMessageEvent, _sessionId: string): Promise<void> {
+    const userId = (event.metadata?.userId as string) ?? event.userId;
+    const contextToken = this.sessionInfo?.contextToken;
+    await this.startTyping(userId, contextToken);
   }
+
+  /** 内核在 loop.run 后回调（无论成功/异常）：停止「正在输入」 */
+  async onLoopEnd(_sessionId: string): Promise<void> {
+    this.stopTyping();
+  }
+
+  // ── 工具 ──────────────────────────────────────────────────────
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));

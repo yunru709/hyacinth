@@ -47,7 +47,13 @@ export function createInputStage(): StageModule<TurnState, StageServiceMap> {
       // 陪伴模式纯旁白轮：本轮 input 来自旁路 LLM 的瞬态产出（未落盘、不在 history 中）
       const ephemeralInput = state.ephemeralInput;
 
-      // 判断是否是工具执行后的续轮（history 中有 tool_use）
+      // ── 续轮判定 ─────────────────────────────────────────────────
+      // 判据是**历史末尾**的形状：末尾为「新鲜用户文本」→ 本轮是用户新输入；
+      // 否则（末尾是 tool_result 等）→ 工具续轮。此判据供下方两处**共用**。
+      const lastMsg = raw[raw.length - 1];
+      const hasFreshUserInput = lastMsg?.role === 'user' && hasTextContent(lastMsg.content);
+
+      // 历史中是否出现过 tool_use（供 context 阶段决定是否走 router.filterHistory）
       const hasPendingToolCalls = raw.some(
         (m) => m.role === 'assistant' && hasToolUseContent(m.content),
       );
@@ -56,20 +62,18 @@ export function createInputStage(): StageModule<TurnState, StageServiceMap> {
       // 台词不因「工具输出」被摘要丢弃导致失忆；普通模式维持原样）
       const uncompressedMsgs = state.companionMode ? materializeExpressions(raw) : raw;
 
-      // 从 history 中排除最后一条 user 文本消息（compose 会重新添加）
-      // 工具执行续轮时保留在历史中供上下文参考，但不清除 userInput 以避免重复注入
-      // 瞬态旁白轮：当前 input 不在 history 中，不剥离任何历史 user 消息
-      const historyWithoutLastUser = hasPendingToolCalls || ephemeralInput
+      // 从 history 中排除最后一条 user 文本消息（compose 会把 userInput 重新添加为
+      // 独立消息）。判据必须与下方清空 userInputText 的判据**同源**：曾用
+      // 「历史中出现过 tool_use」这种宽判据，而它在任何用过工具的会话里恒为真 →
+      // raw 全量保留、userInput 又注入同一条 → 模型每轮收到两份相同用户消息。
+      const historyWithoutLastUser = !hasFreshUserInput || ephemeralInput
         ? raw
         : lastUserTextMsg
           ? raw.filter((m) => !isSameTextMessage(m, lastUserTextMsg))
           : raw;
 
       // 续轮时清空 userInput，防止同一条用户消息被重新注入为"新输入"
-      // 判断依据：历史最末尾不是用户新文本（而是 tool_result），说明是续轮
       // 如果末尾是用户文本消息（如新的"好了停吧"），则保留 userInput
-      const lastMsg = raw[raw.length - 1];
-      const hasFreshUserInput = lastMsg?.role === 'user' && hasTextContent(lastMsg.content);
       if (!hasFreshUserInput) {
         userInputText = '';
       }

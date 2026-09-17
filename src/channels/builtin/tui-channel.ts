@@ -5,8 +5,6 @@ import type {
   ChannelConfig,
   ChannelStatus,
   ChannelMessageEvent,
-  AgentFactory,
-  ReplyFn,
 } from '../interface.js';
 /**
  * TUI 渠道 sessionId 前缀（**渠道自管**：定义在本渠道模块内，核心注册表零渠道知识）。
@@ -27,6 +25,8 @@ export class TuiChannel implements ChannelHandler {
   readonly pluginId = undefined;
   /** sessionId 前缀（引用 src/session-channel.ts 内置前缀表的常量，勿写字面量） */
   readonly sessionPrefix = TUI_SESSION_PREFIX;
+  /** 本地默认渠道：本地主 loop 已由 runtime-wiring 注册；能力声明供路由/推送判定（不作主动推送目标） */
+  readonly loopCapabilities = { localDefault: true } as const;
 
   private status: ChannelStatus = 'registered';
   private eventHandler: ((event: ChannelEvent) => Promise<void>) | null = null;
@@ -78,15 +78,15 @@ export class TuiChannel implements ChannelHandler {
   onReply: ((content: string) => void) | null = null;
 
   /** 消息处理回调（由 tui.ts 设置，TUI 使用主 loop 处理消息） */
-  onHandleMessage: ((event: ChannelMessageEvent, replyFn: ReplyFn) => Promise<void>) | null = null;
+  onHandleMessage: ((event: ChannelMessageEvent) => Promise<void>) | null = null;
 
-  async handleMessage(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    _agentFactory: AgentFactory,
-  ): Promise<void> {
+  /**
+   * 纯转发钩子：TUI 不参与会话管理 —— 消息原样转发给协议层（tui.ts 设置 onHandleMessage）。
+   * 由 ChannelManager 在渠道收到消息时调用（onInboundMessage 存在即不走进内核编排）。
+   */
+  async onInboundMessage(event: ChannelMessageEvent): Promise<void> {
     if (this.onHandleMessage) {
-      await this.onHandleMessage(event, replyFn);
+      await this.onHandleMessage(event);
     }
   }
 }

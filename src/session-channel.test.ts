@@ -11,6 +11,7 @@ import {
   unregisterChannelPrefixes,
   resolveChannelFromSessionId,
   listChannelPrefixes,
+  createOwnedSessionGetter,
 } from './session-channel.js';
 
 describe('session-channel 注册表（纯注册表，零渠道知识）', () => {
@@ -64,5 +65,32 @@ describe('session-channel 注册表（纯注册表，零渠道知识）', () => 
 
   it('收尾：注册表回到空', () => {
     expect(listChannelPrefixes()).toEqual([]);
+  });
+});
+
+describe('createOwnedSessionGetter（归属受限 getter：重启放弃临时共同持有）', () => {
+  it('渠道内切换实时反映；切到别渠道回落最后归属本渠道的会话', () => {
+    registerChannelPrefix('tui_', 'tui');
+    registerChannelPrefix('feishu_', 'feishu');
+
+    let current = 'tui_s1';
+    const getter = createOwnedSessionGetter(() => current, 'tui');
+
+    expect(getter()).toBe('tui_s1'); // 归属本渠道 → 实时
+    current = 'tui_s2'; // 渠道内切换
+    expect(getter()).toBe('tui_s2'); // 实时反映
+    current = 'feishu_other'; // 临时切到别渠道会话（共同持有）
+    expect(getter()).toBe('tui_s2'); // 回落本渠道最后会话，快照不被污染
+    current = 'tui_s3'; // 切回本渠道
+    expect(getter()).toBe('tui_s3'); // 回落基准更新
+    current = 'feishu_other2';
+    expect(getter()).toBe('tui_s3'); // 再次切走仍回落
+
+    unregisterChannelPrefixes(['tui_', 'feishu_']);
+  });
+
+  it('初始会话即作为本渠道回落基准（启动会话不归属时也保持）', () => {
+    const getter = createOwnedSessionGetter(() => 'tui_main', 'tui');
+    expect(getter()).toBe('tui_main');
   });
 });

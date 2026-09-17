@@ -57,14 +57,6 @@ export {
   type FeishuSendResult,
 } from './feishu-send.js';
 export { FeishuStreamingCard } from './feishu-streaming.js';
-export {
-  ChannelSessionPool,
-  createCollectHandler,
-  type CollectHandler,
-  type SessionRunner,
-  type SessionEntry,
-  type SessionMode,
-} from './feishu-session.js';
 
 /**
  * 创建飞书渠道实例（便捷工厂函数）

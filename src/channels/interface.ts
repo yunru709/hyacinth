@@ -33,10 +33,16 @@ export type ChannelEvent =
 /** 用户消息事件 */
 export interface ChannelMessageEvent {
   type: 'message';
-  sessionId: string;
+  /**
+   * 显式会话 ID：协议自带会话的渠道填（TUI/WebUI/HTTP）。
+   * 缺省 = 内核按 identity 解析（会话主控权归 SessionService，渠道不再自行决定 sessionId）。
+   */
+  sessionId?: string;
   userId: string;
   content: string;
   channel: string;
+  /** 平台身份：内核 identity→sessionId 解析输入（渠道只解析协议、提供身份，不决定 sessionId） */
+  identity?: { userId?: string; chatId?: string; threadId?: string; isGroup?: boolean };
   /** 图片数据（base64 + MIME）。各渠道自行下载后填入，可选 */
   images?: Array<{ data: string; media_type: string }>;
   metadata?: Record<string, unknown>;
@@ -196,6 +202,14 @@ export interface ChannelHandler {
   readonly sessionChannel?: string;
 
   /**
+   * 本渠道 loop 能力声明（定时任务路由 / 陪伴推送用）。
+   *
+   * 由 ChannelManager 在 startChannel 统一生成 `__channelLoopRegistry` 条目
+   * （渠道**不再碰 globalThis**）；缺省 = 无能力（不参与主动路由/兜底）。
+   */
+  readonly loopCapabilities?: ChannelLoopCapabilities;
+
+  /**
    * 启动渠道
    * 渠道在此方法中建立连接、启动监听、注册路由等
    */
@@ -221,14 +235,31 @@ export interface ChannelHandler {
   reply(sessionId: string, reply: ChannelReply): Promise<void>;
 
   /**
-   * 处理消息（渠道自行管理 session、AgentLoop、回复）
-   * Gateway 不再在统一回调中分支处理不同渠道
+   * 纯转发钩子（可选）：仅「把消息原样转发给协议层/上层」的渠道实现（如 TUI）。
+   * 缺省 = 内核编排（SessionService 解析会话 → loop.run → reply）。
+   * 实现此钩子的渠道**不参与**会话管理，自身对 loop/回复完全无感。
    */
-  handleMessage(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    agentFactory: AgentFactory,
-  ): Promise<void>;
+  onInboundMessage?(event: ChannelMessageEvent): Promise<void>;
+
+  /**
+   * 自定义输出处理器（可选）：逐 token 渲染的渠道实现（如飞书流式卡片）。
+   * 可为异步（流式卡片的建卡/首帧需要 await）；缺省/返回 undefined = 内核 collectHandler + reply() 一次性发送。
+   */
+  createOutputHandler?(sessionId: string, metadata?: Record<string, unknown>): ChannelOutputHandler | Promise<ChannelOutputHandler | undefined> | undefined;
+
+  /**
+   * 会话绑定通知（可选）：内核解析出本消息的 sessionId 后回调，
+   * 渠道据此记录传输态回复目标（sessionMap 等）。**不决定** sessionId，只记录。
+   */
+  onSessionBound?(sessionId: string, event: ChannelMessageEvent): Promise<void> | void;
+
+  /**
+   * loop 生命周期通知（可选）：内核编排在 loop.run **开始前**回调。
+   * 供需要「生成期传输行为」的渠道使用（如微信「正在输入」）。
+   */
+  onLoopStart?(event: ChannelMessageEvent, sessionId: string): Promise<void> | void;
+  /** loop 生命周期通知（可选）：内核编排在 loop.run **结束后**回调；error 非空 = 运行异常。 */
+  onLoopEnd?(sessionId: string, error?: unknown): Promise<void> | void;
 
   /**
    * 配置热更新（可选）
@@ -253,11 +284,17 @@ export interface ChannelHandler {
   getStatus(): ChannelStatus;
 
   /**
-   * 主动发送消息（跨渠道借用能力入口）。
+   * 主动发送消息（传输能力，可选）：定时任务结果推送等主动消息的出口。
+   * 由 ChannelManager 生成 `__channelLoopRegistry` 条目时统一绑定；缺省 = 不支持主动推送。
+   */
+  sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
+
+  /**
+   * 主动发送消息（跨渠道借用能力入口，可选）。
    *
-   * 设计意图：reply() 是"回复"——在 handleMessage 生命周期内，将 Agent
+   * 设计意图：reply() 是"回复"——在内核编排生命周期内，将 Agent
    * 的响应发回给当前会话的用户。send() 是"借用"——任何渠道的 Agent
-   * 都可以调用其他渠道的 send() 来借用其发送能力，不依赖 handleMessage 生命周期。
+   * 都可以调用其他渠道的 send() 来借用其发送能力，不依赖内核编排生命周期。
    *
    * 行为保证（"纯借用"语义）：
    *   - 不创建 session —— 消息是一次性的，不关联 AgentLoop

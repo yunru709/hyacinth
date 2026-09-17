@@ -506,10 +506,6 @@ export class HttpWebhookChannel implements ChannelHandler {
 
   getStatus(): ChannelStatus { return this.status; }
 
-  async handleMessage(): Promise<void> {
-    throw new Error('HTTP webhook channel does not support handleMessage');
-  }
-
   private async ensureComponents(): Promise<AgentComponents> {
     if (!this.activeComponents) {
       const { createAgent } = await import('../../gateway/factory.js');

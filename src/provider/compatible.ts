@@ -15,7 +15,7 @@ import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
-import { dropOrphanToolMessages } from './message-sanitize.js';
+import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
 
 /** media_type → OpenAI input_audio format（仅支持 wav/mp3，其余归 wav） */
 function audioInputFormat(mediaType: string): 'wav' | 'mp3' {
@@ -397,7 +397,8 @@ export class OpenAICompatibleProvider implements Provider {
       }
     }
 
-    return dropOrphanToolMessages(result);
+    // 两向兜底：先剥「无回应的 tool_calls」（严格厂商 400 的主因），再丢「无主的 tool」
+  return dropOrphanToolMessages(dropOrphanToolCalls(result));
   }
 
   private convertTools(tools: ToolDefinition[]): OpenAI.ChatCompletionTool[] {

@@ -28,10 +28,7 @@ import type {
   ChannelConfig,
   ChannelStatus,
   ChannelMessageEvent,
-  AgentFactory,
-  ReplyFn,
   ChannelOutputHandler,
-  ChannelSessionRunner,
 } from '../../interface.js';
 import {
   resolveFeishuConfig,
@@ -48,10 +45,7 @@ import {
   type FeishuMessageContext,
 } from './feishu-event.js';
 import { sendText, sendCard, sendImage, getSenderInfo } from './feishu-send.js';
-import { ChannelSessionPool, createCollectHandler } from './feishu-session.js';
 import { FeishuMessageQueue } from './feishu-message-queue.js';
-import { generateSessionId } from '../../../memory/session.js';
-import { sessionBelongsToChannel } from '../../../session-channel.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
@@ -78,6 +72,8 @@ export class FeishuChannel implements ChannelHandler {
   readonly pluginId = undefined;
   /** sessionId 前缀（引用 src/session-channel.ts 内置前缀常量，勿写字面量） */
   readonly sessionPrefix = FEISHU_SESSION_PREFIX;
+  /** 能力声明：飞书是持久消息渠道（用户离线也能收到）→ 定时任务最后兜底 + 陪伴推送目标；优先级 10 最高 */
+  readonly loopCapabilities = { persistent: true, fallbackPriority: 10 } as const;
 
   private status: ChannelStatus = 'registered';
   private config!: FeishuChannelConfig;
@@ -87,7 +83,8 @@ export class FeishuChannel implements ChannelHandler {
   private dedupeStore = new FeishuDedupeStore();
   private messageQueue = new FeishuMessageQueue();
 
-  // 会话映射：sessionId → { chatId, messageId, threadId, chatType }
+  // ── 传输态（仅回答「往哪个 chat 发」，不创建/不解析/不持久化会话） ──
+  /** sessionId → 回复目标绑定（reply()/sendProactiveMessage() 据此找目标） */
   private sessionMap = new Map<string, {
     chatId: string;
     messageId: string;
@@ -95,16 +92,8 @@ export class FeishuChannel implements ChannelHandler {
     chatType: string;
     isGroup: boolean;
   }>();
-
-  // conversationKey → sessionId，同一对话复用同一 session 目录
-  private conversationToSession = new Map<string, string>();
-
-  // TUI/Server 模式共享
-  private sessionPool = new ChannelSessionPool();
-  private agentFactory: AgentFactory | null = null;
-  // 最近使用的 loop 引用（用于定时任务主动推送时获取 loop）
-  private lastUsedLoop: ChannelSessionRunner | null = null;
-  private lastUsedSessionId: string | null = null;
+  /** 主动推送兜底目标（最近活跃会话；重启后经 feishu_default 恢复 chatId） */
+  private lastActiveSessionId: string | null = null;
 
   // chatId 持久化（重启后无需等待用户先发消息即可主动推送）
   // 家目录（与其余 ~/.agent 配置一致）：渠道状态不应跟 process.cwd() 走
@@ -116,16 +105,11 @@ export class FeishuChannel implements ChannelHandler {
   // 是否使用流式卡片（server 模式）
   private useStreamingCard = false;
 
-  // LRU loop cache for server mode
-  private loopCache = new Map<string, ChannelSessionRunner>();
-  private loopAccessOrder: string[] = [];
-  private static MAX_LOOP_CACHE = 50;
-  // sessionId → loop 直接映射（供 handleTaskNotification 查找正确的 loop）
-  private sessionLoopMap = new Map<string, ChannelSessionRunner>();
-
   // tenant access token 缓存（避免每次下载图片都请求新 token）
   private cachedToken: string | null = null;
   private tokenExpiresAt = 0;
+  /** 当前进行中的流式卡片（onLoopEnd 收尾/中止用） */
+  private currentStreaming: { finish(): Promise<void>; abort(msg: string): Promise<void> } | null = null;
 
   async start(config: ChannelConfig): Promise<void> {
     this.status = 'starting';
@@ -145,30 +129,9 @@ export class FeishuChannel implements ChannelHandler {
       throw new Error(validationError);
     }
 
-    // 注册到全局 channelLoop 注册表（供定时任务路由到飞书渠道）
-    const registry = (globalThis as any).__channelLoopRegistry as Map<string, {
-      notifyTaskFired(name: string, sessionId?: string): Promise<void>;
-      sendProactiveMessage?(sessionId: string, text: string): Promise<void>;
-      capabilities?: { persistent?: boolean; localDefault?: boolean; fallbackPriority?: number };
-    }> | undefined;
-    if (registry) {
-      registry.set('feishu', {
-        notifyTaskFired: async (name: string, sessionId?: string) => {
-          await this.handleTaskNotification(name, sessionId);
-        },
-        sendProactiveMessage: async (sessionId: string, text: string) => {
-          await this.sendProactiveMessage(sessionId, text);
-        },
-        // 能力声明（核心据此选择，不再写死 'feishu'）：飞书是持久消息渠道 ——
-        // 用户离线也能收到，故作为定时任务最后兜底 + 陪伴推送目标；
-        // fallbackPriority 10：多个持久渠道同时在线时优先飞书。
-        capabilities: { persistent: true, fallbackPriority: 10 },
-      });
-      this.logger.info('registered in channelLoop registry for scheduled task routing');
-    }
-    // 注：飞书渠道的重启 session 恢复不依赖 __channelSessionRegistry，
-    // 而是走既有 persistFeishuState/restoreFeishuState（chatId + conversation→session 映射），
-    // 该机制更完整，且避免了向注册表写入 '__shared__'/'feishu_default' 等伪 session。
+    // 注：会话解析/恢复/持久化已收归内核 SessionService（manager.startChannel →
+    // bindChannel）。本渠道只保留**传输态**持久化（chatId/isGroup），
+    // 供重启后无需等待用户先发消息即可主动推送。
 
     this.logger.info(`starting with appId=${this.config.appId.slice(0, 8)}...`);
 
@@ -196,7 +159,7 @@ export class FeishuChannel implements ChannelHandler {
       this.logger.info('channel started, WebSocket connected');
 
       // 恢复持久化的 chatId（重启后无需等待用户先发消息即可主动推送）
-      await this.restoreFeishuState();
+      await this.restoreFeishuTransport();
     } catch (err) {
       this.status = 'error';
       this.logger.error(`transport start failed: ${String(err instanceof Error ? err.message : err)}`);
@@ -211,12 +174,7 @@ export class FeishuChannel implements ChannelHandler {
       this.transport = null;
     }
     this.sessionMap.clear();
-    this.conversationToSession.clear();
-    this.sessionPool.clear();
     this.messageQueue.clear();
-    this.loopCache.clear();
-    this.sessionLoopMap.clear();
-    this.loopAccessOrder = [];
     this.status = 'stopped';
     this.logger.info('channel stopped');
   }
@@ -253,6 +211,11 @@ export class FeishuChannel implements ChannelHandler {
           replyToMessageId: session.messageId,
           replyInThread: !!session.threadId,
         });
+      }
+
+      // TUI 同步（回复文本）
+      if (this.config.tuiSync && this.onAgentReply && text) {
+        this.onAgentReply(text);
       }
     } catch (err) {
       this.logger.error(`reply failed: ${String(err instanceof Error ? err.message : err)}`);
@@ -411,11 +374,12 @@ export class FeishuChannel implements ChannelHandler {
    */
   async sendProactiveMessage(sessionId: string, text: string): Promise<void> {
     let session = this.sessionMap.get(sessionId);
-    // 降级：陪伴模式下 sessionId 可能是 "companion" 等非飞书 ID
-    if (!session && this.lastUsedSessionId && this.lastUsedSessionId !== sessionId) {
-      session = this.sessionMap.get(this.lastUsedSessionId);
+    // 降级：sessionId 可能是 "companion" 等非飞书 ID，或内核恢复的会话尚未有消息往来
+    // → 回落最近活跃会话目标（重启后 = feishu_default 恢复的持久化 chatId）
+    if (!session && this.lastActiveSessionId && this.lastActiveSessionId !== sessionId) {
+      session = this.sessionMap.get(this.lastActiveSessionId);
       if (session) {
-        this.logger.info(`sendProactiveMessage: ${sessionId.slice(0, 20)}... not in sessionMap, fallback to lastUsedSessionId`);
+        this.logger.info(`sendProactiveMessage: ${sessionId.slice(0, 20)}... not in sessionMap, fallback to lastActiveSessionId`);
       }
     }
     if (!session) {
@@ -437,30 +401,25 @@ export class FeishuChannel implements ChannelHandler {
     }
   }
 
-  // ── chatId 持久化 ──────────────────────────────────────────────
+  // ── chatId 持久化（传输态：只存 {chatId, isGroup}，会话映射归内核 SessionService） ──
   // 个人助手场景：默认只服务一个用户，chatId 一般不会变。
   // 有新消息时自动更新，确保更换账号后也能无缝切换。
-  // 同时持久化 conversation→session 映射，确保重启后复用同一 session 目录。
 
-  private async persistFeishuState(sessionId: string): Promise<void> {
+  private async persistFeishuTransport(sessionId: string): Promise<void> {
     const session = this.sessionMap.get(sessionId);
     if (!session) return;
     try {
-      const sessions: Record<string, string> = {};
-      for (const [key, sid] of this.conversationToSession) {
-        sessions[key] = sid;
-      }
       const data = {
         chatId: session.chatId,
         isGroup: session.isGroup,
-        sessions,
       };
       await fs.mkdir(path.dirname(this.persistChatIdFile), { recursive: true });
       await fs.writeFile(this.persistChatIdFile, JSON.stringify(data), 'utf-8');
     } catch { /* 写入失败不阻塞 */ }
   }
 
-  private async restoreFeishuState(): Promise<void> {
+  /** 恢复持久化的传输态：仅 {chatId, isGroup} → sessionMap['feishu_default'] 兜底目标 */
+  private async restoreFeishuTransport(): Promise<void> {
     try {
       const raw = await fs.readFile(this.persistChatIdFile, 'utf-8');
       const data = JSON.parse(raw);
@@ -471,140 +430,93 @@ export class FeishuChannel implements ChannelHandler {
           chatType: data.isGroup ? 'group' : 'dm',
           isGroup: !!data.isGroup,
         });
-        this.lastUsedSessionId = 'feishu_default';
+        this.lastActiveSessionId = 'feishu_default';
         this.logger.info(`restored chatId from persistence: ${data.chatId}`);
-      }
-      // 恢复 conversation→session 映射，确保同一对话重启后复用同一 session 目录
-      if (data.sessions && typeof data.sessions === 'object') {
-        let dropped = 0;
-        for (const [key, sid] of Object.entries(data.sessions)) {
-          if (typeof sid !== 'string') continue;
-          // 归属校验：只接受**本渠道前缀**的会话（`__shared__` 是 shared 模式的伪会话，豁免）。
-          // 旧版/异常数据里可能是裸 ID 或别渠道 ID，沿用会让飞书持有别人的会话。
-          // 注：这里**不做**「回落到本渠道最新会话」——飞书是 per_chat/per_user 多会话，
-          // 回落会把 A 对话的会话喂给 B 对话。未知对话一律新建（generateSessionId('feishu')）。
-          if (sid === '__shared__' || sessionBelongsToChannel(sid, 'feishu')) {
-            this.conversationToSession.set(key, sid);
-          } else {
-            dropped++;
-          }
-        }
-        if (dropped > 0) {
-          this.logger.info(`[session-ownership] dropped ${dropped} session mapping(s) not belonging to feishu`);
-        }
-        this.logger.info(`restored ${this.conversationToSession.size} session mapping(s)`);
       }
     } catch { /* 文件不存在或格式错误，首次启动正常 */ }
   }
 
+  // ── 内核编排钩子（替代旧 handleMessage/handleTaskNotification 全链路） ──
+
   /**
-   * 处理定时任务通知：运行 Agent 并将结果主动推送到飞书。
-   * @param taskName 定时任务名称
-   * @param sessionId 创建任务时的 session，用于确定回复目标
+   * 会话绑定通知：内核解析出 sessionId 后回调。
+   * 渠道只做**传输态**记录（回复目标绑定 + 兜底目标 + chatId 持久化），不决定 sessionId。
    */
-  async handleTaskNotification(taskName: string, sessionId?: string): Promise<void> {
-    const effectiveSessionId = sessionId ?? this.lastUsedSessionId;
-    if (!effectiveSessionId) {
-      this.logger.error('handleTaskNotification: no sessionId available — cannot send proactive message');
-      return;
-    }
-
-    // 按 sessionId 查找正确的 loop（多会话场景下不能用 lastUsedLoop）
-    let loop: ChannelSessionRunner | null = this.sessionLoopMap.get(effectiveSessionId) ?? null;
-
-    // fallback: 尝试 loopCache（server 模式 LRU）
-    if (!loop) {
-      loop = this.loopCache.get(effectiveSessionId) ?? null;
-    }
-
-    // 最后兜底：使用 lastUsedLoop（可能是新 session 尚未有消息往来）
-    if (!loop) {
-      loop = this.lastUsedLoop;
-      if (loop) {
-        this.logger.info(`handleTaskNotification: using lastUsedLoop as fallback for session ${effectiveSessionId.slice(0, 20)}...`);
-      }
-    }
-
-    if (!loop) {
-      this.logger.error('handleTaskNotification: no loop available — no message has been processed yet');
-      return;
-    }
-
-    const prompt = `[Scheduled Task Triggered]\nYour scheduled task "${taskName}" has just been triggered via Feishu. Execute it now and respond naturally. If this was a one-shot task, it has completed — no need to reschedule.`;
-
-    // 临时收集输出
-    const texts: string[] = [];
-    const collectHandler: ChannelOutputHandler = {
-      onTurnStart: () => { texts.length = 0; },
-      onText: (text) => { texts.push(text); },
-      onStatus: (msg, level) => { this.logger.info(`[feishu-task] ${level}: ${msg}`); },
-    };
-
-    loop.setOutputHandler(collectHandler);
-    try {
-      await loop.run(prompt);
-      const response = texts.join('').trim();
-      if (response) {
-        // 修正发送目标：创建任务时的 sessionId 可能来自其他渠道（如 TUI），
-        // 不在飞书的 sessionMap 中。此时降级使用 lastUsedSessionId。
-        const sendSessionId = this.sessionMap.has(effectiveSessionId)
-          ? effectiveSessionId
-          : (this.lastUsedSessionId ?? effectiveSessionId);
-        if (sendSessionId !== effectiveSessionId) {
-          this.logger.info(
-            `handleTaskNotification: session ${effectiveSessionId.slice(0, 20)}... not in sessionMap, ` +
-            `fallback send to ${sendSessionId.slice(0, 20)}...`
-          );
-        }
-        await this.sendProactiveMessage(sendSessionId, response);
-      } else {
-        this.logger.info(`handleTaskNotification: task "${taskName}" produced no text output`);
-      }
-    } catch (err) {
-      this.logger.error(`handleTaskNotification error: ${String(err instanceof Error ? err.message : err)}`);
-    } finally {
-      // 恢复空操作 outputHandler
-      loop.setOutputHandler({ onText: () => {}, onStatus: () => {} });
-    }
+  async onSessionBound(sessionId: string, event: ChannelMessageEvent): Promise<void> {
+    const meta = event.metadata ?? {};
+    this.sessionMap.set(sessionId, {
+      chatId: meta.chatId as string,
+      messageId: meta.messageId as string,
+      threadId: meta.threadId as string | undefined,
+      chatType: (meta.chatType as string) ?? (meta.isGroup ? 'group' : 'dm'),
+      isGroup: !!meta.isGroup,
+    });
+    this.lastActiveSessionId = sessionId;
+    // 持久化 chatId（重启后无需等待新消息即可主动推送）
+    await this.persistFeishuTransport(sessionId);
   }
 
-  // ── ChannelHandler: handleMessage ──
+  /**
+   * 自定义输出处理器（server 模式）：流式卡片逐 token 渲染。
+   * TUI 模式返回 undefined → 内核回落到 collectHandler + reply() 一次性发送。
+   */
+  async createOutputHandler(
+    _sessionId: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<ChannelOutputHandler | undefined> {
+    if (!this.useStreamingCard) return undefined;
 
-  async handleMessage(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    agentFactory: AgentFactory,
-  ): Promise<void> {
-    if (!this.config) return;
+    // Import FeishuStreamingCard lazily to avoid circular deps
+    const { FeishuStreamingCard } = await import('./feishu-streaming.js');
 
-    // 存储 agentFactory 引用（供 handleTaskNotification 使用）
-    this.agentFactory = agentFactory;
+    const isGroup = metadata?.isGroup as boolean | undefined;
+    const chatId = metadata?.chatId as string | undefined;
+    const to = isGroup ? `chat:${chatId}` : `user:${metadata?.senderOpenId ?? ''}`;
+    const replyToMessageId = metadata?.messageId as string | undefined;
+    const replyInThread = !!metadata?.threadId;
 
-    const chatId = (event.metadata?.chatId as string) ?? '';
-    const senderOpenId = (event.metadata?.senderOpenId as string) ?? event.userId;
+    const streaming = new FeishuStreamingCard(this.config, {
+      replyToMessageId,
+      replyInThread,
+      updateIntervalMs: 1000,
+      onError: (err) => this.logger.error(`streaming error: ${err.message}`),
+    });
+    this.currentStreaming = streaming;
 
-    // tuiSync 回调
+    try {
+      await streaming.start(to);
+    } catch (err) {
+      this.logger.error(`streaming start failed: ${String(err instanceof Error ? err.message : err)}`);
+    }
+
+    return {
+      // 每个新 turn 清空之前累积的文本，只保留最后一轮的输出
+      onTurnStart: () => { streaming.resetBuffer(); },
+      onText: (text) => { streaming.append(text); },
+      onStatus: (msg, level) => { this.logger.info(`[feishu-agent] ${level}: ${msg}`); },
+    };
+  }
+
+  /** loop.run 开始前：TUI 同步用户消息 */
+  async onLoopStart(event: ChannelMessageEvent, _sessionId: string): Promise<void> {
     if (this.config.tuiSync && this.onUserMessage) {
       const label = (event.metadata?.senderName as string) || event.userId.slice(0, 8);
       this.onUserMessage(label, event.content);
     }
+  }
 
+  /** loop.run 结束后（成功 → 卡片收尾；异常 → 卡片中止） */
+  async onLoopEnd(_sessionId: string, error?: unknown): Promise<void> {
+    const streaming = this.currentStreaming;
+    this.currentStreaming = null;
+    if (!streaming) return;
     try {
-      const isShared = this.config.sessionMode === 'shared';
-
-      if (this.useStreamingCard) {
-        // server 模式：使用流式卡片
-        await this.handleWithStreamingCard(event, replyFn, agentFactory, chatId, senderOpenId);
+      if (error) {
+        await streaming.abort(String(error instanceof Error ? error.message : String(error)));
       } else {
-        // TUI 模式：使用 collectHandler 收集回复
-        await this.handleWithCollectHandler(event, replyFn, agentFactory, chatId, senderOpenId, isShared);
+        await streaming.finish();
       }
-    } catch (err) {
-      this.logger.error(`handleMessage error: ${String(err instanceof Error ? err.message : err)}`);
-      try {
-        await replyFn({ content: `处理出错: ${err instanceof Error ? err.message : String(err)}` });
-      } catch { /* ignore */ }
-    }
+    } catch { /* 卡片收尾失败不阻塞 */ }
   }
 
   // ── ChannelHandler: updateConfig ──
@@ -623,141 +535,6 @@ export class FeishuChannel implements ChannelHandler {
       // Just update non-connection config
       this.config = resolveFeishuConfig(newFeishuConfig);
     }
-  }
-
-  // ── TUI 模式：collectHandler 收集回复 ──
-
-  private async handleWithCollectHandler(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    agentFactory: AgentFactory,
-    chatId: string,
-    senderOpenId: string,
-    isShared: boolean,
-  ): Promise<void> {
-    const entry = await this.sessionPool.getOrCreate(
-      this.config,
-      chatId,
-      senderOpenId,
-      async () => {
-        const handler = createCollectHandler();
-        const { loop } = await agentFactory.createAgent({
-          outputHandler: handler,
-          sessionId: event.sessionId,
-          channel: 'feishu',
-        });
-        return { loop, collectHandler: handler };
-      },
-    );
-
-    entry.collectHandler.reset();
-    if (event.images?.length) (entry.loop as any).channelImages = event.images;
-
-    // 存储引用供定时任务主动推送使用
-    const sessionLoop = entry.loop as unknown as ChannelSessionRunner;
-    this.lastUsedLoop = sessionLoop;
-    this.lastUsedSessionId = event.sessionId;
-    this.sessionLoopMap.set(event.sessionId, sessionLoop);
-
-    await entry.loop.run(event.content);
-    const response = entry.collectHandler.getResponse();
-
-    if (response) {
-      await replyFn({ content: response });
-    }
-
-    if (this.config.tuiSync && this.onAgentReply && response) {
-      this.onAgentReply(response);
-    }
-  }
-
-  // ── Server 模式：流式卡片输出 ──
-
-  private async handleWithStreamingCard(
-    event: ChannelMessageEvent,
-    replyFn: ReplyFn,
-    agentFactory: AgentFactory,
-    chatId: string,
-    senderOpenId: string,
-  ): Promise<void> {
-    // Import FeishuStreamingCard lazily to avoid circular deps
-    const { FeishuStreamingCard } = await import('./feishu-streaming.js');
-
-    const isGroup = event.metadata?.isGroup as boolean | undefined;
-    const to = isGroup ? `chat:${chatId}` : `user:${event.userId}`;
-    const replyToMessageId = event.metadata?.messageId as string | undefined;
-    const replyInThread = !!event.metadata?.threadId;
-
-    const loop = await this.getOrCreateLoop(event.sessionId, agentFactory);
-
-    const streaming = new FeishuStreamingCard(this.config, {
-      replyToMessageId,
-      replyInThread,
-      updateIntervalMs: 1000,
-      onError: (err) => this.logger.error(`streaming error: ${err.message}`),
-    });
-
-    try {
-      await streaming.start(to);
-    } catch (err) {
-      this.logger.error(`streaming start failed: ${String(err instanceof Error ? err.message : err)}`);
-    }
-
-    const outputHandler: ChannelOutputHandler = {
-      // 每个新 turn 清空之前累积的文本，只保留最后一轮的输出
-      onTurnStart: () => { streaming.resetBuffer(); },
-      onText: (text) => { streaming.append(text); },
-      onStatus: (msg, level) => { this.logger.info(`[feishu-agent] ${level}: ${msg}`); },
-    };
-
-    loop.setOutputHandler(outputHandler);
-
-    // 存储引用供定时任务主动推送使用
-    this.lastUsedLoop = loop;
-    this.lastUsedSessionId = event.sessionId;
-    this.sessionLoopMap.set(event.sessionId, loop);
-
-    try {
-      if (event.images?.length) (loop as any).channelImages = event.images;
-      await loop.run(event.content);
-      await streaming.finish();
-    } catch (err) {
-      await streaming.abort(String(err instanceof Error ? err.message : String(err)));
-      await replyFn({ content: `处理出错: ${err instanceof Error ? err.message : String(err)}` });
-    } finally {
-      loop.setOutputHandler({ onText: () => {}, onStatus: () => {} });
-    }
-  }
-
-  // ── LRU loop cache for server mode ──
-
-  private async getOrCreateLoop(sessionId: string, agentFactory: AgentFactory): Promise<ChannelSessionRunner> {
-    const cached = this.loopCache.get(sessionId);
-    if (cached) {
-      // LRU: move to end
-      const idx = this.loopAccessOrder.indexOf(sessionId);
-      if (idx >= 0) {
-        this.loopAccessOrder.splice(idx, 1);
-        this.loopAccessOrder.push(sessionId);
-      }
-      return cached;
-    }
-
-    const { loop } = await agentFactory.createAgent({
-      sessionId,
-      outputHandler: { onText: () => {}, onStatus: () => {} },
-      channel: 'feishu',
-    });
-
-    // LRU eviction
-    if (this.loopAccessOrder.length >= FeishuChannel.MAX_LOOP_CACHE) {
-      const oldest = this.loopAccessOrder.shift()!;
-      this.loopCache.delete(oldest);
-    }
-
-    this.loopCache.set(sessionId, loop);
-    this.loopAccessOrder.push(sessionId);
-    return loop;
   }
 
   // ── 原始消息处理（WebSocket 收到 → 去重 → 访问控制 → 构造 ChannelMessageEvent）──
@@ -804,29 +581,6 @@ export class FeishuChannel implements ChannelHandler {
       }
     }
 
-    // ── 构造 sessionId（纯同步，不依赖网络）──
-    const conversationKey = ctx.isGroup
-      ? `feishu_group_${ctx.chatId}${ctx.threadId ? `_thread_${ctx.threadId}` : ''}`
-      : `feishu_dm_${ctx.senderOpenId}`;
-
-    let sessionId = this.conversationToSession.get(conversationKey);
-    if (!sessionId) {
-      sessionId = generateSessionId('feishu');
-      this.conversationToSession.set(conversationKey, sessionId);
-    }
-
-    // 记录会话信息
-    this.sessionMap.set(sessionId, {
-      chatId: ctx.chatId,
-      messageId: ctx.messageId,
-      threadId: ctx.threadId,
-      chatType: ctx.chatType,
-      isGroup: ctx.isGroup,
-    });
-
-    // 持久化 chatId（重启后无需等待新消息即可主动推送）
-    this.persistFeishuState(sessionId);
-
     // ── 发送者名称 + 图片下载（互不依赖）──
 
     // 发送者名称：fire-and-forget，不阻塞消息入队（仅用于 TUI 显示标签）
@@ -857,12 +611,19 @@ export class FeishuChannel implements ChannelHandler {
     }
 
     // ── 构造 ChannelMessageEvent ──
+    // 会话主控权归内核（SessionService 单点解析）：渠道只提供**身份**（identity + metadata），
+    // **不解析/不决定 sessionId**（conversationKey 映射已迁入内核 identityMap）。
     const channelEvent: ChannelEvent = {
       type: 'message',
-      sessionId,
       userId: ctx.senderOpenId,
       content: ctx.content,
       channel: this.id,
+      identity: {
+        userId: ctx.senderOpenId,
+        chatId: ctx.chatId,
+        threadId: ctx.threadId,
+        isGroup: ctx.isGroup,
+      },
       images,
       metadata: {
         messageId: ctx.messageId,
@@ -879,7 +640,8 @@ export class FeishuChannel implements ChannelHandler {
       },
     };
 
-    // 通过消息队列转发给 ChannelManager（入队即返回，ACK 立即发出）
-    this.messageQueue.enqueue(sessionId, channelEvent);
+    // 通过消息队列转发给 ChannelManager（入队即返回，ACK 立即发出）。
+    // 队列键用 chatId（传输态串行化：同一会话的消息按序处理，避免 conversation.jsonl 交叉写入）。
+    this.messageQueue.enqueue(ctx.chatId, channelEvent);
   }
 }

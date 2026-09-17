@@ -37,6 +37,7 @@ import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js
 import { getModelContextWindow } from '../setup/model-defaults.js';
 import { isCompanionModeActive } from '../context/profiles.js';
 import { createLogger } from '../logging/logger.js';
+import { getChannelSessionRegistry, registerChannelSession, createOwnedSessionGetter } from '../session-channel.js';
 
 const logger = createLogger('factory');
 
@@ -120,12 +121,13 @@ export function setupChannelRegistries(
   // 重启后 cli 按启动渠道取对应 session，避免多渠道共享进程（TUI + 飞书）时重启串 session。
   // 注意：仅当显式传入 channel 时才注册——http-webhook/tui-ws 等不传 channel 的渠道
   // 不注册，防止它们静默污染 'tui' 键（否则 serve 模式每个 http 请求都会顶掉真实 TUI 会话）。
-  if (!(globalThis as any).__channelSessionRegistry) {
-    (globalThis as any).__channelSessionRegistry = new Map<string, () => string>();
-  }
-  const channelSessions: Map<string, () => string> = (globalThis as any).__channelSessionRegistry;
+  // 交给调度器的注册表引用（与下方注册写入同一张表）
+  const channelSessions = getChannelSessionRegistry();
   if (channel) {
-    channelSessions.set(channel, () => path.basename((loop as any).sessionDir));
+    // 归属受限 getter：渠道内切换实时反映；切到别渠道会话时回落本渠道最后会话。
+    // 避免 switch_session 临时共同持有别渠道会话后，重启快照被污染（TUI 恢复成
+    // 微信的会话）。临时跨渠道持有 → 重启即放弃，各渠道回到自己的会话。
+    registerChannelSession(channel, createOwnedSessionGetter(() => path.basename((loop as any).sessionDir), channel));
   }
 
   // 本地主 loop 注册为「本地默认渠道」：渠道名取启动渠道（TUI 模式 = 'tui'），

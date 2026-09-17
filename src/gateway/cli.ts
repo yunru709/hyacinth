@@ -44,6 +44,7 @@ import {
   takeRestartContinuation,
 } from '../supervisor/protocol.js';
 import { createLogger } from '../logging/logger.js';
+import { loadRestartSnapshot } from '../session-channel.js';
 import { getDefaultConfig } from '../runtime/defaults.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { createConfigDomain } from '../ui-protocol/domains/config.js';
@@ -1219,6 +1220,9 @@ async function executeAction(
   const content = markerIsFresh(RESTART_SESSION_MARKER, RESTART_MARKER_MAX_AGE_MS)
     ? consumeMarker(RESTART_SESSION_MARKER)
     : (removeMarker(RESTART_SESSION_MARKER), null);
+  // 装载快照供**各渠道**取用（不再只有 TUI 这一条消费路径）：渠道启动时按自己的
+  // 名字取回重启前的会话，实现「各渠道各自恢复」；无命中则回退本渠道最近会话。
+  loadRestartSnapshot(content);
   if (content !== null) {
     restartContinue = true;
     // 非 TUI 模式：忽略特定 session，统一走 shouldContinue（恢复最近）

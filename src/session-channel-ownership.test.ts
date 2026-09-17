@@ -1,14 +1,18 @@
 /**
  * 「渠道只持有自己前缀的会话」不变式 —— 判定入口单测 + 插件接线守卫。
  *
- * 需求：重启时**各在线渠道持有各自前缀的最新 session**。这条不变式有两个断点：
- *   ① 渠道恢复自己的持久化映射时不校验归属 → 旧版裸 ID / 别渠道 ID 被沿用
- *      （实测：clawbot 曾持有裸 ID `20260916-223857-0e9c`，见日志
- *      `Continued session {sessionId: "20260916-223857-0e9c", channel: "clawbot"}`）；
- *   ② 判定口径散落各家 → 与 memory/session.ts 的 getLatestByChannel 兜底不一致。
- * 故收敛到 session-channel.sessionBelongsToChannel()，并由本文件钉住两家插件的接线。
+ * 需求：重启时**各在线渠道持有各自前缀的最新 session**。
  *
- * 注：UI/UI 侧（TUI、WebUI）走 boot 的按渠道恢复，见 boot-channel-restore.test.ts。
+ * 保障方式按渠道而异（本文件分别钉住接线）：
+ *   · clawbot —— **不持久化本地映射**，会话单点取自会话目录（getLatestByChannel
+ *     按渠道过滤）。曾把 userId→sessionId 存进 clawbot_session.json 作第二份状态，
+ *     必然陈旧（实测重启后锚定已删除的 clawbot_20260713-…），该机制已整体移除。
+ *   · feishu —— 仍持久化映射，故恢复时**必须**校验归属，且豁免 __shared__ 伪会话。
+ *
+ * 判定入口收敛在 session-channel.sessionBelongsToChannel()，与 memory/session.ts 的
+ * getLatestByChannel 口径一致。
+ *
+ * 注：UI 侧（TUI、WebUI）走 boot 的按渠道恢复，见 boot-channel-restore.test.ts。
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs/promises';
@@ -45,21 +49,34 @@ describe('sessionBelongsToChannel：归属判定', () => {
   });
 });
 
-describe('插件接线守卫：恢复路径必须做归属校验', () => {
+describe('插件接线守卫：渠道只持有自己的会话', () => {
   const read = (rel: string) => fs.readFile(new URL(rel, import.meta.url), 'utf-8');
 
-  it('clawbot：恢复时校验并丢弃非本渠道 id', async () => {
+  it('clawbot：不再自行解析/持久化会话（会话主控权归内核 SessionService）', async () => {
     const src = await read('./channels/plugins/clawbot/clawbot-channel.ts');
-    expect(src).toContain("sessionBelongsToChannel(sid, 'clawbot')");
+    // 旧实现把 userId→sessionId 持久化到 clawbot_session.json；这份「第二状态」必然陈旧：
+    // 2026-09-17 实测重启后锚定到已被清理的 clawbot_20260713-…（「TUI 与微信共用 session」
+    // 事故的一环）。现在会话单点由内核 SessionService 解析（single 策略），
+    // 渠道不再持有 SessionManager/generateSessionId/getLatestByChannel。
+    expect(src).not.toContain('clawbot_session.json');
+    expect(src).not.toContain('getLatestByChannel');
+    expect(src).not.toContain('generateSessionId');
+    expect(src).not.toContain('new SessionManager');
   });
 
-  it('clawbot：缺记录时回落到**本渠道最新会话**，而非凭空新建', async () => {
-    const src = await read('./channels/plugins/clawbot/clawbot-channel.ts');
-    expect(src).toContain("new SessionManager(process.cwd()).getLatestByChannel('clawbot')");
+  it('飞书：会话映射持久化与归属校验迁入内核 SessionService（豁免 __shared__ 伪会话）', async () => {
+    const src = await read('./session-service.ts');
+    // 旧实现位于 feishu-channel.ts restoreFeishuState：恢复会话映射时校验归属，
+    // 且豁免 __shared__ 伪会话。会话主控权收归内核后该逻辑迁入 migrateFeishuLegacy。
+    expect(src).toContain('sid === \'__shared__\'');
+    expect(src).toContain('sessionBelongsToChannel(sid, \'feishu\')');
   });
 
-  it('飞书：恢复时校验，且豁免 __shared__ 伪会话', async () => {
+  it('飞书渠道文件不再含会话映射解析/持久化内核职责字符串', async () => {
     const src = await read('./channels/plugins/feishu/feishu-channel.ts');
-    expect(src).toContain("sid === '__shared__' || sessionBelongsToChannel(sid, 'feishu')");
+    expect(src).not.toContain('conversationToSession');
+    expect(src).not.toContain('generateSessionId');
+    expect(src).not.toContain('sessionBelongsToChannel');
+    expect(src).not.toContain('__channelLoopRegistry');
   });
 });

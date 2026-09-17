@@ -2,6 +2,7 @@ import { ConfigManager } from '../setup/config.js';
 import { ProviderManager } from '../provider/manager.js';
 import { getProviderConfigLoader } from '../provider/config.js';
 import { SessionManager } from '../memory/session.js';
+import { SessionService } from '../session-service.js';
 import { ChannelManager } from '../channels/manager.js';
 import { HttpWebhookChannel } from '../channels/builtin/http-webhook.js';
 import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
@@ -153,7 +154,18 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     },
   };
 
-  await manager.startAll(agentFactory);
+  // ── 内核会话服务（会话主控权单点：渠道身份解析 / loop 注册表 / 恢复） ──
+  // 策略来源外部配置（session.channelPolicies，defaults.ts 注入）
+  const sessionService = new SessionService({
+    sessionManager,
+    agentFactory,
+    policies: getDefaultConfig().session.channelPolicies,
+  });
+
+  // 旧飞书会话映射迁移（幂等：仅 session-identity.json 不存在时导入 feishu_chat.json 的 sessions）
+  await sessionService.migrateFeishuLegacy();
+
+  await manager.startAll(agentFactory, sessionService);
 
   console.log(`HTTP API: http://localhost:${port}`);
 

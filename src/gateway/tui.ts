@@ -60,6 +60,7 @@ import { LocalModelModule } from '../local-model/index.js';
 import type { BackgroundProcessInfo } from '../tools/background-registry.js';
 
 import { SessionManager } from '../memory/session.js';
+import { SessionService } from '../session-service.js';
 import { ModelChannelRegistry } from '../provider/model-channel-registry.js';
 import { getProviderConfigLoader } from '../provider/config.js';
 import { createInProcPair } from '../ui-protocol/adapter.js';
@@ -667,12 +668,11 @@ export async function runTui(
         maxTurns: maxTurns ?? 20,
         maxContext: maxContext ?? 40_000,
         outputHandler: options.outputHandler as OutputHandler,
-        // 真实会话意图来自 cli（--session / .resume-session / restart marker），
-        // 而非 UiProtocolSession 的协议连接标识（'tui' 兜底）。
-        // 修复：此前把协议标识 'tui' 当真实会话 ID 传入 → boot 恒 resume('tui')，
-        // 导致每次启动都复用同一个名为 tui 的旧会话。现在默认 undefined →
-        // boot 走 shouldContinue/惰性新建分支，首条消息才物化。
-        sessionId,
+        // 会话归属：调用方（渠道）指定的具体会话优先；未指定（undefined）时回退
+        // cli 的恢复意图（--session / .resume-session / restart marker）。
+        // 约定：「未指定」只用 undefined 表达，不用 'tui' 之类占位符——否则工厂层
+        // 只能靠猜值来区分语义（2026-09-17「TUI 与微信共用 session」事故的根源）。
+        sessionId: options.sessionId ?? sessionId,
         channel: options.channel ?? 'tui',
         sessionManager,
         shouldContinue,
@@ -857,7 +857,7 @@ export async function runTui(
       return new StatsManager(process.cwd()).get(sessionManager.getSessionDir(sid));
     };
     // kb / process / orchestrator 域依赖 agent 组件（initialize 后才就绪）：可变引用延迟解析
-    const uiSession = new UiProtocolSession(protocolServer, sessionId ?? 'tui', {
+    const uiSession = new UiProtocolSession(protocolServer, sessionId, {
       cwd: process.cwd(),
       // TUI 本地模式的会话归属渠道恒为 'tui'：不能沿用 ui-protocol 的 'webui' 缺省，
       // 否则 TUI 会话被贴成 webui_ 前缀（标签漂移）→ 重启快照键（'webui'）与 cli.ts 的
@@ -1086,8 +1086,22 @@ export async function runTui(
     await protocolSend('message.chat', { content: event.content });
   };
 
-  // 启动所有渠道（每个渠道自行处理消息）
-  await channelManager.startAll(agentFactory);
+  // ── 内核会话服务（会话主控权单点：渠道身份解析 / loop 注册表 / 恢复） ──
+  // 策略来源外部配置（session.channelPolicies，defaults.ts 注入）；configCenter 未就绪时回落默认。
+  let channelPolicies: Record<string, { sessionKey: 'conversation' | 'single' | 'explicit'; sharedLoop?: boolean }>;
+  try {
+    channelPolicies = RuntimeConfigCenter.getInstance().get<typeof channelPolicies>('session.channelPolicies');
+  } catch {
+    const { getDefaultConfig } = await import('../runtime/defaults.js');
+    channelPolicies = getDefaultConfig().session.channelPolicies;
+  }
+  const sessionService = new SessionService({ sessionManager, agentFactory, policies: channelPolicies });
+
+  // 旧飞书会话映射迁移（幂等：仅 session-identity.json 不存在时导入 feishu_chat.json 的 sessions）
+  await sessionService.migrateFeishuLegacy();
+
+  // 启动所有渠道（消息编排由内核 SessionService 统一完成）
+  await channelManager.startAll(agentFactory, sessionService);
 
   // ── 跨渠道消息发送工具 ────────────────────────────────────
   //

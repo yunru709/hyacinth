@@ -52,6 +52,17 @@ export function getDefaultConfig(): FullConfig {
       maxContext: 200000,
       maxMessages: 10000,
       responseTimeoutSec: 60,
+      // 每渠道会话策略（SessionService 注入源）：
+      //   - conversation：按对话身份派生（群=chat:<chatId>[:thread]，私聊=user:<userId>）
+      //   - single：单会话渠道（微信 ClawBot），恒为 default 键
+      //   - explicit：协议自带会话（TUI/WebUI/HTTP），不派生不持久化
+      //   - sharedLoop：多对话共享一个 loop（旧飞书 sessionMode='shared'）
+      channelPolicies: {
+        feishu: { sessionKey: 'conversation' },
+        clawbot: { sessionKey: 'single' },
+        tui: { sessionKey: 'explicit' },
+        webui: { sessionKey: 'explicit' },
+      },
     },
     safety: {
       // 空数组 = 按 sideEffect 推导（write/exec 需审批）；显式名单 = 加性覆盖

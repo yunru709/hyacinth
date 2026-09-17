@@ -10,7 +10,7 @@ import { getLocalProviderConfigLoader } from './local-config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
-import { dropOrphanToolMessages } from './message-sanitize.js';
+import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
 
 /** LocalProvider 构造选项 */
 export interface LocalProviderOptions {
@@ -284,7 +284,8 @@ export class LocalProvider implements Provider {
       }
     }
 
-    return dropOrphanToolMessages(result);
+    // 两向兜底：先剥「无回应的 tool_calls」（严格厂商 400 的主因），再丢「无主的 tool」
+  return dropOrphanToolMessages(dropOrphanToolCalls(result));
   }
 
   private convertTools(tools: ToolDefinition[]): OpenAI.ChatCompletionTool[] {

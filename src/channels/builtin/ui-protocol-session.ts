@@ -292,7 +292,7 @@ export function createBackendExecutor(
  * UI 侧（TUI 本地 / WebUI / 桌面端）与后端均只通过 save 协议交互。
  */
 export class UiProtocolSession {
-  readonly sessionId: string;
+  readonly sessionId: string | undefined;
   /** 协议服务器（已注册全部 17 域；动态域在 initialize 后生效） */
   readonly server: UiProtocolServer;
   /** 事件桥（后端 AgentLoop 回调 → 协议事件广播） */
@@ -308,7 +308,7 @@ export class UiProtocolSession {
   /** 后端依赖存档（rebindRuntimeRegistry 重绑 model 域时复用其余 options） */
   private backend: UiProtocolSessionBackend;
 
-  constructor(adapter: UIAdapter, sessionId: string, backend: UiProtocolSessionBackend) {
+  constructor(adapter: UIAdapter, sessionId: string | undefined, backend: UiProtocolSessionBackend) {
     this.adapter = adapter;
     this.sessionId = sessionId;
     this.server = new UiProtocolServer();

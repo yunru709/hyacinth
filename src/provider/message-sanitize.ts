@@ -70,3 +70,53 @@ export function dropOrphanToolMessages<T>(messages: T[]): T[] {
 
   return out;
 }
+
+/**
+ * 剥离**未被回应**的 assistant tool_calls（孤儿 tool_calls）。
+ *
+ * 与 dropOrphanToolMessages 互为镜像：后者治「tool 找不到主」，本函数治
+ * 「主找不到 tool」——assistant 声明了调用，但整段历史里没有任何 tool 消息回应它。
+ * 严格厂商据此整请求 400：
+ *   "An assistant message with 'tool_calls' must be followed by tool messages
+ *    responding to each 'tool_call_id'"
+ *
+ * 处理：剥掉未被回应的 tool_calls 条目（保留该消息的其它内容）；若剥完整条已无
+ * 内容则丢弃。同为**读侧兜底**（不改磁盘），历史脏数据发请求前自愈。
+ */
+export function dropOrphanToolCalls<T>(messages: T[]): T[] {
+  const answered = new Set<string>();
+  let sawToolCalls = false;
+  for (const raw of messages) {
+    const m = raw as unknown as ToolMessageLike;
+    if (m.role === 'tool' && typeof m.tool_call_id === 'string' && m.tool_call_id) {
+      answered.add(m.tool_call_id);
+    }
+    if (Array.isArray(m.tool_calls)) sawToolCalls = true;
+  }
+  // 常见路径：整段没有 tool_calls → 无需处理
+  if (!sawToolCalls) return messages;
+
+  const out: T[] = [];
+  for (const raw of messages) {
+    const m = raw as unknown as ToolMessageLike;
+    const calls = Array.isArray(m.tool_calls) ? m.tool_calls : null;
+    if (m.role !== 'assistant' || !calls) { out.push(raw); continue; }
+
+    const kept = calls.filter((c) => {
+      const id = (c as { id?: unknown } | null)?.id;
+      return typeof id === 'string' && answered.has(id);
+    });
+    if (kept.length === calls.length) { out.push(raw); continue; }
+
+    // 有孤儿 tool_calls → 剥掉；剥完无内容则整条丢弃
+    const rec = raw as unknown as { content?: unknown };
+    const hasContent = rec.content !== undefined && rec.content !== null && rec.content !== '';
+    if (kept.length === 0 && !hasContent) continue;
+
+    const clone = { ...(raw as Record<string, unknown>) };
+    if (kept.length > 0) clone.tool_calls = kept;
+    else delete clone.tool_calls;
+    out.push(clone as T);
+  }
+  return out;
+}

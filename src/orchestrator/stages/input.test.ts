@@ -89,6 +89,33 @@ describe('input 阶段（builtin:input-normalize）', () => {
     expect(st.userInput).toBe(''); // 末尾不是新 user 文本 → 续轮，清空防重复注入
     expect(st.historyWithoutLastUser).toBe(history); // 续轮不剥离
   });
+  it('回归：历史含早期 tool_use、末尾又是新 user 文本 → 仍须剥离（防重复注入）', async () => {
+    // 这是「同一条用户消息被注入两次」的真实形态：会话只要用过工具（任意一轮），
+    // hasPendingToolCalls 就恒为真。旧实现拿它当「本轮是否续轮」的剥离判据 →
+    // raw 全量保留（含末尾新 user 消息），同时 userInput 又注入同一条。
+    const history: Message[] = [
+      msg('user', '帮我查天气'),
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'weather', input: {} }] as never },
+      toolResultMsg('晴，25 度', 'w1'),
+      msg('assistant', '今天晴，25 度'),
+      msg('user', '那明天呢'),
+    ];
+    const ctx = makeCtx({
+      conversationStore: { readAll: vi.fn().mockResolvedValue(history) },
+      sessionDir: '/tmp/test-session',
+    });
+
+    const st = await stage.run(baseState(), ctx);
+
+    expect(st.userInput).toBe('那明天呢');
+    // 宽判据本身仍为真（context 阶段据此决定是否 filterHistory），但它不再参与剥离判定
+    expect(st.hasPendingToolCalls).toBe(true);
+    // 关键：末尾那条新 user 消息必须被剥离，否则 compose 后与 userInput 重复
+    expect(st.historyWithoutLastUser.includes(history[4])).toBe(false);
+    expect(st.historyWithoutLastUser).toHaveLength(4);
+  });
+
+
 
   it('瞬态旁白轮：ephemeralInput 覆盖 userInput 并置 null（一次性消费标记）', async () => {
     const history: Message[] = [msg('user', '上一轮输入')];
