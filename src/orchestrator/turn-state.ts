@@ -176,6 +176,13 @@ export interface TurnState {
   activePlan: Plan | undefined;
   /** Flow 状态机是否仍在运行（runTurn 预填；true 时 finalize 不写 stop 事件） */
   flowStillActive: boolean;
+  /**
+   * say 工具状态（runTurn 预填，消费即重置）：
+   *   'submitted' = 本轮已交付结论 → finalize 判停（stopReason 'say_submitted'）
+   *   'aborted'   = 连续校验失败超限 → 强制结束（stopReason 'say_failed'）
+   * undefined = 未提交。判定必须排在 toolCalled 之前（report 也是工具调用）。
+   */
+  sayStatus?: 'submitted' | 'aborted';
 }
 
 // ─── 会话状态（跨回合） ────────────────────────────────────────────

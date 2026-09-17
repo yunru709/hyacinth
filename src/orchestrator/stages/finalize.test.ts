@@ -88,6 +88,45 @@ describe('finalize 阶段（builtin:turn-finalize）', () => {
     expect(evt.reason).toBe('end_turn');
   });
 
+  // ── say 工具（2026-09-18）──
+  // 关键：report 本身也是一次工具调用（toolCalled=true），判定必须排在它之前，
+  // 否则"调用了 report 却停不下来"。以下两条用例锁定这个顺序语义。
+  it('report 已提交：即使 toolCalled=true 也停（say_submitted）并写 stop 事件', async () => {
+    const endTurn = vi.fn().mockResolvedValue(null);
+    const sessionDir = tmpSessionDir();
+    const ctx = makeCtx({ turnRecorder: { endTurn }, sessionDir });
+
+    const st = await stage.run(
+      { ...baseState(), toolCalled: true, sayStatus: 'submitted' },
+      ctx,
+    );
+
+    expect(st.stop).toBe(true);
+    expect(st.stopReason).toBe('say_submitted');
+    const line = fs.readFileSync(path.join(sessionDir, 'events.jsonl'), 'utf8').trim();
+    expect(JSON.parse(line).reason).toBe('say_submitted');
+  });
+
+  it('say 连续失败中止：stop=true + say_failed（不再空转到 maxTurns）', async () => {
+    const sessionDir = tmpSessionDir();
+    const ctx = makeCtx({ turnRecorder: { endTurn: vi.fn().mockResolvedValue(null) }, sessionDir });
+
+    const st = await stage.run({ ...baseState(), toolCalled: true, sayStatus: 'aborted' }, ctx);
+
+    expect(st.stop).toBe(true);
+    expect(st.stopReason).toBe('say_failed');
+  });
+
+  it('未提交 report 时行为不变（toolCalled 分支优先于默认结束）', async () => {
+    const sessionDir = tmpSessionDir();
+    const ctx = makeCtx({ sessionDir });
+
+    const st = await stage.run({ ...baseState(), toolCalled: true }, ctx);
+
+    expect(st.stop).toBe(false);
+    expect(st.toolCalled).toBe(true);
+  });
+
   it('无 turnRecorder 服务时跳过回合记账（不抛错）', async () => {
     const sessionDir = tmpSessionDir();
     const ctx = makeCtx({ sessionDir });

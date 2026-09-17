@@ -68,6 +68,9 @@ const BUILTIN_COMMON: ToolBundle = {
     'flow_start', 'flow_add', 'flow_complete',
     'session_fork',
     'ask_user',
+    // say 与 ask_user 同属核心交互工具：交付结论并结束回合，
+    // 必须进 common（始终加载）否则默认 coding 包下模型看不到它。
+    'say',
   ],
 };
 

@@ -88,4 +88,11 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
 
   // ── 用户交互工具 ──
   toolRegistry.register(createAskUserTool(() => loop.getAskUserHandler()));
+  // 交付结论工具（say）：把最终结论交给用户并结束回合。
+  // loop.submitSay 负责落 assistant 文本 + 屏显（不只留工具形态），
+  // finalize 在 toolCalled 之前据 sayStatus 判停（stopReason 'say_submitted'）。
+  {
+    const { createSayTool } = await import('../tools/say.js');
+    toolRegistry.register(createSayTool((content) => loop.submitSay(content)));
+  }
 }

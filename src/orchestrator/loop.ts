@@ -323,6 +323,11 @@ export class AgentLoop {
   /** ask_user 工具的交互 handler（按 loop 实例注入：构造时取 outputHandler.onAskUser，
    *  多路 UI 并发时各 loop 各自应答，不再覆盖进程内唯一全局 handler） */
   private askUserHandler: ((questions: AskUserQuestion[]) => Promise<string>) | null = null;
+  /** say 工具：本回合状态（'submitted' 已交付结论 / 'aborted' 连续失败超限） */
+  private sayStatus: 'submitted' | 'aborted' | null = null;
+  /** say 工具：连续校验失败次数（report 失败时 toolCalled 仍为 true，会重置
+   *  idleTurnCount 使空转兜底失效，故需独立上限，防空转到 maxTurns） */
+  private sayFailureCount = 0;
   private compressCount = 0;
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
@@ -904,6 +909,59 @@ export class AgentLoop {
     return this.askUserHandler;
   }
 
+  /**
+   * say 工具提交入口：校验 → 落 assistant 文本 + 屏显 → 置回合结束标志。
+   *
+   * 为什么落 assistant 消息而非只留工具形态（2026-09-18 分析）：
+   *   - 压缩 Phase 4 的规则裁剪（trimToolResults / dedup / truncateLargeToolCalls）
+   *     只作用于 tool 消息，assistant 文本不受影响
+   *   - 摘要输入里自然语言比 [ToolUse] JSON 形态更不易被略写
+   *   - 历史尾部不会停在 user(tool_result)，避免严格厂商拒绝"连续 user 消息"
+   * 返回 ok=false 时由工具层抛错 → is_error → loop 自动续轮让模型重写。
+   */
+  async submitSay(content: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const text = (content ?? '').trim();
+    if (!text) {
+      this.sayFailureCount++;
+      // 连续 3 次空内容即中止：report 失败时 toolCalled 仍为 true 会重置
+      // idleTurnCount，空转兜底失效，只能靠 maxTurns —— 故此处独立设限。
+      if (this.sayFailureCount >= 3) {
+        this.sayStatus = 'aborted';
+        return {
+          ok: false,
+          error: `say 连续 ${this.sayFailureCount} 次内容为空。本回合已结束，请在下一条消息里重新汇报。`,
+        };
+      }
+      return {
+        ok: false,
+        error: 'say 的 content 不能为空：请把要交付用户的结论正文写进 content 后重新调用。',
+      };
+    }
+
+    try {
+      await this.conversationStore.append(this.sessionDir, {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+      });
+    } catch (err) {
+      // 落盘失败不阻断交付（屏显仍应发生），但记下便于排查
+      this.logger?.warn?.('submitSay: append assistant message failed', {
+        error: (err as Error).message,
+      });
+    }
+    this.outputHandler?.onText?.(text);
+    this.sayStatus = 'submitted';
+    return { ok: true };
+  }
+
+  /** 消费 report 状态（预填进 TurnState；消费即重置，供每回合独立判定） */
+  private takeSayStatus(): 'submitted' | 'aborted' | undefined {
+    const status = this.sayStatus;
+    this.sayStatus = null;
+    this.sayFailureCount = 0;
+    return status ?? undefined;
+  }
+
   /** 获取当前 active Provider（考虑 Router 路由） */
   getActiveProvider(): Provider {
     return this.activeProvider ?? this.provider;
@@ -1256,7 +1314,12 @@ export class AgentLoop {
         // delegate-tool 中异步任务完成后会将结果推送到此队列。
         // 本轮迭代结束后检查：有已完成的结果→注入对话→强制继续迭代，
         // 让 LLM 在当前 turn 内拿到结果并做出反应，无需跨 turn 手动查。
-        if (this.pendingAsyncResults.length > 0) {
+        // report 已交付/中止时不注入（队列保留到下回合，避免"已汇报却又续轮"）
+        if (
+          this.pendingAsyncResults.length > 0
+          && result.stopReason !== 'say_submitted'
+          && result.stopReason !== 'say_failed'
+        ) {
           const results = this.pendingAsyncResults.splice(0);
           for (const r of results) {
             const content = r.status === 'completed'
@@ -1785,7 +1848,8 @@ export class AgentLoop {
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
       // ── P1 M3：finalize 阶段（endTurn + stop 判定，经内核管道执行） ──
-      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true }, this.makeStageCtx());
+      // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成
+      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: this.takeSayStatus() }, this.makeStageCtx());
       // ── 钩子：迭代结束（stop 判定已出） ──
       await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finA.stop, stopReason: finA.stopReason });
       // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
@@ -1851,6 +1915,8 @@ export class AgentLoop {
   ): Promise<{ stop: boolean; stopReason?: string }> {
     const mode = this.configCenter?.get('repair.verification.mode') as 'off' | 'soft' | 'hard' | undefined;
     if (!mode || mode === 'off') return { stop, stopReason };
+    // report 显式交付优先于自动校验：模型已明确"结论交给用户"，不应被验证门拽回继续
+    if (stopReason === 'say_submitted' || stopReason === 'say_failed') return { stop, stopReason };
     if (!this.planHandoff.pending) return { stop, stopReason };
 
     const reason = this.planHandoff.pending;
@@ -1882,6 +1948,8 @@ export class AgentLoop {
   ): Promise<{ stop: boolean; stopReason?: string }> {
     const mode = this.configCenter?.get('repair.evidenceGate.mode') as 'off' | 'soft' | 'hard' | undefined;
     if (!mode || mode === 'off') return { stop, stopReason };
+    // 同验证门：report 显式交付优先（否则"改了文件没验证"会把已汇报的回合拽回继续）
+    if (stopReason === 'say_submitted' || stopReason === 'say_failed') return { stop, stopReason };
     if (!this.turnHadMutation || this.turnEvidenceCount > 0) return { stop, stopReason };
     if (!stop) return { stop, stopReason };
 

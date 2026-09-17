@@ -29,7 +29,7 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
     name: 'turn-finalize',
     version: '1.0.0',
     // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明
-    reads: ['stop', 'toolCalled', 'flowStillActive'],
+    reads: ['stop', 'toolCalled', 'flowStillActive', 'sayStatus'],
     writes: ['stop', 'stopReason'],
     async run(state: TurnState, ctx: KernelStageContext): Promise<TurnState> {
       // ── 回合回滚：回合结束记录（尽力而为，不阻塞主循环） ──
@@ -38,6 +38,20 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
         turnRecorder.endTurn().catch((err: unknown) => {
           ctx.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
         });
+      }
+
+      // ── report 交付/中止判停（必须先于 toolCalled）──
+      // report 本身也是一次工具调用（toolCalled=true），若排在它后面就永远停不下来。
+      // 写 stop 事件与普通结束一致，便于事后区分「结论交付」与「end_turn」。
+      if (state.sayStatus === 'submitted' || state.sayStatus === 'aborted') {
+        const reason = state.sayStatus === 'submitted' ? 'say_submitted' : 'say_failed';
+        const sessionDir = ctx.require('sessionDir');
+        await appendEvent(sessionDir, {
+          type: 'stop',
+          reason,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
+        return { ...state, stop: true, stopReason: reason };
       }
 
       // 有工具调用 → 工具已执行，继续下一轮（stopReason 不传递，与原返回语义一致）
