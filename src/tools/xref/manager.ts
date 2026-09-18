@@ -27,6 +27,7 @@ import type {
 } from './schema.js';
 import { ParserRegistry, createParserRegistry } from './parser.js';
 import { toProjectKey } from '../../utils/misc.js';
+import { languageOfExtension } from './languages/index.js';
 import Database from '../sqlite.js';
 import type { SqliteDatabase } from '../sqlite.js';
 import { statSync } from 'node:fs';
@@ -1765,15 +1766,13 @@ export class XrefManager {
     return mods;
   }
 
+  /**
+   * 扩展名 → 语言。表已迁到 languages/ 注册表（Phase 1）——加语言不再需要改这里。
+   * 行为不变：与原内联表逐条一致（含 5 个"可解析但语言未知"的后缀，见
+   * languages/types.ts 的注记；那是既有现状，修它属独立决定）。
+   */
   private guessLanguage(ext: string): string {
-    const map: Record<string, string> = {
-      '.ts': 'typescript', '.tsx': 'typescript',
-      '.js': 'javascript', '.jsx': 'javascript',
-      '.py': 'python', '.go': 'go', '.rs': 'rust',
-      '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.hpp': 'cpp',
-      '.java': 'java', '.kt': 'kotlin', '.swift': 'swift',
-    };
-    return map[ext] ?? 'unknown';
+    return languageOfExtension(ext) ?? 'unknown';
   }
 
   private shorten(text: string): string {
