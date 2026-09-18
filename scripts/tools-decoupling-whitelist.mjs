@@ -49,7 +49,6 @@ export const SHARED_TOOL_INFRA = new Set([
  * 每条格式：`<from 模块 basename>→<to 模块 basename>`
  */
 export const KNOWN_TOOL_COUPLINGS = new Set([
-  'multi-edit→glob',          // 待修：multi-edit new GlobTool 且字符串比对它的输出（建议抽共享匹配器）
   'write→symbol-references',  // 待修：应改为"分析订阅变更"而非"写工具调用分析"
   'edit→symbol-references',   // 同上
 ]);

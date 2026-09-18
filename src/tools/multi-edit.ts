@@ -1,10 +1,80 @@
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { Tool } from './interface.js';
-import { GlobTool } from './glob.js';
 import { getAnyReadTime, recordFileWrite } from './file-tracker.js';
 import { refuseEditUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { detectEol, applyEol } from '../utils/eol.js';
+
+// ── 目录遍历 + glob 匹配（**有意内联复制自 glob.ts**，2026-09-19）──────────────
+// 为什么不 import GlobTool、也不抽公共模块：工具是动态的、会一个一个地变动，
+// 每个工具应当是**独立个体**（用户立的架构原则）。抽共享模块同样是耦合（改它影响两个），
+// 而"重复"的代价（修 bug 要改两处）在工具粒度上被判定为可接受。
+// 附带收益：原实现要 `new GlobTool()` 再**字符串比对它的返回值**
+// （`globResult.trim() === 'No files matched the pattern'`）—— GlobTool 改一句提示语，
+// multi_edit 就静默失效；内联后这个脆弱点消失。
+// ⚠️ 维护者：**不要**为了"消除重复"把它们再合并回去 —— 见 verify-layers 规则 6。
+
+/** 递归遍历目录，返回相对 posix 路径 */
+async function walkDir(dir: string, basePath = ''): Promise<string[]> {
+  const results: string[] = [];
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    const relativePath = basePath ? path.posix.join(basePath, entry.name) : entry.name;
+    if (entry.isDirectory()) {
+      results.push(...(await walkDir(path.join(dir, entry.name), relativePath)));
+    } else if (entry.isFile()) {
+      results.push(relativePath);
+    }
+  }
+  return results;
+}
+
+/** glob 模式 → 正则表达式（支持 `**`、`*`、`?`） */
+function globToRegex(pattern: string): RegExp {
+  const normalized = pattern.replace(/\\/g, '/');
+  let regex = '';
+  let i = 0;
+  while (i < normalized.length) {
+    const c = normalized[i]!;
+    if (c === '*') {
+      if (normalized[i + 1] === '*') {
+        if (normalized[i + 2] === '/') { regex += '(?:[^/]*/)*'; i += 3; }  // **/ 匹配零或多层
+        else { regex += '.*'; i += 2; }                                     // ** 含分隔符
+      } else { regex += '[^/]*'; i++; }                                     // * 单层内
+    } else if (c === '?') { regex += '[^/]'; i++; }
+    else if (c === '/') { regex += '/'; i++; }
+    else if ('.+^${}()|[]\\'.includes(c)) { regex += '\\' + c; i++; }        // 转义正则特殊字符
+    else { regex += c; i++; }
+  }
+  return new RegExp('^' + regex + '$');
+}
+
+/**
+ * 按 glob 模式匹配 root 下的文件，返回**绝对路径**。
+ * 路径不存在时抛错（与内联前由 glob.ts 抛 "Directory not found" 的行为一致）。
+ *
+ * 注：**不做 mtime 排序**。排序只在"命中数超过上限"时才有意义决定留哪几个，
+ * 而本工具一旦超过 max_files 就直接抛错（见 execute），故排序无实际作用 ——
+ * 省掉对全部命中文件的一次 stat。
+ */
+async function matchFiles(pattern: string, root: string): Promise<string[]> {
+  try {
+    const st = await fs.stat(root);
+    if (!st.isDirectory()) throw new Error(`Path is not a directory: ${root}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Path is not a directory')) throw err;
+    throw new Error(`Directory not found: ${root}`);
+  }
+  const regex = globToRegex(pattern);
+  const matched = (await walkDir(root)).filter((f) => regex.test(f));
+  return matched.map((rel) => path.join(root, rel));
+}
 
 export class MultiEditTool implements Tool {
   readonly name = 'multi_edit';
@@ -56,18 +126,8 @@ export class MultiEditTool implements Tool {
     const dryRun = (args.dry_run as boolean | undefined) ?? false;
     const replaceAll = (args.replace_all as boolean | undefined) ?? false;
 
-    const globTool = new GlobTool();
-    const globResult = await globTool.execute({ pattern, path: searchPath });
-
-    // GlobTool 无匹配时返回错误串而非路径列表——识别并直接返回，避免把错误文本当文件路径
-    if (globResult.trim() === 'No files matched the pattern') {
-      return `No files matched the pattern "${pattern}".`;
-    }
-
-    const filePaths = globResult
-      .split('\n')
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
+    // 内联的目录遍历 + glob 匹配（**有意不依赖 GlobTool**，见文件末尾 helpers 的说明）
+    const filePaths = await matchFiles(pattern, searchPath);
 
     if (filePaths.length === 0) {
       return `No files matched the pattern "${pattern}".`;
