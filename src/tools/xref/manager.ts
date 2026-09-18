@@ -28,6 +28,8 @@ import type {
 import { ParserRegistry, createParserRegistry } from './parser.js';
 import { toProjectKey } from '../../utils/misc.js';
 import { languageOfExtension, supportForLanguage } from './languages/index.js';
+import { resolveTsLike } from './languages/resolve-helpers.js';
+import type { ResolveContext } from './languages/types.js';
 import Database from '../sqlite.js';
 import type { SqliteDatabase } from '../sqlite.js';
 import { statSync } from 'node:fs';
@@ -1532,207 +1534,19 @@ export class XrefManager {
     return result;
   }
 
-  /** 按语言分派说明符解析 */
+  /** 按语言分派说明符解析 —— 实现已迁进 languages/ 描述符（Phase 1 半 2b） */
   private async resolveSpecifier(spec: string, dir: string, lang: string): Promise<string | null> {
-    switch (lang) {
-      case 'typescript':
-      case 'javascript':
-        return spec.startsWith('.') ? this.resolveTsLike(spec, dir) : null;
-      case 'python':
-        return this.resolvePython(spec, dir);
-      case 'go':
-        return this.resolveGo(spec);
-      case 'rust':
-        return this.resolveRust(spec, dir);
-      case 'c':
-      case 'cpp':
-        return this.resolveCInclude(spec, dir);
-      case 'java':
-      case 'kotlin':
-        return this.resolveJavaLike(spec, lang);
-      default:
-        return spec.startsWith('.') ? this.resolveTsLike(spec, dir) : null;
-    }
+    const support = supportForLanguage(lang);
+    if (support) return support.resolveSpecifier(spec, dir, this.resolveContext());
+    // 未注册语言（含 guessLanguage 的 'unknown' 兜底）：沿用旧 default —— 相对路径按 ts-like 试
+    return spec.startsWith('.') ? resolveTsLike(spec, dir) : null;
   }
 
-  /** 依次尝试候选路径，返回首个存在的文件 */
-  private async firstExisting(candidates: string[]): Promise<string | null> {
-    for (const c of candidates) {
-      try {
-        const st = await fs.stat(c);
-        if (st.isFile()) return normPath(c);
-      } catch {
-        // 不存在，试下一个
-      }
-    }
-    return null;
+  /** 说明符解析的上下文：描述符不持有项目状态，这里把项目级信息注入进去 */
+  private resolveContext(): ResolveContext {
+    return { rootDir: normPath(this.rootDir), goModules: () => this.readGoModules() };
   }
 
-  /**
-   * TS/JS 说明符解析 —— 本次最关键的一处修复。
-   *
-   * 旧实现只做「往路径尾部拼扩展名」，于是 `from './manager.js'` 会去找
-   * `manager.js.ts` / `manager.js.js`，两条都不可能存在 ⇒ 永远 null。
-   * 而 NodeNext / bundler 的通行约定是：说明符写 `./x.js`，源码实际是 `./x.ts`。
-   * 本项目 2617 条相对导入全是这种写法，所以 imports 表恒为 0，
-   * deps / dependents / impact / symbol_search / 文件依赖图全部空转。
-   *
-   * 现在按 Node 的解析顺序试：
-   *   1) 原路径本身
-   *   2) 去掉 .js/.mjs/.cjs/.jsx 后换 TS 扩展名（.js→.ts/.tsx，.mjs→.mts，.cjs→.cts）
-   *   3) 原路径 + 各扩展名
-   *   4) 当作目录 → <dir>/index.<ext>
-   */
-  private async resolveTsLike(spec: string, dir: string): Promise<string | null> {
-    const base = normPath(path.resolve(dir, spec));
-    const TS_EXTS = ['.ts', '.tsx', '.mts', '.cts'];
-    const ALL_EXTS = [...TS_EXTS, '.js', '.jsx', '.mjs', '.cjs'];
-    const candidates: string[] = [base];
-
-    const esmSuffix = base.match(/\.(js|mjs|cjs|jsx)$/);
-    if (esmSuffix) {
-      const stem = base.slice(0, -esmSuffix[0].length);
-      const mapped: string[] =
-        esmSuffix[0] === '.mjs' ? ['.mts']
-        : esmSuffix[0] === '.cjs' ? ['.cts']
-        : esmSuffix[0] === '.jsx' ? ['.tsx', '.jsx']
-        : ['.ts', '.tsx'];
-      for (const e of mapped) candidates.push(stem + e);
-    }
-
-    for (const e of ALL_EXTS) candidates.push(base + e);
-    for (const e of ALL_EXTS) candidates.push(`${base}/index${e}`);
-
-    return this.firstExisting([...new Set(candidates)]);
-  }
-
-  /**
-   * Python 说明符解析。
-   * 旧实现把 `from .pkg import x` 的 `.pkg` 当相对路径拼接，去找 `<dir>/.pkg.py`
-   * （带前导点的文件名），必然不命中；同时非相对导入完全不采集 ⇒ Python 依赖图此前整体为空。
-   *
-   * 现在按 PEP 328：前导点数是上跳层数（1 个点 = 当前包目录，2 个 = 上一级），
-   * 其余按点拆成目录，兼容 `x.py` 与包目录 `x/__init__.py`；
-   * 非相对说明符按项目根解析（解析不到即视作标准库/第三方，不计入缺失）。
-   */
-  private async resolvePython(spec: string, dir: string): Promise<string | null> {
-    const root = normPath(this.rootDir);
-    const dots = /^\.+/.exec(spec)?.[0].length ?? 0;
-    const rest = spec.slice(dots);
-    let baseDir = dir;
-    for (let i = 1; i < dots; i++) baseDir = normPath(path.dirname(baseDir));
-
-    const candidates: string[] = [];
-    if (rest === '') {
-      candidates.push(`${baseDir}/__init__.py`, `${baseDir}/__init__.pyi`);
-    } else {
-      const rel = rest.split('.').filter(Boolean).join('/');
-      candidates.push(`${baseDir}/${rel}.py`, `${baseDir}/${rel}.pyi`, `${baseDir}/${rel}/__init__.py`);
-    }
-    if (dots === 0) {
-      const rel = spec.split('.').filter(Boolean).join('/');
-      candidates.push(`${root}/${rel}.py`, `${root}/${rel}/__init__.py`);
-    }
-    return this.firstExisting([...new Set(candidates)]);
-  }
-
-  /**
-   * Go：模块路径 → 仓库内目录。
-   * 优先按 go.mod 的 module 名剥前缀，其次直接按仓库根拼接；
-   * 命中目录后取该目录下字典序第一个 .go 文件作代表（Go 是「目录=包」，
-   * 依赖图本质上按目录理解更贴切，这里落成文件行以便复用文件级 BFS）。
-   */
-  private async resolveGo(spec: string): Promise<string | null> {
-    const root = normPath(this.rootDir);
-    const mods = await this.readGoModules();
-    const dirCandidates: string[] = [];
-    for (const mod of mods) {
-      if (spec === mod.name || spec.startsWith(mod.name + '/')) {
-        const rel = spec.slice(mod.name.length).replace(/^\//, '');
-        dirCandidates.push(rel === '' ? mod.dir : `${mod.dir}/${rel}`);
-      }
-    }
-    // 兜底：仓库根下按路径直接找（无 go.mod 或非模块化仓库）
-    dirCandidates.push(`${root}/${spec}`);
-    for (const dirCandidate of dirCandidates) {
-      const picked = await this.firstFileInDir(dirCandidate, '.go');
-      if (picked) return picked;
-    }
-    return null;
-  }
-
-  /** Rust：mod 声明 / crate:: / self:: / super:: 说明符（外部 crate 返回 null） */
-  private async resolveRust(spec: string, dir: string): Promise<string | null> {
-    const root = normPath(this.rootDir);
-    let baseDir = dir;
-    let rest = spec;
-    let isModDecl = false;
-    if (spec.startsWith('crate::')) {
-      baseDir = `${root}/src`;
-      rest = spec.slice('crate::'.length);
-    } else if (spec.startsWith('self::')) {
-      rest = spec.slice('self::'.length);
-    } else if (spec.startsWith('super::')) {
-      baseDir = normPath(path.dirname(dir));
-      rest = spec.slice('super::'.length);
-    } else if (spec.startsWith('mod:')) {
-      isModDecl = true;
-      rest = spec.slice('mod:'.length);
-    } else if (!spec.startsWith('.')) {
-      return null;
-    }
-
-    const segs = rest.split('::').filter(Boolean);
-    if (isModDecl) {
-      const name = segs[0] ?? rest;
-      return this.firstExisting([`${baseDir}/${name}.rs`, `${baseDir}/${name}/mod.rs`]);
-    }
-    // use a::b::Thing → 逐级回退：a/b.rs / a/b/mod.rs → a.rs / a/mod.rs
-    for (let n = segs.length; n >= 1; n--) {
-      const rel = segs.slice(0, n).join('/');
-      const hit = await this.firstExisting([`${baseDir}/${rel}.rs`, `${baseDir}/${rel}/mod.rs`]);
-      if (hit) return hit;
-    }
-    return null;
-  }
-
-  /** C/C++：#include "x.h" —— 先同目录，再 include/，最后仓库根 */
-  private async resolveCInclude(spec: string, dir: string): Promise<string | null> {
-    const root = normPath(this.rootDir);
-    const exts = path.extname(spec) ? [''] : ['.h', '.hpp', '.hxx'];
-    const candidates: string[] = [];
-    for (const base of [dir, `${root}/include`, root]) {
-      for (const e of exts) candidates.push(`${base}/${spec}${e}`);
-    }
-    return this.firstExisting(candidates);
-  }
-
-  /** Java/Kotlin：com.foo.Bar → <source root>/com/foo/Bar.java|.kt */
-  private async resolveJavaLike(spec: string, lang: string): Promise<string | null> {
-    const root = normPath(this.rootDir);
-    const rel = spec.replace(/^static\s+/, '').split('.').filter(Boolean).join('/');
-    const exts = lang === 'kotlin' ? ['.kt'] : ['.java', '.kt'];
-    const roots = [root, `${root}/src`, `${root}/src/main/java`, `${root}/src/main/kotlin`];
-    const candidates: string[] = [];
-    for (const r of roots) {
-      for (const e of exts) candidates.push(`${r}/${rel}${e}`);
-    }
-    return this.firstExisting(candidates);
-  }
-
-  /** 目录下第一个指定扩展名的文件（字典序，保证多次构建结果稳定） */
-  private async firstFileInDir(dirCandidate: string, ext: string): Promise<string | null> {
-    try {
-      const entries = await fs.readdir(dirCandidate, { withFileTypes: true });
-      const hit = entries
-        .filter((e) => e.isFile() && e.name.endsWith(ext))
-        .map((e) => e.name)
-        .sort()[0];
-      return hit ? normPath(`${dirCandidate}/${hit}`) : null;
-    } catch {
-      return null;
-    }
-  }
 
   /**
    * 找出项目里所有 go.mod 及其 module 名（仓库根 + 一层子目录）。

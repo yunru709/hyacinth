@@ -7,8 +7,8 @@
  *   resolveImportPath 只拼尾部扩展名那阵，本项目 2617 条 `from './x.js'` 全部解析不到，
  *   imports 表长期恒为 0 且无人察觉。
  *
- * 已迁入：后缀→语言表（半 1）、项目内说明符判定（半 2a）。
- * 待迁入：说明符解析实现（半 2b）、解析器工厂（半 3）。
+ * 已迁入：后缀→语言表（半 1）、项目内判定（半 2a）、说明符解析实现（半 2b）。
+ * 待迁入：解析器工厂（半 3，createParsers）。
  */
 export interface LanguageSupport {
   /** 描述符 id（'typescript' / 'python' / 'ccpp' …） */
@@ -33,4 +33,17 @@ export interface LanguageSupport {
    * false → 视为外部依赖（npm 包 / 标准库 / 外部 crate），设计上不入图。
    */
   isIntraProjectSpecifier(spec: string): boolean;
+  /**
+   * 说明符 → 项目内文件（正斜杠绝对路径）；解析不到返回 null。
+   * 只实现**本语言**的形态；调用方负责结果缓存（resolveImportPath）与未注册语言的兜底。
+   */
+  resolveSpecifier(spec: string, dir: string, ctx: ResolveContext): Promise<string | null>;
+}
+
+/** 说明符解析需要的外部世界 —— 由调用方提供，描述符自身不持有项目状态 */
+export interface ResolveContext {
+  /** 项目根（正斜杠规范路径） */
+  rootDir: string;
+  /** 项目内所有 go.mod（{dir, name}；仓库根 + 一层子目录）。实现侧带缓存 */
+  goModules(): Promise<{ dir: string; name: string }[]>;
 }
