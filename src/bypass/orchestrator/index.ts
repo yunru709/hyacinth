@@ -45,11 +45,47 @@ import os from 'node:os';
 const LOG_DIR = path.join(os.homedir(), '.agent', 'NormalBypassAgent');
 const LOG_FILE = path.join(LOG_DIR, 'orchestrator.log');
 
+/**
+ * 日志上限与轮转（2026-09-19，用户要求："上限 50KB，满了就写新的、删旧的"）。
+ *
+ * 背景：本文件的日志**不走统一 logger**（`createLogger`），而是自己 appendFileSync ——
+ * 后果是无轮转、可无限增长（实测 orchestrator.log 已达 1.15MB）。同一问题的另一半是
+ * logDetail 会把 USER_INPUT / ASSISTANT_OUTPUT 全文落盘，所以设上限同时也缩小了暴露面。
+ * （已确认：该目录下只有 .log 文件、且全仓**没有任何代码读取它们** → 轮转安全。）
+ *
+ * 策略：当前文件 ≥ 50KB 时，把它的**最后 50KB** 覆写到 `<file>.1`，当前文件清空重开。
+ * 故总占用封顶约 100KB（当前 + 一份历史）。只留最后 50KB 是因为旧文件可能远超上限
+ * （1.15MB → 若整份留档就违背了"上限"的本意）。
+ * 注：单条 logDetail 可能一次写入超过 50KB，此时当前文件会**瞬时**超过上限，
+ * 下一次写入即轮转 —— 这是有意的（不截断单条内容，避免丢失信息）。
+ */
+const LOG_MAX_BYTES = 50 * 1024;
+
+function rotateLogIfTooLarge(file: string): void {
+  let size = 0;
+  try {
+    size = fs.statSync(file).size;
+  } catch {
+    return; // 文件不存在 → 无需轮转
+  }
+  if (size < LOG_MAX_BYTES) return;
+  try {
+    const buf = fs.readFileSync(file);
+    // 字节切片可能切在多字节字符中间 → 丢掉可能残缺的首行
+    const tail = buf.subarray(Math.max(0, buf.length - LOG_MAX_BYTES)).toString('utf-8');
+    const nl = tail.indexOf('\n');
+    const archive = nl >= 0 ? tail.slice(nl + 1) : tail;
+    fs.writeFileSync(`${file}.1`, archive, 'utf-8'); // 覆盖旧的历史（= 删旧的）
+    fs.writeFileSync(file, '', 'utf-8');             // 当前文件重开（= 写新的）
+  } catch { /* ignore */ }
+}
+
 function log(msg: string): void {
   const ts = new Date().toISOString();
   const line = `[${ts}] ${msg}\n`;
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    rotateLogIfTooLarge(LOG_FILE);
     fs.appendFileSync(LOG_FILE, line, 'utf-8');
   } catch { /* ignore */ }
 }
@@ -59,6 +95,7 @@ function logDetail(label: string, content: string): void {
   const line = `[${ts}] ${label}:\n${separator}\n${content}\n${separator}\n`;
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    rotateLogIfTooLarge(LOG_FILE);
     fs.appendFileSync(LOG_FILE, line, 'utf-8');
   } catch { /* ignore */ }
 }

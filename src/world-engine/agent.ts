@@ -55,9 +55,35 @@ import type {
 // ── 调试日志（用完注释掉） ───────────────────────────────────
 import fsSync from 'node:fs';
 const _WE_LOG = path.join(os.homedir(), '.agent', 'NormalBypassAgent', 'world-engine.log');
+
+// 日志上限与轮转（2026-09-19，用户要求："上限 50KB，满了就写新的、删旧的"）。
+// 本文件同样不走统一 logger，故无轮转、可无限增长（实测 162KB）。
+// 策略：当前文件 ≥50KB → 最后 50KB 覆写到 .1，当前文件清空重开；总占用封顶约 100KB。
+// （已确认目录下只有 .log、且全仓无代码读取它们 → 轮转安全。）
+const LOG_MAX_BYTES = 50 * 1024;
+
+function _weRotateIfTooLarge(file: string): void {
+  let size = 0;
+  try {
+    size = fsSync.statSync(file).size;
+  } catch {
+    return;
+  }
+  if (size < LOG_MAX_BYTES) return;
+  try {
+    const buf = fsSync.readFileSync(file);
+    const tail = buf.subarray(Math.max(0, buf.length - LOG_MAX_BYTES)).toString('utf-8');
+    const nl = tail.indexOf('\n');
+    const archive = nl >= 0 ? tail.slice(nl + 1) : tail;
+    fsSync.writeFileSync(`${file}.1`, archive, 'utf-8');
+    fsSync.writeFileSync(file, '', 'utf-8');
+  } catch { /* ignore */ }
+}
+
 function _welog(msg: string): void {
   try {
     if (!fsSync.existsSync(path.dirname(_WE_LOG))) fsSync.mkdirSync(path.dirname(_WE_LOG), { recursive: true });
+    _weRotateIfTooLarge(_WE_LOG);
     fsSync.appendFileSync(_WE_LOG, `[${new Date().toISOString()}] ${msg}\n`, 'utf-8');
   } catch {}
 }
@@ -65,6 +91,7 @@ function _welogDetail(label: string, content: string): void {
   const sep = '─'.repeat(60);
   try {
     if (!fsSync.existsSync(path.dirname(_WE_LOG))) fsSync.mkdirSync(path.dirname(_WE_LOG), { recursive: true });
+    _weRotateIfTooLarge(_WE_LOG);
     fsSync.appendFileSync(_WE_LOG, `[${new Date().toISOString()}] ${label}:\n${sep}\n${content}\n${sep}\n`, 'utf-8');
   } catch {}
 }
