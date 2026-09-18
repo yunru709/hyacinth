@@ -5,13 +5,21 @@
  * 这种问题用**纯文本回溯**就能答 90%，且永远新鲜、零依赖。所以本模块刻意做成
  * 无状态的：给文本，回结构。
  *
- * ⚠️ 已知重复（待合并，别假装没看见）：
- *   `src/tools/symbol-references.ts` 里有一份私有的语言配置与"回溯最近外层符号"
- *   逻辑（`LangConfig` / `defineLang` / `ALL_LANGUAGES` / `findEnclosingSymbol`）。
- *   正确终局是把那份下沉到这里、两边共用；但该文件**没有直接单测**，改动风险不划算，
- *   故先并存并在运行期验证。合并时请：把 symbol-references 的私有副本删掉，改为
- *   从本模块 import detectLang / extractSymbols / findEnclosingSymbol，并跑全量测试。
- *   （utils 不可反向 import tools —— 依赖方向会倒置，这是没直接复用的原因。）
+ * ⚠️ 与 symbol-references.ts 的关系（**不是**重复实现，别去天真地"合并"）：
+ *   `src/tools/symbol-references.ts` 里也有一份语言配置与"回溯最近外层符号"逻辑，
+ *   看着重叠，但两者**服务不同问题，故模式表与忽略表有意不同**：
+ *     - 本模块：答"某行属于哪个声明 / 某符号的区间在哪" → 目标是**精确**
+ *       （要识别类方法，要按花括号 / 缩进定出区间）；
+ *     - symbol-references：答"这次改动声明了哪些标识符、谁引用了它" → 目标是**高召回**
+ *       （typedef / #define / 模块级变量都要捞，且每语言配了定制忽略大表）。
+ *   实证：本模块用紧凑的共享 KEYWORD_BLOCK，而它用每语言定制表
+ *   （println / main / unwrap / typedef / String / Vec …）。若强行统一成一张表，
+ *   **两边质量会同时下降** —— 高召回侧变吵（冒出 println 这类噪声引用），
+ *   精确侧漏方法。
+ *   结论：**共享的应是"引擎思路"，不是"数据表"**。真要重构，方向是抽公共引擎 +
+ *   各自保留自己的模式表；且必须先用特征化测试锁住 symbol-references 的现有行为 ——
+ *   该前提已于 2026-09-18 完成（`src/tools/symbol-references.test.ts`，9 例）。
+ *   （另：utils 不可反向 import tools —— 依赖方向会倒置，这也是当初未直接复用的原因。）
  */
 
 export type Lang = 'ts' | 'js' | 'py' | 'go' | 'rust' | 'java' | 'other';
