@@ -50,6 +50,7 @@
     "openai": "^6.39.0",
     "picocolors": "^1.1.1",
     "sharp": "^0.35.0",
+    "web-tree-sitter": "0.27.0",
     "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },
@@ -59,6 +60,8 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
+    "tree-sitter-cli": "0.27.0",
+    "tree-sitter-python": "0.25.0",
     "undici-types": "^7.24.6",
     "vitest": "^4.1.7"
   }
