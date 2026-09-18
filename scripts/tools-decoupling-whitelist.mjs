@@ -47,8 +47,14 @@ export const SHARED_TOOL_INFRA = new Set([
 /**
  * 已登记的违规（**只减不增**）。修掉就删对应条目。
  * 每条格式：`<from 模块 basename>→<to 模块 basename>`
+ *
+ * ✅ 2026-09-19：**已清空 —— 3 条全部解除**
+ *   - multi-edit→glob          已内联目录遍历 + glob 匹配（86 行）
+ *   - write→symbol-references  已按方案 A 内联：把 424 行实现**复制**进 write.ts 与 edit.ts
+ *                              （工具独立 > DRY；两份一致性由 src/tools/inlined-copies-sync.test.ts 守住）
+ *   - edit→symbol-references   同上
+ *
+ * **空集就是目标状态**：从此任何新出现的"工具依赖工具"都会被规则 6 直接拦下，
+ * 不再有"已登记待修"这种中间态可以塞进去。
  */
-export const KNOWN_TOOL_COUPLINGS = new Set([
-  'write→symbol-references',  // 待修：应改为"分析订阅变更"而非"写工具调用分析"
-  'edit→symbol-references',   // 同上
-]);
+export const KNOWN_TOOL_COUPLINGS = new Set<string>();
