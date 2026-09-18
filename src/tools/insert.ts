@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
+import { detectEol, applyEol } from '../utils/eol.js';
 
 /**
  * InsertTool — 在文件指定行号处插入内容。
@@ -63,7 +64,10 @@ export class InsertTool implements Tool {
 
     const insertLines = content.split('\n');
     lines.splice(lineNumber - 1, 0, ...insertLines);
-    await fs.writeFile(filePath, lines.join('\n') + '\n', 'utf-8');
+    // 行尾适配：目标若是 CRLF 文件，插入的 content（LF）以及这里的 `+ '\n'`
+    // 都会留下裸 LF。整串按文件原有行尾统一规整一次即可
+    // （applyEol 内部先 toLf 折平，因此不会把已有的 \r\n 变成 \r\r\n）。
+    await fs.writeFile(filePath, applyEol(lines.join('\n') + '\n', detectEol(text ?? '')), 'utf-8');
 
     return `Inserted ${insertLines.length} line(s) at line ${lineNumber} in ${filePath}`;
   }

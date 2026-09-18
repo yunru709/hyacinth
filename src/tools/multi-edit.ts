@@ -3,6 +3,7 @@ import type { Tool } from './interface.js';
 import { GlobTool } from './glob.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
+import { detectEol, applyEol } from '../utils/eol.js';
 
 export class MultiEditTool implements Tool {
   readonly name = 'multi_edit';
@@ -47,8 +48,9 @@ export class MultiEditTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const pattern = args.glob as string;
     const searchPath = (args.path as string | undefined) || process.cwd();
-    const oldString = args.old_string as string;
-    const newString = args.new_string as string;
+    // 用 let：下面要按各文件的行尾生成适配副本（为何需要适配见 utils/eol.ts 的说明）
+    let oldString = args.old_string as string;
+    let newString = args.new_string as string;
     const maxFiles = (args.max_files as number | undefined) ?? 10;
     const dryRun = (args.dry_run as boolean | undefined) ?? false;
     const replaceAll = (args.replace_all as boolean | undefined) ?? false;
@@ -84,6 +86,15 @@ export class MultiEditTool implements Tool {
       let content: string;
       try {
         content = await fs.readFile(filePath, 'utf-8');
+
+        // ── 行尾适配（2026-09-18）──
+        // 必须在**匹配计数之前**按本文件行尾适配：否则跨行 old_string 用 LF 去匹配 CRLF
+        // 文件会得到 0 匹配，然后在下面 `if (matchCount === 0) continue` 被**静默跳过** ——
+        // 表现为"执行成功但文件根本没变"，比明着报错更危险（字节级 E2E 抓出）。
+        // applyEol 幂等，故循环到不同行尾的文件也安全。
+        const fileEol = detectEol(content);
+        oldString = applyEol(oldString, fileEol);
+        newString = applyEol(newString, fileEol);
       } catch {
         continue;
       }
@@ -136,6 +147,13 @@ export class MultiEditTool implements Tool {
     let totalReplacements = 0;
     for (const plan of plans) {
       let content = await fs.readFile(plan.path, 'utf-8');
+
+      // 行尾适配（2026-09-18，同 edit 字符串模式）：调用方给的 old/new_string 通常是 LF，
+      // 而目标文件可能是 CRLF。不适配会有两个后果：跨行匹配失败；写回留下裸 LF。
+      // 在分支之前适配一次即可覆盖下方两条分支；applyEol 幂等，故循环到不同行尾的文件也安全。
+      const planEol = detectEol(content);
+      oldString = applyEol(oldString, planEol);
+      newString = applyEol(newString, planEol);
 
       if (replaceAll) {
         content = content.split(oldString).join(newString);
