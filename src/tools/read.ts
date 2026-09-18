@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import type { Tool } from './interface.js';
 import { recordFileRead } from './file-tracker.js';
 import { getToolConfig } from './tool-config.js';
+import { detectLang, outline, findDeclRange } from '../utils/code-structure.js';
 
 /** 图片处理器 — 将 read 工具输出的图片注入到 ImageStore */
 export interface ImageHandler {
@@ -224,7 +225,7 @@ async function readPdf(filePath: string, stat: Stats): Promise<string> {
 
 export class ReadTool implements Tool {
   readonly name = 'read';
-  readonly description = '读取磁盘上的文件。支持 offset/limit 分块读取。图片文件返回尺寸信息，PDF 返回页数。每次最多读取 2000 行，大文件请用 offset+limit 分段读取。';
+  readonly description = '读取磁盘上的文件。支持 offset/limit 分块读取。图片文件返回尺寸信息，PDF 返回页数。每次最多读取 2000 行，大文件请用 offset+limit 分段读取。另支持结构模式：outline=true 列出该文件的符号大纲（函数/类/方法+行号），symbol="名字" 只读该声明的区间 —— 二者都不依赖 xref 索引，永不"过期"。';
   readonly companionDescription = '需要看点别的东西了。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
@@ -244,6 +245,14 @@ export class ReadTool implements Tool {
       return_base64: {
         type: 'boolean',
         description: 'For image files: return full base64-encoded data for use with vision models. For text files: ignored.',
+      },
+      outline: {
+        type: 'boolean',
+        description: 'List the file\'s symbol outline (functions/classes/methods with line numbers) instead of its content. Pure-text scan, no index needed. Useful before reading a large file.',
+      },
+      symbol: {
+        type: 'string',
+        description: 'Read only the given declaration\'s body (function/class/method), by name. C-family bodies are matched by brace balance, Python by indentation. Pair with outline=true to discover names.',
       },
     },
     required: ['file_path'],
@@ -289,6 +298,41 @@ export class ReadTool implements Tool {
       }
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('File not found')) throw err;
+    }
+
+    // ── 结构模式（outline / symbol）──
+    // 纯文本扫描，不依赖 xref 索引，因此永远不会"过期"。需要全文才能算结构，故设上限，
+    // 避免把超大文件整份读进内存；超限时明确引导改用 grep structure 或分段 read。
+    const wantOutline = args.outline === true;
+    const symbol = args.symbol as string | undefined;
+    if (wantOutline || symbol) {
+      const MAX_STRUCT_BYTES = 2 * 1024 * 1024;
+      if (stat.size > MAX_STRUCT_BYTES) {
+        return `文件过大，结构模式不支持（${formatFileSize(stat.size)} > 上限 ${formatFileSize(MAX_STRUCT_BYTES)}）。请改用 grep 的 structure:true，或 read 分段。`;
+      }
+      const text = await fs.readFile(filePath, 'utf-8');
+      const allLines = text.split('\n');
+      const lang = detectLang(filePath);
+
+      if (wantOutline) {
+        const decls = outline(text, lang);
+        if (decls.length === 0) {
+          return `未在 ${filePath} 中识别出任何声明（lang=${lang}）。\n提示：若该文件确含函数/类，可用 grep 的 structure:true 辅助定位，或直接 read 分段。`;
+        }
+        const width = String(decls[decls.length - 1]!.line).length;
+        const body = decls
+          .map((d) => String(d.line).padStart(width) + '→' + d.kind.padEnd(10) + ' ' + d.name)
+          .join('\n');
+        return `[outline] ${filePath} (lang=${lang}, ${decls.length} 个声明)\n${body}\n\n(用 read symbol="名字" 只读某个声明的区间)`;
+      }
+
+      const range = findDeclRange(allLines, symbol!, lang);
+      if (!range) {
+        return `未找到符号 "${symbol}"（lang=${lang}）。\n提示：先用 read outline:true 看该文件有哪些符号名。`;
+      }
+      const body = allLines.slice(range.start - 1, range.end);
+      return formatLines(range.start, body)
+        + `\n\n(symbol "${symbol}" 位于 ${range.start}-${range.end} 行，共 ${range.end - range.start + 1} 行)`;
     }
 
     return readTextLines(filePath, offset, limit, stat.size);
