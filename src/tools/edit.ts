@@ -5,6 +5,7 @@ import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
+import { detectEol, applyEol } from '../utils/eol.js';
 
 /**
  * EditTool — 在文件中精确替换匹配的字符串 或 按行号替换
@@ -177,7 +178,13 @@ export class EditTool implements Tool {
     const end = Math.min(start + lineCount, lines.length);
     const before = lines.slice(0, start);
     const after = lines.slice(end);
-    const newContent = [...before, newString, ...after].join('\n');
+    // 行模式的行尾处理（第一版想漏了，被字节级 E2E 抓出来）：
+    // content 按 '\n' 切分后各行仍带 \r，join('\n') 恰好还原 CRLF —— 但**join 的分隔符本身
+    // 也是 LF**，插入的 newString 里面的换行同样不会自动变 CRLF。只适配 newString 内部是不够的
+    // （实测结果 "l1\r\nNEW1\r\nNEW2\nl3\r\n"，NEW2 后仍留裸 LF）。
+    // 正确做法：拼完之后**整串按文件原有行尾统一规整一次**。applyEol 内部先 toLf 折平，
+    // 因此不会把已有的 \r\n 变成 \r\r\n。
+    const newContent = applyEol([...before, newString, ...after].join('\n'), detectEol(content));
 
     await fs.writeFile(filePath, newContent, 'utf-8');
     try { pushDiff(filePath, computeDiff(content, newContent, filePath)); } catch {}
@@ -206,6 +213,16 @@ export class EditTool implements Tool {
     args: Record<string, unknown>,
   ): Promise<string> {
     const replaceAll = (args.replace_all as boolean | undefined) ?? false;
+
+    // 行尾适配（2026-09-18 实测缺陷）：调用方给的 old/new_string 通常是 LF，
+    // 而仓库既有文件是 CRLF。若不适配会有两个后果：
+    //   ① 跨行 old_string 用 LF 去匹配 CRLF 文件**必然失败**（报 "not found"）；
+    //   ② 写入的 new_string 会在 CRLF 文件里留下裸 LF，制造混合行尾
+    //      （实测 src/tools/grep.ts 变成 CRLF=379 / 裸LF=22）。
+    // 在分支之前统一把两侧适配成**文件原有行尾**，匹配与写回便自然一致。
+    const eol = detectEol(content);
+    oldString = applyEol(oldString, eol);
+    newString = applyEol(newString, eol);
 
     const matchCount = this.countOccurrences(content, oldString);
 

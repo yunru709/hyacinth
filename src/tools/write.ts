@@ -6,6 +6,7 @@ import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
+import { adaptEolTo } from '../utils/eol.js';
 
 /**
  * WriteTool — 创建或覆盖文件
@@ -86,7 +87,11 @@ export class WriteTool implements Tool {
     // 中文串乱码、甚至吞掉闭合引号导致解析期崩溃。脚本类后缀补 BOM。
     // 与 bash.ts 写临时 .ps1 的做法保持一致（那边注释已明确说明该坑）。
     const needsBom = /\.(ps1|psm1|bat|cmd)$/i.test(filePath);
-    await fs.writeFile(filePath, needsBom ? '\uFEFF' + content : content, 'utf-8');
+    // 行尾纪律：**覆盖既有文件时适配该文件原有行尾**，避免整份翻成 LF。
+    // 仓库既有文件是 CRLF（core.autocrlf=true），而模型给的 content 通常是 LF ——
+    // 实测 background-registry.ts 就被这样从 CRLF 毁成纯 LF。新建文件保持 content 原样。
+    const body = fileExists && oldContent ? adaptEolTo(content, oldContent) : content;
+    await fs.writeFile(filePath, needsBom ? '\uFEFF' + body : body, 'utf-8');
 
     // 记录写入（写入后自动更新 readTime = writeTime）
     recordFileWrite(filePath);
