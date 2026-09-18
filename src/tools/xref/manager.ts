@@ -67,6 +67,41 @@ function formatStaleNotice(s: StaleCheck): string {
 }
 
 /**
+ * 项目根合法性校验（2026-09-19，事故驱动）。
+ *
+ * 事故：插件把**裸 cwd** 当项目根（`xref-plugin.ts` 的 `init(services.cwd)`），而 agent
+ * 可能从用户主目录启动。实测后果 —— `root=C:\Users\74689` → `projectKey=C-Users-74689`
+ * → 产出 **1.18GB** 的索引（把 AppData、浏览器缓存全解析了一遍），且无人察觉，
+ * 直到一次空间盘点才发现。
+ *
+ * 这里**只拒绝确定不合理的根**：主目录本身、以及主目录的祖先（含盘符根）。
+ * 刻意**不**要求"必须有 package.json 之类的项目标记" —— 一个没有标记的脚本目录
+ * 是完全合法的索引目标；把"像不像项目"当成准入条件会误伤。
+ * 抛错发生在 `Database()` 之前，所以**连垃圾库文件都不会被创建**。
+ */
+function assertIndexableRoot(rootDir: string): void {
+  const norm = (p: string): string => {
+    const r = path.resolve(p).replace(/[/\\]+$/, '');
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  const root = norm(rootDir);
+  const home = norm(os.homedir());
+
+  if (root === home) {
+    throw new Error(
+      `拒绝索引用户主目录（${rootDir}）：这会把 AppData / 浏览器缓存等全部扫入索引 `
+      + `（实测可产出 GB 级垃圾库）。请把 xref 指向真正的项目根，或从项目目录启动。`,
+    );
+  }
+  if (home.startsWith(root + path.sep)) {
+    throw new Error(
+      `拒绝索引主目录的祖先目录（${rootDir}）：范围过大（如 C:\\Users、盘符根）。`
+      + `请指向具体项目根。`,
+    );
+  }
+}
+
+/**
  * 路径单一规范：库里所有 path 一律存「正斜杠绝对路径」。
  *
  * 背景（修复）：扫描侧原用 `path.join`（Windows 下是反斜杠）入库，而查询/导入解析侧
@@ -110,6 +145,8 @@ export class XrefManager {
 
   /** 初始化数据库（创建 if not exists，运行 schema DDL） */
   async init(rootDir: string): Promise<void> {
+    // 先校验根目录：不合理就抛错，**连垃圾库文件都不会被创建**（见 assertIndexableRoot 注释）
+    assertIndexableRoot(rootDir);
     this.rootDir = rootDir;
     this.resolveCache.clear();
     this.goModules = undefined;
