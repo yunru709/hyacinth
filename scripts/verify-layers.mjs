@@ -53,6 +53,19 @@
  *   - 白名单**只减不增**：每把一处直连改为经协议层调用就删一条；已登记但
  *     实际不再直连 → stale 违规（防豁免虚增）。基线由 T4 生成，T6 起递减。
  *
+ * 规则 6「工具之间零互相依赖」（2026-09-19，用户立的架构原则）
+ *   - 理由：**工具是动态的、会一个一个地变动**；不能让"升级一个工具"导致
+ *     "另一个工具出故障"。耦合的工具 = 一次改动影响面不可控。
+ *   - 范围：只扫 **src/tools/*.ts 顶层文件**（子目录 xref/ runtime-control/
+ *     python-bridge/ 内部自有内聚，不属本规则）。其 `./x.js` 相对导入若指向
+ *     同目录的**工具侧模块**即违规；指向 SHARED_TOOL_INFRA（共享基础设施）
+ *     则豁免。
+ *   - 白名单（tools-decoupling-whitelist.mjs）**只减不增**，且白名单 ⊆ 实际：
+ *     已登记但实际不再耦合 → stale 违规（防豁免虚增）。
+ *   - 实测的反面案例：`multi-edit.ts` 不仅 import `GlobTool`，还 new 它并
+ *     **字符串比对它的返回值**（`=== 'No files matched the pattern'`）——
+ *     GlobTool 改一句提示语，multi_edit 就静默失效。这就是要防的形态。
+ *
  * 用法：npm run verify:layers
  * 退出码：0 = 干净；1 = 有违规（打印违规清单）
  */
@@ -61,6 +74,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALLOWED_DIRECT_NEW, ASSEMBLY_EXCLUDED } from './assembly-whitelist.mjs';
 import { UI_DIRECT_ALLOWED, UI_DIRECT_EXCLUDED } from './ui-direct-whitelist.mjs';
+import { SHARED_TOOL_INFRA, KNOWN_TOOL_COUPLINGS } from './tools-decoupling-whitelist.mjs';
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
 
@@ -243,6 +257,45 @@ function checkUiDirect() {
   return { scanned, violations, staleEntries };
 }
 
+// ── 规则 6：工具之间零互相依赖 ──────────────────────────────
+/**
+ * 只扫 src/tools 的**顶层** *.ts（子目录内部自有内聚，不属本规则）。
+ * - 排除 index.ts：它是**组合根**，职责就是 import 并导出全部工具。
+ * - 豁免 `import type`：编译期擦除，不产生运行时耦合（与规则 2/5 同因）。
+ * - 判据：`./x.js` 相对导入若指向同目录的**工具侧模块**即违规；
+ *   x ∈ SHARED_TOOL_INFRA（共享基础设施）则豁免。
+ * - 同时检查白名单是否过期（登记的耦合已不存在 → stale，防豁免虚增）。
+ */
+function checkToolDecoupling() {
+  const dir = join(SRC, 'tools');
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts'))
+    .map((e) => join(dir, e.name))
+    .filter((f) => !f.endsWith('index.ts'));
+
+  const violations = [];
+  const seen = new Set();
+
+  for (const file of files) {
+    const rel = relative(SRC, file).split('\\').join('/');       // tools/xxx.ts
+    const from = rel.replace(/^tools\//, '').replace(/\.ts$/, '');
+    for (const { spec, isTypeOnly } of extractImports(readFileSync(file, 'utf8'))) {
+      if (isTypeOnly) continue;                                   // 编译期擦除
+      if (!spec.startsWith('./')) continue;                       // 只管同目录（顶层）互引
+      const to = spec.slice(2).replace(/\.js$/, '');
+      if (SHARED_TOOL_INFRA.has(to)) continue;                    // 共享基础设施：豁免
+      const key = `${from}→${to}`;
+      seen.add(key);
+      if (!KNOWN_TOOL_COUPLINGS.has(key)) {
+        violations.push({ file: rel, from, to });
+      }
+    }
+  }
+
+  const staleEntries = [...KNOWN_TOOL_COUPLINGS].filter((k) => !seen.has(k));
+  return { scanned: files.length, violations, staleEntries };
+}
+
 const kernel = checkKernel();
 const core = checkBusinessCore();
 const assembly = checkAssembly();
@@ -319,6 +372,29 @@ if (uiDirect.violations.length > 0 || uiDirect.staleEntries.length > 0) {
       '（ui-direct-whitelist.mjs），且白名单 ⊆ 实际。\n' +
       '白名单只减不增 —— 每把一处直连改为经 ui-protocol 协议调用就删一条。\n' +
       '指向 ui-protocol / 根级基础文件 / 纯工具目录（UI_DIRECT_EXCLUDED）的引用已豁免。',
+  );
+}
+
+// ── 规则 6：工具之间零互相依赖 ──────────────────────────────
+// （自成一块，不并入上面的调用区：便于规则 6 独立演进）
+const toolCoupling = checkToolDecoupling();
+if (toolCoupling.violations.length > 0 || toolCoupling.staleEntries.length > 0) {
+  failed = true;
+  console.error('❌ 规则 6「工具之间零互相依赖」失败：');
+  for (const v of toolCoupling.violations) {
+    console.error(`   src/${v.file}\n      → 依赖了同目录的工具侧模块 '${v.to}'`);
+  }
+  for (const k of toolCoupling.staleEntries) {
+    console.error(
+      `   ${k}\n      → 白名单过期：该耦合已不存在，请从 tools-decoupling-whitelist.mjs 删除该条`,
+    );
+  }
+  console.error(
+    '\n规则：src/tools 顶层文件之间不得互相依赖 —— 工具会一个一个地变动，\n' +
+      '耦合意味着"升级一个工具"可能导致"另一个工具出故障"，改动影响面不可控。\n' +
+      `共享基础设施请登记进 SHARED_TOOL_INFRA（现 ${SHARED_TOOL_INFRA.size} 个：${[...SHARED_TOOL_INFRA].join(' / ')}）。\n` +
+      '新工具若要复用逻辑 → 抽成共享模块并登记，而不是 import 另一个工具的实现。\n' +
+      `已登记的待修耦合（只减不增）：${[...KNOWN_TOOL_COUPLINGS].join(' / ')}。`,
   );
 }
 
