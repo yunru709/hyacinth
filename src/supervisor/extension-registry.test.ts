@@ -116,12 +116,19 @@ describe('名单加载 loadExtensionManifest', () => {
 
   it('只读全局名单；项目级已取消；坏 JSON 记错不炸', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-reg-'));
-    fs.mkdirSync(path.join(dir, '.agent'), { recursive: true });
-    fs.mkdirSync(path.join(os.homedir(), '.agent'), { recursive: true });
-    const globalPath = path.join(os.homedir(), '.agent', 'extension-registry.json');
-    const hadGlobal = fs.existsSync(globalPath);
-    const savedGlobal = hadGlobal ? fs.readFileSync(globalPath, 'utf-8') : null;
+    // 隔离：与上一条用例同款 —— 劫持 homedir 到临时目录。
+    // 原先这条直接写**真实**的 ~/.agent/extension-registry.json，再在 finally 里还原：
+    // 并行 worker 会互相踩（A 写入的夹具被 B 读走/还原），进程被超时杀掉则完全不还原。
+    // 与 2026-09-19 查到的「测试污染真实 model-channels.json → 压缩通道 401」同类，
+    // 故统一改为劫持 homedir，**根本不碰真实路径**（无需 restore 动作）。
+    const realHomedir = os.homedir();
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-reg-home-'));
+    const origHomedir = Object.getOwnPropertyDescriptor(os, 'homedir');
+    (os as any).homedir = () => fakeHome;
     try {
+      fs.mkdirSync(path.join(dir, '.agent'), { recursive: true });   // 项目级已取消：放这里也不该被读
+      fs.mkdirSync(path.join(fakeHome, '.agent'), { recursive: true });
+      const globalPath = path.join(fakeHome, '.agent', 'extension-registry.json');
       fs.writeFileSync(globalPath, JSON.stringify({ plugins: [{ id: 'greeter', enabled: true }] }));
       const { manifest, errors } = loadExtensionManifest(dir);
       expect(errors).toEqual([]);
@@ -132,10 +139,12 @@ describe('名单加载 loadExtensionManifest', () => {
       expect(bad.errors).toHaveLength(1);
       expect(bad.manifest.plugins).toEqual([]); // 坏 JSON → 空名单
     } finally {
-      if (hadGlobal) fs.writeFileSync(globalPath, savedGlobal!);
-      else fs.rmSync(globalPath, { force: true });
+      if (origHomedir) Object.defineProperty(os, 'homedir', origHomedir);
+      else (os as any).homedir = () => realHomedir;
       fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(fakeHome, { recursive: true, force: true });
     }
+
   });
 });
 

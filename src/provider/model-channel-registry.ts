@@ -53,8 +53,22 @@ const DEFAULT_ROLES: Record<string, string> = {
   'sub-agent': 'main',
 };
 
-/** 全局配置文件路径（~/.agent/model-channels.json；项目级已取消，P-Config 收敛） */
+/** 全局配置文件路径（~/.agent/model-channels.json；项目级已取消，P-Config 收敛）
+ *
+ * ⚠️ 2026-09-19 加测试隔离覆盖点 —— 起因是一次实测事故：
+ *   `src/provider/model-scoped-provider.test.ts` 会 `new ModelChannelRegistry()` 并
+ *   upsertChannel 写入夹具值（`main-model` / `test-model` / `test-key`）。而构造函数
+ *   **没有路径参数**（cwd 已被有意废弃），于是它写的是**用户真实的**这个文件。
+ *   后果链：每次全量测试把真实通道配置覆盖成夹具值 → channel-watcher 热重载 →
+ *   压缩通道拿字面量 "test-key" 调 DeepSeek → 401 → `summary_failed` →
+ *   压缩**静默降级**为机械裁剪（≈1%，而非走 LLM 摘要的 ≈30%），且只打 warn。
+ *   实测证据：单跑该测试文件前后，真实文件 SHA256 由 9275D356… 变为 25823976…。
+ *   做法与 `memory/session.ts` 的 HYACINTH_SESSIONS_ROOT 同款：**生产行为不变**，
+ *   仅当显式设置该环境变量时才改路径。
+ */
 function getGlobalConfigPath(): string {
+  const override = process.env.HYACINTH_MODEL_CHANNELS_PATH;
+  if (override) return override;
   return path.join(os.homedir(), '.agent', 'model-channels.json');
 }
 
