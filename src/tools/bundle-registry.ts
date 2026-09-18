@@ -53,7 +53,10 @@ const BUILTIN_COMMON: ToolBundle = {
   description: '通用工具包 — 始终加载，不可关闭',
   builtin: true,
   tools: [
-    'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep',
+    // probe 与 grep 同族（在文件里找东西）：grep 面向文本行，probe 面向二进制/
+    // 超大/编码混杂文件的"上下文窗口"，必须进 common 与 grep 同列，否则默认
+    // coding 包下模型看不到它。
+    'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep', 'probe',
     'list_bundles', 'activate_bundle', 'deactivate_bundle',
     'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
     'system_info', 'channel_info',

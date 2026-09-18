@@ -32,6 +32,7 @@ export { EditTool } from './edit.js';
 export { BashTool } from './bash.js';
 export { GlobTool } from './glob.js';
 export { GrepTool } from './grep.js';
+export { ProbeTool } from './probe.js';
 export { GitTool } from './git-tool.js';
 export { MultiEditTool } from './multi-edit.js';
 export { InsertTool } from './insert.js';
@@ -58,6 +59,7 @@ import { EditTool } from './edit.js';
 import { BashTool } from './bash.js';
 import { GlobTool } from './glob.js';
 import { GrepTool } from './grep.js';
+import { ProbeTool } from './probe.js';
 import { GitTool } from './git-tool.js';
 import { MultiEditTool } from './multi-edit.js';
 import { InsertTool } from './insert.js';
@@ -92,6 +94,9 @@ export function createDefaultRegistry(
   registry.register(new BashTool(cwd, sandboxConfig));
   registry.register(new GlobTool());
   registry.register(new GrepTool());
+  // probe 与 grep 同族（都是"在文件里找东西"），紧跟其后注册：
+  // grep 面向文本行，probe 面向二进制/超大/编码混杂文件的"上下文窗口"。
+  registry.register(new ProbeTool());
   registry.register(new MultiEditTool());
   registry.register(new InsertTool());
   registry.register(new RestartTool(cwd ?? process.cwd(), sessionId, channel));
@@ -123,4 +128,3 @@ export function createBuiltInTools(
   registry.register(new GitTool(gitManager, sessionId));
   return registry;
 }
-
