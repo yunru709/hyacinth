@@ -174,7 +174,7 @@ export class BashTool implements Tool {
       },
       async: {
         type: 'boolean',
-        description: 'If true, run the command as a background process. Returns a handle immediately (e.g. [background:bg_001]). The process continues running and can be managed with process_list/process_output/process_kill.',
+        description: 'If true, run the command as a background process. Returns a handle immediately (e.g. [background:bg_001]). The process continues running and can be managed with process_list/process_output/process_kill. NOTE: background runs are still subject to `timeout` (default 600s) — when it expires the process tree is killed and the entry is retained as stopped(<reason>). Processes cannot outlive this tool call or the session (watchdog + session-scoped cleanup). For long-running monitors, pass an explicit `timeout` covering the whole intended duration.',
       },
     },
     required: ['command'],
