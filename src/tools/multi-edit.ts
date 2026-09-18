@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { GlobTool } from './glob.js';
-import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { getAnyReadTime, recordFileWrite } from './file-tracker.js';
+import { refuseEditUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { detectEol, applyEol } from '../utils/eol.js';
 
@@ -100,16 +101,18 @@ export class MultiEditTool implements Tool {
       }
 
       // ── Read-before-write 门控 ──
-      const lastRead = getLastReadTime(filePath);
+      // 同 edit：拒绝时交出 old_string 锚点上下文（教学 + 给料），不只是一句错误。
+      // 同 edit：完整或部分读过都算（锚定替换不需要全文）
+      const lastRead = getAnyReadTime(filePath);
       if (lastRead === null) {
-        return `Error: You must read "${filePath}" before editing it. Use the read tool first.`;
+        return refuseEditUnread(filePath, content, oldString, 'unread');
       }
       try {
         const stat = await fs.stat(filePath);
         // 与 write/edit 一致的 50ms 容差：stat.mtimeMs 是高精度（带小数），
         // Date.now() 是整数毫秒，同一毫秒内 read 后 edit 会误判为"外部修改"
         if (stat.mtimeMs > lastRead + 50) {
-          return `Error: "${filePath}" has been modified on disk since it was last read. Please re-read it first.`;
+          return refuseEditUnread(filePath, content, oldString, 'stale');
         }
       } catch {}
 

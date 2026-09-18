@@ -295,9 +295,13 @@ describe('MultiEditTool', () => {
       new_string: '"v1"',
     });
 
-    expect(result).toContain('You must read');
+    // 门控必须拒绝（本用例意图不变）。措辞于 2026-09-19 升级为「拒绝 + 交出锚点上下文」
+    // （见 read-gate.ts：把惩罚变成教学 + 给料，3 轮压到 2 轮），故不再断言某句固定话术，
+    // 改为断言"明确拒绝"且"附带了诊断信息"。
+    expect(result).toContain('not read yet');
+    expect(result).toContain('old_string');
     const a = await fs.readFile(path.join(tempDir, 'src', 'a.ts'), 'utf-8');
-    expect(a).toContain('"v0"'); // unchanged
+    expect(a).toContain('"v0"'); // unchanged —— 拒绝时一个字都不许改
   });
 
   it('returns "No files matched" for an unmatched pattern', async () => {

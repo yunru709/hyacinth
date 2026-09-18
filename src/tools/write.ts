@@ -4,6 +4,7 @@ import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { refuseWriteUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
 import { adaptEolTo } from '../utils/eol.js';
@@ -59,7 +60,12 @@ export class WriteTool implements Tool {
     if (fileExists) {
       const lastRead = getLastReadTime(filePath);
       if (lastRead === null) {
-        return 'Error: You must read the file before writing to it. Use the read tool first.';
+        // 拒绝覆盖，但**顺手把当前内容交出去**（教学 + 给料，3 轮压到 2 轮）。
+        // 安全边界见 read-gate.ts 头部：「交出了多少，才允许往下走多少」——
+        // 只有交出全文才算读过；只给片段时仍不放行（否则可能把没看到的中段写没）。
+        let cur = '';
+        try { cur = await fs.readFile(filePath, 'utf-8'); } catch {}
+        return refuseWriteUnread(filePath, cur, 'unread');
       }
       try {
         const stat = await fs.stat(filePath);
@@ -67,7 +73,10 @@ export class WriteTool implements Tool {
         // 同一毫秒内 read 后 write 时，mtimeMs 小数部分会让它 > lastRead，误判为"外部修改"。
         // 加 50ms 容差吸收精度差异；真正的并发外部修改通常间隔更久。
         if (stat.mtimeMs > lastRead + 50) {
-          return 'Error: File has been modified on disk since it was last read. Please re-read it first.';
+          // 这是**真实的安全信号**（文件被外部改过），不是流程形式 —— 同样把现状交出去
+          let cur = '';
+          try { cur = await fs.readFile(filePath, 'utf-8'); } catch {}
+          return refuseWriteUnread(filePath, cur, 'stale');
         }
       } catch {}
     }

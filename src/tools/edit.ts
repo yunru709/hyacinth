@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
-import { getLastReadTime, recordFileWrite } from './file-tracker.js';
+import { getLastReadTime, getAnyReadTime, recordFileWrite } from './file-tracker.js';
+import { refuseEditUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { autoReferenceCheck } from './symbol-references.js';
 import { detectEol, applyEol } from '../utils/eol.js';
@@ -106,9 +107,15 @@ export class EditTool implements Tool {
     }
 
     // ── Read-before-write 门控 ──
-    const lastRead = getLastReadTime(filePath);
+    // 拒绝时不再只回一句错误，而是**交出 old_string 命中处的上下文**（教学 + 给料，3 轮压到 2 轮）。
+    // edit 是锚定替换、改动只落在匹配处，故给出锚点上下文即可放行下一轮（边界见 read-gate.ts）；
+    // 若 old_string 根本没命中，这个响应会直接告诉模型"你对这个文件内容的假设是错的"。
+    // 门控强度随模式而变（见 read-gate.ts 的安全边界表）：
+    //   - 字符串模式：old_string 可自校验（猜错就匹配不上 → 当场拒绝）→ 完整或部分读过都算；
+    //   - 行模式（line_start，无锚点）：改动可落在**没看到过的行**上 → 与 write 同等严格，只认完整读过。
+    const lastRead = oldString ? getAnyReadTime(filePath) : getLastReadTime(filePath);
     if (lastRead === null) {
-      return 'Error: You must read the file before editing it. Use the read tool first.';
+      return refuseEditUnread(filePath, content, oldString, 'unread');
     }
     try {
       const stat = await fs.stat(filePath);
@@ -116,7 +123,7 @@ export class EditTool implements Tool {
       // 同一毫秒内 read 后 edit 时，mtimeMs 小数部分会让它 > lastRead，误判为"外部修改"。
       // 加 50ms 容差吸收精度差异；真正的并发外部修改通常间隔更久。
       if (stat.mtimeMs > lastRead + 50) {
-        return 'Error: File has been modified on disk since it was last read. Please re-read it first.';
+        return refuseEditUnread(filePath, content, oldString, 'stale');
       }
     } catch {}
 
