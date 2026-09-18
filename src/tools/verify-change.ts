@@ -16,7 +16,12 @@ import type { Tool } from './interface.js';
  *     不接受任意 shell 字符串 —— 否则它会变成沙箱旁路（`bash` 已存在，不该再开一个口）。
  *   - **不引入 shell**：一律 `spawn(process.execPath, [<bin 的 js 入口>, ...args], { shell: false })`，
  *     从根上消灭参数注入（Windows 上 npx.cmd/tsc.cmd 那套绕不过 shell，故直接调 js 入口）。
- *   - 传入的路径参数**必须落在仓库内**且字符集受限，否则直接拒绝。
+ *   - 传入的路径参数走**危险元字符黑名单**（不是白名单 —— 白名单会误杀 `C:\...` 绝对路径）。
+ *   - **项目根绝不能盲用 `process.cwd()`**：agent 的 cwd 常常是"包含多个项目的工作区目录"
+ *     （实测就是 `C:\Users\74689\Desktop`），而项目在 `Desktop\Agent\hyacinth`。盲用会导致
+ *     相对 paths 解析到不存在的位置、tsc 在 0.1 秒内就失败、关联测试全判 NO TARGETS ——
+ *     即**"看起来跑了，其实什么都没验"**（首次 live 实跑即撞上）。现按
+ *     `paths 向上找标记 → cwd 是否项目 → git toplevel` 的顺序推断，都不成立就明确报错，**不猜**。
  *   - "改动文件 → 关联测试"用**共址命名惯例**（`src/x/y.ts` ↔ `src/x/y.test.ts`）；
  *     没有共址测试时退化为**同目录的测试文件**，并在输出里说明依据（不静默跳过）。
  *
@@ -38,6 +43,11 @@ export class VerifyChangeTool implements Tool {
         type: 'array',
         items: { type: 'string' },
         description: 'Files/dirs to verify (relative to the repo root). Omit to use uncommitted git changes.',
+      },
+      root: {
+        type: 'string',
+        description:
+          'Project root. Usually unnecessary: it is inferred from `paths` (climbing up to package.json/tsconfig.json), then from cwd, then from git. Pass it when the agent cwd is a workspace dir containing several projects.',
       },
       run: {
         type: 'string',
@@ -68,19 +78,34 @@ export class VerifyChangeTool implements Tool {
   private static readonly SRC_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json']);
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const root = process.cwd();
     const timeoutMs = Math.min(Math.max((args.timeout_ms as number) ?? 180_000, 5_000), 600_000);
     const run = (args.run as string) ?? 'both';
+    const explicitRoot = typeof args.root === 'string' && args.root ? args.root : undefined;
+    const pathsArg = Array.isArray(args.paths) ? (args.paths as string[]) : [];
+
+    // 参数合法性先于一切：可疑输入不进入任何后续命令
+    if (pathsArg.length > 0) {
+      const bad = pathsArg.filter((p) => typeof p !== 'string' || VerifyChangeTool.UNSAFE_PATH.test(p));
+      if (bad.length > 0) return `Error: illegal path argument(s): ${JSON.stringify(bad)}`;
+    }
+
+    // ── 0. 定项目根 ──
+    // **绝不能盲用 process.cwd()**：agent 的 cwd 往往是"包含多个项目的工作区目录"
+    // （本会话就是 C:\Users\74689\Desktop），而项目在 Desktop\Agent\hyacinth。
+    // 盲用会导致：相对 paths 解析到不存在的位置、tsc 在 0.1s 内就失败、
+    // 关联测试全判为 NO TARGETS —— 即"看起来跑了，其实什么都没验"。
+    const resolved = await resolveRoot(explicitRoot, pathsArg, timeoutMs);
+    if (!resolved.root) {
+      return `Error: cannot determine the project root (${resolved.how}).\n`
+        + '  → pass `root` explicitly, or pass `paths` that point at existing files inside the project.';
+    }
+    const root = resolved.root;
 
     // ── 1. 定改动文件 ──
     let changed: string[];
     let source = '';
-    if (Array.isArray(args.paths) && args.paths.length > 0) {
-      const bad = (args.paths as unknown[]).filter(
-        (p): p is string => typeof p !== 'string' || VerifyChangeTool.UNSAFE_PATH.test(p),
-      );
-      if (bad.length > 0) return `Error: illegal path argument(s): ${JSON.stringify(bad)}`;
-      changed = (args.paths as string[]).map((p) => path.relative(root, path.resolve(root, p)));
+    if (pathsArg.length > 0) {
+      changed = pathsArg.map((p) => path.relative(root, path.resolve(p)));
       source = 'explicit paths';
     } else {
       const g = await runPlain('git', ['status', '--porcelain'], root, 20_000);
@@ -125,11 +150,14 @@ export class VerifyChangeTool implements Tool {
           sections.push(`--- typecheck (tsc --noEmit) ---\nPASS (${secs}s)`);
           verdicts.push('typecheck: PASS');
         } else {
-          sections.push(
-            `--- typecheck (tsc --noEmit) ---\nFAIL (${secs}s, ${errLines.length} error line(s))\n`
-            + errLines.slice(0, 20).join('\n')
-            + (errLines.length > 20 ? `\n... (+${errLines.length - 20} more)` : ''),
-          );
+          // 没有 "error TS" 行时**绝不能**只报 "0 error line(s)"（说了等于没说）：
+          // 这通常意味着 tsc 根本没正常起来（找不到 tsconfig、解析器缺失、路径不存在…），
+          // 必须把原始输出尾巴贴出来，否则调用方无从判断。第一次实跑就撞上了这种输出。
+          const detail = errLines.length > 0
+            ? errLines.slice(0, 20).join('\n') + (errLines.length > 20 ? `\n... (+${errLines.length - 20} more)` : '')
+            : '(no "error TS" lines — tsconfig or tsc itself likely failed to start; raw output tail below)\n'
+              + r.out.split('\n').filter(Boolean).slice(-12).join('\n');
+          sections.push(`--- typecheck (tsc --noEmit) ---\nFAIL (${secs}s, ${errLines.length} error line(s))\n${detail}`);
           verdicts.push(`typecheck: FAIL (${errLines.length})`);
         }
       }
@@ -191,6 +219,66 @@ export class VerifyChangeTool implements Tool {
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────
+
+/** 项目根标记（按可靠性排序；.git 放最后，因为它可能出现在祖先工作区里） */
+export const PROJECT_MARKERS = ['package.json', 'tsconfig.json', 'pyproject.toml', 'Cargo.toml', 'go.mod'];
+
+/** 从 dir（含自身）向上最多 12 层找含项目标记的目录 */
+export function climbForMarker(dir: string): string | null {
+  let cur = path.resolve(dir);
+  for (let i = 0; i < 12; i++) {
+    if (PROJECT_MARKERS.some((m) => fs.existsSync(path.join(cur, m)))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
+/**
+ * 判定项目根。顺序（越靠前越可靠）：
+ *   1) 显式 `root` 参数
+ *   2) 从 `paths` 里**真实存在**的文件向上找项目标记 ← 最常用且最可靠
+ *      （调用方既然指定了文件，就该以它所在的项目为准）
+ *   3) cwd 本身就是项目目录
+ *   4) cwd 是 git 仓库 → `git rev-parse --show-toplevel`
+ *   都不成立则返回 null，由调用方给出明确引导（**不猜**）。
+ */
+export async function resolveRoot(
+  explicit: string | undefined,
+  paths: string[],
+  timeoutMs: number,
+): Promise<{ root: string | null; how: string }> {
+  if (explicit) {
+    const abs = path.resolve(explicit);
+    return fs.existsSync(abs)
+      ? { root: abs, how: 'explicit root argument' }
+      : { root: null, how: `explicit root does not exist: ${abs}` };
+  }
+
+  for (const p of paths) {
+    const abs = path.resolve(p);
+    if (!fs.existsSync(abs)) continue;
+    const up = climbForMarker(path.dirname(abs));
+    if (up) return { root: up, how: `climbed up from "${p}" to a project marker` };
+  }
+
+  const cwd = process.cwd();
+  if (PROJECT_MARKERS.some((m) => fs.existsSync(path.join(cwd, m)))) {
+    return { root: cwd, how: 'cwd is a project directory' };
+  }
+
+  const g = await runPlain('git', ['rev-parse', '--show-toplevel'], cwd, Math.min(timeoutMs, 15_000));
+  if (g.code === 0) {
+    const top = g.out.split('\n').map((l) => l.trim()).find(Boolean);
+    if (top) return { root: top, how: 'git rev-parse --show-toplevel' };
+  }
+
+  return {
+    root: null,
+    how: 'no explicit root; none of `paths` exists; cwd is neither a project nor a git repo',
+  };
+}
 
 interface CmdResult { code: number | null; timedOut: boolean; out: string }
 

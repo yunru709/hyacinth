@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { VerifyChangeTool, parseGitStatus, deriveTestTargets } from './verify-change.js';
+import { VerifyChangeTool, parseGitStatus, deriveTestTargets, climbForMarker, resolveRoot } from './verify-change.js';
 
 describe('parseGitStatus', () => {
   it('解析普通状态行', () => {
@@ -81,5 +81,42 @@ describe('VerifyChangeTool（快路径）', () => {
     const r = await new VerifyChangeTool().execute({ paths: [f], run: 'tests' });
     expect(r).not.toContain('illegal path');
     expect(r).toContain('NO TARGETS');
+  });
+});
+
+/**
+ * 项目根推断 —— 这几条锁住**首次 live 实跑踩到的真 bug**：
+ * 盲用 process.cwd() 当项目根，而 agent 的 cwd 常是"含多个项目的工作区目录"，
+ * 于是相对路径解析到不存在的位置、tsc 起来就挂、关联测试全判 NO TARGETS。
+ */
+describe('项目根推断', () => {
+  it('climbForMarker：从子目录向上找到 package.json 所在层', () => {
+    const root = makeRepo({ 'package.json': '{}', 'src/utils/a.ts': '' });
+    expect(climbForMarker(path.join(root, 'src', 'utils'))).toBe(root);
+  });
+
+  it('climbForMarker：目标目录自身含标记时也命中', () => {
+    const root = makeRepo({ 'tsconfig.json': '{}' });
+    expect(climbForMarker(root)).toBe(root);
+  });
+
+  it('resolveRoot：显式 root 优先', async () => {
+    const root = makeRepo({ 'package.json': '{}', 'src/a.ts': '' });
+    const r = await resolveRoot(root, [], 5000);
+    expect(r.root).toBe(root);
+    expect(r.how).toContain('explicit');
+  });
+
+  it('resolveRoot：由 paths 里真实存在的文件向上推断（首跑踩到的场景）', async () => {
+    const root = makeRepo({ 'package.json': '{}', 'src/utils/eol.ts': '' });
+    const r = await resolveRoot(undefined, [path.join(root, 'src/utils/eol.ts')], 5000);
+    expect(r.root).toBe(root);
+    expect(r.how).toContain('climbed up');
+  });
+
+  it('resolveRoot：显式 root 不存在时返回 null 与原因（不猜）', async () => {
+    const r = await resolveRoot(path.join(os.tmpdir(), `__nope-${Date.now()}__`), [], 5000);
+    expect(r.root).toBeNull();
+    expect(r.how).toContain('does not exist');
   });
 });
