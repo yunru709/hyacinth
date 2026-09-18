@@ -53,6 +53,56 @@ export class ArchiveTool implements Tool {
     return `Error: Unknown action "${action}". Use extract or compress.`;
   }
 
+  /**
+   * 解析要用的 tar 及其附加参数（结果缓存，每进程只探测一次）。
+   *
+   * 缺陷背景（2026-09-19，用户在 Git Bash 环境复现，本机亦以同法复现）：
+   * 原先直接 spawn('tar') 从 **PATH** 解析 —— 而 Windows 上 PATH 里 tar 有两个来源：
+   *   · C:\Windows\System32\tar.exe（bsdtar，Win10+ 自带）—— **认盘符** ✓
+   *   · MSYS/Git Bash 的 GNU tar（装了 Git 的开发者 PATH 里常排在前面）—— 把 `C:\...`
+   *     当成**远程主机** ⇒ `Cannot connect to C: resolve failed` / Child returned status 128 ✗
+   * 于是同一份代码"在只装了 System32 那版的机器上全绿、在 Git Bash 机器上全挂"。
+   *
+   * 修法（双保险）：
+   *   ① win32 且 System32\tar.exe 存在 → **优先用它**（确定性的 bsdtar，认盘符）；
+   *   ② 否则用 PATH 里的 tar，并探测它是否为 GNU —— 是则附加 `--force-local`，
+   *      让 GNU tar 把 C:\ 当本地路径而非主机名。
+   *      （**只对 GNU 加**：bsdtar 不认 `--force-local`，无条件加会把它弄坏 ✗）
+   */
+  private tarPromise?: Promise<{ cmd: string; extra: string[] }>;
+
+  private resolveTar(): Promise<{ cmd: string; extra: string[] }> {
+    this.tarPromise ??= (async () => {
+      if (process.platform === 'win32') {
+        const sys = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+        if (fs.existsSync(sys)) return { cmd: sys, extra: [] };
+      }
+      const gnu = await this.isGnuTar('tar');
+      return { cmd: 'tar', extra: gnu ? ['--force-local'] : [] };
+    })();
+    return this.tarPromise;
+  }
+
+  /** 探测某个 tar 是否为 GNU tar（bsdtar 的 --version 输出不含 "GNU tar"） */
+  private isGnuTar(cmd: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const child = spawn(cmd, ['--version'], {
+        shell: process.platform === 'win32',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      let out = '';
+      child.stdout!.on('data', (d: Buffer) => { out += d.toString(); });
+      child.on('close', () => resolve(out.includes('GNU tar')));
+      child.on('error', () => resolve(false));
+    });
+  }
+
+  /** 跑 tar —— 命令与附加参数一律经 resolveTar 决定 */
+  private async execTar(args: string[], okPrefix: string): Promise<string> {
+    const { cmd, extra } = await this.resolveTar();
+    return this.execCommand(cmd, [...extra, ...args], okPrefix);
+  }
+
   private async extract(archiveFile: string, targetDir?: string): Promise<string> {
     if (!fs.existsSync(archiveFile)) {
       return `Error: Archive file not found: ${archiveFile}`;
@@ -67,7 +117,7 @@ export class ArchiveTool implements Tool {
     const ext = path.basename(archiveFile).toLowerCase();
 
     if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz') || ext.endsWith('.tar.bz2') || ext.endsWith('.tbz2') || ext.endsWith('.tar')) {
-      return this.execCommand('tar', ['-xf', archiveFile, '-C', destDir],
+      return this.execTar(['-xf', archiveFile, '-C', destDir],
         `Extracted to ${destDir}`);
     } else if (ext.endsWith('.zip')) {
       // Try PowerShell on Windows, unzip on Unix
@@ -98,13 +148,13 @@ export class ArchiveTool implements Tool {
     const ext = outputFile.toLowerCase();
 
     if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) {
-      return this.execCommand('tar', ['-czf', outputFile, '-C', sourceDir, sourceName],
+      return this.execTar(['-czf', outputFile, '-C', sourceDir, sourceName],
         `Created ${outputFile}`);
     } else if (ext.endsWith('.tar.bz2') || ext.endsWith('.tbz2')) {
-      return this.execCommand('tar', ['-cjf', outputFile, '-C', sourceDir, sourceName],
+      return this.execTar(['-cjf', outputFile, '-C', sourceDir, sourceName],
         `Created ${outputFile}`);
     } else if (ext.endsWith('.tar')) {
-      return this.execCommand('tar', ['-cf', outputFile, '-C', sourceDir, sourceName],
+      return this.execTar(['-cf', outputFile, '-C', sourceDir, sourceName],
         `Created ${outputFile}`);
     } else if (ext.endsWith('.zip')) {
       if (process.platform === 'win32') {
@@ -121,8 +171,10 @@ export class ArchiveTool implements Tool {
 
   private execCommand(cmd: string, args: string[], okPrefix: string): Promise<string> {
     return new Promise((resolve) => {
+      // 绝对路径命令不必经 shell —— 而且经 shell 会破坏含空格的路径（tar 现在总是绝对路径）
+      const needShell = process.platform === 'win32' && !path.isAbsolute(cmd);
       const child = spawn(cmd, args, {
-        shell: process.platform === 'win32',
+        shell: needShell,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';

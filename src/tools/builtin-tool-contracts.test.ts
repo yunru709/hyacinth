@@ -342,6 +342,35 @@ describe('ArchiveTool', () => {
     expect(await fs.readFile(path.join(destDir, 'src', 'file.txt'), 'utf-8')).toBe('hello');
   });
 
+  it('PATH 里 GNU tar 排在前面时也必须成功（回归：GNU tar 会把 C:\\ 当远程主机）', async () => {
+    // 背景（2026-09-19，用户在其 Git Bash 环境实测复现）：
+    //   Windows 上 PATH 里 tar 有两个来源 —— System32 的 bsdtar（认盘符）与 MSYS/Git Bash 的
+    //   GNU tar（多数装了 Git 的开发者 PATH 里排在前面）。GNU tar 把 `C:\...` 当**远程主机**
+    //   ⇒ `Cannot connect to C: resolve failed` / Child returned status 128 ⇒ 压缩直接失败。
+    // 修法：win32 优先用 System32\tar.exe；退化到 PATH 的 tar 时若探测到 GNU 则加 --force-local。
+    // 本用例把 GNU tar 目录插到 PATH 最前，若哪天又退回"裸 tar + 看 PATH 脸色"就会红。
+    const srcDir = path.join(tmpRoot, 'src2');
+    await fs.mkdir(srcDir, { recursive: true });
+    await fs.writeFile(path.join(srcDir, 'file.txt'), 'hello2', 'utf-8');
+
+    const gitBashTarDir = 'F:\\Git\\usr\\bin'; // 本机 GNU tar 所在（不在此环境则跳过断言强度）
+    const oldPath = process.env.PATH ?? '';
+    process.env.PATH = `${gitBashTarDir};${oldPath}`;
+    try {
+      const archive = path.join(tmpRoot, 'out2.tar.gz');
+      const compressed = await new ArchiveTool().execute({ action: 'compress', file: archive, target: srcDir });
+      expect(compressed).toContain('Created');
+      expect(fss.existsSync(archive)).toBe(true);
+
+      const destDir = path.join(tmpRoot, 'dest2');
+      const extracted = await new ArchiveTool().execute({ action: 'extract', file: archive, target: destDir });
+      expect(extracted).toContain('Extracted to');
+      expect(await fs.readFile(path.join(destDir, 'src2', 'file.txt'), 'utf-8')).toBe('hello2');
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  });
+
   it('归档不存在返回错误字符串', async () => {
     const result = await new ArchiveTool().execute({
       action: 'extract',
