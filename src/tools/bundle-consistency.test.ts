@@ -33,9 +33,12 @@ const DYNAMIC_TOOLS: Record<string, string> = {
   'docx_read': 'Python 桥：名字来自 .py 元数据，不在 TS 源码里',
   'xlsx_read': '同上',
 };
-/** 前缀形式（MCP 工具名来自服务器端工具列表，只能按前缀识别） */
+/** 前缀形式（MCP 工具名来自服务器端工具列表，只能按前缀识别）
+ *  ⚠️ 决定（2026-09-19，用户确认）：MCP 工具**有意只让 `all` 模式可用** ——
+ *  不为它单开包，也不让过滤逻辑对 `mcp__` 前缀放行。故此处走白名单，
+ *  **不要**"顺手"把它们补进 common/coding。 */
 const DYNAMIC_PREFIXES: Array<[string, string]> = [
-  ['mcp__', 'MCP 桥：名字来自 MCP 服务器的工具列表，静态不可枚举'],
+  ['mcp__', 'MCP 桥：名字来自 MCP 服务器工具列表，静态不可枚举；有意只让 all 模式可用'],
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
