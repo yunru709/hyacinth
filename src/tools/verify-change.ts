@@ -105,7 +105,13 @@ export class VerifyChangeTool implements Tool {
     let changed: string[];
     let source = '';
     if (pathsArg.length > 0) {
-      changed = pathsArg.map((p) => path.relative(root, path.resolve(p)));
+      // schema 承诺的是 "relative to the repo root"，因此**相对路径按 root 解析，而不是 cwd**
+      // —— 本环境 cwd 是"含多个项目的工作区目录"，按 cwd 解析会指到不存在的位置。
+      // 此前即便显式传了 root，相对路径仍按 cwd 解析，与文档不符。绝对路径按自身解析。
+      changed = pathsArg.map((p) => {
+        const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(root, p);
+        return path.relative(root, abs) || '.';
+      });
       source = 'explicit paths';
     } else {
       const g = await runPlain('git', ['status', '--porcelain'], root, 20_000);
@@ -177,9 +183,13 @@ export class VerifyChangeTool implements Tool {
         );
         verdicts.push('tests: NO TARGETS');
       } else {
+        // 先把"推导出的目标"算成头部：**即便 vitest 不可用也要显示目标** ——
+        // 否则调用方看不到"它本来打算跑什么"，诊断价值全丢。
+        const targetHeader = `--- tests (${derived.files.length} target(s), by ${derived.basis}) ---\n`
+          + derived.files.map((f) => `  ${f}`).join('\n');
         const vitest = resolveBin(root, ['vitest/vitest.mjs']);
         if (!vitest) {
-          sections.push('--- tests ---\nSKIPPED: cannot resolve vitest (run npm install?)');
+          sections.push(`${targetHeader}\nSKIPPED: cannot resolve vitest (run npm install?)`);
           verdicts.push('tests: SKIPPED');
         } else {
           const t0 = Date.now();
@@ -189,8 +199,7 @@ export class VerifyChangeTool implements Tool {
             .slice(0, 12).join('\n');
           const failed = /failed/.test(summary) && !/0 failed/.test(summary);
           sections.push(
-            `--- tests (${derived.files.length} target(s), by ${derived.basis}) ---\n`
-            + derived.files.map((f) => `  ${f}`).join('\n') + '\n'
+            `${targetHeader}\n`
             + (r.timedOut ? `TIMEOUT after ${timeoutMs}ms` : (summary || `(no summary; exit ${r.code})`))
             + `\n(${secs}s)`,
           );

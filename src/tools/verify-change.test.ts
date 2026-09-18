@@ -120,3 +120,17 @@ describe('项目根推断', () => {
     expect(r.how).toContain('does not exist');
   });
 });
+
+describe('相对路径语义（schema 承诺 relative to the repo root）', () => {
+  it('显式 root + 相对 paths：按 root 解析，能定位到共址测试', async () => {
+    const root = makeRepo({
+      'package.json': '{}',
+      'src/utils/eol.ts': '',
+      'src/utils/eol.test.ts': '',
+    });
+    const r = await new VerifyChangeTool().execute({ root, paths: ['src/utils/eol.ts'], run: 'tests' });
+    // 关键：相对路径按 root 解析 → 能找到共址测试（若按 cwd 解析，这里会得到 NO TARGETS）
+    expect(r).toContain('eol.test.ts');
+    expect(r).not.toContain('NO TARGETS');
+  });
+});
