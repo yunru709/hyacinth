@@ -20,7 +20,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { SCHEMA_DDL, MIGRATION_ADD_MTIME } from './schema.js';
+import { SCHEMA_DDL, MIGRATION_ADD_MTIME, MIGRATION_ADD_PARSER } from './schema.js';
 import type {
   BuildStats, QueryParams, GraphOptions, GraphFormat,
   XrefSymbol, XrefRef, XrefImport, XrefFile, ParsedFile,
@@ -176,6 +176,13 @@ export class XrefManager {
         // 并发迁移：另一个进程已补上则忽略
       }
     }
+    if (!cols.some((c) => c.name === 'parser')) {
+      try {
+        this.db.exec(MIGRATION_ADD_PARSER);
+      } catch {
+        // 并发迁移：另一个进程已补上则忽略
+      }
+    }
   }
 
   /** 是否已初始化 */
@@ -319,10 +326,10 @@ export class XrefManager {
     // 批量解析
     // 用 INSERT（不是 INSERT OR REPLACE）：REPLACE 会换掉 id 并级联删除子行
     const insertFile = this.db.prepare(
-      'INSERT INTO files (path, language, hash, last_parsed_at, mtime_ms) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO files (path, language, hash, last_parsed_at, mtime_ms, parser) VALUES (?, ?, ?, ?, ?, ?)',
     );
     const updateFile = this.db.prepare(
-      'UPDATE files SET language = ?, hash = ?, last_parsed_at = ?, mtime_ms = ? WHERE path = ?',
+      'UPDATE files SET language = ?, hash = ?, last_parsed_at = ?, mtime_ms = ?, parser = ? WHERE path = ?',
     );
     const selectFileId = this.db.prepare('SELECT id FROM files WHERE path = ?');
     const insertSymbol = this.db.prepare(
@@ -340,7 +347,7 @@ export class XrefManager {
 
     // 分批解析（默认 50，可通过工具参数调整）
     const BATCH_SIZE = Math.max(1, Math.min(batchSize, 500));
-    const allParsed: { file: string; data: ParsedFile }[] = [];
+    const allParsed: { file: string; data: ParsedFile; parserName: string }[] = [];
 
     for (let i = 0; i < filesToParse.length; i += BATCH_SIZE) {
       const batch = filesToParse.slice(i, i + BATCH_SIZE);
@@ -349,7 +356,8 @@ export class XrefManager {
           const parser = this.parserRegistry!.getParser(f);
           if (!parser) return null;
           try {
-            return { file: f, data: await parser.parseFile(f) };
+            // 带上解析器名 → 入库记进 files.parser：降级必须可查（否则 AST 与正则数据不可分辨）
+            return { file: f, data: await parser.parseFile(f), parserName: parser.name };
           } catch {
             // 不再静默吞掉：计入 failed_files，构建结果里可见
             failedFiles++;
@@ -401,7 +409,7 @@ export class XrefManager {
     // 导入边随机消失、deps/dependents/impact 结果不可信。
     // 现在建行只发生在阶段一，阶段二只读映射，不再触碰 files 行的身份。
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const doBatch = this.db.transaction((parsedFiles: { file: string; data: ParsedFile }[]) => {
+    const doBatch = this.db.transaction((parsedFiles: { file: string; data: ParsedFile; parserName: string }[]) => {
       const now = new Date().toISOString();
       const fileIdByPath = new Map<string, number>();
 
@@ -412,7 +420,7 @@ export class XrefManager {
        *   hash/mtime 冲成 null），不存在才补建占位行
        * 绝不用 REPLACE —— 换 id 会级联删子行
        */
-      const ensureFileId = (rawPath: string, language: string, meta: { hash: string; mtime: number } | null): number => {
+      const ensureFileId = (rawPath: string, language: string, meta: { hash: string; mtime: number; parser: string } | null): number => {
         const p = normPath(rawPath);
         const cached = fileIdByPath.get(p);
         if (cached !== undefined) return cached;
@@ -421,22 +429,22 @@ export class XrefManager {
         let id: number;
         if (row) {
           id = row.id;
-          if (meta) updateFile.run(language, meta.hash, now, meta.mtime, p);
+          if (meta) updateFile.run(language, meta.hash, now, meta.mtime, meta.parser, p);
         } else {
-          id = insertFile.run(p, language, meta?.hash ?? null, now, meta?.mtime ?? null).lastInsertRowid as number;
+          id = insertFile.run(p, language, meta?.hash ?? null, now, meta?.mtime ?? null, meta?.parser ?? null).lastInsertRowid as number;
         }
         fileIdByPath.set(p, id);
         return id;
       };
 
       // ── 阶段一：全部文件行就位 ──
-      for (const { file, data } of parsedFiles) {
-        ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0 });
+      for (const { file, data, parserName } of parsedFiles) {
+        ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0, parser: parserName });
       }
 
       // ── 阶段二：子表写入（fileId 一律取自映射） ──
-      for (const { file, data } of parsedFiles) {
-        const fileId = ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0 });
+      for (const { file, data, parserName } of parsedFiles) {
+        const fileId = ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0, parser: parserName });
         langBreakdown[data.language] = (langBreakdown[data.language] ?? 0) + 1;
 
         for (const sym of data.symbols) {
@@ -472,6 +480,13 @@ export class XrefManager {
     const count = (table: string): number =>
       (this.db!.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c;
     const indexed = count('files');
+    // 各解析器产出的文件数 —— 同上面所有统计，一律取自库内实际行（sync 下未解析的文件保留原值）
+    const parserBreakdown: Record<string, number> = {};
+    for (const row of this.db.prepare(
+      'SELECT parser, COUNT(*) AS c FROM files WHERE parser IS NOT NULL GROUP BY parser',
+    ).all() as { parser: string; c: number }[]) {
+      parserBreakdown[row.parser] = row.c;
+    }
     const duration = Date.now() - startedAt;
     return {
       files: indexed,
@@ -480,6 +495,7 @@ export class XrefManager {
       imports: count('imports'),
       duration_ms: duration,
       language_breakdown: langBreakdown,
+      parser_breakdown: parserBreakdown,
       mode,
       parsed_files: allParsed.length,
       unchanged_files: unchangedFiles,

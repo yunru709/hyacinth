@@ -50,6 +50,13 @@ export interface XrefFile {
   last_parsed_at: string | null;
   /** 上次入库时的 mtime（毫秒）；同步构建据此判断是否需要重新解析 */
   mtime_ms: number | null;
+  /**
+   * 产出该行数据的解析器名（如 'ts-ast' / 'py-regex' / 'generic-regex'）。
+   * 为什么记录：解析器是一条精度链，缺依赖会静默降级 —— 不记出处就无法分辨
+   * 「AST 级数据」与「正则级数据」，消费侧也就无从判断哪些结果可放心行动。
+   * 仅被引用到、未曾解析的占位行为 null。
+   */
+  parser: string | null;
 }
 
 // ── 枚举 ──────────────────────────────────────────────────────────────
@@ -97,6 +104,8 @@ export interface BuildStats {
   imports: number;
   duration_ms: number;
   language_breakdown: Record<string, number>;
+  /** 库内各解析器产出的文件数（取自库内实际行，不在本次解析范围的文件保留原值） */
+  parser_breakdown?: Record<string, number>;
   /** 本次构建模式：full=全部重新解析；sync=按 mtime 只解析变更文件 */
   mode?: 'full' | 'sync' | 'incremental';
   /** 本次实际解析的文件数（sync 下通常远小于 files） */
@@ -172,7 +181,8 @@ CREATE TABLE IF NOT EXISTS files (
     language TEXT NOT NULL,
     hash TEXT,
     last_parsed_at TEXT,
-    mtime_ms INTEGER
+    mtime_ms INTEGER,
+    parser TEXT
 );
 
 CREATE TABLE IF NOT EXISTS symbols (
@@ -233,3 +243,9 @@ CREATE INDEX IF NOT EXISTS idx_imports_to_from ON imports(to_file_id, from_file_
  * 用 PRAGMA table_info 探测后再补，保证幂等。
  */
 export const MIGRATION_ADD_MTIME = `ALTER TABLE files ADD COLUMN mtime_ms INTEGER`;
+
+/**
+ * 增量迁移：加 parser 列（记录该行数据出自哪个解析器）。
+ * 与 MIGRATION_ADD_MTIME 同一模式：CREATE TABLE IF NOT EXISTS 不会给已存在的表补列。
+ */
+export const MIGRATION_ADD_PARSER = `ALTER TABLE files ADD COLUMN parser TEXT`;

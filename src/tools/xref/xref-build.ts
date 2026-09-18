@@ -143,6 +143,11 @@ export class XrefBuildTool implements Tool {
       lines.push(`  Files indexed:   ${stats.files}`);
       if (stats.parsed_files !== undefined) lines.push(`  Parsed now:      ${stats.parsed_files}`);
       if (stats.unchanged_files) lines.push(`  Unchanged:       ${stats.unchanged_files} (mtime 未变，跳过解析)`);
+      // 解析器分布：库里哪些数据出自 AST、哪些出自正则兜底（降级可查）
+      if (stats.parser_breakdown && Object.keys(stats.parser_breakdown).length > 0) {
+        const parts = Object.entries(stats.parser_breakdown).map(([k, v]) => `${k}: ${v}`).join(', ');
+        lines.push(`  Parser:          ${parts}`);
+      }
       if (stats.removed_files) lines.push(`  Removed:         ${stats.removed_files} (已从磁盘消失，摘除索引)`);
       if (stats.failed_files) lines.push(`  Failed to parse: ${stats.failed_files}`);
       lines.push(`  Symbols found:   ${stats.symbols}`);
