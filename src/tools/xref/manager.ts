@@ -333,7 +333,7 @@ export class XrefManager {
       for (const f of resolved) {
         deleteFile.run(f);
       }
-      filesToParse = resolved.filter(f => this.parserRegistry!.getParser(f) !== null);
+      filesToParse = resolved.filter(f => this.parserRegistry!.getParsers(f).length > 0);
       for (const f of filesToParse) {
         try {
           mtimeByPath.set(f, (await fs.stat(f)).mtimeMs);
@@ -399,16 +399,20 @@ export class XrefManager {
       const batch = filesToParse.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(
         batch.map(async (f) => {
-          const parser = this.parserRegistry!.getParser(f);
-          if (!parser) return null;
-          try {
-            // 带上解析器名 → 入库记进 files.parser：降级必须可查（否则 AST 与正则数据不可分辨）
-            return { file: f, data: await parser.parseFile(f), parserName: parser.name };
-          } catch {
-            // 不再静默吞掉：计入 failed_files，构建结果里可见
-            failedFiles++;
-            return null;
+          // 按精度链逐个尝试（高精度失败自动退低精度）；记录**成功者**的名字，
+          // 使 files.parser 如实反映数据出自哪一级（降级必须可查）
+          const chain = this.parserRegistry!.getParsers(f);
+          if (chain.length === 0) return null;
+          for (const parser of chain) {
+            try {
+              return { file: f, data: await parser.parseFile(f), parserName: parser.name };
+            } catch {
+              // 本链级失败 → 试下一级；整条链都失败才算 failed_files
+            }
           }
+          failedFiles++;
+          return null;
+
         }),
       );
       for (const r of batchResults) {

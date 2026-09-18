@@ -33,13 +33,22 @@ export class ParserRegistry {
     this.parsers.push(parser);
   }
 
-  /** 获取适合该文件的解析器（按注册顺序，优先返回第一个匹配） */
-  getParser(filePath: string): FileParser | null {
+  /**
+   * 获取适合该文件的**解析器链**（按注册顺序 = 精度优先级）。
+   *
+   * 为什么要链而不是单个：一门语言可以声明"先试高精度、失败退低精度"
+   *（如 python 先 py-tree-sitter 再 py-regex）。构建循环按序尝试，并把**成功者**的
+   * name 记进 `files.parser` —— 这样"降级确实发生过"是可查的事实，而不是靠外层名字
+   * 假装没降级。
+   */
+  getParsers(filePath: string): FileParser[] {
     const ext = path.extname(filePath).toLowerCase();
-    for (const parser of this.parsers) {
-      if (parser.extensions.includes(ext)) return parser;
-    }
-    return null;
+    return this.parsers.filter((p) => p.extensions.includes(ext));
+  }
+
+  /** 兼容入口：链首（不关心降级时够用） */
+  getParser(filePath: string): FileParser | null {
+    return this.getParsers(filePath)[0] ?? null;
   }
 
   /** 获取所有已注册的扩展名 */

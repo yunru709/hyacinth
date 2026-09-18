@@ -8,9 +8,14 @@ export const pythonSupport: LanguageSupport = {
   extensions: ['.py', '.pyi', '.pyx'],
   extMap: { '.py': 'python' }, // .pyi/.pyx 同上：可解析、语言未知
 
+  /**
+   * 精度链：语法树优先（能给出 caller_name —— py-regex 给不出），载不到 wasm 时退正则。
+   * 降级由构建循环"按链依次尝试"完成，且 files.parser 会如实记成**成功的那一级**。
+   */
   async createParsers(): Promise<FileParser[]> {
     const { PyParser } = await import('../regex-parser.js');
-    return [new PyParser()];
+    const { PyTreeSitterParser } = await import('./python-tree-sitter.js');
+    return [new PyTreeSitterParser(), new PyParser()];
   },
 
   isIntraProjectSpecifier: () => false,
