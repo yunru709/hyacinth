@@ -4,5 +4,11 @@
     "wasm": "tree-sitter-python.wasm",
     "bytes": 457883,
     "sha256": "16108b50df4ee9a30168794252ab55e7c93bfc5765d7fa0aa3e335752c515f47"
+  },
+  "go": {
+    "pkg": "tree-sitter-go",
+    "wasm": "tree-sitter-go.wasm",
+    "bytes": 217182,
+    "sha256": "9504573f352b20be7f2f1911754d710622aedc15afff16d5ed8fb5645681aee7"
   }
 }

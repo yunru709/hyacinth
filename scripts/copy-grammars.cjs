@@ -30,7 +30,8 @@ const update = process.argv.includes('--update');
 /** 语言 → 语法包。**加一门语言 = 这里加一行**（包须已精确锁进 devDependencies） */
 const GRAMMARS = [
   { language: 'python', pkg: 'tree-sitter-python', wasm: 'tree-sitter-python.wasm' },
-  // 待铺（官方包均自带 wasm，本机实测）：go 217kB / rust 1.1MB / c 626kB / cpp 3.4MB / java 415kB
+  { language: 'go', pkg: 'tree-sitter-go', wasm: 'tree-sitter-go.wasm' },
+  // 待铺（官方包均自带 wasm，本机实测）：rust 1.1MB / c 626kB / cpp 3.4MB / java 415kB
   // kotlin / swift：官方包**不含** wasm → 正则兜底（v2.2 备选路径：自建管线）
 ];
 

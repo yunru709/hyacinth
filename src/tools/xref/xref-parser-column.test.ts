@@ -52,7 +52,7 @@ describe('xref files.parser 出处列', () => {
 
   // 出处会随精度链升级而迁移：.py 起初是 py-regex，Phase 2 引入语法树后变成 py-tree-sitter。
   // 这类"期望随设计前进"的改动必须显式改断言并写明迁移原因，而不是让测试去迁就实现。
-  it('三种语言各记各的出处：.ts → ts-ast、.py → py-tree-sitter、.go → generic-regex', async () => {
+  it('三种语言各记各的出处：.ts → ts-ast、.py → py-tree-sitter、.go → go-tree-sitter', async () => {
     const root = await makeProject(PROJECT);
     const m = new XrefManager();
     await m.init(root);
@@ -62,7 +62,8 @@ describe('xref files.parser 出处列', () => {
       expect(pb['ts-ast']).toBe(1);
       expect(pb['py-tree-sitter']).toBe(1); // Phase 2：语义链首选（py-regex 降为兜底）
       expect(pb['py-regex']).toBeUndefined(); // 没降级 → 兜底那级不该出现在库里
-      expect(pb['generic-regex']).toBe(1);
+      expect(pb['go-tree-sitter']).toBe(1); // Go 已随铺量升级到语义链首选
+      expect(pb['generic-regex']).toBeUndefined(); // 没降级 → 兜底那级不该出现在库里
     } finally {
       m.close();
       await fs.rm(root, { recursive: true, force: true });

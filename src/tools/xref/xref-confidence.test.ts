@@ -4,7 +4,8 @@
  * 为什么需要：索引数据有两档精度来源 —— 语法树/AST（precise）与正则兜底（heuristic）。
  * 模型看结果是**字面思维**，不确定性必须显式写进输出；否则它会拿正则级结论当精确事实用。
  * 判据（都对着真实产出，不看文档）：
- *  ① .ts（ts-ast）与 .py（py-tree-sitter）→ [precise]；.go（generic-regex）→ [heuristic]
+ *  ① .ts（ts-ast）/ .py（py-tree-sitter）/ .go（go-tree-sitter）→ [precise]；
+ *     .rs（generic-regex）→ [heuristic] —— Go 升级到语义链后，heuristic 档改用**尚未铺到**的 Rust 作代表
  *  ② 块级标注：deps 整块由被查文件产出 → 标在表头
  *  ③ 图例：出现标注时必须附一行说明标签含义；没有标注时不得凭空出现
  *
@@ -34,7 +35,7 @@ const PROJECT = {
   ].join('\n'),
   'src/b.ts': 'export function helperB(): number {\n  return 1;\n}\n',
   'src/c.py': 'def gamma():\n    return 1\n',
-  'src/d.go': 'package main\n\nfunc delta() int {\n\treturn 1\n}\n',
+  'src/d.rs': 'fn delta() -> i32 {\n    1\n}\n',
 };
 
 async function makeProject(): Promise<string> {
@@ -71,7 +72,7 @@ describe('Phase 3：置信度标注', () => {
     await fs.rm(fakeHome, { recursive: true, force: true });
   });
 
-  it('① ts-ast 与 py-tree-sitter → [precise]；generic-regex → [heuristic]', async () => {
+  it('① 语义链语言（ts/py/go）→ [precise]；仍走正则的（rs）→ [heuristic]', async () => {
     const ts = await query.execute({ action: 'defs', symbol: 'main' });
     expect(ts).toContain('[precise]');
 
@@ -81,7 +82,7 @@ describe('Phase 3：置信度标注', () => {
     const go = await query.execute({ action: 'defs', symbol: 'delta' });
     // 只能对**数据行**断言：图例要解释两个标签，所以整段输出必然同时含 [precise]。
     // （首版就是错在这里 —— 对整段断言 "不含 [precise]" 永远失败，是测试写错而非代码错。）
-    const goRow = go.split('\n').find((l) => l.includes('src/d.go'));
+    const goRow = go.split('\n').find((l) => l.includes('src/d.rs'));
     expect(goRow, 'delta 的定义行应存在').toBeTruthy();
     expect(goRow).toContain('[heuristic]');
     expect(goRow).not.toContain('[precise]');

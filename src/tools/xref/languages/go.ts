@@ -7,9 +7,14 @@ export const goSupport: LanguageSupport = {
   extensions: ['.go'],
   extMap: { '.go': 'go' },
 
+  /**
+   * 精度链：语法树优先（能给出 caller_name 与嵌入边 —— generic-regex 都给不出），
+   * 载不到 wasm 时退正则。降级由构建循环按链依次尝试，files.parser 记成功的那一级。
+   */
   async createParsers(): Promise<FileParser[]> {
     const { GenericParser } = await import('../regex-parser.js');
-    return [new GenericParser(['.go'])];
+    const { GoTreeSitterParser } = await import('./go-tree-sitter.js');
+    return [new GoTreeSitterParser(), new GenericParser(['.go'])];
   },
 
   // Go 的项目内形态就是 `./pkg`（相对），已由通用规则覆盖
