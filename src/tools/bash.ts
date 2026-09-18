@@ -100,6 +100,11 @@ function spawnWindows(command: string, cwd: string, env: NodeJS.ProcessEnv, opts
     // 无 BOM 的 UTF-8 文件导致中文乱码。用 PSDefaultParameterValues 强制读取走 UTF-8。
     '$PSDefaultParameterValues["Get-Content:Encoding"] = "utf8"',
     '$PSDefaultParameterValues["Select-String:Encoding"] = "utf8"',
+    // 同类修复（写侧）：PS 5.1 的 `>` 即 Out-File，其默认文件编码是 Unicode(UTF-16LE)，
+    // 会把重定向产物写成 UTF-16LE —— 随后 rg 视为二进制静默零命中（假阴性），
+    // read 的前 512 字节 NUL 嗅探也会判成 [Binary File]。强制走 UTF-8。
+    '$PSDefaultParameterValues["Out-File:Encoding"]    = "utf8"',
+    '$PSDefaultParameterValues["Set-Content:Encoding"] = "utf8"',
     'chcp 65001 > $null',       // 让 cmd.exe / 外部命令也走 UTF-8
   ].join('\n');
   fs.writeFileSync(psFile, '﻿' + preamble + '\n' + script + '\n', 'utf-8');
@@ -325,7 +330,13 @@ export class BashTool implements Tool {
         if (childProcess.pid) {
           killProcessTreeSync(childProcess.pid);
         }
-        this.backgroundRegistry?.kill(handle);
+        // keepEntry + reason：条目保留并标 stopped，让 process_list 能解释"超时被杀"，
+        // 而不是条目凭空消失 —— 否则调用方会误判为"还在跑"或"从没起过"，
+        // 长跑监控场景下会白白多轮排查（曾真实踩过）。
+        void this.backgroundRegistry?.kill(handle, {
+          reason: `timeout after ${timeout}s`,
+          keepEntry: true,
+        });
       }, timeoutMs);
       // 子进程正常退出时清除定时器，避免重复 kill
       childProcess.on('exit', () => clearTimeout(timer));

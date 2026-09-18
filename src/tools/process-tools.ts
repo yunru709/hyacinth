@@ -28,7 +28,10 @@ export function createProcessListTool(registry: BackgroundProcessRegistry): Tool
       for (const p of processes) {
         const handle = p.handle.padEnd(8);
         const pid = String(p.pid ?? '?').padEnd(8);
-        const status = p.status.padEnd(8);
+        // 带上停止原因（如 timeout after 600s）：否则"进程停了我不知道为什么"，
+        // 长跑监控场景下无法区分"死了"和"闲着"。
+        const statusText = p.stoppedReason ? `${p.status}(${p.stoppedReason})` : p.status;
+        const status = statusText.padEnd(8);
         const output = `${p.outputSize} lines`.padEnd(8);
         lines.push(`${handle} ${pid} ${status} ${output} ${p.command}`);
       }

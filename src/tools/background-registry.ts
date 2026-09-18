@@ -5,6 +5,14 @@
  * 注册、查询、输出读取、终止和优雅关闭能力。
  *
  * 所有后台进程在会话结束时由 LifecycleSupervisor 统一清理。
+ *
+ * 关于"进程为什么不见了"（重要，排查过一次事故）：
+ *   bash(async:true) 同样受 timeout 约束（默认 600 秒，见 bash.ts 的定时器），
+ *   到点会被 killProcessTreeSync 杀掉。如果 kill 顺手把注册表条目 delete 掉，
+ *   调用方在 process_list 里就只看得到"没这个进程"——分不清是
+ *   "死了"、"从没起过"还是"还在跑"。因此 kill 支持 keepEntry：
+ *     - 超时/异常终止 → keepEntry=true，条目保留并标 stopped + reason
+ *     - 显式 process_kill / 会话关闭 → 默认删除，避免条目堆积
  */
 import { type ChildProcess } from 'node:child_process';
 import { createLogger } from '../logging/logger.js';
@@ -20,6 +28,8 @@ export interface BackgroundProcessInfo {
   status: 'running' | 'stopped' | 'crashed';
   startTime: string;
   outputSize: number;
+  /** 停止原因（如 'timeout after 600s'）。仅当 keepEntry 保留条目时存在。 */
+  stoppedReason?: string;
 }
 
 interface BackgroundEntry {
@@ -30,6 +40,8 @@ interface BackgroundEntry {
   outputBuffer: string[];
   maxOutputLines: number;
   startTime: Date;
+  /** 见文件头说明：保留条目时的停止原因 */
+  stoppedReason?: string;
 }
 
 let nextId = 1;
@@ -117,7 +129,12 @@ export class BackgroundProcessRegistry {
     const killed = entry.childProcess.killed;
 
     let status: 'running' | 'stopped' | 'crashed' = 'running';
-    if (killed) status = 'stopped';
+    // 先看主动终止标记：kill({keepEntry:true}) 记下的 stop 是"我们有意停的"，不是自己崩了。
+    // 注意 childProcess.killed 仅在我们调用过 child.kill() 时才置位；而 killProcessTree
+    // 走的是 taskkill/KT 按 PID 杀树，不会置位它 —— 于是会落到 exitCode!==0 分支被误判
+    // 成 crashed（实测：timeout 15s 的 async 进程显示 "crashed(timeout after 15s)"）。
+    if (entry.stoppedReason !== undefined) status = 'stopped';
+    else if (killed) status = 'stopped';
     else if (exited && entry.childProcess.exitCode !== 0) status = 'crashed';
     else if (exited) status = 'stopped';
 
@@ -129,6 +146,8 @@ export class BackgroundProcessRegistry {
       status,
       startTime: entry.startTime.toISOString(),
       outputSize: entry.outputBuffer.length,
+      // exactOptionalPropertyTypes 下不可直接赋 undefined，用条件展开
+      ...(entry.stoppedReason !== undefined ? { stoppedReason: entry.stoppedReason } : {}),
     };
   }
 
@@ -150,8 +169,16 @@ export class BackgroundProcessRegistry {
     return results;
   }
 
-  /** 停止指定进程 */
-  async kill(handle: string): Promise<boolean> {
+  /**
+   * 停止指定进程（杀整棵进程树）。
+   *
+   * @param opts.reason   停止原因（如 'timeout after 600s'），写入条目并透出到
+   *                      process_list，让调用方知道"为什么停了"。
+   * @param opts.keepEntry true = 保留条目并标记 stopped + reason（超时/异常终止用，
+   *                      因为调用方需要事后解释去向）；默认 false = 删除条目
+   *                      （显式 process_kill 与会话关闭用，避免条目无限堆积）。
+   */
+  async kill(handle: string, opts?: { reason?: string; keepEntry?: boolean }): Promise<boolean> {
     const entry = this.entries.get(handle);
     if (!entry) return false;
 
@@ -159,8 +186,13 @@ export class BackgroundProcessRegistry {
     if (pid) {
       killProcessTree(pid);
     }
-    this.entries.delete(handle);
-    logger.debug(`Killed background process ${handle}`);
+    if (opts?.keepEntry) {
+      entry.stoppedReason = opts.reason ?? 'stopped';
+      logger.debug(`Stopped background process ${handle} (${entry.stoppedReason}); entry kept for inspection`);
+    } else {
+      this.entries.delete(handle);
+      logger.debug(`Killed background process ${handle}`);
+    }
     return true;
   }
 

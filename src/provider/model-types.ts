@@ -70,7 +70,11 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry[]> = {
   deepseek: [
     { id: 'deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash 0731', provider: 'deepseek', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.09, output: 0.18, cacheRead: 0.018 }, status: 'deprecated', replacedBy: 'deepseek-v4-flash', reasoning: true, reasoningEffort: 'high' },
     { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'deepseek', contextWindow: 1048576, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.435, output: 0.87, cacheRead: 0.003625 }, status: 'available', reasoning: true, reasoningEffort: 'max' },
-    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'deepseek', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.09, output: 0.18, cacheRead: 0.018 }, status: 'available', reasoning: true, reasoningEffort: 'high' },
+    // NOTE: this legacy id is still accepted by the provider but its requests are now
+    // served by DeepSeek-V4.1-Flash, which IS vision-capable (api-docs.deepseek.com/guides/vision).
+    // It used to declare vision:false here, which made the provider silently DROP image parts
+    // before sending. Keep this in sync with the explicit V4.1 entries below.
+    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'deepseek', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, cost: { input: 0.09, output: 0.18, cacheRead: 0.018 }, status: 'available', reasoning: true, reasoningEffort: 'high' },
   ],
   gemini: [
     { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', provider: 'gemini', contextWindow: 1048576, maxOutputTokens: 65536, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'document', 'audio', 'video'] }, cost: { input: 1.5, output: 7.5, cacheRead: 0.15 }, status: 'available' },

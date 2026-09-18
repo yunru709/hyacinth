@@ -82,7 +82,11 @@ export class WriteTool implements Tool {
     //       需先解决 WriteTool 获取 sessionDir 的问题（目前没有注入该信息）。
 
     // 写入文件
-    await fs.writeFile(filePath, content, 'utf-8');
+    // PS 5.1 的 -File 靠 BOM 识别编码：无 BOM 的 UTF-8 脚本会被按 ANSI(GB2312) 解析，
+    // 中文串乱码、甚至吞掉闭合引号导致解析期崩溃。脚本类后缀补 BOM。
+    // 与 bash.ts 写临时 .ps1 的做法保持一致（那边注释已明确说明该坑）。
+    const needsBom = /\.(ps1|psm1|bat|cmd)$/i.test(filePath);
+    await fs.writeFile(filePath, needsBom ? '\uFEFF' + content : content, 'utf-8');
 
     // 记录写入（写入后自动更新 readTime = writeTime）
     recordFileWrite(filePath);
