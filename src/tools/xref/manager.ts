@@ -284,6 +284,41 @@ export class XrefManager {
     return `（已自动同步 ${stats.parsed_files ?? 0} 个变更文件）\n\n`;
   }
 
+  // ── 置信度标注（Phase 3）：消费 files.parser 列 ──────────────────────
+  /** 库内某文件的产出解析器（无记录 → null）。带缓存，build 后清空 */
+  private parserByPath = new Map<string, string | null>();
+
+  private parserOf(filePath: string): string | null {
+    if (!this.db) return null;
+    const key = normPath(filePath);
+    const hit = this.parserByPath.get(key);
+    if (hit !== undefined) return hit;
+    const row = this.db.prepare('SELECT parser FROM files WHERE path = ?').get(key) as
+      | { parser: string | null }
+      | undefined;
+    const v = row?.parser ?? null;
+    this.parserByPath.set(key, v);
+    return v;
+  }
+
+  /**
+   * 该文件数据的**置信度标注**。
+   *   [precise]   出自语法树 / AST（ts-ast、*-tree-sitter）
+   *   [heuristic] 出自正则兜底（*-regex、generic-regex）
+   * 无记录（只被引用到、从未被解析的占位行）→ 空串：**不知道就不标**，不给凭空信心。
+   */
+  private marker(filePath: string): string {
+    const p = this.parserOf(filePath);
+    if (!p) return '';
+    return p.includes('ast') || p.includes('tree-sitter') ? ' [precise]' : ' [heuristic]';
+  }
+
+  /** 本次输出若出现过标注，就补一行图例（读的人需要知道标签的确切含义） */
+  private markerLegend(body: string): string {
+    if (!body.includes('[precise]') && !body.includes('[heuristic]')) return '';
+    return '\n\n标注：[precise] = 出自语法树/AST 解析；[heuristic] = 正则兜底（分布可在 xref_build 输出里核对）';
+  }
+
   // ── 构建索引 ────────────────────────────────────────────────────────
 
   /**
@@ -523,6 +558,7 @@ export class XrefManager {
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('root_dir', this.rootDir);
     // 刚重建过 → 自检结果必然过期，清掉缓存；否则 TTL 窗口内会误报"新鲜"
     staleCacheByDb.delete(this.dbPath);
+    this.parserByPath.clear(); // 同理：重建后各文件的产出解析器可能已变
 
     // 统计一律取自库内实际行数，而不是「本次解析了多少」——
     // 否则 sync 模式下"全部未变"的那次构建会报 Symbols/Refs/Import edges = 0，
@@ -586,7 +622,7 @@ export class XrefManager {
         body = `Unknown action: "${params.action}". Supported: refs, defs, callers, callees, deps, dependents, hierarchy, impact, trace, symbol_search`;
     }
     // 结果照给，但**顺带告知索引是否陈旧**（不拒绝、不隐式重建 —— 见文件头 STALE_* 说明）
-    return body + this.stalenessNotice();
+    return body + this.markerLegend(body) + this.stalenessNotice();
   }
 
   /** 把可选的 file 参数解析成 file_id；文件不在索引中返回 null（区别于"未指定"= undefined） */
@@ -649,7 +685,7 @@ export class XrefManager {
     lines.push(`References to "${symbol}" (${rows.length} found):`);
     for (const r of rows) {
       const shortPath = this.toRelative(r.file_path);
-      lines.push(`  ${shortPath}:${r.line} [${r.kind}]${r.context ? ` — ${r.context}` : ''}`);
+      lines.push(`  ${shortPath}:${r.line} [${r.kind}]${this.marker(r.file_path)}${r.context ? ` — ${r.context}` : ''}`);
     }
     if (rows.length === 200) lines.push('  ... (truncated at 200 results)');
     return lines.join('\n');
@@ -698,7 +734,7 @@ export class XrefManager {
       if (s.is_exported) flags.push('exported');
       if (s.parent_name) flags.push(`in ${s.parent_name}`);
       const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
-      lines.push(`  [${s.kind}] ${shortPath}:${s.line}${flagStr}`);
+      lines.push(`  [${s.kind}] ${shortPath}:${s.line}${flagStr}${this.marker(s.file_path)}`);
       if (s.signature) lines.push(`    ${s.signature}`);
     }
 
@@ -753,7 +789,7 @@ export class XrefManager {
 
     const render = (r: XrefRef & { file_path: string }): string[] => {
       const callerInfo = r.caller_name ? ` (in ${r.caller_name})` : '';
-      const out = [`  ${this.toRelative(r.file_path)}:${r.line}${callerInfo}`];
+      const out = [`  ${this.toRelative(r.file_path)}:${r.line}${callerInfo}${this.marker(r.file_path)}`];
       if (r.context) out.push(`    ${r.context}`);
       return out;
     };
@@ -855,7 +891,7 @@ export class XrefManager {
     if (rows.length === 0) return `${this.toRelative(resolved)} has no tracked dependencies.`;
 
     const lines: string[] = [];
-    lines.push(`${this.toRelative(resolved)} depends on (${rows.length}):`);
+    lines.push(`${this.toRelative(resolved)} depends on (${rows.length}):${this.marker(resolved)}`);
     for (const imp of rows) {
       lines.push(`  - ${this.toRelative(imp.to_path)}${this.formatImportType(imp)}${this.formatImportSymbols(imp)}`);
     }
@@ -882,7 +918,7 @@ export class XrefManager {
     const lines: string[] = [];
     lines.push(`Files depending on ${this.toRelative(resolved)} (${rows.length}):`);
     for (const imp of rows) {
-      lines.push(`  - ${this.toRelative(imp.from_path)}${this.formatImportType(imp)}${this.formatImportSymbols(imp)}`);
+      lines.push(`  - ${this.toRelative(imp.from_path)}${this.formatImportType(imp)}${this.formatImportSymbols(imp)}${this.marker(imp.from_path)}`);
     }
     return lines.join('\n');
   }
@@ -931,7 +967,7 @@ export class XrefManager {
     if (childRefs.length > 0) {
       lines.push(`  Children (${childRefs.length}):`);
       for (const c of childRefs) {
-        lines.push(`    - ${c.child_name} (${this.toRelative(c.file_path)}:${c.line})`);
+        lines.push(`    - ${c.child_name} (${this.toRelative(c.file_path)}:${c.line})${this.marker(c.file_path)}`);
       }
     } else {
       lines.push(`  Children: (none)`);
@@ -1045,7 +1081,7 @@ export class XrefManager {
     if (rows.length === 0) return `No references to "${symbol}" found in ${this.toRelative(resolved)}.`;
 
     const lines: string[] = [];
-    lines.push(`Data flow for "${symbol}" in ${this.toRelative(resolved)} (${rows.length} points):`);
+    lines.push(`Data flow for "${symbol}" in ${this.toRelative(resolved)} (${rows.length} points):${this.marker(resolved)}`);
 
     // 按 kind 分组
     const kindOrder: Record<string, number> = {
@@ -1100,7 +1136,7 @@ export class XrefManager {
       const key = `${imp.from_path}→${imp.to_path}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      lines.push(`  ${this.toRelative(imp.from_path)} → ${this.toRelative(imp.to_path)} [${imp.import_type}]`);
+      lines.push(`  ${this.toRelative(imp.from_path)} → ${this.toRelative(imp.to_path)} [${imp.import_type}]${this.marker(imp.from_path)}`);
     }
 
     return lines.join('\n');
@@ -1125,7 +1161,7 @@ export class XrefManager {
       default:         body = `Unknown format: ${format}. Supported: text, mermaid, graphviz`;
     }
     // 同 query()：图也顺带告知索引是否陈旧
-    return body + this.stalenessNotice();
+    return body + this.markerLegend(body) + this.stalenessNotice();
   }
 
   private graphMermaid(options: GraphOptions, maxDepth: number): string {
@@ -1205,7 +1241,7 @@ export class XrefManager {
 
     if (file) {
       const resolved = this.resolvePath(file);
-      lines.push(`Dependency graph for ${this.toRelative(resolved)} (max depth: ${maxDepth}):`);
+      lines.push(`Dependency graph for ${this.toRelative(resolved)} (max depth: ${maxDepth}):${this.marker(resolved)}`);
       this.textTreeFileDeps(resolved, '', new Set(), maxDepth, 0, lines);
     }
 
