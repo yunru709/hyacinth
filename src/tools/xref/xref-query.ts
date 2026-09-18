@@ -1,16 +1,20 @@
 /**
  * xref_query — 查询交叉引用索引。
  *
- * 支持 9 种查询操作：
- *   refs       — 查符号被哪些地方引用
- *   defs       — 查符号的定义位置
- *   callers    — 谁调用了该函数
- *   callees    — 该函数调用了谁
- *   deps       — 文件依赖了哪些模块
- *   dependents — 哪些文件依赖了该文件
- *   hierarchy  — 类的继承关系树
- *   impact     — 修改文件的影响面分析（BFS）
- *   trace      — 变量在文件内的数据流追踪
+ * 支持 10 种查询操作：
+ *   refs          — 查符号被哪些地方引用
+ *   defs          — 查符号的定义位置
+ *   callers       — 谁调用了该函数
+ *   callees       — 该函数调用了谁
+ *   deps          — 文件依赖了哪些模块
+ *   dependents    — 哪些文件依赖了该文件
+ *   symbol_search — 哪些文件导入了指定符号
+ *   hierarchy     — 类的继承关系树
+ *   impact        — 修改文件的影响面分析（BFS）
+ *   trace         — 变量在文件内的数据流追踪
+ *
+ * 输出一律为人类可读文本（无 JSON 模式 —— 原 schema 曾声明 format: json
+ * 但实现从未支持，属空承诺，已移除；需要结构化输出请在上层解析或另立需求）。
  *
  * 需要先运行 xref_build 构建索引。
  *
@@ -35,7 +39,9 @@ export class XrefQueryTool implements Tool {
     'L1 — 符号查询：\n' +
     '  - "refs": 查找项目中某符号的所有引用\n' +
     '  - "defs": 查找符号定义位置（含签名）\n' +
-    '  - "callers": 谁调用了此函数？\n' +
+    '  - "callers": 谁调用了此函数？结果分「已确认」（调用者文件经导入链可到达定义文件）与\n' +
+    '    「仅同名」（无导入关系，可能是同名异实体）两组——请优先采信前者；\n' +
+    '    重名符号（如 build/get/init）请用 file 指定定义所在文件来消歧\n' +
     '  - "callees": 此函数调用了什么？（支持 depth 控制调用链深度）\n\n' +
     'L2 — 文件依赖查询：\n' +
     '  - "deps": 此文件导入了哪些模块？\n' +
@@ -63,31 +69,30 @@ export class XrefQueryTool implements Tool {
         description:
           'Symbol name (function, class, variable, etc.). ' +
           'Required for: refs, defs, callers, callees, hierarchy, trace. ' +
-          'Optional for: impact (filters by symbol).',
+          'For "impact": optional — annotates which affected files actually reference the symbol ' +
+          '(it does not filter: the impact set is determined by file imports).',
       },
       file: {
         type: 'string',
         description:
           'File path (relative to project root or absolute). ' +
           'Required for: deps, dependents, impact, trace. ' +
-          'Optional for: refs, defs, callers, callees (narrows search scope).',
+          'Optional for: refs, defs — restricts results to that file. ' +
+          'For callers/callees — pins the symbol definition to that file, which is the only ' +
+          'reliable way to disambiguate overloaded names (e.g. "build" is defined in dozens of files).',
       },
       depth: {
         type: 'number',
         description:
           'Max traversal depth. Default: 1-2 depending on action. ' +
           'WARNING: larger depth = more results exponentially. ' +
-          'Applies to: callees, impact.',
+          'Applies to: callees (callee chain), impact (BFS layers), ' +
+          'callers (how many import hops still count as "confirmed caller", default 2).',
       },
       kind: {
         type: 'string',
         enum: ['function', 'method', 'arrow', 'class', 'interface', 'type', 'enum', 'variable', 'parameter', 'property'],
         description: 'Filter symbols by kind. Useful with "defs" when a name is overloaded.',
-      },
-      format: {
-        type: 'string',
-        enum: ['text', 'json'],
-        description: 'Output format. Default: "text" (human-readable). Use "json" for structured data.',
       },
     },
     required: ['action'],
@@ -105,7 +110,6 @@ export class XrefQueryTool implements Tool {
     const file = args.file as string | undefined;
     const depth = args.depth as number | undefined;
     const kind = args.kind as SymbolKind | undefined;
-    const format = (args.format as string | undefined) ?? 'text';
 
     if (!ACTIONS.includes(action)) {
       return `Unknown action: "${action}". Supported: ${ACTIONS.join(', ')}`;
@@ -132,7 +136,6 @@ export class XrefQueryTool implements Tool {
       file,
       depth,
       kind,
-      format: format as 'text' | 'json',
     });
 
     return result;

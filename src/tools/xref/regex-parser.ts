@@ -72,6 +72,13 @@ export class TsRegexParser implements FileParser {
         imports.push({ to_path: modulePath, symbols: syms, import_type: 'require' });
       }
     }
+    // 再导出（桶文件透传）与动态 import：AST 解析器已支持，正则回退保持一致
+    for (const m of content.matchAll(/export\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g)) {
+      if (m[1].startsWith('.')) imports.push({ to_path: m[1], symbols: [], import_type: 'reexport' });
+    }
+    for (const m of content.matchAll(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      if (m[1].startsWith('.')) imports.push({ to_path: m[1], symbols: [], import_type: 'dynamic' });
+    }
 
     // ── 解析函数/类/变量定义 ──
     for (let i = 0; i < lines.length; i++) {
@@ -206,26 +213,44 @@ export class PyParser implements FileParser {
     const refs: ParsedRef[] = [];
     const imports: ParsedImport[] = [];
 
-    // ── import 语句 ──
+    // ── 导入语句（PEP 328）──
+    //
+    // 修复三处：
+    //   1) `from .pkg import x` 原先把 `.pkg` 原样当路径，解析侧拼成 `<dir>/.pkg.py`
+    //      （带前导点的文件名）必然不命中 ⇒ Python 相对导入一条都进不了图；
+    //   2) `from . import x` 因正则要求点后必须跟非空白字符而完全不匹配；
+    //   3) `import a.b` / `from a.b import c`（Python 里的常态）压根不采集，反而把
+    //      `import os` 伪造成一个名为 os 的 variable 符号塞进符号表，污染 defs/refs。
+    // 现在：相对导入保留前导点（交给解析侧按 PEP 328 上跳），绝对导入记模块路径，
+    // 两者都落成 import 边；不再为外部模块伪造符号。
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i].trim();
-      // from .xxx import yyy
-      let m = trimmed.match(/^from\s+(\.\S+)\s+import\s+(.+)/);
+      // from .pkg import a, b  /  from . import a  /  from a.b import c
+      let m = trimmed.match(/^from\s+([.\w]+)\s+import\s+(.+)$/);
       if (m) {
         const toPath = m[1];
-        const syms = m[2].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
-        imports.push({ to_path: toPath, symbols: syms, import_type: 'static' });
+        const syms = m[2]
+          .replace(/[()]/g, '')
+          .split(',')
+          .map(s => s.trim().split(/\s+as\s+/)[0].trim())
+          .filter(Boolean);
+        if (/^\.+$/.test(toPath)) {
+          // `from . import b`：点后没有模块名，导入的是**同级子模块** b（不是包本身），
+          // 所以要按符号逐个成边，否则会退化成"导入当前包"从而丢边。
+          for (const s of syms) imports.push({ to_path: `${toPath}${s}`, symbols: [], import_type: 'static' });
+          if (syms.length === 0) imports.push({ to_path: toPath, symbols: [], import_type: 'static' });
+        } else {
+          imports.push({ to_path: toPath, symbols: syms, import_type: 'static' });
+        }
         continue;
       }
-      // import xxx (non-relative, record for symbol search)
-      m = trimmed.match(/^import\s+(\S+)/);
-      if (m && !m[1].startsWith('.')) {
-        // 标准库或第三方，只记录符号
-        const imported = m[1].split(',')[0].trim();
-        symbols.push({
-          name: imported, kind: 'variable', line: i + 1, col: 7,
-          signature: trimmed, is_exported: false,
-        });
+      // import a.b  /  import a.b as c  /  import a, b
+      m = trimmed.match(/^import\s+([\w.]+(?:\s*,\s*[\w.]+)*)(?:\s+as\s+\w+)?\s*$/);
+      if (m) {
+        for (const part of m[1].split(',')) {
+          const mod = part.trim();
+          if (mod) imports.push({ to_path: mod, symbols: [], import_type: 'static' });
+        }
         continue;
       }
     }
@@ -324,14 +349,28 @@ export class GenericParser implements FileParser {
 
     // ── Go ──
     if (ext === '.go') {
+      // 块式 import ( ... ) 的跨行状态
+      let inImportBlock = false;
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
         const lineNum = i + 1;
 
-        // import
-        let m = t.match(/^"(\.\S+)"/);
+        // import 路径
+        // 修复：原正则 `^"(\.\S+)"` 要求路径以点开头（Go 里极少），
+        // 且随后 `.slice(1, -1)` 又削掉首尾各一个字符（`"./foo"` → `/fo`）——
+        // 等于 Go 的依赖边既抓不到又抓错。现在按 GOPATH/模块路径原样记录。
+        if (/^import\s*\($/.test(t)) { inImportBlock = true; continue; }
+        if (inImportBlock && t === ')') { inImportBlock = false; continue; }
+        if (inImportBlock) {
+          const q = t.match(/^(?:[\w.]+\s+)?"([^"]+)"/);
+          if (q) {
+            imports.push({ to_path: q[1], symbols: [], import_type: 'static' });
+            continue;
+          }
+        }
+        let m = t.match(/^import\s+(?:[\w.]+\s+)?"([^"]+)"/);
         if (m) {
-          imports.push({ to_path: m[1].slice(1, -1), symbols: [], import_type: 'static' });
+          imports.push({ to_path: m[1], symbols: [], import_type: 'static' });
           continue;
         }
 
@@ -367,7 +406,27 @@ export class GenericParser implements FileParser {
         const t = lines[i].trim();
         const lineNum = i + 1;
 
-        let m = t.match(/^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/);
+        // use 声明（原实现完全没有采集 Rust 导入 ⇒ Rust 依赖图恒空）
+        let m = t.match(/^(?:pub\s+)?use\s+([^;]+);/);
+        if (m) {
+          const raw = m[1].trim();
+          const braceIdx = raw.indexOf('::{');
+          const items = braceIdx >= 0 ? [raw.slice(0, braceIdx)] : raw.split(',').map((s) => s.trim());
+          for (const item of items) {
+            const spec = item.replace(/\s+as\s+\w+$/, '').replace(/[{};\s]/g, '').trim();
+            if (spec) imports.push({ to_path: spec, symbols: [], import_type: 'static' });
+          }
+          continue;
+        }
+
+        // mod foo; → 同目录 foo.rs 或 foo/mod.rs
+        m = t.match(/^(?:pub\s+)?mod\s+(\w+)\s*;/);
+        if (m) {
+          imports.push({ to_path: `mod:${m[1]}`, symbols: [], import_type: 'static' });
+          continue;
+        }
+
+        m = t.match(/^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/);
         if (m) {
           symbols.push({ name: m[1], kind: 'function', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: t.startsWith('pub') });
           continue;
@@ -408,10 +467,10 @@ export class GenericParser implements FileParser {
         const t = lines[i].trim();
         const lineNum = i + 1;
 
-        // #include (记录为 import)
+        // #include (记录为 import；尖括号形式属系统头文件，不收)
         let m = t.match(/^#include\s+"([^"]+)"/);
         if (m) {
-          imports.push({ to_path: m[1], symbols: [], import_type: 'static' });
+          imports.push({ to_path: m[1], symbols: [], import_type: 'include' });
           continue;
         }
 
@@ -446,8 +505,15 @@ export class GenericParser implements FileParser {
         const t = lines[i].trim();
         const lineNum = i + 1;
 
+        // import 声明（原实现完全没有采集 Java 导入）
+        let m = t.match(/^import\s+(?:static\s+)?([\w.]+(?:\.\*)?)\s*;/);
+        if (m) {
+          imports.push({ to_path: m[1].replace(/\.\*$/, ''), symbols: [], import_type: 'static' });
+          continue;
+        }
+
         // class/interface
-        let m = t.match(/^(?:public\s+|private\s+|protected\s+)?(?:static\s+|abstract\s+|final\s+)*(?:class|interface)\s+(\w+)/);
+        m = t.match(/^(?:public\s+|private\s+|protected\s+)?(?:static\s+|abstract\s+|final\s+)*(?:class|interface)\s+(\w+)/);
         if (m) {
           symbols.push({ name: m[1], kind: 'class', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: t.startsWith('public') });
           continue;
@@ -475,6 +541,62 @@ export class GenericParser implements FileParser {
           if (!isKeyword(nm[1])) {
             refs.push({ symbol_name: nm[1], line: i + 1, col: nm.index ?? 0, kind: 'new', context: lines[i].trim().slice(0, 120) });
           }
+        }
+      }
+    }
+
+    // ── Kotlin ──
+    // 原实现注册了 .kt 扩展名却没有任何分支：文件被计入"已索引"，
+    // 实际符号/引用/导入全空 —— 典型的"声称支持、实际空转"。现补最小实现。
+    if (ext === '.kt') {
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        const lineNum = i + 1;
+
+        let m = t.match(/^import\s+([\w.]+)(?:\s+as\s+\w+)?\s*$/);
+        if (m) {
+          imports.push({ to_path: m[1].replace(/\.\*$/, ''), symbols: [], import_type: 'static' });
+          continue;
+        }
+
+        m = t.match(/^(?:public\s+|private\s+|internal\s+|protected\s+|open\s+|abstract\s+|sealed\s+|data\s+|suspend\s+|override\s+)*fun\s+(?:<[^>]*>\s*)?(\w+)/);
+        if (m) {
+          symbols.push({ name: m[1], kind: 'function', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: !t.startsWith('private') });
+          continue;
+        }
+
+        m = t.match(/^(?:public\s+|private\s+|internal\s+|protected\s+|open\s+|abstract\s+|sealed\s+|data\s+)*(?:class|interface|object)\s+(\w+)/);
+        if (m) {
+          symbols.push({ name: m[1], kind: 'class', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: !t.startsWith('private') });
+          continue;
+        }
+      }
+    }
+
+    // ── Swift ──
+    // Swift 无项目内 import（同 module 内直接可见），import 只指向外部 module/framework；
+    // 这里采集导入仅为如实标注依赖，不产生项目内边；符号提取仍有价值。
+    if (ext === '.swift') {
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        const lineNum = i + 1;
+
+        let m = t.match(/^import\s+([\w.]+)/);
+        if (m) {
+          imports.push({ to_path: m[1], symbols: [], import_type: 'static' });
+          continue;
+        }
+
+        m = t.match(/^(?:public\s+|private\s+|internal\s+|open\s+|fileprivate\s+|final\s+|static\s+|class\s+|mutating\s+)*func\s+(\w+)/);
+        if (m) {
+          symbols.push({ name: m[1], kind: 'function', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: !t.startsWith('private') });
+          continue;
+        }
+
+        m = t.match(/^(?:public\s+|private\s+|internal\s+|open\s+|final\s+)*(?:class|struct|enum|protocol|actor)\s+(\w+)/);
+        if (m) {
+          symbols.push({ name: m[1], kind: 'class', line: lineNum, col: t.indexOf(m[1]), signature: t, is_exported: !t.startsWith('private') });
+          continue;
         }
       }
     }

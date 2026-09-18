@@ -63,12 +63,18 @@ export class TsParser implements FileParser {
 
     // 当前遍历所在的函数/方法上下文（用于记录 caller_name）
     const contextStack: string[] = [];
-    // 声明名称集合 — 跳过这些标识符的 read 记录（避免 const x = ... 中的 x 被记为读）
-    const declaredNames = new Set<string>();
+    // 声明处标识符节点集合 —— 只跳过「声明语句里的那个标识符」本身
+    // （避免 `const x = 0` / `function foo()` 的名字本身被记为一次 read）。
+    //
+    // 修复：原实现按「名字」过滤（declaredNames 累计本文件全部声明名），
+    // 于是本文件内**所有**同名标识符的 write/read 引用被整体丢弃 ——
+    // 导致 xref_query 的 trace 对「同文件声明的局部变量」结构性查不到数据流
+    // （而 trace 又按 file_id 限定在本文件，等于该能力完全失效）。
+    const declNameNodes = new Set<unknown>();
 
     // 辅助：记录一个引用
     const recordRef = (name: string, node: any, kind: RefKind) => {
-      if (this.isBuiltin(name) || declaredNames.has(name)) return;
+      if (this.isBuiltin(name) || declNameNodes.has(node)) return;
       const pos = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile));
       const callerName = contextStack.length > 0 ? contextStack[contextStack.length - 1] : undefined;
       refs.push({
@@ -97,7 +103,9 @@ export class TsParser implements FileParser {
             if (importClause.namedBindings) {
               if (ts.isNamedImports(importClause.namedBindings)) {
                 for (const el of importClause.namedBindings.elements) {
-                  symbols_list.push(el.name.text);
+                  // `import { a as b }` 里被导入的符号名是 a（propertyName），
+                  // b 只是本地别名；symbol_search 要匹配的是目标文件里的 a。
+                  symbols_list.push((el.propertyName ?? el.name).text);
                 }
               } else if (ts.isNamespaceImport(importClause.namedBindings)) {
                 symbols_list.push(importClause.namedBindings.name.text);
@@ -114,9 +122,33 @@ export class TsParser implements FileParser {
         }
       }
 
+      // ── 再导出声明（export * from / export { a } from）──
+      // 旧实现只处理 ImportDeclaration，于是桶文件（index.ts）的透传边全部丢失，
+      // dependents 会漏掉「经 barrel 间接依赖」的那一批文件。
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        const modulePath = node.moduleSpecifier.text;
+        if (modulePath.startsWith('.')) {
+          const names: string[] = [];
+          if (node.exportClause && ts.isNamedExports(node.exportClause)) {
+            for (const el of node.exportClause.elements) {
+              names.push((el.propertyName ?? el.name).text);
+            }
+          }
+          imports.push({ to_path: modulePath, symbols: names, import_type: 'reexport' });
+        }
+      }
+
+      // ── 动态 import('./x.js') ──
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        const arg = node.arguments[0];
+        if (arg && ts.isStringLiteral(arg) && arg.text.startsWith('.')) {
+          imports.push({ to_path: arg.text, symbols: [], import_type: 'dynamic' });
+        }
+      }
+
       // ── 函数声明 ──
       if (ts.isFunctionDeclaration(node) && node.name) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         const isExported = this.hasExportModifier(node, tsModule);
         symbols.push({
           name: node.name.text,
@@ -136,7 +168,7 @@ export class TsParser implements FileParser {
 
       // ── 类声明 ──
       if (ts.isClassDeclaration(node) && node.name) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         const isExported = this.hasExportModifier(node, tsModule);
         const parentName = node.heritageClauses
           ?.flatMap((h: any) => h.types)
@@ -180,7 +212,7 @@ export class TsParser implements FileParser {
       if (ts.isMethodDeclaration(node) && node.name) {
         const methodName = ts.isIdentifier(node.name) ? node.name.text : '[computed]';
         if (methodName !== '[computed]') {
-          declaredNames.add(methodName);
+          declNameNodes.add(node.name);
           symbols.push({
             name: methodName,
             kind: 'method',
@@ -200,7 +232,7 @@ export class TsParser implements FileParser {
 
       // ── 属性声明（类成员变量） ──
       if (ts.isPropertyDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         symbols.push({
           name: node.name.text,
           kind: 'property',
@@ -217,7 +249,7 @@ export class TsParser implements FileParser {
         for (const decl of node.declarationList.declarations) {
           if (ts.isIdentifier(decl.name)) {
             const varName = decl.name.text;
-            declaredNames.add(varName);
+            declNameNodes.add(decl.name);
             let kind: SymbolKind = 'variable';
 
             if (decl.initializer) {
@@ -252,7 +284,7 @@ export class TsParser implements FileParser {
 
       // ── 接口声明 ──
       if (ts.isInterfaceDeclaration(node) && node.name) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         const isExported = this.hasExportModifier(node, tsModule);
         const extendsList = node.heritageClauses
           ?.flatMap((h: any) => h.types)
@@ -291,7 +323,7 @@ export class TsParser implements FileParser {
 
       // ── 类型别名 ──
       if (ts.isTypeAliasDeclaration(node) && node.name) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         const isExported = this.hasExportModifier(node, tsModule);
         symbols.push({
           name: node.name.text,
@@ -306,7 +338,7 @@ export class TsParser implements FileParser {
 
       // ── 枚举声明 ──
       if (ts.isEnumDeclaration(node) && node.name) {
-        declaredNames.add(node.name.text);
+        declNameNodes.add(node.name);
         const isExported = this.hasExportModifier(node, tsModule);
         symbols.push({
           name: node.name.text,

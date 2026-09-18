@@ -17,10 +17,12 @@ export class XrefBuildTool implements Tool {
     '构建或管理项目的交叉引用索引。使用 AST 解析器扫描源码，将符号定义、引用和导入依赖存入 SQLite 数据库。' +
     '使用 xref_query 或 xref_graph 之前必须先执行一次。\n\n' +
     '四种模式：\n' +
-    '  1. 全量构建（默认）：扫描项目中所有源文件\n' +
+    '  1. 同步构建（默认）：扫描项目，只重新解析 mtime 变更的文件，并摘除已删除的文件。' +
+    '重复调用代价极低，可以放心在每次会话开始时调用以保持索引新鲜\n' +
     '  2. 目录过滤构建：传 "directories" 限制扫描范围\n' +
-    '  3. 增量更新：传 "files" 仅重新索引变更文件\n' +
-    '  4. 清理：传 clean=true 删除索引库（下次查询需重建）';
+    '  3. 增量更新：传 "files" 仅重新索引指定文件\n' +
+    '  4. 清理：传 clean=true 删除索引库（下次查询需重建）\n\n' +
+    '传 force=true 可忽略 mtime 强制全量重解析（改了解析器或怀疑索引损坏时用）。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
@@ -28,13 +30,14 @@ export class XrefBuildTool implements Tool {
         type: 'string',
         description:
           'Optional JSON array of directory paths (relative to project root) to limit the scan. ' +
-          'Example: ["src/tools", "src/gateway"]. If omitted, scans the entire project.',
+          'Example: ["src/tools", "src/gateway"]. If omitted, scans the entire project. ' +
+          'Note: when set, files outside these directories are left untouched (not pruned).',
       },
       files: {
         type: 'string',
         description:
           'Optional JSON array of file paths to incrementally re-index. ' +
-          'If omitted or empty, performs a full rebuild. ' +
+          'If omitted, performs a mtime-based sync build. ' +
           'Example: ["src/tools/xref.ts", "src/gateway/factory.ts"]',
       },
       clean: {
@@ -43,6 +46,12 @@ export class XrefBuildTool implements Tool {
           'If true, deletes the current project\'s xref index database entirely. ' +
           'Use this to reclaim disk space for old projects or force a fresh rebuild. ' +
           'No other action is performed when clean is true.',
+      },
+      force: {
+        type: 'boolean',
+        description:
+          'If true, re-parse every scanned file regardless of mtime (full rebuild semantics). ' +
+          'Default false: only changed/new files are parsed, deleted files are pruned.',
       },
       project: {
         type: 'string',
@@ -71,9 +80,9 @@ export class XrefBuildTool implements Tool {
     const clean = args.clean as boolean | undefined;
     const project = args.project as string | undefined;
 
-    // ── clean 模式：删除数据库 ──
+    // ── clean 模式：删除数据库（await：删除已完成再回话，不再"发射即忘"）──
     if (clean) {
-      return this.manager.deleteDatabase(project);
+      return await this.manager.deleteDatabase(project);
     }
 
     // ── build 模式 ──
@@ -109,29 +118,41 @@ export class XrefBuildTool implements Tool {
       }
     }
 
+    const force = args.force === true;
     const isIncremental = changedFiles && changedFiles.length > 0;
     const isFiltered = dirs && dirs.length > 0;
     let modeLabel: string;
     if (isIncremental) {
       modeLabel = `incremental (${changedFiles!.length} files)`;
+    } else if (force) {
+      modeLabel = 'force full rebuild';
     } else if (isFiltered) {
-      modeLabel = `filtered (${dirs!.length} dirs: ${dirs!.join(', ')})`;
+      modeLabel = `sync, filtered (${dirs!.length} dirs: ${dirs!.join(', ')})`;
     } else {
-      modeLabel = 'full';
+      modeLabel = 'sync (mtime-based)';
     }
 
     // 解析 batch_size（默认 50，范围 1-500）
     const batchSize = typeof args.batch_size === 'number' ? args.batch_size : 50;
 
     try {
-      const stats = await this.manager.build(changedFiles, dirs, batchSize);
+      const stats = await this.manager.build(changedFiles, dirs, batchSize, { force });
       const lines: string[] = [];
       lines.push(`✅ Cross-reference index built successfully (${modeLabel}).`);
       lines.push('');
       lines.push(`  Files indexed:   ${stats.files}`);
+      if (stats.parsed_files !== undefined) lines.push(`  Parsed now:      ${stats.parsed_files}`);
+      if (stats.unchanged_files) lines.push(`  Unchanged:       ${stats.unchanged_files} (mtime 未变，跳过解析)`);
+      if (stats.removed_files) lines.push(`  Removed:         ${stats.removed_files} (已从磁盘消失，摘除索引)`);
+      if (stats.failed_files) lines.push(`  Failed to parse: ${stats.failed_files}`);
       lines.push(`  Symbols found:   ${stats.symbols}`);
       lines.push(`  References:      ${stats.refs}`);
       lines.push(`  Import edges:    ${stats.imports}`);
+      if (stats.unresolved_imports) {
+        lines.push(`  Unresolved imports: ${stats.unresolved_imports}  ← 项目内说明符未解析到文件，依赖图会缺这些边`);
+        for (const s of stats.unresolved_samples ?? []) lines.push(`      · ${s}`);
+      }
+      if (stats.external_imports) lines.push(`  External imports:   ${stats.external_imports} (npm/标准库，设计上不入图)`);
       lines.push(`  Duration:        ${stats.duration_ms}ms`);
       if (Object.keys(stats.language_breakdown).length > 0) {
         lines.push('  Language breakdown:');
