@@ -91,7 +91,9 @@ export class HttpRequestTool implements Tool {
       ? (args.urls as unknown[]).filter((u): u is string => typeof u === 'string' && !!u)
       : [];
     if (!single && rawList.length === 0) {
-      return 'Error: url (or urls) is required.';
+      // 措辞里必须保留历史子串 "url is required"（既有契约测试断言它）。
+      // 曾写成 'url (or urls) is required.' 直接把那条测试撞红 —— 是契约先于措辞。
+      return 'Error: url is required (or provide urls).';
     }
     const maxUrls = HttpRequestTool.MAX_URLS;
     const targets = single ? [single] : rawList.slice(0, maxUrls);

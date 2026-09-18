@@ -95,7 +95,8 @@ describe('http_request 按需深挖', () => {
   });
 
   it('既没给 url 也没给 urls 时报错', async () => {
-    expect(await tool.execute({})).toContain('url (or urls) is required');
+    // 注意：措辞需保留历史子串 "url is required" —— 既有契约测试断言它（见 builtin-tool-contracts）
+    expect(await tool.execute({})).toContain('url is required');
   });
 
   it('JSON 响应不受提取影响（保持原样）', async () => {
