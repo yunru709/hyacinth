@@ -141,6 +141,40 @@ function isHiddenTag(name: string, attrs: string): boolean {
   return false;
 }
 
+/**
+ * 从提取出的正文里切出某一节（按标题匹配）。
+ *
+ * 与 extractReadableText 配套：后者把 <h1..h6> 渲染成 `#`*n 开头的行，故这里按同一格式解析。
+ * 区间 = 命中标题 → 下一个"同级或更高级"标题之前（子标题会被包含进来）。
+ *
+ * @param needle 用于匹配标题的子串（大小写不敏感）
+ * @returns 命中信息与正文；**无标题或未命中时返回 null**，由调用方给出引导（例如提示先取全文）。
+ */
+export function sliceSection(
+  text: string,
+  needle: string,
+): { body: string; matched: string; headingCount: number } | null {
+  const lines = text.split('\n');
+  const heads: Array<{ i: number; level: number; title: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(#{1,6})\s+(.*)$/.exec(lines[i]!);
+    if (m) heads.push({ i, level: m[1]!.length, title: m[2]!.trim() });
+  }
+  if (heads.length === 0) return null;
+
+  const key = needle.trim().toLowerCase();
+  const hits = heads.filter((h) => h.title.toLowerCase().includes(key));
+  if (hits.length === 0) return null;
+
+  const first = hits[0]!;
+  let end = lines.length;
+  for (const h of heads) {
+    if (h.i <= first.i) continue;
+    if (h.level <= first.level) { end = h.i; break; }
+  }
+  return { body: lines.slice(first.i, end).join('\n'), matched: first.title, headingCount: hits.length };
+}
+
 export function extractReadableText(html: string, opts: { maxChars?: number; keepLinks?: boolean } = {}): ExtractResult {
   const keepLinks = opts.keepLinks === true;
   const maxChars = opts.maxChars && opts.maxChars > 0 ? opts.maxChars : Infinity;
