@@ -45,6 +45,7 @@ export { DbQueryTool } from './db-query.js';
 export { DiskUsageTool } from './disk-usage.js';
 export { GenerateMediaTool } from './generate-media.js';
 export { VerifyChangeTool } from './verify-change.js';
+export { LogTimelineTool } from './log-timeline.js';
 export { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool } from './xref/index.js';
 export { PythonToolBridge } from './python-bridge/index.js';
 export type { PythonToolMeta } from './python-bridge/index.js';
@@ -62,6 +63,7 @@ import { GlobTool } from './glob.js';
 import { GrepTool } from './grep.js';
 import { ProbeTool } from './probe.js';
 import { VerifyChangeTool } from './verify-change.js';
+import { LogTimelineTool } from './log-timeline.js';
 import { GitTool } from './git-tool.js';
 import { MultiEditTool } from './multi-edit.js';
 import { InsertTool } from './insert.js';
@@ -103,6 +105,8 @@ export function createDefaultRegistry(
   registry.register(new InsertTool());
   // verify_change：改完代码后一次跑完类型检查 + 定向测试（见 verify-change.ts 的设计说明）
   registry.register(new VerifyChangeTool());
+  // log_timeline：把几十 MB 日志压成"什么事件、多少次、什么时候、中间断了多久"
+  registry.register(new LogTimelineTool());
   registry.register(new RestartTool(cwd ?? process.cwd(), sessionId, channel));
   registry.register(new DiffFilesTool());
   registry.register(new JsonEditTool());

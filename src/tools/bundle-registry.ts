@@ -81,7 +81,7 @@ const BUILTIN_CODING: ToolBundle = {
   name: 'coding',
   description: '编程工具包 — 版本控制、交叉引用、代码技能（通用工具已自动包含）',
   builtin: true,
-  tools: ['git', 'multi-edit', 'use_skill', 'verify_change',
+  tools: ['git', 'multi-edit', 'use_skill', 'verify_change', 'log_timeline',
           'xref_build', 'xref_query', 'xref_graph', 'plan_execute'],
 };
 
