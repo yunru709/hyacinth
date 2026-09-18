@@ -221,7 +221,8 @@ export function extractReadableText(html: string, opts: { maxChars?: number; kee
       for (let k = stack.length - 1; k >= 0; k--) {
         if (stack[k]!.name === name) { stack.length = k; break; }
       }
-      if (name === 'pre') { push('```'); newline(); }
+      // 闭合围栏前必须先换行，否则会与末行粘连（实测出现 `}``` `，破坏 markdown 代码块）
+      if (name === 'pre') { newline(); push('```'); newline(); }
       else if (name === 'code') { if (!stack.some((s) => s.name === 'pre')) push('`'); }
       else if (BLOCK.has(name)) newline();
       if (name === 'a' && keepLinks && pendingLinkHref) { push(` (${pendingLinkHref})`); pendingLinkHref = null; }
