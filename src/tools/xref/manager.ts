@@ -29,6 +29,42 @@ import { ParserRegistry, createParserRegistry } from './parser.js';
 import { toProjectKey } from '../../utils/misc.js';
 import Database from '../sqlite.js';
 import type { SqliteDatabase } from '../sqlite.js';
+import { statSync } from 'node:fs';
+
+// ── 索引陈旧自检（2026-09-19）───────────────────────────────────────────
+// 目的：让索引**知道自己旧不旧** —— 不是拒绝回答，而是**带标注回答**
+//（成熟 IDE 的 "dumb mode" 最小版：宁可声明"结果可能不全"，不悄悄给看起来完整的答案）。
+//
+// 为什么不走"写工具通知"：那要求**每个生产者都配合并记得**（四个写工具 / bash / git /
+// 外部编辑器 / 将来新增的工具），N 个生产者 × M 个消费者**必然漏**；并且会让核心写工具
+// 反向依赖本插件（依赖方向倒挂：插件可以不存在，`init` 失败即 idle）。
+// 故这里走**可观测性**：自己拿 files.mtime_ms 去 stat 磁盘比对 —— 改动来自谁都能发现。
+//
+// 判定口径**刻意与 build() 的增量跳过一致**（都用 mtime）：否则"检验器"与"构建器"会对
+// "什么算变更"产生分歧。已知边界：**发现不了新增文件**（需遍历目录，成本过高）。
+const STALE_CHECK_CAP = 5000;   // 单次最多 stat 多少个文件；超出则抽样并在提示中注明
+const STALE_TTL_MS = 5000;      // 结果缓存 5s：查询密集时不必每次都 stat 上千文件
+
+interface StaleCheck {
+  at: number;
+  total: number;    // files 表总行数
+  checked: number;  // 本次实际 stat 的行数（< total 即抽样）
+  stale: string[];  // 已变更（或已消失）的路径
+  builtAt: string | null;
+}
+
+/** dbPath → 最近一次自检结果（多实例共库时共享，避免各查各的） */
+const staleCacheByDb = new Map<string, StaleCheck>();
+
+/** 把自检结果格式化成可直接拼在查询结果末尾的提示；新鲜则返回空串 */
+function formatStaleNotice(s: StaleCheck): string {
+  if (s.stale.length === 0) return '';
+  const sample = s.stale.slice(0, 3).map((p) => p.replace(/^.*\//, '')).join(', ');
+  const more = s.stale.length > 3 ? ` …(+${s.stale.length - 3})` : '';
+  const sampled = s.total > s.checked ? `（抽样 ${s.checked}/${s.total}）` : '';
+  return `\n\n⚠️ 索引可能陈旧${sampled}：检查的 ${s.checked} 个文件中有 ${s.stale.length} 个在索引后已变更（如 ${sample}${more}）。`
+    + `\n   索引构建于 ${s.builtAt ?? '未知'}；结果可能不全（**不含新增文件**）→ 建议先运行 xref_build。`;
+}
 
 /**
  * 路径单一规范：库里所有 path 一律存「正斜杠绝对路径」。
@@ -122,6 +158,40 @@ export class XrefManager {
       files: files.c, symbols: symbols.c, refs: refs.c, imports: imports.c,
       built_at: meta?.value ?? null,
     };
+  }
+
+  /**
+   * 索引陈旧自检 —— 设计说明见文件头 STALE_* 常量处。
+   * 返回可直接拼在查询结果末尾的提示；索引新鲜（或未建库）时返回空串。
+   *
+   * **只读**：既不修改索引也不触发重建 —— "判断陈旧"与"修复陈旧"是两件事，
+   * 混在一起会让查询变成隐式写操作（也就重新引入了本设计要避免的耦合）。
+   */
+  private stalenessNotice(): string {
+    if (!this.db) return '';
+    const now = Date.now();
+    const cached = staleCacheByDb.get(this.dbPath);
+    if (cached && now - cached.at < STALE_TTL_MS) return formatStaleNotice(cached);
+
+    const total = (this.db.prepare('SELECT COUNT(*) AS c FROM files').get() as { c: number }).c;
+    // 只校验"解析过"的行（mtime_ms 非空）：仅被引用到的行从未写入 mtime，无从判定
+    const rows = this.db
+      .prepare('SELECT path, mtime_ms FROM files WHERE mtime_ms IS NOT NULL LIMIT ?')
+      .all(STALE_CHECK_CAP) as { path: string; mtime_ms: number }[];
+
+    const stale: string[] = [];
+    for (const r of rows) {
+      try {
+        // 与 build() 同一口径（mtime）；1ms 容差吸收文件系统精度（同 write/edit 门控的做法）
+        if (Math.abs(statSync(r.path).mtimeMs - r.mtime_ms) > 1) stale.push(r.path);
+      } catch {
+        stale.push(`${r.path}(已不存在)`);
+      }
+    }
+    const builtAt = (this.db.prepare('SELECT value FROM meta WHERE key = ?').get('built_at') as { value: string } | undefined)?.value ?? null;
+    const result: StaleCheck = { at: now, total, checked: rows.length, stale, builtAt };
+    staleCacheByDb.set(this.dbPath, result);
+    return formatStaleNotice(result);
   }
 
   // ── 构建索引 ────────────────────────────────────────────────────────
@@ -356,6 +426,8 @@ export class XrefManager {
     // 更新 meta
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('built_at', new Date().toISOString());
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('root_dir', this.rootDir);
+    // 刚重建过 → 自检结果必然过期，清掉缓存；否则 TTL 窗口内会误报"新鲜"
+    staleCacheByDb.delete(this.dbPath);
 
     // 统计一律取自库内实际行数，而不是「本次解析了多少」——
     // 否则 sync 模式下"全部未变"的那次构建会报 Symbols/Refs/Import edges = 0，
@@ -395,20 +467,23 @@ export class XrefManager {
       return 'Error: Xref index is empty. Run xref_build to build the index first.';
     }
 
+    let body: string;
     switch (params.action) {
-      case 'refs':       return this.queryRefs(params);
-      case 'defs':       return this.queryDefs(params);
-      case 'callers':    return this.queryCallers(params);
-      case 'callees':    return this.queryCallees(params);
-      case 'deps':       return this.queryDeps(params);
-      case 'dependents': return this.queryDependents(params);
-      case 'hierarchy':  return this.queryHierarchy(params);
-      case 'impact':     return this.queryImpact(params);
-      case 'trace':        return this.queryTrace(params);
-      case 'symbol_search': return this.querySymbolSearch(params);
+      case 'refs':       body = this.queryRefs(params); break;
+      case 'defs':       body = this.queryDefs(params); break;
+      case 'callers':    body = this.queryCallers(params); break;
+      case 'callees':    body = this.queryCallees(params); break;
+      case 'deps':       body = this.queryDeps(params); break;
+      case 'dependents': body = this.queryDependents(params); break;
+      case 'hierarchy':  body = this.queryHierarchy(params); break;
+      case 'impact':     body = this.queryImpact(params); break;
+      case 'trace':        body = this.queryTrace(params); break;
+      case 'symbol_search': body = this.querySymbolSearch(params); break;
       default:
-        return `Unknown action: "${params.action}". Supported: refs, defs, callers, callees, deps, dependents, hierarchy, impact, trace, symbol_search`;
+        body = `Unknown action: "${params.action}". Supported: refs, defs, callers, callees, deps, dependents, hierarchy, impact, trace, symbol_search`;
     }
+    // 结果照给，但**顺带告知索引是否陈旧**（不拒绝、不隐式重建 —— 见文件头 STALE_* 说明）
+    return body + this.stalenessNotice();
   }
 
   /** 把可选的 file 参数解析成 file_id；文件不在索引中返回 null（区别于"未指定"= undefined） */
@@ -939,12 +1014,15 @@ export class XrefManager {
     const format = options.format ?? 'mermaid';
     const maxDepth = options.max_depth ?? 3;
 
+    let body: string;
     switch (format) {
-      case 'mermaid':  return this.graphMermaid(options, maxDepth);
-      case 'text':     return this.graphText(options, maxDepth);
-      case 'graphviz': return this.graphGraphviz(options, maxDepth);
-      default:         return `Unknown format: ${format}. Supported: text, mermaid, graphviz`;
+      case 'mermaid':  body = this.graphMermaid(options, maxDepth); break;
+      case 'text':     body = this.graphText(options, maxDepth); break;
+      case 'graphviz': body = this.graphGraphviz(options, maxDepth); break;
+      default:         body = `Unknown format: ${format}. Supported: text, mermaid, graphviz`;
     }
+    // 同 query()：图也顺带告知索引是否陈旧
+    return body + this.stalenessNotice();
   }
 
   private graphMermaid(options: GraphOptions, maxDepth: number): string {
