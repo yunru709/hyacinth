@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Tool } from './interface.js';
 import { getToolConfig } from './tool-config.js';
+import { detectLang, findEnclosingDecl } from '../utils/code-structure.js';
 
 export type GrepOutputMode = 'content' | 'files_with_matches' | 'count';
 
@@ -57,9 +58,19 @@ export class GrepTool implements Tool {
         type: 'boolean',
         description: 'Enable multiline mode where . matches newlines and patterns can span lines. Default: false.',
       },
+      structure: {
+        type: 'boolean',
+        description: 'Annotate each content match with its nearest enclosing declaration (function/class/method) using a pure-text backward scan — no index needed, never stale. Only affects output_mode "content". Default: false.',
+      },
     },
     required: ['pattern', 'path'],
   };
+
+  /**
+   * structure 模式开关。用实例字段而非层层传参 —— formatResults 已有 6 个位置参数，
+   * 再加第 7 个会让两处调用点都变吵。execute() 每次进入即赋值，无跨调用残留。
+   */
+  private structureMode = false;
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const pattern = args.pattern as string;
@@ -74,6 +85,7 @@ export class GrepTool implements Tool {
     // ToolResultBuffer handles context protection（tools.grep.headLimit，默认 2000）
     const headLimit = (args.head_limit as number | undefined) ?? getToolConfig('grep.headLimit', 2000);
     const multiline = (args.multiline as boolean | undefined) ?? false;
+    this.structureMode = (args.structure as boolean | undefined) ?? false;
 
     let flags = 'g';
     if (caseInsensitive) flags += 'i';
@@ -256,6 +268,16 @@ export class GrepTool implements Tool {
 
         const startLine = Math.max(1, match.lineNumber - contextBefore);
         const endLine = Math.min(result.allLines.length, match.lineNumber + contextAfter);
+
+        // structure 模式：给这条命中附上"它属于哪个函数/类"。
+        // 用纯文本回溯（code-structure.ts），不依赖 xref 索引，因此永远不会"过期"。
+        if (this.structureMode) {
+          const decl = findEnclosingDecl(result.allLines, match.lineNumber - 1, detectLang(result.filePath));
+          parts.push(decl
+            ? `  ↳ in ${decl.kind} ${decl.name} (line ${decl.line})`
+            : '  ↳ (top level — no enclosing declaration found)');
+          totalLines++;
+        }
 
         if (startLine > 1 && contextBefore > 0) {
           parts.push('---');
