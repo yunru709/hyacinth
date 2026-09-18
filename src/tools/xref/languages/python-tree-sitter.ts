@@ -15,18 +15,12 @@
  * line 从 1 起、is_exported = 不以 _ 开头、import 的 to_path 含义见下方"导入"段。
  */
 import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { Parser, Language } from 'web-tree-sitter';
+import { Parser } from 'web-tree-sitter';
 import type { Node } from 'web-tree-sitter';
 import type { FileParser } from '../parser.js';
 import type { ParsedFile, ParsedImport, ParsedRef, ParsedSymbol } from '../schema.js';
-
-const require = createRequire(import.meta.url);
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+import { loadGrammar } from './tree-sitter-loader.js';
 
 /** Python 内建/关键字 —— 与 py-regex 同一份名单，避免把 print/len 之类灌进引用图 */
 const PY_BUILTINS = new Set([
@@ -37,44 +31,6 @@ const PY_BUILTINS = new Set([
   'staticmethod', 'classmethod', 'property', 'Exception', 'ValueError', 'TypeError',
   'self', 'cls', 'True', 'False', 'None',
 ]);
-
-/** wasm 候选路径：① 随包分发的 dist/grammars/（运行时该走这条）② node_modules（开发/测试） */
-function wasmCandidates(): string[] {
-  const out: string[] = [];
-  out.push(path.resolve(HERE, '..', '..', '..', 'grammars', 'tree-sitter-python.wasm'));
-  try {
-    const pkgJson = require.resolve('tree-sitter-python/package.json');
-    out.push(path.join(path.dirname(pkgJson), 'tree-sitter-python.wasm'));
-  } catch {
-    // 语法包未安装（可选路径）——忽略
-  }
-  return out;
-}
-
-let cachedLanguage: Promise<Language> | null = null;
-
-/**
- * 载入 Python 语法（进程内只成功加载一次）。
- * **失败不缓存** —— 这样"刚跑过构建、dist/grammars 才就位"的情况下无需重启即可用。
- */
-async function loadPythonLanguage(): Promise<Language | null> {
-  if (cachedLanguage) return cachedLanguage;
-  const attempt = (async (): Promise<Language | null> => {
-    await Parser.init();
-    for (const p of wasmCandidates()) {
-      try {
-        if (!fsSync.existsSync(p)) continue;
-        return await Language.load(p);
-      } catch {
-        // ABI 不符或产物损坏 → 试下一个候选（守卫测试会单独把这类问题抓出来）
-      }
-    }
-    return null;
-  })();
-  const lang = await attempt;
-  if (lang) cachedLanguage = Promise.resolve(lang);
-  return lang;
-}
 
 /** 显示用：把节点所在行裁剪成 context */
 function lineContext(lines: string[], row: number): string {
@@ -128,7 +84,7 @@ export class PyTreeSitterParser implements FileParser {
   readonly extensions = ['.py', '.pyi', '.pyx'];
 
   async parseFile(filePath: string): Promise<ParsedFile> {
-    const language = await loadPythonLanguage();
+    const language = await loadGrammar({ pkg: 'tree-sitter-python', wasm: 'tree-sitter-python.wasm' });
     if (!language) {
       // 抛错而非静默降级：让构建循环按精度链退到 py-regex，并把出处如实记成 py-regex
       throw new Error('tree-sitter-python.wasm 不可用（dist/grammars 与 node_modules 均无）');
