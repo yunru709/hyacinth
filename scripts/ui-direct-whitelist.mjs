@@ -36,11 +36,10 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['gateway/bootstrap-wiring.ts', new Set(['provider', 'setup'])],
   ['gateway/bypass-wiring.ts', new Set(['plugins'])],
   ['gateway/channel-contributions.ts', new Set(['provider'])],
-  ['gateway/cli.ts', new Set(['memory', 'orchestrator', 'provider', 'runtime', 'setup', 'supervisor', 'update'])],
+  ['gateway/cli.ts', new Set(['lifecycle', 'memory', 'orchestrator', 'provider', 'runtime', 'setup', 'supervisor', 'update'])], // lifecycle：诊断/进程保留（arch/export 等读全局注册表，无协议等价物）
   ['gateway/config-wiring.ts', new Set(['context', 'generation', 'hot-reload', 'provider', 'runtime', 'tools'])],
   ['gateway/context-chain-contributions.ts', new Set(['context'])],
   ['gateway/context-mode-service.ts', new Set(['context'])],
-  ['gateway/context-sources.ts', new Set(['context'])],
   ['gateway/core-contributions.ts', new Set(['memory', 'skills'])],
   ['gateway/infra-contributions.ts', new Set(['mcp', 'memory', 'schedule'])],
   ['gateway/media-routes.ts', new Set(['generation', 'media'])],
@@ -55,8 +54,10 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['gateway/tui-model-cmds.ts', new Set(['setup'])], // 上下文窗口本地常量（runtime 直连已随 T11 清理移除）
   // 本地宿主装配豁免（T11 纯协议客户端化）：管理命令全协议化，剩余 import 支撑
   // 宿主角色（channelManager/supervisor/localModel 进程）+ 本地 stats 渲染 + 共享组件源
-  ['gateway/tui.ts', new Set(['channels', 'local-model', 'memory', 'provider', 'runtime', 'setup', 'supervisor'])],
+  ['gateway/tui.ts', new Set(['channels', 'lifecycle', 'local-model', 'memory', 'provider', 'runtime', 'setup', 'supervisor'])],
   ['gateway/world-engine-service.ts', new Set(['world-engine'])],
+  // 命令面板读取 provider 的模型目录 / 元信息**用于展示**（只读渲染数据；管理命令已全部协议化）
+  ['ui/command-registry.ts', new Set(['provider'])],
 ]);
 
 /** 不算"业务核心"的目标目录（纯工具/常量/类型/UI 内部/内核，允许直连）。
