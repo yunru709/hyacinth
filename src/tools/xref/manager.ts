@@ -27,7 +27,7 @@ import type {
 } from './schema.js';
 import { ParserRegistry, createParserRegistry } from './parser.js';
 import { toProjectKey } from '../../utils/misc.js';
-import { languageOfExtension } from './languages/index.js';
+import { languageOfExtension, supportForLanguage } from './languages/index.js';
 import Database from '../sqlite.js';
 import type { SqliteDatabase } from '../sqlite.js';
 import { statSync } from 'node:fs';
@@ -1510,11 +1510,10 @@ export class XrefManager {
    * 旧实现把两者一起静默丢弃，于是 imports 恒为 0 也无人察觉。
    */
   private isIntraProjectSpecifier(spec: string, fromFile: string): boolean {
-    if (spec.startsWith('.')) return true; // TS/JS/Python 相对、Go 的 ./pkg、C 的 ./x.h
+    if (spec.startsWith('.')) return true; // 相对路径：所有语言通用（TS/JS/Python 相对、Go 的 ./pkg、C 的 ./x.h）
+    // 语言特例迁到描述符（Phase 1 半 2a）：rust 的 crate::/mod:、ccpp 的"必为项目内"等
     const lang = this.languageOf(fromFile);
-    if (lang === 'rust') return /^(crate|self|super)::/.test(spec) || spec.startsWith('mod:');
-    if (lang === 'c' || lang === 'cpp') return true; // 只采集引号形式（#include "x.h"），必为项目内
-    return false;
+    return supportForLanguage(lang)?.isIntraProjectSpecifier(spec) ?? false;
   }
 
   /**
