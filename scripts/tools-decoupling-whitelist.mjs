@@ -57,4 +57,4 @@ export const SHARED_TOOL_INFRA = new Set([
  * **空集就是目标状态**：从此任何新出现的"工具依赖工具"都会被规则 6 直接拦下，
  * 不再有"已登记待修"这种中间态可以塞进去。
  */
-export const KNOWN_TOOL_COUPLINGS = new Set<string>();
+export const KNOWN_TOOL_COUPLINGS = new Set();
