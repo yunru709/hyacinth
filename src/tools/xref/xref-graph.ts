@@ -90,7 +90,9 @@ export class XrefGraphTool implements Tool {
       return 'Error: Xref index not built. Run xref_build first to index the project.';
     }
 
-    const result = this.manager.graph({
+    // 查询前自保鲜（Phase 4）：变更少则内联同步一次，并把"同步了几个"写进输出（有界且明示）
+    const fresh = await this.manager.ensureFresh();
+    const result = fresh + this.manager.graph({
       format,
       symbol,
       file,

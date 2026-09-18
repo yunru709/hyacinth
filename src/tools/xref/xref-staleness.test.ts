@@ -3,8 +3,15 @@
  *
  * 背景：`xref` 的索引是**派生数据**，而代码一直在变。原先 `isReady()` 只回答"建过没有"，
  * 不回答"建完之后文件改过没有"（虽然 `meta.built_at` 与 `files.mtime_ms` 都存着，只是没拿来比）。
- * 于是查询会给出**看起来完整、其实可能不全**的答案。本文件锁住新行为：
- *   ① 新鲜 → 不带提示；② 有文件变更 → **带提示且给出下一步（xref_build）**，但不拒绝回答。
+ * 于是查询会给出**看起来完整、其实可能不全**的答案。本文件锁住的行为分三类：
+ *   ① 新鲜 → 不带提示（第 1 例兼作隔离自检）；
+ *   ④ 小改动（≤20 文件）→ 查询前**自动同步**（Phase 4），结果里写明同步了几个，
+ *      且数据确实已刷新（用"新符号查得到"当硬判据，而不是只看多了一行提示）；
+ *   ⑤ 变更超阈值（>20）→ **不隐式重建**，只如实告知陈旧并给下一步（xref_build）。
+ *
+ * 演进记录：原先还有一条「③ 改了 1 个文件 → 查询带出陈旧提示、且不得顺手重建」——
+ * Phase 4 **有意反转**了它（小改动就该自动保鲜）。这是期望变更、不是"让测试变绿"；
+ * 它的两条断言分别由 ④（新行为）与 ⑤（超阈值时仍保持原意）承接，故删除。
  *
  * 隔离（照抄同目录 xref-tools.test.ts 的约定）：`XrefManager.init()` 把库固定在
  * `~/.agent/cache/xref-<projectKey>.sqlite`，全仓**没有**环境变量开关，故
@@ -88,29 +95,66 @@ describe('xref 索引陈旧自检', () => {
     }
   });
 
-  it('③ 改了文件之后：查询**带出陈旧提示**，并给出下一步（不拒绝、不隐式重建）', async () => {
+
+  it('④ 小改动（≤20 文件）→ 查询前自动同步，且结果里写明同步了几个（Phase 4）', async () => {
     const root = await makeProject({ 'src/a.ts': A_TS, 'src/b.ts': B_TS });
     const m = new XrefManager();
     await m.init(root);
     try {
       await m.build(undefined, undefined, 50, { force: true });
 
-      // 改动 b.ts：内容与 mtime 都要变（1ms 容差来自实现里的比对口径）
+      // 只改 1 个文件（在阈值内）→ 应触发自保鲜
       await new Promise((r) => setTimeout(r, 20));
       await fs.writeFile(
         path.join(root, 'src', 'b.ts'),
-        ['export function helperA(): number {', '  return 2;', '}', ''].join('\n'),
+        [
+          'export function helperA(): number {',
+          '  return 1;',
+          '}',
+          '',
+          'export function helperNew(): number {',
+          '  return 9;',
+          '}',
+          '',
+        ].join('\n'),
         'utf-8',
       );
 
-      const out = await new XrefQueryTool(m).execute({ action: 'deps', file: 'src/a.ts' });
-      expect(out).toContain('索引可能陈旧');    // ① 陈旧要说得出来
-      expect(out).toContain('xref_build');      // ② 要给下一步
-      expect(out).toContain('src/b.ts');        // ③ 但不拒绝回答（照给结果）
+      const out = await new XrefQueryTool(m).execute({ action: 'defs', symbol: 'helperNew' });
+      expect(out).toContain('已自动同步'); // ① 明示：同步了（不是静默重建）
+      expect(out).toContain('src/b.ts'); // ② 硬判据：新符号真的查得到 = 数据确实已刷新
+      expect(out).not.toContain('索引可能陈旧'); // ③ 同步后不该再报陈旧
+    } finally {
+      m.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 
-      // ④ 不得"顺手重建"：索引里仍是旧内容（未重新解析）
-      const defs = await new XrefQueryTool(m).execute({ action: 'defs', symbol: 'helperA' });
-      expect(defs).toContain('src/b.ts');
+  it('⑤ 变更超阈值（>20 文件）→ 不隐式重建，只如实告知并给下一步', async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 25; i++) {
+      files[`src/f${i}.ts`] = `export function fn${i}(): number {\n  return ${i};\n}\n`;
+    }
+    const root = await makeProject(files);
+    const m = new XrefManager();
+    await m.init(root);
+    try {
+      await m.build(undefined, undefined, 50, { force: true });
+
+      // 25 个文件全改（超阈值 20）→ 不该内联重建
+      await new Promise((r) => setTimeout(r, 20));
+      for (let i = 0; i < 25; i++) {
+        await fs.writeFile(
+          path.join(root, 'src', `f${i}.ts`),
+          `export function fn${i}(): number {\n  return ${i + 100};\n}\n`,
+          'utf-8',
+        );
+      }
+
+      const out = await new XrefQueryTool(m).execute({ action: 'defs', symbol: 'fn0' });
+      expect(out).not.toContain('已自动同步'); // ① 不隐式重建
+      expect(out).toContain('索引可能陈旧'); // ② 但如实告知
+      expect(out).toContain('xref_build'); // ③ 并给下一步
     } finally {
       m.close();
       await fs.rm(root, { recursive: true, force: true });

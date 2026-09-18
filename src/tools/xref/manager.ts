@@ -48,6 +48,20 @@ import { statSync } from 'node:fs';
 const STALE_CHECK_CAP = 5000;   // 单次最多 stat 多少个文件；超出则抽样并在提示中注明
 const STALE_TTL_MS = 5000;      // 结果缓存 5s：查询密集时不必每次都 stat 上千文件
 
+/**
+ * 内联自保鲜的阈值（Phase 4）。
+ *
+ * ≤ 该值的变更 → 查询前**内联做一次增量同步**再回答，并在输出里写明"已自动同步 N 个"；
+ * 超过 → 照常回答 + 陈旧提示，**不隐式重建**（那种规模的重建会让查询变得不可预期）。
+ *
+ * 为什么敢让"查询"写库：因为它是**有界且明示**的 —— 上限 20 个文件、且结果里说清同步了几个。
+ * 这与此前"陈旧自检只读"的取舍不冲突：那条反对的是"悄悄重建"，这里的有界 + 明示正是它的反面。
+ * 顺带效应：增量同步走整棵树，所以**新增文件**也会在这次同步里被收录
+ *（陈旧自检只 stat 已入库文件、看不见新增 —— 借这里补上一半：只要有任一已索引文件变更，
+ *  这棵树就会被走一遍；纯新增（无任何修改）仍不触发，属已知边界，见 ensureFresh 的注释）。
+ */
+const AUTO_SYNC_MAX_FILES = 20;
+
 interface StaleCheck {
   at: number;
   total: number;    // files 表总行数
@@ -214,11 +228,15 @@ export class XrefManager {
    * **只读**：既不修改索引也不触发重建 —— "判断陈旧"与"修复陈旧"是两件事，
    * 混在一起会让查询变成隐式写操作（也就重新引入了本设计要避免的耦合）。
    */
-  private stalenessNotice(): string {
-    if (!this.db) return '';
+  /**
+   * 陈旧自检本体（结果按 dbPath 缓存 STALE_TTL_MS 秒）。**只读**：不改索引、不触发重建。
+   * 拆出成独立方法，是为了让 ensureFresh() 也能读到 stale 列表（此前只能拿到格式化后的提示）。
+   */
+  private staleCheck(): StaleCheck | null {
+    if (!this.db) return null;
     const now = Date.now();
     const cached = staleCacheByDb.get(this.dbPath);
-    if (cached && now - cached.at < STALE_TTL_MS) return formatStaleNotice(cached);
+    if (cached && now - cached.at < STALE_TTL_MS) return cached;
 
     const total = (this.db.prepare('SELECT COUNT(*) AS c FROM files').get() as { c: number }).c;
     // 只校验"解析过"的行（mtime_ms 非空）：仅被引用到的行从未写入 mtime，无从判定
@@ -238,7 +256,32 @@ export class XrefManager {
     const builtAt = (this.db.prepare('SELECT value FROM meta WHERE key = ?').get('built_at') as { value: string } | undefined)?.value ?? null;
     const result: StaleCheck = { at: now, total, checked: rows.length, stale, builtAt };
     staleCacheByDb.set(this.dbPath, result);
-    return formatStaleNotice(result);
+    return result;
+  }
+
+  private stalenessNotice(): string {
+    const s = this.staleCheck();
+    return s ? formatStaleNotice(s) : '';
+  }
+
+  /**
+   * 查询前自保鲜（Phase 4）—— 有界 + 明示，绝不静默。
+   *
+   * 变更数落在 (0, AUTO_SYNC_MAX_FILES] 时：内联做一次增量同步（build 的 sync 模式），
+   * 返回可拼在结果前的"（已自动同步 N 个变更文件）"。
+   * 其余情况返回空串：新鲜 → 无事可做；变更过多 → 交给 stalenessNotice() 的提示，
+   * 不在这里隐式重建。
+   *
+   * 已知边界：stale.length 统计的是**已入库文件**的变更数（陈旧自检看不见新增文件）；
+   * 增量同步会走整棵树，故只要有任一变更，新增文件就会顺带被收录。
+   */
+  async ensureFresh(): Promise<string> {
+    if (!this.db) return '';
+    const s = this.staleCheck();
+    if (!s || s.stale.length === 0 || s.stale.length > AUTO_SYNC_MAX_FILES) return '';
+    const stats = await this.build();
+    staleCacheByDb.delete(this.dbPath); // 刚同步过 → 让下一次查询重新判定
+    return `（已自动同步 ${stats.parsed_files ?? 0} 个变更文件）\n\n`;
   }
 
   // ── 构建索引 ────────────────────────────────────────────────────────
