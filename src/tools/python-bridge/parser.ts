@@ -54,7 +54,12 @@ export function parsePythonToolMeta(filePath: string): PythonToolMeta | null {
 /** 提取第一个 triple-quoted docstring */
 function extractDocstring(content: string): string | null {
   // 匹配 """...""" 或 '''...'''
-  const m = content.match(/"""([^"]*)"""/s) ?? content.match(/'''([^']*)'''/s);
+  // ⚠️ 2026-09-19 修：原为 /"""([^"]*)"""/s —— 字符类**排除双引号**，于是 docstring 里
+  // 只要出现一个 `"`（例如描述里写 `e.g. "A1:D100"`），整个匹配就失败 → docstring=null
+  // → 该 .py 工具**静默不注册**（只在日志里留一条 "does not export a valid Tool"）。
+  // 实测就是 xlsx_read.py 装不上、docx_read.py 正常的原因（后者恰好一个引号都没有）。
+  // 改为非贪婪匹配，允许描述里出现引号。
+  const m = content.match(/"""([\s\S]*?)"""/) ?? content.match(/'''([\s\S]*?)'''/);
   return m ? m[1].trim() : null;
 }
 

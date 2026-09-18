@@ -6,7 +6,7 @@ parameters:
   properties:
     file: {type: string, description: Path to the .xlsx file (absolute or relative to cwd)}
     sheet: {type: string, description: Sheet name to read. If omitted, lists all sheet names and their dimensions.}
-    range: {type: string, description: Cell range to read, e.g. "A1:D100". If omitted, reads entire used range.}
+    range: {type: string, description: Cell range to read, e.g. A1:D100. If omitted, reads entire used range.}
     max_rows: {type: number, description: Maximum rows to return. Default: 1000. Set to 0 for unlimited.}
     format: {type: string, description: Output format: table (Markdown table, default), csv, or json}
   required: [file]
