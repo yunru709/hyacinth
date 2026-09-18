@@ -74,6 +74,12 @@ const BUILTIN_COMMON: ToolBundle = {
     // say 与 ask_user 同属核心交互工具：交付结论并结束回合，
     // 必须进 common（始终加载）否则默认 coding 包下模型看不到它。
     'say',
+    // ── 2026-09-19 由 bundle-consistency 守卫测试揪出的漂移 ──
+    // 现象：**同一族里只进了一半**（session_stats/session_fork/channel_info/
+    // companion_mode/view_image 早在此处，其余成员却漏了）→ 默认 coding 模式下
+    // 这些工具直接不可见。手维护清单没有守门测试，就会这样。
+    'current_session', 'list_sessions', 'new_session', 'switch_session', 'delete_session',
+    'send_channel_message', 'companion_say', 'generate_media',
   ],
 };
 
@@ -81,7 +87,10 @@ const BUILTIN_CODING: ToolBundle = {
   name: 'coding',
   description: '编程工具包 — 版本控制、交叉引用、代码技能（通用工具已自动包含）',
   builtin: true,
-  tools: ['git', 'multi-edit', 'use_skill', 'verify_change', 'log_timeline',
+  // 注意：这里曾写作 'multi-edit'（连字符），而工具实际注册名是 'multi_edit'（下划线）
+  // —— 死条目，导致 multi_edit 不在任何包内、默认 coding 模式下直接消失。
+  // 由 bundle-consistency 守卫测试抓出（见该测试头部说明）。
+  tools: ['git', 'multi_edit', 'use_skill', 'verify_change', 'log_timeline',
           'xref_build', 'xref_query', 'xref_graph', 'plan_execute'],
 };
 
@@ -89,7 +98,11 @@ const BUILTIN_AGENT: ToolBundle = {
   name: 'agent',
   description: '子 Agent 编排 — 创建和管理子 Agent 执行复杂任务',
   builtin: true,
-  tools: ['spawn_sub_agent', 'create_sub_agent', 'update_sub_agent', 'destroy_sub_agent', 'delegate_to_agent', 'use_skill'],
+  // 曾漏掉 list_sub_agent_tasks / get_sub_agent_result：同族 7 个在包内、这 2 个不在，
+  // 默认模式下"能派活却看不到任务状态"。守卫测试抓出。
+  tools: ['spawn_sub_agent', 'create_sub_agent', 'update_sub_agent', 'destroy_sub_agent',
+          'delegate_to_agent', 'list_sub_agents', 'toggle_sub_agent', 'use_skill',
+          'list_sub_agent_tasks', 'get_sub_agent_result'],
 };
 
 const BUILTIN_ADMIN: ToolBundle = {
@@ -104,7 +117,16 @@ const BUILTIN_ADMIN: ToolBundle = {
     'allow_tool', 'disallow_tool', 'list_allowlist',
     'list_model_channels', 'add_model_channel', 'remove_model_channel',
     'set_channel_role', 'set_channel_model', 'reset_channel_model',
+    'model_channel_info',  // 同族 7 个在包内、它漏了（守卫测试抓出）
   ],
+};
+
+/** 知识库 — 六个 kb_* 工具此前**不在任何包内**（默认模式下整个知识库不可用，守卫测试抓出） */
+const BUILTIN_KNOWLEDGE: ToolBundle = {
+  name: 'knowledge',
+  description: '知识库 — 文档索引与结构化记忆的增删查改（按需激活）',
+  builtin: true,
+  tools: ['kb_add', 'kb_list', 'kb_update', 'kb_delete', 'kb_toggle', 'kb_structured'],
 };
 
 const BUILTIN_OFFICE: ToolBundle = {
@@ -124,7 +146,7 @@ const BUILTIN_DATABASE: ToolBundle = {
 /** 全部内置包定义（顺序无关；load() 用它做缺项补齐与工具列表回填） */
 const BUILTIN_BUNDLES: ToolBundle[] = [
   BUILTIN_ALL, BUILTIN_COMMON, BUILTIN_CODING,
-  BUILTIN_AGENT, BUILTIN_ADMIN, BUILTIN_OFFICE, BUILTIN_DATABASE,
+  BUILTIN_AGENT, BUILTIN_ADMIN, BUILTIN_OFFICE, BUILTIN_DATABASE, BUILTIN_KNOWLEDGE,
 ];
 
 /** 内置包名称集合（供测试与 UI 判定） */
@@ -138,8 +160,9 @@ const DEFAULT_CONFIG: ToolBundlesConfig = {
   // 配置结构版本。用于把「已存在的旧配置」迁移到新的默认工具包，
   // 同时不会覆盖用户显式选择过的全量模式。
   configVersion: 2,
-  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN, office: BUILTIN_OFFICE, database: BUILTIN_DATABASE },
+  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN, office: BUILTIN_OFFICE, database: BUILTIN_DATABASE, knowledge: BUILTIN_KNOWLEDGE },
 };
+
 
 // ── Helpers ────────────────────────────────────────────────────────
 
