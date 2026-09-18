@@ -38,3 +38,6 @@ tsconfig.tsbuildinfo
 
 # 调试残留（vitest 输出重定向文件，不应提交）
 vt-*.txt
+
+# agent 生成的架构报告（非源码产物，不应入库；含调试残留文件）
+arch-report/
