@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { FileParser } from '../parser.js';
 import type { LanguageSupport } from './types.js';
 import { firstExisting, normPath } from './resolve-helpers.js';
 
@@ -6,6 +7,12 @@ export const rustSupport: LanguageSupport = {
   id: 'rust',
   extensions: ['.rs'],
   extMap: { '.rs': 'rust' },
+
+  async createParsers(): Promise<FileParser[]> {
+    const { GenericParser } = await import('../regex-parser.js');
+    return [new GenericParser(['.rs'])];
+  },
+
   // crate/super/self:: 开头与 mod: 前缀：Rust 的模块路径不是文件路径，但确属项目内
   isIntraProjectSpecifier: (spec) => /^(crate|self|super)::/.test(spec) || spec.startsWith('mod:'),
 

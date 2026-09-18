@@ -329,7 +329,15 @@ export class PyParser implements FileParser {
 
 export class GenericParser implements FileParser {
   readonly name = 'generic-regex';
-  readonly extensions = ['.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.java', '.kt', '.swift'];
+  readonly extensions: string[];
+  /**
+   * 后缀由调用方（语言描述符）给出：一门语言一份实例、各自声明自己的后缀。
+   * 默认值保留全部——仅为向后兼容，新代码一律显式传入。
+   * name 保持 'generic-regex' 不变：files.parser 列的既有断言依赖它（Phase 2 换真解析器时才改）。
+   */
+  constructor(extensions: string[] = ['.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.java', '.kt', '.swift']) {
+    this.extensions = extensions;
+  }
 
   async parseFile(filePath: string): Promise<ParsedFile> {
     const content = await fs.readFile(filePath, 'utf-8');

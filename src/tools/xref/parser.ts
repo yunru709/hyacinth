@@ -6,13 +6,16 @@
  *   - TsRegexParser: 当 TS compiler 不可用时的正则回退
  *   - PyParser: Python 正则解析
  *   - GenericParser: 通用括号匹配回退
+ *
+ * Phase 1 之后：**谁提供哪些解析器**由 languages/ 注册表声明（一门语言一个描述符），
+ * 本文件只负责按声明顺序装配 ParserRegistry。加一门语言不再需要改这里。
  */
-
 import path from 'node:path';
 import type { ParsedFile } from './schema.js';
+import { LANGUAGES } from './languages/index.js';
 
 export interface FileParser {
-  /** 解析器名称（用于日志） */
+  /** 解析器名称（用于日志与 files.parser 列） */
   readonly name: string;
   /** 支持的文件扩展名 */
   readonly extensions: string[];
@@ -46,33 +49,18 @@ export class ParserRegistry {
 }
 
 /**
- * 创建默认的解析器注册中心（尝试加载 TS parser，失败则使用正则回退）。
+ * 创建默认的解析器注册中心 —— 遍历语言注册表，按**声明顺序**注册。
+ *
+ * 顺序即优先级：getParser 返回首个匹配，故 typescript 必须排在其余语言之前
+ * （保证 .ts 走 AST 而非正则兜底）。降级链由各描述符的 createParsers 自行声明
+ * （如 TS AST 装不上则退正则），注册表不感知。
  */
 export async function createParserRegistry(): Promise<ParserRegistry> {
   const registry = new ParserRegistry();
-
-  // 尝试加载 TypeScript AST 解析器
-  try {
-    const { TsParser } = await import('./ts-parser.js');
-    registry.register(new TsParser());
-  } catch {
-    // TypeScript 不可用，使用正则回退
-    try {
-      const { TsRegexParser } = await import('./regex-parser.js');
-      registry.register(new TsRegexParser());
-    } catch {
-      // 忽略
+  for (const lang of LANGUAGES) {
+    for (const parser of await lang.createParsers()) {
+      registry.register(parser);
     }
   }
-
-  // 正则回退解析器（总是可用）
-  try {
-    const { PyParser, GenericParser } = await import('./regex-parser.js');
-    registry.register(new PyParser());
-    registry.register(new GenericParser());
-  } catch {
-    // 忽略
-  }
-
   return registry;
 }

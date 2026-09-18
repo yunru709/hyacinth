@@ -7,9 +7,11 @@
  *   resolveImportPath 只拼尾部扩展名那阵，本项目 2617 条 `from './x.js'` 全部解析不到，
  *   imports 表长期恒为 0 且无人察觉。
  *
- * 已迁入：后缀→语言表（半 1）、项目内判定（半 2a）、说明符解析实现（半 2b）。
- * 待迁入：解析器工厂（半 3，createParsers）。
+ * Phase 1 完成后：上述 4 处全部收敛到本目录。加语言 = 新增一个描述符文件 +
+ * index.ts 一行注册；manager 与 parser.ts 零改动。
  */
+import type { FileParser } from '../parser.js';
+
 export interface LanguageSupport {
   /** 描述符 id（'typescript' / 'python' / 'ccpp' …） */
   id: string;
@@ -24,6 +26,13 @@ export interface LanguageSupport {
    * 纯重构阶段如实保留、不做行为变更；要不要修是单独的决定。
    */
   extMap: Record<string, string>;
+  /**
+   * 该语言的解析器链（按优先级；工厂按声明顺序注册，`getParser` 取首个匹配）。
+   * 允许"某个解析器装不上就换下一个"：如 TypeScript 走 AST，TS compiler 不可用时退正则 ——
+   * 这是项目里已有的降级链模式（另有 chokidar 缺失静默禁用、node:sqlite 消灭原生编译）。
+   * 降级结果会被记入 files.parser 列，所以退到了哪一级是**可查**的。
+   */
+  createParsers(): Promise<FileParser[]>;
   /**
    * 「本语言特有的、非相对路径的**项目内**说明符形态」。
    *

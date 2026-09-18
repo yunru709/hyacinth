@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { FileParser } from '../parser.js';
 import type { LanguageSupport } from './types.js';
 import { firstExisting, normPath } from './resolve-helpers.js';
 
@@ -6,6 +7,12 @@ export const pythonSupport: LanguageSupport = {
   id: 'python',
   extensions: ['.py', '.pyi', '.pyx'],
   extMap: { '.py': 'python' }, // .pyi/.pyx 同上：可解析、语言未知
+
+  async createParsers(): Promise<FileParser[]> {
+    const { PyParser } = await import('../regex-parser.js');
+    return [new PyParser()];
+  },
+
   isIntraProjectSpecifier: () => false,
 
   /**

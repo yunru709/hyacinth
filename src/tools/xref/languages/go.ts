@@ -1,3 +1,4 @@
+import type { FileParser } from '../parser.js';
 import type { LanguageSupport } from './types.js';
 import { firstFileInDir } from './resolve-helpers.js';
 
@@ -5,6 +6,12 @@ export const goSupport: LanguageSupport = {
   id: 'go',
   extensions: ['.go'],
   extMap: { '.go': 'go' },
+
+  async createParsers(): Promise<FileParser[]> {
+    const { GenericParser } = await import('../regex-parser.js');
+    return [new GenericParser(['.go'])];
+  },
+
   // Go 的项目内形态就是 `./pkg`（相对），已由通用规则覆盖
   isIntraProjectSpecifier: () => false,
 
@@ -14,7 +21,7 @@ export const goSupport: LanguageSupport = {
    * 命中目录后取该目录下字典序第一个 .go 文件作代表（Go 是「目录=包」，
    * 依赖图本质上按目录理解更贴切，这里落成文件行以便复用文件级 BFS）。
    *
-   * 注：go.mod 的探测与缓存仍在 manager（它是项目级状态），通过 ctx 注入。
+   * 注：go.mod 的探测与缓存仍在 manager（项目级状态），通过 ctx 注入。
    */
   async resolveSpecifier(spec, _dir, ctx): Promise<string | null> {
     const root = ctx.rootDir;
