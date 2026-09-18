@@ -53,11 +53,12 @@
     "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },
-  "optionalDependencies": {},
+  "optionalDependencies": {
+    "typescript": "^6.0.3"
+  },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
-    "typescript": "^6.0.3",
     "undici-types": "^7.24.6",
     "vitest": "^4.1.7"
   }
