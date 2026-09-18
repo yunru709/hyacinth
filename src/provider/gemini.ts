@@ -10,7 +10,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
-import { sanitizeText } from './sanitize.js';
+import { sanitizeText, sanitizeStrings } from './sanitize.js';
 export interface GeminiProviderOptions {
   apiKey?: string;
   model?: string;
@@ -141,6 +141,9 @@ export class GeminiProvider implements Provider {
     userMessage: string;
     userParts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; functionResponse?: { name: string; response: Record<string, unknown> } }>;
   } {
+    // 发送边界统一清洗：递归清洗全部将进 API 请求体的字符串（含 tool_use 参数 /
+    // thinking 等单点漏网字段），与各 block 内部 sanitizeText 幂等。
+    messages = sanitizeStrings(messages);
     const systemParts: string[] = [];
     const history: Content[] = [];
     let userMessage = '';

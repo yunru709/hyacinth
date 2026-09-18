@@ -12,7 +12,7 @@ import { getModelInfo } from './catalog.js';
 import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
-import { sanitizeText } from './sanitize.js';
+import { sanitizeText, sanitizeStrings } from './sanitize.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {
   /** 必须提供 apiKey，或通过 ANTHROPIC_API_KEY 环境变量自动读取 */
@@ -292,6 +292,9 @@ export class AnthropicProvider implements Provider {
     system?: string | Anthropic.TextBlockParam[];
     messages: Anthropic.MessageParam[];
   } {
+    // 发送边界统一清洗：递归清洗全部将进 API 请求体的字符串（含 tool_use 参数 /
+    // thinking 等单点漏网字段），与各 block 内部 sanitizeText 幂等。
+    messages = sanitizeStrings(messages);
     const systemBlocks: Anthropic.TextBlockParam[] = [];
     const filteredMessages: Anthropic.MessageParam[] = [];
 
@@ -341,6 +344,9 @@ export class AnthropicProvider implements Provider {
 
   /** 将内部 Message[] 转换为 Anthropic MessageParam[]（已废弃，保留兼容） */
   private convertMessages(messages: Message[]): Anthropic.MessageParam[] {
+    // 发送边界统一清洗：递归清洗全部将进 API 请求体的字符串（含 tool_use 参数 /
+    // thinking 等单点漏网字段），与各 block 内部 sanitizeText 幂等。
+    messages = sanitizeStrings(messages);
     return messages
       .filter((msg) => msg.role !== 'system')
       .map((msg) => {

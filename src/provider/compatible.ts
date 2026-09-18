@@ -13,7 +13,7 @@ import { getProviderConfigLoader } from './config.js';
 import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
-import { sanitizeText } from './sanitize.js';
+import { sanitizeText, sanitizeStrings } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
 
@@ -269,6 +269,9 @@ export class OpenAICompatibleProvider implements Provider {
   // ---- 转换方法 ----
 
   private convertMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
+    // 发送边界统一清洗：递归清洗全部将进 API 请求体的字符串（含 tool_use 参数 /
+    // thinking / reasoning_content 等单点漏网字段），与各 block 内部 sanitizeText 幂等。
+    messages = sanitizeStrings(messages);
     const result: OpenAI.ChatCompletionMessageParam[] = [];
 
     for (const msg of messages) {
@@ -406,7 +409,7 @@ export class OpenAICompatibleProvider implements Provider {
       type: 'function' as const,
       function: {
         name: tool.name,
-        description: tool.description,
+        description: sanitizeText(tool.description ?? ''),
         parameters: tool.input_schema,
       },
     }));

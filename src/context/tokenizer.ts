@@ -28,9 +28,15 @@ function getEncoding() {
 export class TokenCounter {
   /**
    * Count tokens for a plain text string.
+   *
+   * encode 的 allowedSpecial 传 'all'：tiktoken 默认**禁止**特殊 token，文本含
+   * `<|endoftext|>` 等会直接抛错（`The text contains a special token that is not
+   * allowed: ...`）。会话历史 / 工具输出可能天然含这类 token（如模型原样输出的
+   * EOS）。计数层应忠实计数（特殊 token 按 1 token 计，与真实 LLM 一致）；
+   * 发送层清洗（provider/sanitize）负责防止 API 拒收 —— 两层职责分离。
    */
   countTokens(text: string): number {
-    return getEncoding().encode(text).length;
+    return getEncoding().encode(text, 'all').length;
   }
 
   /**
