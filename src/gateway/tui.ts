@@ -91,7 +91,7 @@ import { createModelCmds } from './tui-model-cmds.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
-import { formatDeclaredToolLinks, getCurrentToolLinks } from '../supervisor/tool-links.js';
+import { formatDeclaredToolLinks, getCurrentToolLinks } from '../utils/tool-links.js';
 
 // ─── Main TUI ─────────────────────────────────────────────────────────────
 export async function runTui(

@@ -958,7 +958,7 @@ export async function runCli(): Promise<void> {
           xrefEnabled = null; // 插件目录不可用 → 状态未知（不猜，formatLinksSection 会写"状态未知"）
         }
         // 声明态（第三圈）：清单里声明了什么 —— 与下面的运行态合起来才是全图
-        const { getCurrentToolLinks, formatDeclaredToolLinks } = await import('../supervisor/tool-links.js');
+        const { getCurrentToolLinks, formatDeclaredToolLinks } = await import('../utils/tool-links.js');
         process.stderr.write(formatDeclaredToolLinks(getCurrentToolLinks()) + '\n');
         process.stderr.write(formatLinksSection(readSnapshot(), xrefEnabled) + '\n');
       } catch {

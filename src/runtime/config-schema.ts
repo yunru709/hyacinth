@@ -94,7 +94,7 @@ export interface FullConfig {
     targetRatio: number;          // 0.15 — 理想压缩目标比率，达到即停
     clusterBudgetRatio: number;   // 0.7  — 分簇预算占 historyBudget 比例（决策 H）
     zone5TailBudgetRatio: number; // 0.15 — Zone5 尾部保护预算占 maxContextTokens 比例
-    /** 临时记事本（Zone 5）注入上限（字符）；超出截断并标注。见 context/scratchpad.ts */
+    /** 临时记事本（Zone 5）注入上限（字符）；超出截断并标注。见 utils/scratchpad.ts */
     scratchpadMaxChars: number;
     zone4BudgetRatio: number;     // 0.5  — Zone4 检索预算占 maxContextTokens 比例
     /** 意图块模式（intent_block conditional section） */

@@ -23,7 +23,7 @@ import { ConversationStore } from '../memory/conversation.js';
 import { LoopGuard } from '../repair/loop-guard.js';
 import { bootstrapSecurity } from '../kernel/security/index.js';
 import { WriteTool } from '../tools/write.js';
-import { defaultToolLinks, setCurrentToolLinks } from '../supervisor/tool-links.js';
+import { defaultToolLinks, setCurrentToolLinks } from '../utils/tool-links.js';
 import type { ToolCall } from '../types.js';
 
 /** 诊断模块打桩：只关心"被调用了没有" */

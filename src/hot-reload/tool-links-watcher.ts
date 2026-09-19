@@ -3,7 +3,7 @@
 // ============================================================
 // 监听 ~/.agent/tool-links.json：文件一变 → 重新装载"当前清单"（启动时已装载一次）。
 //
-// 语义全在 supervisor/tool-links.ts 的 initToolLinksFromDisk 里：
+// 语义全在 utils/tool-links.ts 的 initToolLinksFromDisk 里：
 //   · 文件不存在 ⇒ 出厂默认（= 迁移前行为，行为不回退）；
 //   · 结构错 / 语义错（事件名不在目录、handler 未注册）⇒ **保旧**并报错。
 // 本文件只做两件事：**何时重载**（createWatcher）+ **怎么记日志**。

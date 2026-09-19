@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { scratchpadMaxChars } from '../context/context-config.js';
 
 /** 记事本文件位置 —— 与 memory 同目录（用户指定） */
 export function scratchpadPath(): string {
@@ -55,7 +56,9 @@ export const SCRATCHPAD_DEFAULT_MAX_CHARS = 8000;
  *
  * @param maxChars 上限；超出则截断并标注（显式告诉模型"这里被截了"，不留错觉 ✓）
  */
-export function readScratchpadForContext(maxChars: number = SCRATCHPAD_DEFAULT_MAX_CHARS): string {
+export function readScratchpadForContext(
+  maxChars: number = scratchpadMaxChars(), // 配置项 context.scratchpadMaxChars（未注入 ⇒ 回退默认 8000）✓
+): string {
   const file = scratchpadPath();
   let raw: string;
   try {

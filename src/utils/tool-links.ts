@@ -210,7 +210,7 @@ export function parseToolLinks(raw: unknown): { manifest: ToolLinksManifest; err
     if (typeof l.kind === 'string' && (RESERVED_TOOL_LINK_KINDS as readonly string[]).includes(l.kind)) {
       errors.push(
         `links[${i}]: kind "${l.kind}" is reserved and NOT implemented in this round — `
-        + 'veto/intercept need a new contract (see header of src/supervisor/tool-links.ts)',
+        + 'veto/intercept need a new contract (see header of src/utils/tool-links.ts)',
       );
       return;
     }
@@ -367,7 +367,7 @@ export class ToolLinkRegistry {
       // 将来加 kind 时，这里会拦住"注册了但契约没实现"的处理器 —— 有意如此
       throw new Error(
         `[tool-links] handler "${h.id}" kind "${h.kind}" is not implemented in this round `
-        + '(see header of src/supervisor/tool-links.ts)',
+        + '(see header of src/utils/tool-links.ts)',
       );
     }
     this.handlers.set(h.id, h);

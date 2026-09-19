@@ -27,8 +27,7 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
-import { readScratchpadForContext, ensureScratchpadFile, ensurePathLine } from '../context/scratchpad.js';
-import { scratchpadMaxChars } from '../context/context-config.js';
+import { readScratchpadForContext, ensureScratchpadFile, ensurePathLine } from '../utils/scratchpad.js';
 // companion_memory 现按「当前 loop 的 activeRouter」判定，不再需要全局 getActiveRouter
 
 export interface ContextSourceDeps {
@@ -115,7 +114,7 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     strategy: 'always_inline',
     cacheability: 'live',
     description: '临时记事本（Zone 5；不进消息流转，与 memory 同目录）',
-    getContent: () => readScratchpadForContext(scratchpadMaxChars()),
+    getContent: () => readScratchpadForContext(),
   });
 
   // ── 陪伴模式 Memory ──────────────────────────────────────────────────

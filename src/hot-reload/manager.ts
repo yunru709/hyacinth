@@ -186,7 +186,7 @@ export class HotReloadManager {
       },
       {
         // 联动清单（第三圈）：~/.agent/tool-links.json 变化 → 重新装载（校验失败保旧）。
-        // 语义（读盘/校验/保旧）在 supervisor/tool-links.ts 的 initToolLinksFromDisk，
+        // 语义（读盘/校验/保旧）在 utils/tool-links.ts 的 initToolLinksFromDisk，
         // 本项只负责"何时重载"；与启动时那次装载调用同一函数 ⇒ 冷热语义必然一致。
         // toolLinksAccess 未装配时 build 返回 null 跳过注册。
         // ⚠️ 新增 watcher 必须**三处一起动**（这条是活体验证当场踩出来的）：

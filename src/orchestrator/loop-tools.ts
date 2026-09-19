@@ -21,7 +21,7 @@ import { isFlowTool } from '../tools/flow.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { LoopGuard, isMutating, ToolGuard } from '../repair/loop-guard.js';
 import { isWriteTool, isMutatingTool } from '../tools/side-effect.js';
-import { getCurrentToolLinks, resolveToolLinks } from '../supervisor/tool-links.js';
+import { getCurrentToolLinks, resolveToolLinks } from '../utils/tool-links.js';
 import { buildCoreToolLinkRegistry } from './tool-link-handlers.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';

@@ -15,10 +15,10 @@
  *
  * ⚠️ **依赖影响面（core.dependency-impact-enrich）故意不在本文件**：它是**批量级**的
  *    （一次算所有被改文件的合并影响），按调用触发会退化 ⇒ 仍留在 loop-tools 里硬编码，
- *    要纳入需先有批量级事件（见 supervisor/tool-links.ts 的 defaultToolLinks 注释）。
+ *    要纳入需先有批量级事件（见 utils/tool-links.ts 的 defaultToolLinks 注释）。
  *
  * ⚠️ **veto / intercept 类不在本轮范围**（清单模块会明确拒绝这类 kind）——
- *    它们需要"自带拒绝结果 / 包裹语义"的新契约，见 supervisor/tool-links.ts 文件头。
+ *    它们需要"自带拒绝结果 / 包裹语义"的新契约，见 utils/tool-links.ts 文件头。
  *
  * ────────────────────────────────────────────────────────────────────────────
  * 将来加处理器（三步，照做即可）
@@ -27,11 +27,11 @@
  *      注意 run 的契约：**不得抛错**（失败返回空串）。
  *   ② 在 buildCoreToolLinkRegistry 里 register —— **register 顺序 = 执行顺序**
  *      （且要与 defaultToolLinks 里的顺序一致，否则"清单顺序"与"注册顺序"会打架）。
- *   ③ 在 supervisor/tool-links.ts 的 defaultToolLinks 里加一行（= 出厂默认就启用）。
+ *   ③ 在 utils/tool-links.ts 的 defaultToolLinks 里加一行（= 出厂默认就启用）。
  *      若要**默认关闭**，就别加进默认清单，让用户自己往 ~/.agent/tool-links.json 里写。
  *   ④ 在 docs/design/tool-linkage-laws.md 的成员清单里登记，并在六处「圈三锚点」注释旁同步说明。
  */
-import { ToolLinkRegistry, type ToolLinkHandler } from '../supervisor/tool-links.js';
+import { ToolLinkRegistry, type ToolLinkHandler } from '../utils/tool-links.js';
 
 /**
  * 核心处理器的 payload 形状（**调用方 loop-tools 负责塞进来**）。
@@ -121,7 +121,7 @@ export const evidenceLedgerHandler: ToolLinkHandler = {
 
 /**
  * 组装核心注册表 —— **进程级一份**（这些处理器无状态）。
- * 若有**有状态**处理器：改成每装配一份，并把 supervisor/tool-links.ts 里 currentManifest
+ * 若有**有状态**处理器：改成每装配一份，并把 utils/tool-links.ts 里 currentManifest
  * 持有者一并改成每 loop 一份（那边的 ⚠️ 有说明）。
  */
 let coreRegistry: ToolLinkRegistry | null = null;
