@@ -63,6 +63,7 @@
     "tree-sitter-cli": "0.27.0",
     "tree-sitter-go": "0.25.0",
     "tree-sitter-python": "0.25.0",
+    "tree-sitter-rust": "0.24.0",
     "undici-types": "^7.24.6",
     "vitest": "^4.1.7"
   }

@@ -8,9 +8,14 @@ export const rustSupport: LanguageSupport = {
   extensions: ['.rs'],
   extMap: { '.rs': 'rust' },
 
+  /**
+   * 精度链：语法树优先（能给出 caller_name 与 impl 结构性边 —— generic-regex 都给不出），
+   * 载不到 wasm 时退正则。降级由构建循环按链依次尝试，files.parser 记成功的那一级。
+   */
   async createParsers(): Promise<FileParser[]> {
     const { GenericParser } = await import('../regex-parser.js');
-    return [new GenericParser(['.rs'])];
+    const { RustTreeSitterParser } = await import('./rust-tree-sitter.js');
+    return [new RustTreeSitterParser(), new GenericParser(['.rs'])];
   },
 
   // crate/super/self:: 开头与 mod: 前缀：Rust 的模块路径不是文件路径，但确属项目内
