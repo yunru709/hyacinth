@@ -92,4 +92,62 @@ describe('xref 插件', () => {
     const leaked = fs.readdirSync(cacheDir).filter((f) => f.startsWith('xref-') && f.endsWith('.sqlite'));
     expect(leaked.length).toBeGreaterThan(0);
   });
+  // ── Phase 6：引用分析能力的注册生命周期 ──────────────────────────────
+  // 验收线：「xref 卸载 → 行为退回纯兜底，无报错」。机制：activate 时
+  // ctx.register('referenceAnalysis', cap)，卸载时宿主把服务恢复为注册前的值；
+  // 消费侧（loop-tools 的 ctx 字面量）**每回合现场**从 host.get 取 ⇒ 取不到即 null
+  // ⇒ analyzeReferences 走核心兜底。故这里只需证明注册面随挂载/卸载增删。
+
+  it('能力注册随挂载/卸载增删：referenceAnalysis', async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'xrefplug-cap-'));
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'a.ts'), 'export function foo() { return 1; }\n');
+
+    const { toolRegistry } = makeRegistry();
+    const host = new PluginHost<Services, Hooks>({ toolRegistry });
+
+    expect(host.get('referenceAnalysis')).toBeUndefined(); // 挂载前 = 消费侧会走兜底
+
+    await host.mount(createXrefPlugin({ cwd: tmp }));
+    expect(host.get('referenceAnalysis')).toBeTruthy(); // 挂载后能力就位
+
+    await host.unmount('xref');
+    expect(host.get('referenceAnalysis')).toBeUndefined(); // 卸载后回到"从未挂载过"
+  });
+
+  it('索引没建过 → 能力返回空串（交给兜底），原因如实记录而非"没有引用"', async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'xrefplug-noidx-'));
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'a.ts'), 'export function foo() { return 1; }\n');
+    fs.writeFileSync(path.join(tmp, 'src', 'b.ts'), "import { foo } from './a.js';\nexport const v = foo();\n");
+
+    const { toolRegistry } = makeRegistry();
+    const host = new PluginHost<Services, Hooks>({ toolRegistry });
+    await host.mount(createXrefPlugin({ cwd: tmp }));
+    try {
+      const cap = host.get('referenceAnalysis') as {
+        analyze: (i: {
+          toolName: string;
+          filePath: string;
+          before: string;
+          after: string;
+          oldText: string;
+          newText: string;
+        }) => Promise<string>;
+        getRuntime?: () => { lastReason: string };
+      };
+      const out = await cap.analyze({
+        toolName: 'write',
+        filePath: path.join(tmp, 'src', 'a.ts'),
+        before: 'export function foo() { return 1; }\n',
+        after: 'export function foo2() { return 1; }\n',
+        oldText: 'export function foo() { return 1; }',
+        newText: 'export function foo2() { return 1; }',
+      });
+      expect(out).toBe(''); // 没建索引 ⇒ 不给精确结论（空 = 消费侧走兜底）
+      expect(cap.getRuntime?.().lastReason).toBe('索引陈旧'); // 原因如实
+    } finally {
+      await host.unmount('xref');
+    }
+  });
 });
