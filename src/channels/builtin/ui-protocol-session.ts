@@ -46,6 +46,8 @@ import { createBundleDomain, type BundleRegistryLike } from '../../ui-protocol/d
 import { createPluginDomain, type PluginStatusLike } from '../../ui-protocol/domains/plugin.js';
 import { createSupervisorDomain } from '../../ui-protocol/domains/supervisor.js';
 import { createArchDomain } from '../../ui-protocol/domains/arch.js';
+// 联动段的渲染与快照读取（纯函数 + 只读快照，无副作用；分层若不允由 verify:layers 报出）
+import { readSnapshot, formatLinksSection } from '../../utils/reference-analysis-state.js';
 import { createMCPDomain, type MCPSystemLike } from '../../ui-protocol/domains/mcp.js';
 import { createCompanionDomain, type SceneReaderLike, type CompanionSceneMeta } from '../../ui-protocol/domains/companion.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
@@ -380,7 +382,12 @@ export class UiProtocolSession {
     }));
     // arch 域（架构监督，第 20 域）：目录/名单/生效视图来自装配组件（extensionRegistry/
     // assemblyRegistry），延迟解析；toggle 写项目级名单（supervisor/extension-registry）。
-    this.server.registerDomain('arch', createArchDomain({ getArch: () => backend.getArch?.() ?? null }));
+    this.server.registerDomain('arch', createArchDomain({
+      getArch: () => backend.getArch?.() ?? null,
+      // 联动段：读引用自检的运行态快照并渲染（快照由能力在每次分析后 best-effort 写入）。
+      // 插件启用态此处传 null ⇒ 渲染为"状态未知"，不猜；能力是否注册以快照的 registered 为准。
+      getLinks: () => formatLinksSection(readSnapshot(), null),
+    }));
     this.server.registerDomain('mcp', createMCPDomain({ getMCP: () => backend.getMCP?.() ?? null }));
     // companion 域：依赖 loop / companionMgr / routerSwitcher，延迟解析。
     // 音色库 / 生成语音库 / 台词历史 / 场景读取 / keepPerCharacter 由桥接层注入默认值

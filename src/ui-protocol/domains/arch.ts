@@ -61,6 +61,11 @@ export interface ArchListResult {
   entries: ArchEntryView[];
   manifest: ArchManifestView | null;
   assembly: string | null;
+  /**
+   * 联动（links）段：消费者 + 能力提供方状态 + **运行态计数**（calls/fallbacks/lastReason）。
+   * 未装配数据源时为 null —— 前端应显示"能力未注册（走核心兜底）"而不是留白。
+   */
+  links: string | null;
 }
 
 /** arch.get 返回结构 */
@@ -81,10 +86,15 @@ export interface ArchGetResult {
 export interface ArchDomainOptions {
   /** 架构监督数据源（backend 注入；未装配为 null，各 action 降级报错） */
   getArch: () => ArchDataLike | null;
+  /**
+   * 联动（links）段数据源（可选；注入方负责渲染 —— 协议层零业务依赖，故此处不 import 工具层）。
+   * 未注入 ⇒ null（前端显示"能力未注册（走核心兜底）"）。
+   */
+  getLinks?: () => string | null;
 }
 
 export function createArchDomain(options: ArchDomainOptions): DomainHandler {
-  const { getArch } = options;
+  const { getArch, getLinks } = options;
 
   return {
     /** 全景：目录 + 生效条目 + 名单 + 本体图 */
@@ -96,6 +106,8 @@ export function createArchDomain(options: ArchDomainOptions): DomainHandler {
         entries: data.getEntries(),
         manifest: data.getManifest(),
         assembly: data.getAssemblyDescribe(),
+        // links 段：数据源未注入时为 null（不抛 —— 它是附加信息，不该拖垮整屏）
+        links: getLinks ? getLinks() : null,
       };
     },
 

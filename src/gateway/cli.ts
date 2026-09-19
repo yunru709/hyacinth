@@ -937,6 +937,27 @@ export async function runCli(): Promise<void> {
       } catch {
         // 插件目录不可用则跳过预览
       }
+
+      // ── 联动（links）：引用自检的消费者 + 能力状态 + 运行态计数 ──
+      // CLI 是**进程外诊断**（不启动 agent）⇒ 拿不到活的能力实例，故读能力落下的快照。
+      // 快照可能来自上一个进程，formatLinksSection 会把时间与 pid 一并给出（不假装是"此刻"）。
+      try {
+        const { readSnapshot, formatLinksSection } = await import('../utils/reference-analysis-state.js');
+        // 插件启用态用**与上面同一套三源折叠**（名单 > plugins.config.json > enabledByDefault）——
+        // 只看 manifest 会把"经 plugins.config 启用"的插件误报成已禁用 ✗（活体验证当场抓到过）。
+        let xrefEnabled: boolean | null = null;
+        try {
+          const { PluginLoader } = await import('../plugins/loader.js');
+          const pluginConfig = await new PluginLoader(process.cwd()).loadPluginConfig();
+          const decl = manifest.plugins.find((p) => p.id === 'xref');
+          xrefEnabled = decl ? decl.enabled : (pluginConfig['xref']?.enabled ?? true);
+        } catch {
+          xrefEnabled = null; // 插件目录不可用 → 状态未知（不猜，formatLinksSection 会写"状态未知"）
+        }
+        process.stderr.write(formatLinksSection(readSnapshot(), xrefEnabled) + '\n');
+      } catch {
+        process.stderr.write('── 联动（links）──\n  能力未注册（走核心兜底）\n');
+      }
     });
 
   archCmd

@@ -14,6 +14,7 @@
  */
 import type { ReferenceAnalysisCapability, ReferenceAnalysisInput } from '../reference-analysis.js';
 import { resolveChangedSymbols } from '../reference-analysis.js';
+import { writeSnapshot } from '../../utils/reference-analysis-state.js';
 import type { XrefManager } from './manager.js';
 
 /** 运行态（arch list 的 links 段展示用） */
@@ -55,6 +56,23 @@ export function createReferenceAnalysisCapability(manager: XrefManager): Referen
     runtime.fallbacks += 1;
     runtime.lastReason = reason;
     return '';
+  };
+
+  /**
+   * 落一份运行态快照（arch list 的两个入口都读它；CLI 是进程外诊断，拿不到活实例）。
+   * best-effort：writeSnapshot 自身不抛，故不会影响工具结果。
+   */
+  const persistSnap = (registered: boolean): void => {
+    writeSnapshot({
+      provider: 'xref',
+      registered,
+      calls: runtime.calls,
+      fallbacks: runtime.fallbacks,
+      lastReason: runtime.lastReason,
+      lastAt: runtime.lastAt,
+      lastSymbols: runtime.lastSymbols,
+      lastOutput: runtime.lastOutput,
+    });
   };
 
   return {
@@ -101,6 +119,10 @@ export function createReferenceAnalysisCapability(manager: XrefManager): Referen
       } catch (err) {
         // 能力失败一律退兜底（消费侧还有一层 try/catch，双保险）
         return giveUp(`能力异常：${(err as Error).message}`);
+      } finally {
+        // 无论走哪条路径都落一份快照（诊断用）。注册态这里恒为 true —— 本实例存在即已注册；
+        // 卸载时的"false"由插件侧写（见 xref-plugin 的 disposer）。
+        persistSnap(true);
       }
     },
   };
