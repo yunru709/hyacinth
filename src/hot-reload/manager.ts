@@ -207,6 +207,9 @@ export class HotReloadManager {
     }
 
     const debounceMs = this.deps.configCenter.get<number>('hotReload.debounceMs') ?? 500;
+// ── [圈三锚点 · watcher 装配位] ──────────────────────────────────────────────
+// 第三圈（联动清单 tool-links.json）接入时，改动落在这里：清单文件的 watcher 在这里追加一条 WatcherSpec（现有若干条，纯增量）
+// 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
     this.logger.info('Starting hot reload watchers...');
 
     for (const spec of this.watcherSpecs()) {

@@ -45,6 +45,9 @@ export interface PluginContext<S extends ServiceMap = ServiceMap, M extends Reco
   config<T = Record<string, unknown>>(): T;
   /** 登记资源：卸载时自动释放（工具、ContextSource、事件订阅、定时器…） */
   add(item: Disposable | Disposer): void;
+// ── [圈三锚点 · 能力注册面] ──────────────────────────────────────────────
+// 第三圈（联动清单 tool-links.json）接入时，改动落在这里：处理器能力注册（{id, kind, owner}）挂在这里；卸载自动回滚的语义已由本方法提供
+// 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
   /** 注册服务：卸载时自动恢复到注册前的值（支持热替换后回滚） */
   register<K extends keyof S>(key: K, service: S[K]): Disposable;
   /** 读取服务（不存在返回 undefined） */

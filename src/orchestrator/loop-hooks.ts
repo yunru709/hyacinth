@@ -45,6 +45,9 @@ export interface LoopHooks extends Record<string, unknown> {
   onTurnError: { turn: number; error: Error };
 }
 
+// ── [圈三锚点 · 事件目录] ──────────────────────────────────────────────
+// 第三圈（联动清单 tool-links.json）接入时，改动落在这里：声明清单里可出现的事件名必须 ∈ LOOP_HOOK_NAMES（校验即查这里）
+// 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
 /** 钩子名清单 —— 供诊断/文档/UI 展示用，与 LoopHooks 键一一对应 */
 export const LOOP_HOOK_NAMES = [
   'onTurnStart',

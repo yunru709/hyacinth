@@ -45,6 +45,9 @@ export function watchExtensionRegistry(deps: ExtensionRegistryWatcherDeps): Watc
     paths: () => deps.manifestAccess.listManifestPaths(),
     reload: async () => {
       const { manifest, errors } = deps.manifestAccess.loadManifest();
+// ── [圈三锚点 · 校验先例] ──────────────────────────────────────────────
+// 第三圈（联动清单 tool-links.json）接入时，改动落在这里：清单校验的**完整参照**就在这里：失败保旧、成功 diff、单条失败仅 warn
+// 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
       if (errors.length > 0) {
         logger.warn('名单校验失败，保留旧名单继续运行', { errors });
         return;

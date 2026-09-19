@@ -44,6 +44,11 @@ export function createXrefPlugin(
       // 正是任务单要的"挂载即注册、卸载即摘除"。
       // 消费侧（loop-tools 后置序列）经 loop.pluginHost.get('referenceAnalysis') 取用；
       // 取不到时自动退回核心内置的字符串扫描兜底 —— 故卸载后行为等于"从未挂载过"。
+      // ── [圈三锚点 · 首条绑定] ────────────────────────────────────────────
+      // 这是**第一条**真实联动绑定（消费者=核心后置序列，提供方=xref 能力）。
+      // 第三圈接入时，这一行（ctx.register）由"声明清单驱动"取代/包一层 ——
+      // 关系写进 tool-links.json，handler id 在此注册。
+      // 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
       const { createReferenceAnalysisCapability } = await import('../tools/xref/reference-capability.js');
       ctx.register('referenceAnalysis', createReferenceAnalysisCapability(xrefManager) as never);
 
