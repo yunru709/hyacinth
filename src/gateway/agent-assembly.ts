@@ -54,7 +54,7 @@ import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { ConfigManager } from '../setup/config.js';
 import { createLogger } from '../logging/logger.js';
-import { initToolLinksFromDisk } from '../supervisor/tool-links.js';
+import { initToolLinksFromDisk, toolLinksPath } from '../supervisor/tool-links.js';
 import { buildCoreToolLinkRegistry } from '../orchestrator/tool-link-handlers.js';
 import { LOOP_HOOK_NAMES } from '../orchestrator/loop-hooks.js';
 import type { ProviderRouter } from '../provider/router.js';
@@ -587,6 +587,16 @@ export async function createAgentAssembly(
     modelCatalog,
     extensionRegistry,
     manifestAccess,
+    // 联动清单访问面（第三圈）：装配层注入"路径 + 装载逻辑"，hot-reload 层只做类型引用。
+    // 与上面那次启动装载**调用同一函数** ⇒ 冷启动与热更的语义必然一致，不会分叉。
+    toolLinksAccess: {
+      listPaths: () => [toolLinksPath()],
+      reload: () =>
+        initToolLinksFromDisk({
+          eventNames: LOOP_HOOK_NAMES,
+          handlerIds: buildCoreToolLinkRegistry().ids(),
+        }),
+    },
   });
   const bundleRegistry = runtimeResults.get('bundleRegistry') as ToolBundleRegistry;
   const hotReloadManager = runtimeResults.get('hotReloadManager') as HotReloadManager;

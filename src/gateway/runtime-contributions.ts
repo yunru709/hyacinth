@@ -15,6 +15,7 @@ import { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { HotReloadManager } from '../hot-reload/index.js';
 import type { ExtensionRegistry } from '../supervisor/extension-registry.js';
 import type { ManifestAccessLike } from '../hot-reload/extension-registry-watcher.js';
+import type { ToolLinksAccessLike } from '../hot-reload/tool-links-watcher.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { AgentRegistry } from '../agents/index.js';
@@ -42,6 +43,8 @@ export interface RuntimeContributionDeps {
   extensionRegistry?: ExtensionRegistry;
   /** 名单访问面（与 extensionRegistry 成对注入） */
   manifestAccess?: ManifestAccessLike;
+  /** 联动清单访问面（未注入 ⇒ 该 watcher 不注册，与 manifestAccess 同款） */
+  toolLinksAccess?: ToolLinksAccessLike;
 }
 
 /** 执行运行时贡献批（ToolBundleRegistry / HotReloadManager），返回产出（bundleRegistry / hotReloadManager） */
@@ -62,7 +65,7 @@ export async function runRuntimeContributions(
       needs: [
         'toolRegistry', 'skillRegistry', 'agentRegistry', 'pluginManager',
         'configCenter', 'contextComposer', 'mcpSystem', 'bundleRegistry',
-        'channelRegistry', 'cwd', 'providerConfigLoader', 'modelCatalog', 'extensionRegistry', 'manifestAccess',
+        'channelRegistry', 'cwd', 'providerConfigLoader', 'modelCatalog', 'extensionRegistry', 'manifestAccess', 'toolLinksAccess',
       ],
       provides: ['hotReloadManager'],
       mount: (d) => ({
@@ -81,6 +84,7 @@ export async function runRuntimeContributions(
           modelCatalog: d.modelCatalog as typeof modelCatalog,
           extensionRegistry: d.extensionRegistry as ExtensionRegistry | undefined,
           manifestAccess: d.manifestAccess as ManifestAccessLike | undefined,
+          toolLinksAccess: d.toolLinksAccess as ToolLinksAccessLike | undefined,
         }),
       }),
     },

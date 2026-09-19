@@ -47,6 +47,8 @@ export interface HotReloadDeps {
   extensionRegistry?: ExtensionRegistry;
   /** 名单访问面（gateway 注入 arch-assembly.createManifestAccess；与 extensionRegistry 成对出现） */
   manifestAccess?: ManifestAccessLike;
+  /** 联动清单访问面（装配层注入；未注入 ⇒ 该 watcher 不注册，与 manifestAccess 同款） */
+  toolLinksAccess?: import('./tool-links-watcher.js').ToolLinksAccessLike;
   cwd: string;
   providerConfigLoader: ProviderConfigLoader;
   modelCatalog: ModelCatalog;
@@ -181,6 +183,15 @@ export class HotReloadManager {
           d.extensionRegistry && d.manifestAccess
             ? [{ extensionRegistry: d.extensionRegistry, pluginManager: d.pluginManager, manifestAccess: d.manifestAccess, debounceMs: ms }]
             : null,
+      },
+      {
+        // 联动清单（第三圈）：~/.agent/tool-links.json 变化 → 重新装载（校验失败保旧）。
+        // 语义（读盘/校验/保旧）在 supervisor/tool-links.ts 的 initToolLinksFromDisk，
+        // 本项只负责"何时重载"；与启动时那次装载调用同一函数 ⇒ 冷热语义必然一致。
+        // toolLinksAccess 未装配时 build 返回 null 跳过注册。
+        flag: 'hotReload.watchToolLinks',
+        load: () => import('./tool-links-watcher.js').then((m) => ({ watch: m.watchToolLinks })),
+        build: (d, ms) => (d.toolLinksAccess ? [{ access: d.toolLinksAccess, debounceMs: ms }] : null),
       },
       {
         // channel watcher 与 provider watcher 共用同一开关；
