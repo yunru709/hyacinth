@@ -24,6 +24,7 @@ import { CompanionSessionManager } from '../memory/companion-session.js';
 import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { deriveDangerousTools } from '../tools/side-effect.js';
 import { applyWorkspaceFence } from '../tools/path-sandbox.js';
+import { scratchpadPath } from '../context/scratchpad.js';
 import type { ToolExecutor } from '../tools/executor.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { registerBundleTools } from '../tools/bundle-tools.js';
@@ -288,7 +289,9 @@ export async function createAgentAssembly(
   // ── 安全：主 Agent 工作区围栏（kernel/security P0）——写类工具限工作区、.git 拒写 ──
   // 旧实现 createBuiltInTools 第 4 参传 undefined，path-sandbox 从未对主 Agent 生效。
   const securityWorkspaceRoot = (config as { security?: { workspaceRoot?: string } }).security?.workspaceRoot ?? cwd;
-  applyWorkspaceFence(toolRegistry, securityWorkspaceRoot);
+  // 额外可写根：agent 自维护区（与 memory.md 同目录的 persona 目录；Zone 5 临时记事本也在此）
+  // —— 目录由 scratchpadPath() 推导（不写死字符串 ✓），且只放行这一个目录 ✓
+  applyWorkspaceFence(toolRegistry, securityWorkspaceRoot, [path.dirname(scratchpadPath())]);
   // ── 编排贡献批（行数收尾第七批：planStore/orchestrator/providerRouter/
   // agentRegistry/toolExecutor/backgroundRegistry）——在 toolRegistry 建后执行。
   const orchResults = await runOrchestratorContributions({

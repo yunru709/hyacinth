@@ -1,7 +1,9 @@
 /**
  * 工作区围栏测试 —— 写类工具限工作区、.git 拒写；读类/bash 不受限。
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { Tool } from './interface.js';
 import { applyWorkspaceFence } from './path-sandbox.js';
@@ -75,5 +77,54 @@ describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
     applyWorkspaceFence(registry, root);
     expect(() => applyWorkspaceFence(registry, root)).not.toThrow();
     expect(registry.get('write')).toBeDefined();
+  });
+
+  // ── 额外可写根（2026-09-19 用户裁定 (a)：放行 ~/.agent/prompts/persona/，让 edit 能写记事本）──
+  // 这组用例是那条裁定的**边界守卫**：放行面只增不减，且**不**给出绕过 .git 的后门 ✓
+  describe('额外可写根（extraWritableRoots）', () => {
+    // ⚠️ 夹具必须是**真实存在**的目录：围栏用真实路径（跟随符号链接）判界，
+    //    对不存在的路径会退到某个已存在的祖先 ⇒ 结果不可预期。
+    //    首版我用 /tmp/extra-writable（不存在）⇒ 两条红、一条**因错误的原因而绿**（假绿 ✗）。
+    const extra = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-'));
+    const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-sibling-'));
+    afterAll(() => {
+      try { fs.rmSync(extra, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(sibling, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    it('额外可写根**内**的路径放行', async () => {
+      const registry = makeFakeRegistry([makeTool('edit', 'E')]);
+      applyWorkspaceFence(registry, root, [extra]);
+      const wrapped = registry.get('edit')!;
+      const res = await wrapped.execute({ file_path: path.join(extra, 'scratchpad.md') }, undefined);
+      expect(res, '额外根内应放行（记事本就走这条路）').toBe('E');
+    });
+
+    it('额外可写根**之外**的外部路径仍拒 —— 放行面没有被扩大', async () => {
+      const registry = makeFakeRegistry([makeTool('edit', 'E')]);
+      applyWorkspaceFence(registry, root, [extra]);
+      const wrapped = registry.get('edit')!;
+      const outside = await wrapped.execute({ file_path: 'C:/Windows/system32/evil.txt' }, undefined);
+      expect(outside).toMatch(/outside the workspace root/);
+      // 与额外根"同级"但不在其内的路径也必须拒（防"前缀相同即放行"这类实现错误）
+      const sib = await wrapped.execute({ file_path: path.join(sibling, 'x') }, undefined);
+      expect(sib, '与额外根同级、但不在其内的真实目录，仍必须拒').toMatch(/outside the workspace root/);
+    });
+
+    it('额外可写根里的 .git 仍拒 —— 不给绕过 .git 的后门', async () => {
+      const registry = makeFakeRegistry([makeTool('edit', 'E')]);
+      applyWorkspaceFence(registry, root, [extra]);
+      const wrapped = registry.get('edit')!;
+      const hook = await wrapped.execute({ file_path: path.join(extra, '.git', 'hooks', 'pre-commit') }, undefined);
+      expect(hook).toMatch(/\.git.*blocked/);
+    });
+
+    it('不传额外根 ⇒ 与从前完全一致（默认严格）', async () => {
+      const registry = makeFakeRegistry([makeTool('edit', 'E')]);
+      applyWorkspaceFence(registry, root);
+      const wrapped = registry.get('edit')!;
+      const res = await wrapped.execute({ file_path: path.join(extra, 'scratchpad.md') }, undefined);
+      expect(res, '不传额外根时，那个目录仍应被拒').toMatch(/outside the workspace root/);
+    });
   });
 });

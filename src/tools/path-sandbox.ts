@@ -117,20 +117,30 @@ export function wrapSandboxedTools(
 export function applyWorkspaceFence(
   registry: { getAll(): Tool[]; register(tool: Tool): void },
   workspaceRoot: string,
+  /**
+   * 额外可写根（白名单，默认空 ⇒ 与不传时完全一致 ✓）。
+   *
+   * 为什么需要它（2026-09-19 用户裁定）：~/.agent/prompts/persona/ 是 agent 自维护区
+   * （memory.md 的头注释就写着 "Managed by Agent. Edit directly"，Zone 5 临时记事本也在那里），
+   * 但围栏只认 workspaceRoot ⇒ 记事本无法用 edit 工具写 ✗。
+   * 放行面只增不减：这些根内部仍然拒 .git（不给出绕过 .git 的后门 ✓）。
+   */
+  extraWritableRoots: readonly string[] = [],
 ): number {
   const normalizedRoot = path.resolve(workspaceRoot);
   let wrapped = 0;
   for (const tool of registry.getAll()) {
     if (!isWriteTool(tool.name)) continue;
-    registry.register(createWriteFencedTool(tool, normalizedRoot));
+    registry.register(createWriteFencedTool(tool, normalizedRoot, extraWritableRoots));
     wrapped++;
   }
   return wrapped;
 }
 
-/** 为写类工具创建围栏包装：校验 file_path 在工作区内且不触 .git */
-function createWriteFencedTool(tool: Tool, root: string): Tool {
+/** 为写类工具创建围栏包装：校验 file_path 在工作区内（或额外可写根内）且不触 .git */
+function createWriteFencedTool(tool: Tool, root: string, extraWritableRoots: readonly string[] = []): Tool {
   const realRoot = resolveRealPathSync(root);
+  const realExtraRoots = extraWritableRoots.map((r) => resolveRealPathSync(r));
   const pathParam = tool.name === 'insert' ? 'file_path' : (PATH_PARAMS[tool.name]?.[0] ?? 'file_path');
   return {
     ...tool,
@@ -143,8 +153,13 @@ function createWriteFencedTool(tool: Tool, root: string): Tool {
         }
         // 用真实路径（跟随符号链接）判界，防 symlink 逃逸
         const realTarget = resolveRealPathSync(resolved);
-        const rel = path.relative(realRoot, realTarget);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        /** realTarget 是否落在某个根之内（相等也算之内 ✓） */
+        const inside = (realBase: string): boolean => {
+          const rel = path.relative(realBase, realTarget);
+          return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+        };
+        // 主根 ∪ 额外可写根（额外根是白名单：只增放行面，不放宽 .git 那条 ✓）
+        if (!inside(realRoot) && !realExtraRoots.some(inside)) {
           return `Error: path "${value}" resolves to "${resolved}" which is outside the workspace root "${root}". Writes must stay inside the workspace (security workspace fence).`;
         }
       }
