@@ -445,4 +445,86 @@ export function autoReferenceCheck(
   }
 }
 
+/**
+ * 能力探针契约：**xref 挂载时**注册它 —— 用索引给出精确结果（含 caller_name 与
+ * [precise]/[heuristic] 标注）；未注册、返回空、或抛错时，消费者退回本模块的字符串扫描。
+ *
+ * 为什么"返回空也要退兜底"：能力方可能因为**索引陈旧**而给不出结论。
+ * 此时若直接当"没有引用"，模型会得到**假阴性**；退兜底最多是回到从前的精度 —— 诚实优先。
+ */
+export interface ReferenceAnalysisCapability {
+  analyze(input: ReferenceAnalysisInput): Promise<string | null> | string | null;
+}
+
+/** 归一化后的输入：各工具的差异（write 传全文、edit 传片段）在此抹平 */
+export interface ReferenceAnalysisInput {
+  /** 触发本次分析的写工具名（edit / write） */
+  toolName: string;
+  filePath: string;
+  /** 改动前 / 后的**全文**（取自 diff 账本的结构事实） */
+  before: string;
+  after: string;
+  /** 变更片段：edit 为 old/new 文本；write 为改动前后全文 */
+  oldText: string;
+  newText: string;
+}
+
+/** 取 before 的第 [lineStart, lineStart+lineCount) 行（与 edit 的 line_replace 口径一致） */
+function sliceLines(text: string, lineStart: number, lineCount: number): string {
+  return text.split('\n').slice(lineStart - 1, lineStart - 1 + lineCount).join('\n');
+}
+
+/**
+ * 把工具入参 + 账本归一化成 ReferenceAnalysisInput —— **逐字对齐原调用点的语义**：
+ *   write 原为 autoReferenceCheck(file, oldContent, oldContent, content) ⇒ 全文/全文/新全文
+ *   edit  原为 autoReferenceCheck(file, content, effectiveOld, newString) ⇒ before/片段/新片段
+ * （effectiveOld 的 line_replace 分支按 line_start/line_count 从改动前内容切片）
+ */
+export function normalizeReferenceInput(input: {
+  toolName: string;
+  filePath: string;
+  before: string;
+  after: string;
+  args?: Record<string, unknown>;
+}): ReferenceAnalysisInput {
+  const { toolName, filePath, before, after, args = {} } = input;
+  if (toolName === 'edit') {
+    const oldString = typeof args.old_string === 'string' ? args.old_string : undefined;
+    const effectiveOld =
+      oldString ??
+      sliceLines(
+        before,
+        typeof args.line_start === 'number' ? args.line_start : 1,
+        typeof args.line_count === 'number' ? args.line_count : 1,
+      );
+    return { toolName, filePath, before, after, oldText: effectiveOld, newText: typeof args.new_string === 'string' ? args.new_string : after };
+  }
+  // write（及其它写工具）：全文前后
+  return { toolName, filePath, before, after, oldText: before, newText: after };
+}
+
+/**
+ * 消费者入口：**能力优先、兜底常在**。
+ * 任一环节出问题都不得影响工具返回值 —— 与从前的 try/catch 语义一致。
+ */
+export async function analyzeReferences(
+  capability: ReferenceAnalysisCapability | null | undefined,
+  input: { toolName: string; filePath: string; before: string; after: string; args?: Record<string, unknown> },
+): Promise<string> {
+  const normalized = normalizeReferenceInput(input);
+  if (capability) {
+    try {
+      const out = await capability.analyze(normalized);
+      if (out) return out; // 能力给不出内容（如索引陈旧）→ 继续走兜底，不给假阴性
+    } catch {
+      // 能力失败 → 退兜底
+    }
+  }
+  try {
+    return autoReferenceCheck(normalized.filePath, normalized.before, normalized.oldText, normalized.newText).text;
+  } catch {
+    return '';
+  }
+}
+
 // ── [内联副本 end] ──────────────────────────────────────────────────

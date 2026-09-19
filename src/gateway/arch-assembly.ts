@@ -50,6 +50,7 @@ export const STAGE_SERVICE_KEYS = [
   'outputHandler', 'maxContextTokens', 'personaDir', 'bundleRegistry', 'kbState',
   'loopHooks', 'getRouter', 'eventStore', 'orchestrator', 'bypassManager',
   'toolService', 'clusterService',
+  'referenceAnalysis',
 ] as const satisfies readonly (keyof StageServiceMap)[];
 
 /** kernel.pipeline 槽位声明（FullConfig.kernel.pipeline 条目的最小面） */

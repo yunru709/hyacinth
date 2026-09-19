@@ -63,6 +63,11 @@ export interface StageServiceMap {
   bypassManager: () => BypassManager | undefined;
   /** 工具执行服务（executeTools / executeSingleInline / flushInline；替代旧 executeTools/flushInline/executeSingleInline 三闭包） */
   toolService: ToolService | undefined;
+  /**
+   * 引用分析能力（Phase 6）：由 xref 插件经 ctx.registerStageService 注册/摘除。
+   * 缺省（xref 未挂载）⇒ 核心后置消费者退回内置字符串扫描兜底。
+   */
+  referenceAnalysis: import('../tools/reference-analysis.js').ReferenceAnalysisCapability | undefined;
   /** 意图簇 + deep 压缩状态服务（替代旧 clusterTransform/deepCompressRestore 两闭包） */
   clusterService: ClusterService | undefined;
 }

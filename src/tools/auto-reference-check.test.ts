@@ -26,7 +26,7 @@ import path from 'node:path';
 // 内联后（方案 A）：实现在 write.ts 的标记块里 —— 用**仅测试用**的导出取回，
 // 别名回 autoReferenceCheck，故本文件其余断言无需改动。
 // （edit.ts 另有一份**逐字节相同**的副本，由 inlined-copies-sync.test.ts 守住一致性。）
-import { __autoReferenceCheckForTest as autoReferenceCheck } from './write.js';
+import { autoReferenceCheck } from './reference-analysis.js';
 
 /** 造一个带 .git 标记的临时"项目"，保证扫描根就是它（既真实又隔离） */
 function makeProject(files: Record<string, string>): string {

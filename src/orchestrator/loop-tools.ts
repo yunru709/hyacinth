@@ -35,6 +35,8 @@ import * as sessionAllowlist from '../tools/session-allowlist.js';
  * 由 AgentLoop.makeToolExecContext() 构造（每轮调用取当前值）。
  */
 /** 工具执行结果摘要（P2：afterToolExecute 区分真实成败） */
+import { analyzeReferences, type ReferenceAnalysisCapability } from '../tools/reference-analysis.js';
+
 export interface ToolExecOutcome {
   id: string;
   name: string;
@@ -50,6 +52,8 @@ export interface ToolExecContext {
   loopHooks?: LoopHookBus;
   turnRecorder?: TurnRecorder | null;
   dependencyAnalyzer?: DependencyAnalyzer;
+  /** 引用分析能力（Phase 6）：xref 挂载时经 stageServices 注入；缺省 → 用核心内置兜底 */
+  referenceAnalysis?: ReferenceAnalysisCapability | null;
   gitManager: GitManager;
   conversationStore: ConversationStore;
   configCenter?: RuntimeConfigCenter;
@@ -342,7 +346,33 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
     // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
     if (call?.name && isFlowTool(call.name)) continue;
 
-    const sanitized = sanitizeToolResult(result.content);
+    // ── 引用自检（核心后置消费者，Phase 6）──────────────────────────────
+    // 改完文件后提示"谁引用了它"。**放核心而非 xref 插件的钩子订阅**，两个理由：
+    //   ① 兜底永远在：xref 未挂载 / 索引陈旧时走内置字符串扫描 = 从前的行为，与插件有无无关；
+    //   ② 子代理同样覆盖：子代理跑同一套 stages，核心消费者自动生效（插件订阅会漏掉它们，
+    //      E2 已定性子代理不接插件钩子）。
+    // 输入取**结构事实账本**（diff-channel 的 before/after）+ 工具入参，不反推 ——
+    // 此刻磁盘上已是新内容，反推不出来（B1 增记 before/after 正是为此）。
+    let refNote = '';
+    if (call && (call.name === 'edit' || call.name === 'write') && typeof call.input.file_path === 'string') {
+      try {
+        const { popDiff: popForRefs } = await import('../tools/diff-channel.js');
+        const entry = popForRefs(call.input.file_path);
+        if (entry?.before !== undefined && entry.after !== undefined) {
+          refNote = await analyzeReferences(ctx.referenceAnalysis, {
+            toolName: call.name,
+            filePath: call.input.file_path,
+            before: entry.before,
+            after: entry.after,
+            args: call.input,
+          });
+        }
+      } catch {
+        // 引用自检失败不影响工具返回值（与从前一致）
+      }
+    }
+
+    const sanitized = sanitizeToolResult(refNote ? `${result.content}\n\n${refNote}` : result.content);
     const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
       call.input.file_path.startsWith(bufferDir);
     const content = skipBuffer ? sanitized : ctx.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);

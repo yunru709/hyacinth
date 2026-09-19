@@ -8,7 +8,6 @@ import { getLastReadTime, recordFileWrite } from './file-tracker.js';
 import { refuseWriteUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { adaptEolTo } from '../utils/eol.js';
-import { autoReferenceCheck } from './reference-analysis.js';
 
 /**
  * WriteTool — 创建或覆盖文件
@@ -133,24 +132,9 @@ export class WriteTool implements Tool {
       if (diag) result += '\n\n' + diag;
     } catch { /* 诊断失败不影响工具返回值 */ }
 
-    // ── 自动引用搜索：覆盖已有文件时搜索变更符号的引用 ──
-    if (oldContent) {
-      try {
-        const ref = autoReferenceCheck(filePath, oldContent, oldContent, content);
-        if (ref.text) result += '\n\n' + ref.text;
-      } catch { /* 引用搜索失败不影响工具返回值 */ }
-    }
-
     return result;
   }
 }
 
 
 
-// ─────────────────────────────────────────────────────────────────────
-// 仅测试用导出：特征化测试与守卫测试需要直接拿到内联副本的实现。
-// **刻意放在上面的标记块之外** —— 否则 write.ts 与 edit.ts 两份块就不再逐字节一致，
-// 守卫测试（inlined-copies-sync.test.ts）也就失去意义。
-// 这不是给别的工具调用的 API：工具之间不得互相依赖（verify-layers 规则 6）。
-// ─────────────────────────────────────────────────────────────────────
-export { autoReferenceCheck as __autoReferenceCheckForTest };

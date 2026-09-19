@@ -2004,6 +2004,10 @@ export class AgentLoop {
       loopHooks: this.loopHooks,
       turnRecorder: this.turnRecorder,
       dependencyAnalyzer: this.dependencyAnalyzer,
+      // 引用分析能力（Phase 6）：插件经 ctx.registerStageService 注册/摘除，这里随取随用
+      referenceAnalysis: this.stageServices.get('referenceAnalysis') as
+        | import('../tools/reference-analysis.js').ReferenceAnalysisCapability
+        | undefined,
       gitManager: this.gitManager,
       conversationStore: this.conversationStore,
       configCenter: this.configCenter,

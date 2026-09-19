@@ -8,7 +8,6 @@ import { getLastReadTime, getAnyReadTime, recordFileWrite } from './file-tracker
 import { refuseEditUnread } from './read-gate.js';
 import { maybeRunDiagnostics } from './diagnostics.js';
 import { detectEol, applyEol } from '../utils/eol.js';
-import { autoReferenceCheck } from './reference-analysis.js';
 
 /**
  * EditTool — 在文件中精确替换匹配的字符串 或 按行号替换
@@ -148,17 +147,6 @@ export class EditTool implements Tool {
       const diag = await maybeRunDiagnostics(process.cwd());
       if (diag) result += '\n\n' + diag;
     } catch { /* 诊断失败不影响工具返回值 */ }
-
-    // ── 自动引用搜索：提取变更符号 → 项目内搜索引用 ──
-    try {
-      const effectiveOld = oldString ?? (() => {
-        const ls = (args.line_start as number) ?? 1;
-        const lc = (args.line_count as number) ?? 1;
-        return content.split('\n').slice(ls - 1, ls - 1 + lc).join('\n');
-      })();
-      const ref = autoReferenceCheck(filePath, content, effectiveOld, newString);
-      if (ref.text) result += '\n\n' + ref.text;
-    } catch { /* 引用搜索失败不影响工具返回值 */ }
 
     return result;
   }
