@@ -18,6 +18,7 @@
  * 不改这里 —— 这样"无插件时行为与从前完全一致"是可验证的事实，而不是承诺。
  */
 import fsSync from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 // ── [内联副本 begin]（与另一份逐字节一致，由守卫测试比对）────────────────
@@ -232,35 +233,58 @@ defineLang(
 
 // ── 项目根目录探测 ───────────────────────────────────────────
 
-function findProjectRoot(filePath: string): string {
-  let dir = path.dirname(path.resolve(filePath));
+/**
+ * 找"项目根"——**带上溯边界**（2026-09-19 修）。
+ *
+ * 为什么要有边界：原实现会一路向上走到用户目录 ✗。而 `C:\Users\<name>\package.json`
+ * 常常存在（某次 npm init 的残留即可），于是扫描根落到**用户目录** ✗ ⇒ 500 文件上限被
+ * 系统目录吃光 ⇒ **连自己项目里的引用都扫不到**（实测：产出直接为空串）。
+ *
+ * 规则：
+ *   · 向上走，但**不许越过 home 与盘根**；边界本身不作为项目根 ✓
+ *   · 边界内找不到任何标记 ⇒ 退回**文件所在目录** ✓
+ *   · 若连文件所在目录也在边界上（= 等于"扫描整个用户目录"）⇒ 返回 **null**，
+ *     调用点**不扫描** —— 宁可"不说"，也不去翻用户目录 ✓
+ *   · 主用例（仓库内改文件）不受影响：`.git` 在 home 之下，第一轮就命中 ✓
+ */
+function findProjectRoot(filePath: string): string | null {
+  const dir = path.dirname(path.resolve(filePath));
 
-  // 先找 .git
-  let current = dir;
-  while (true) {
-    if (fsSync.existsSync(path.join(current, '.git'))) {
-      return current;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
+  // 边界：home 与盘根（Windows 下大小写不敏感、尾部斜杠不敏感）
+  const norm = (p: string): string => {
+    const r = path.resolve(p).replace(/[\\/]+$/, '');
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  const home = norm(os.homedir());
+  const driveRoot = norm(path.parse(path.resolve(dir)).root);
+  const atBoundary = (p: string): boolean => {
+    const n = norm(p);
+    return n === home || n === driveRoot;
+  };
 
-  // 没 .git 找其他项目标记
-  current = dir;
-  while (true) {
-    for (const marker of PROJECT_MARKERS) {
-      if (fsSync.existsSync(path.join(current, marker))) {
-        return current;
+  /** 从 dir 向上找，命中任一标记即返回；到边界即停（边界本身不算项目根） */
+  const walkUp = (markers: readonly string[]): string | null => {
+    let current = dir;
+    while (true) {
+      if (atBoundary(current)) return null;
+      for (const marker of markers) {
+        if (fsSync.existsSync(path.join(current, marker))) return current;
       }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
     }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
+    return null;
+  };
 
-  // 什么都没有，退回文件所在目录
-  return dir;
+  // 先找 .git（严格优先），再找其他项目标记 —— 两轮都受同一边界约束
+  const byGit = walkUp(['.git']);
+  if (byGit) return byGit;
+  const byMarker = walkUp(PROJECT_MARKERS);
+  if (byMarker) return byMarker;
+
+  // 都没找到：退回文件所在目录；若它本身就在边界上，则**不扫描**（见函数头说明）
+  return atBoundary(dir) ? null : dir;
 }
 
 // ── 语言检测 ─────────────────────────────────────────────────
@@ -432,7 +456,10 @@ export function autoReferenceCheck(
     if (!lang) return { text: '' };
 
     // 2. 检测项目根目录
+    // null = 边界内找不到可信的项目根（见 findProjectRoot 的说明）⇒ **不扫描**：
+    // 与其翻遍用户目录、把 500 文件上限浪费在系统文件上，不如如实"没有结论"。
     const projectRoot = findProjectRoot(filePath);
+    if (!projectRoot) return { text: '' };
 
     // 3. 符号判定（与能力侧共用同一函数 —— 见 resolveChangedSymbols 的说明）
     const symbols = resolveChangedSymbols(filePath, fileContent, oldString, newString);
