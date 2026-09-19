@@ -13,6 +13,20 @@ import type { Message, ToolUseContent, ToolResultContent, ThinkingContent } from
 
 const counter = new TokenCounter();
 
+describe('图片 token 估算（官方上界）', () => {
+  it('图片不随 base64 长度膨胀：456KB 的图 ≈ 上界，而不是 ~117K ✗', () => {
+    const counter = new TokenCounter();
+    const msg = (n: number) => ({ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(n) } },
+    ] });
+    const small = counter.countMessageTokens(msg(1024) as never);
+    const big = counter.countMessageTokens(msg(456 * 1024) as never);
+    expect(big, '官方上限 1024（含少量结构开销）').toBeLessThanOrEqual(1024 + 16);
+    expect(big, '不应随 base64 长度增长（旧实现这里会到 ~117K）').toBe(small);
+    expect(big).toBeGreaterThan(0);
+  });
+});
+
 describe('TokenCounter.countTokens（容忍特殊 token）', () => {
   it('普通文本正常计数', () => {
     expect(counter.countTokens('hello world')).toBeGreaterThan(0);

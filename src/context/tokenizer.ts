@@ -25,6 +25,22 @@ function getEncoding() {
 
 // --- TokenCounter ---
 
+/**
+ * 单张图片的 token **上界** —— 官方口径（DeepSeek「图像理解 › Token 用量」）。
+ *
+ * 官方规则：图片按尺寸折算 token；进模型前自动缩放（小于约 544×544 者按长宽比放大，
+ * 更大者按长宽比缩小到约 1300×1300 等效像素）⇒ **每张图上限 1024 tokens**
+ * （所以 2000×2000 与 5000×5000 缩放后消耗相同；多图每张独立计算）。
+ *
+ * 为什么取上界而不是精算：这是**发送前的预算估算**（用于压缩判定），
+ * 取上界**不会低估**（宁可略早压缩，也不至于溢出），且与常见大图基本吻合 ✓。
+ *
+ * 反面教材（2026-09-19 修）：旧实现按 base64 字节数折算（data.length * 0.75 / 4）✗
+ * ⇒ 一张 456 KB 的图被算成 ~117K tokens（实测 harness 报 116869）—— 约 114 倍虚高 ✗，
+ * 显示上"读图暴涨几百 K"，且把压缩阈值判定也带偏 ✗。
+ */
+const IMAGE_TOKEN_UPPER_BOUND = 1024;
+
 export class TokenCounter {
   /**
    * Count tokens for a plain text string.
@@ -90,11 +106,12 @@ export class TokenCounter {
         return this.countTokens(trc.content) + 4;
       }
       case 'image': {
-        const img = content as ImageContent;
-        if (img.source.type === 'url') return 1000;  // 远程 URL，保守估算
-        // base64: decoded ≈ data.length * 0.75 bytes, ~1 token per 4 bytes
-        return Math.max(1, Math.ceil(img.source.data.length * 0.75 / 4)) + 4;
+        // 官方上界（见 IMAGE_TOKEN_UPPER_BOUND 注释）；URL 与 base64 都是同一张图 ⇒ 同价 ✓
+        return IMAGE_TOKEN_UPPER_BOUND;
       }
+      // ⚠️ 未收口（2026-09-19）：video/audio 仍是"按 base64 字节数折算"✗，同样会虚高 ——
+      //   本次只按官方文档修了 image（唯一有权威口径的）。原生视频/音频注入是少数路径，
+      //   而**视频抽帧**走的是 image 分支 ✓（已被上界覆盖 ✓）。要修需先拿到对应厂商的口径。
       case 'video': {
         const v = content as VideoContent;
         if (v.source.type === 'file') return 200; // 文件引用占位
