@@ -399,9 +399,9 @@ export class AgentLoop {
   /** 图片索引存储（会话级） */
   readonly imageStore = new ImageStore();
   /** 待注入图片队列（view_image 工具填充，下次 compose 前消费） */
-  readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string }> = [];
+  readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string; origin?: string }> = [];
   /** 原生视频/音频待注入（view_media 产出；context 阶段按 inputTypes 门控注入） */
-  readonly pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string }> = [];
+  readonly pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string; origin?: string }> = [];
   /** 渠道预取图片（渠道层在 run() 前写入，_runInternal 一次性消费） */
   channelImages: Array<{ data: string; media_type: string }> | null = null;
   /** Fallback 通知（onFallback 回调写入，runTurn 一次性消费后清空） */

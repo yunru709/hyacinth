@@ -448,8 +448,8 @@ export interface ViewMediaOptions {
 
 export function createViewMediaTool(
   imageStore: ImageStore,
-  pendingImageInjections: Array<{ imgId: string; data: string; media_type: string }>,
-  pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string }>,
+  pendingImageInjections: Array<{ imgId: string; data: string; media_type: string; origin?: string }>,
+  pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string; origin?: string }>,
   opts: ViewMediaOptions = {},
 ) {
   return {
@@ -475,12 +475,12 @@ export function createViewMediaTool(
       if (imageStore.get(target) || IMAGE_MIME_MAP[ext]) {
         const img = imageStore.get(target);
         if (img) {
-          pendingImageInjections.push({ imgId: target, data: img.data, media_type: img.media_type });
+          pendingImageInjections.push({ imgId: target, data: img.data, media_type: img.media_type, origin: img.source_path || undefined });
           return `[Image #${target} retrieved]\nThe image will be visible in the next response.`;
         }
         const loaded = await loadImageFileToStore(target, imageStore);
         if (loaded) {
-          pendingImageInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type });
+          pendingImageInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type, origin: target });
           return `[Image #${loaded.id} loaded from ${target}]\nThe image will be visible in the next response.`;
         }
         return `Error: 无法读取图片 ${target}`;
@@ -494,7 +494,7 @@ export function createViewMediaTool(
           const inlineMax = opts.getVideoInlineMaxBytes?.() ?? DEFAULT_VIDEO_INLINE_MAX;
           if (supportsVideo && stat.size <= inlineMax) {
             const data = (await fs.promises.readFile(target)).toString('base64');
-            pendingMediaInjections.push({ type: 'video', media_type: VIDEO_MIME_MAP[ext], data });
+            pendingMediaInjections.push({ type: 'video', media_type: VIDEO_MIME_MAP[ext], data, origin: target });
             return `[Video queued for native injection: ${target}]\nThe video will be visible in the next response (model supports video input).`;
           }
           const frames = await extractFrames(target, {
@@ -515,7 +515,7 @@ export function createViewMediaTool(
             }
             const b64 = buf.toString('base64');
             const imgId = imageStore.store(b64, outMime, target);
-            pendingImageInjections.push({ imgId, data: b64, media_type: outMime });
+            pendingImageInjections.push({ imgId, data: b64, media_type: outMime, origin: target + '（视频抽帧 ' + (count + 1) + '/' + frames.length + '）' });
             count++;
           }
           return `[Video ${target} → ${count} frames extracted as images]\nThe frames will be visible in the next response.`;
@@ -532,7 +532,7 @@ export function createViewMediaTool(
           const inlineMax = opts.getAudioInlineMaxBytes?.() ?? DEFAULT_AUDIO_INLINE_MAX;
           if (supportsAudio && stat.size <= inlineMax) {
             const data = (await fs.promises.readFile(target)).toString('base64');
-            pendingMediaInjections.push({ type: 'audio', media_type: AUDIO_MIME_MAP[ext], data });
+            pendingMediaInjections.push({ type: 'audio', media_type: AUDIO_MIME_MAP[ext], data, origin: target });
             return `[Audio queued for native injection: ${target}]\nThe audio will be visible in the next response (model supports audio input).`;
           }
           return `[Audio file: ${target}]`;

@@ -27,6 +27,8 @@ export interface PendingImage {
   imgId: string;
   data: string;
   media_type: string;
+  /** 来源路径（view_media 入队时填入）—— 落盘标记靠它带上位置，便于再次取回 ✓ */
+  origin?: string;
 }
 
 /** 流内工具执行结果（inline tool） */
@@ -143,7 +145,7 @@ export interface TurnState {
   kbQuery: string;
   pendingImageInjections: PendingImage[];
   /** 原生视频/音频待注入（view_media 产出；context 阶段按 inputTypes 门控注入） */
-  pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string }>;
+  pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string; origin?: string }>;
   /** 配置热更新标记（input 阶段消费） */
   contextDirty: boolean;
 

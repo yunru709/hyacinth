@@ -23,7 +23,27 @@
  *   uncompressedMsgs / kbQuery / userInput
  *
  * 行为与原 runTurn 内联代码逐位等价（M4 只迁移不改语义）。
+ *
+ * 2026-09-19 变更（用户裁定）：图片/视频/音频**不落历史** —— 注入时只把模态数据放进**本轮请求**，
+ * 落盘改为一行**剥离标记**（带来源路径 ⇒ 需要时再 view_media 取回）。原先是连 base64 一起 store.append，
+ * 实测一张图 608.8 KB 成了永久历史、每轮重发（占十几万 token）。详见 strippedMarker()。
  */
+
+/**
+ * 模态数据的**剥离标记** —— 落盘用，替代原先的 base64 消息。
+ *
+ * 为什么：模态数据应**一次性**发送。标记很小、且**自带来源路径**，
+ * 于是"看完就从上下文剥离"与"还能再取回来"这两件事同时成立 ✓。
+ * 头部 ASCII 键 MediaStripped 是给 grep 用的（中文匹配在某些 shell 里不可靠）。
+ */
+function strippedMarker(kind: string, id: string, origin: string | undefined): Message {
+  const src = origin ? '来源: ' + origin : '来源未记录（可能是渠道附图）—— 需要时请重发';
+  const how = origin ? '；再看一次就调 view_media("' + origin + '") ✓' : '';
+  return {
+    role: 'user',
+    content: [{ type: 'text', text: '[MediaStripped ' + kind + ' #' + id + ' | ' + src + how + ']' }],
+  };
+}
 
 import type { Message, ToolDefinition } from '../../types.js';
 import type { ToolBundleRegistry } from '../../tools/bundle-registry.js';
@@ -135,8 +155,10 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
               { type: 'text', text: `[Re-examining Image #${pi.imgId}]` },
             ],
           };
-          await store.append(sessionDir, imgMsg);
+          // 本轮请求**带图**（模型只看这一次 —— 这就是"看完即剥离"）✓
           effectiveHistory = [...effectiveHistory, imgMsg];
+          // 落盘只留标记：base64 **不进历史**（否则每轮重发 —— 用户 2026-09-19 裁定）✓
+          await store.append(sessionDir, strippedMarker('图片', pi.imgId, pi.origin));
         }
       }
 
@@ -158,8 +180,9 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
               { type: 'text', text: `[Re-examining ${pi.type === 'video' ? 'Video' : 'Audio'} #${pi.data.slice(0, 8)}…]` },
             ],
           };
-          await store.append(sessionDir, mediaMsg);
+          // 同上：本轮带媒体，落盘只留标记 ✓
           effectiveHistory = [...effectiveHistory, mediaMsg];
+          await store.append(sessionDir, strippedMarker(pi.type === 'video' ? '视频' : '音频', pi.type, pi.origin));
         }
       }
 

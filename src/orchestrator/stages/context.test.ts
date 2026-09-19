@@ -162,13 +162,20 @@ describe('context 阶段（builtin:layered-composer）', () => {
       baseState({
         activeProvider: provider({ vision: true }) as never,
         pendingImageInjections: [
-          { imgId: 'img1', data: 'base64data', media_type: 'image/png' } as never,
+          { imgId: 'img1', data: 'base64data', media_type: 'image/png', origin: 'C:\\tmp\\pic.png' } as never,
         ],
       }),
       ctx,
     );
 
     expect(append).toHaveBeenCalledTimes(1);
+    // ★ 2026-09-19 用户裁定：模态数据**一次性** —— 落盘只留**标记**，base64 **绝不进历史** ✗
+    //   （此前实测一张图 608.8 KB 成了永久历史、每轮重发，占十几万 token）
+    const appended = JSON.stringify(append.mock.calls[0][1]); // append(sessionDir, msg) ⇒ 消息是第 2 个参数 ✓
+    expect(appended, 'base64 落进历史了 —— 它会被每轮重发').not.toContain('base64data');
+    expect(appended, '应落一行带位置的可检索标记').toContain('MediaStripped');
+    expect(appended).toContain('图片');
+    expect(appended, '标记必须带上来源，否则我再取不回来').toContain('pic.png');
     // compose 收到含图片消息的历史
     const composeArg = (ctx as never as { require(k: string): { compose: ReturnType<typeof vi.fn> } }).require('contextComposer').compose;
     const historyArg = composeArg.mock.calls[0][0].history as Message[];
