@@ -114,6 +114,8 @@ export interface UiProtocolSessionBackend {
   getGitSummary?: () => import('../../ui-protocol/domains/supervisor.js').SupervisorGitLike | null | Promise<import('../../ui-protocol/domains/supervisor.js').SupervisorGitLike | null>;
   /** 架构监督数据（arch 域用；对应 AgentComponents 的扩展/本体注册表，可选）。 */
   getArch?: () => import('../../ui-protocol/domains/arch.js').ArchDataLike | null;
+  /** 联动清单的声明态文本（可选；由 gateway 后端提供 —— 协议层不得直连 supervisor） */
+  getToolLinks?: () => string | null;
   /** 动态获取工具注册表（tool 域用；对应 AgentComponents.toolRegistry，可选）。 */
   getToolRegistry?: () => ToolRegistryLike | null;
   /** 动态获取工具包注册表（bundle 域用；对应 AgentComponents.bundleRegistry，可选）。 */
@@ -386,7 +388,11 @@ export class UiProtocolSession {
       getArch: () => backend.getArch?.() ?? null,
       // 联动段：读引用自检的运行态快照并渲染（快照由能力在每次分析后 best-effort 写入）。
       // 插件启用态此处传 null ⇒ 渲染为"状态未知"，不猜；能力是否注册以快照的 registered 为准。
-      getLinks: () => formatLinksSection(readSnapshot(), null),
+      // 声明态（backend 提供；未提供则只剩运行态）+ 运行态（本地快照）
+      getLinks: () =>
+        [backend.getToolLinks?.(), formatLinksSection(readSnapshot(), null)]
+          .filter(Boolean)
+          .join('\n\n'),
     }));
     this.server.registerDomain('mcp', createMCPDomain({ getMCP: () => backend.getMCP?.() ?? null }));
     // companion 域：依赖 loop / companionMgr / routerSwitcher，延迟解析。

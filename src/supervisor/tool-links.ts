@@ -117,6 +117,32 @@ export function toolLinksPath(): string {
  *   故本轮明确留白（与 veto/intercept 同款处理：**不假装支持**）。
  *
  */
+/**
+ * 渲染「声明态」—— 清单里声明了哪些联动、哪些被停用。
+ *
+ * 与 utils/reference-analysis-state.ts 的 formatLinksSection（**运行态**：能力计数、最近原因）
+ * 合起来才是"联动全图"：
+ *   声明态回答「该发生什么」（来自清单，是**意图**）；
+ *   运行态回答「实际发生了什么」（来自快照，是**事实**）。
+ * 两者分开呈现是有意的：只报运行态会让人以为"没跑=没声明"，只报声明态则看不出跑没跑。
+ *
+ * 纯函数、无 IO ⇒ CLI（gateway）与 UI 后端各自取来清单后调它，不重复实现。
+ */
+export function formatDeclaredToolLinks(manifest: ToolLinksManifest): string {
+  const lines: string[] = ['── 联动（声明态 · tool-links.json）──'];
+  if (manifest.links.length === 0) {
+    lines.push('  （清单为空 —— 不会有任何联动被触发）');
+    return lines.join('\n');
+  }
+  for (const l of manifest.links) {
+    const state = l.enabled === false ? '停用' : '启用';
+    lines.push('  [' + state + '] ' + l.on + ' → ' + l.handler);
+  }
+  const disabled = manifest.links.filter((l) => l.enabled === false).length;
+  lines.push('  共 ' + manifest.links.length + ' 条，其中停用 ' + disabled + ' 条');
+  return lines.join('\n');
+}
+
 export function defaultToolLinks(): ToolLinksManifest {
   return {
     version: TOOL_LINKS_VERSION,

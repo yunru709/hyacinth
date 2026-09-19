@@ -91,6 +91,7 @@ import { createModelCmds } from './tui-model-cmds.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
+import { formatDeclaredToolLinks, getCurrentToolLinks } from '../supervisor/tool-links.js';
 
 // ─── Main TUI ─────────────────────────────────────────────────────────────
 export async function runTui(
@@ -908,6 +909,12 @@ export async function runTui(
         return { isRepo: true, dirty, lastAutoCommit: autoCommits[0]?.message ?? null };
       },
       // arch 域（架构监督）：目录/名单/生效条目来自装配组件；toggle 写项目级名单
+      // 联动清单的**声明态**（第三圈）：协议层的 arch 域经 backend 取（协议层不得直连 supervisor）。
+      // 与运行态（utils 的快照）由会话侧拼接 —— 声明"该发生什么"、运行态"实际发生了什么"。
+      getToolLinks: () => {
+        const manifest = getCurrentToolLinks();
+        return formatDeclaredToolLinks(manifest);
+      },
       getArch: () => {
         const ext = localComponents?.extensionRegistry as
           import('../supervisor/extension-registry.js').ExtensionRegistry | undefined;
