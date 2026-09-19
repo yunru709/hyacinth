@@ -6,7 +6,6 @@ import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, getAnyReadTime, recordFileWrite } from './file-tracker.js';
 import { refuseEditUnread } from './read-gate.js';
-import { maybeRunDiagnostics } from './diagnostics.js';
 import { detectEol, applyEol } from '../utils/eol.js';
 
 /**
@@ -141,12 +140,6 @@ export class EditTool implements Tool {
 
     // 记录写入
     recordFileWrite(filePath);
-
-    // ── 自动诊断：修改后运行类型检查/编译检查 ──
-    try {
-      const diag = await maybeRunDiagnostics(process.cwd());
-      if (diag) result += '\n\n' + diag;
-    } catch { /* 诊断失败不影响工具返回值 */ }
 
     return result;
   }

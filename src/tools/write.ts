@@ -6,7 +6,6 @@ import { computeDiff } from '../utils/diff.js';
 import { pushDiff } from './diff-channel.js';
 import { getLastReadTime, recordFileWrite } from './file-tracker.js';
 import { refuseWriteUnread } from './read-gate.js';
-import { maybeRunDiagnostics } from './diagnostics.js';
 import { adaptEolTo } from '../utils/eol.js';
 
 /**
@@ -125,12 +124,6 @@ export class WriteTool implements Tool {
       result += `\n... (${lines.length - 5} more lines)`;
     }
     result += `\n--- End preview ---`;
-
-    // ── 自动诊断：修改后运行类型检查/编译检查 ──
-    try {
-      const diag = await maybeRunDiagnostics(process.cwd());
-      if (diag) result += '\n\n' + diag;
-    } catch { /* 诊断失败不影响工具返回值 */ }
 
     return result;
   }

@@ -346,9 +346,11 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
     // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
     if (call?.name && isFlowTool(call.name)) continue;
 
+    const diagNote = await diagnosticsNoteFor(call); // 诊断在前（保持现状的可见顺序）
     const refNote = await referenceNoteFor(ctx, call);
 
-    const sanitized = sanitizeToolResult(refNote ? `${result.content}\n\n${refNote}` : result.content);
+    const withNotes = [result.content, diagNote, refNote].filter((x) => x).join('\n\n');
+    const sanitized = sanitizeToolResult(withNotes);
     const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
       call.input.file_path.startsWith(bufferDir);
     const content = skipBuffer ? sanitized : ctx.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
@@ -612,6 +614,30 @@ function findWriteConflicts(calls: ToolCall[], projectDir: string): Set<number> 
  * ② 输入取**结构事实账本**（diff-channel 的 before/after）+ 工具入参，不反推（磁盘上已是新内容）；
  * ③ 任何异常都返回空串 —— 自检失败绝不影响工具返回值。
  */
+/**
+ * 写后诊断注记（联动体系的一员：从 write/edit 工具里搬出来的**后置消费者**）。
+ *
+ * 搬出来的理由（三律③）：三处工具里写着**逐字相同**的 try/catch + 追加（write/edit/multi-edit），
+ * 属"反应写进被联动的工具"；且它是**纯附加**（只看 process.cwd()，不依赖工具内部）⇒ 适合做消费者。
+ *
+ * "这次调用真的写了吗"的判据 = **diff 账本里有条目**（被读门控拒绝的调用不推 diff）——
+ * 用 peek（读而不删），不抢别的消费者。
+ * ⚠️ multi_edit 暂留内联：它**不推 diff**（见文件头说明），该判据对它无效。
+ */
+async function diagnosticsNoteFor(call: ToolCall | undefined): Promise<string> {
+  if (!call || (call.name !== 'edit' && call.name !== 'write')) return '';
+  const filePath = call.input?.file_path;
+  if (typeof filePath !== 'string') return '';
+  try {
+    const { peekDiff } = await import('../tools/diff-channel.js');
+    if (!peekDiff(filePath)) return ''; // 没写成功（如被读门控拒绝）⇒ 不诊断
+    const { maybeRunDiagnostics } = await import('../tools/diagnostics.js');
+    return (await maybeRunDiagnostics(process.cwd())) ?? '';
+  } catch {
+    return ''; // 诊断失败不影响工具返回值（与从前一致）
+  }
+}
+
 async function referenceNoteFor(ctx: ToolExecContext, call: ToolCall | undefined): Promise<string> {
   if (!call || (call.name !== 'edit' && call.name !== 'write')) return '';
   const filePath = call.input.file_path;
@@ -666,13 +692,14 @@ export async function flushInlineResults(ctx: ToolExecContext, toolCalls: ToolCa
     outcomes.push({ id: tc.id, name: tc.name, ok: !stored.isError });
     // ── 引用自检（与批量路径**同一份实现**，见 referenceNoteFor）──
     // P0 修复点：inline 是真实 provider 的常态路径，此前完全不经消费者。
+    const diagNote = await diagnosticsNoteFor(tc); // 诊断在前（与批量路径一致）
     const refNote = await referenceNoteFor(ctx, tc);
     const toolResultMessage: Message = {
       role: 'user',
       content: {
         type: 'tool_result',
         tool_use_id: tc.id,
-        content: refNote ? `${stored.content}\n\n${refNote}` : stored.content,
+        content: [stored.content, diagNote, refNote].filter((x) => x).join('\n\n'),
         is_error: stored.isError,
       } as ToolResultContent,
     };

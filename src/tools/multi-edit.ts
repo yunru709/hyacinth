@@ -237,7 +237,9 @@ export class MultiEditTool implements Tool {
       result += `${basename}: ${plan.matchCount} replacement${plan.matchCount > 1 ? 's' : ''}\n`;
     }
 
-    // ── 自动诊断：修改后运行类型检查/编译检查 ──
+    // ── 自动诊断（**暂留内联**，见 loop-tools.ts diagnosticsNoteFor 的说明）──
+    // 该行为已迁为"核心后置消费者"（write/edit 两工具已搬走）；multi_edit 因**不推 diff**，
+    // 消费者无法判断"这次是否真的写了"（被读门控拒绝时不该诊断）⇒ 待它补上 diff 结构事实后再搬。
     try {
       const diag = await maybeRunDiagnostics(process.cwd());
       if (diag) result += '\n\n' + diag;
