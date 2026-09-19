@@ -413,6 +413,10 @@ export class XrefManager {
       'UPDATE files SET language = ?, hash = ?, last_parsed_at = ?, mtime_ms = ?, parser = ? WHERE path = ?',
     );
     const selectFileId = this.db.prepare('SELECT id FROM files WHERE path = ?');
+    // 重解析前清旧子行 —— 否则每次重建都把 symbols/refs/imports 再插一遍（索引成倍膨胀）
+    const delSymbolsByFile = this.db.prepare('DELETE FROM symbols WHERE file_id = ?');
+    const delRefsByFile = this.db.prepare('DELETE FROM refs WHERE file_id = ?');
+    const delImportsByFile = this.db.prepare('DELETE FROM imports WHERE from_file_id = ?');
     const insertSymbol = this.db.prepare(
       'INSERT INTO symbols (name, kind, file_id, line, col, signature, is_exported, parent_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     );
@@ -522,9 +526,17 @@ export class XrefManager {
         return id;
       };
 
-      // ── 阶段一：全部文件行就位 ──
+      // ── 阶段一：全部文件行就位 + 清掉这些文件的旧子行 ──
+      //
+      // 为什么必须清（2026-09-19 真实仓库冒烟发现）：原先只做 ensureFileId（已有的行走
+      // UPDATE），旧子行原样留着，阶段二又把新解析结果插进去 ⇒ 同一文件同名符号出现多份、
+      // 库随每次重建成倍增长（实测 549→1098→1647）。
+      // 夹具测不出来是因为每个用例都在**全新临时库**上跑，一次插入不产生累积。
       for (const { file, data, parserName } of parsedFiles) {
-        ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0, parser: parserName });
+        const fileId = ensureFileId(file, data.language, { hash: data.hash, mtime: mtimeByPath.get(normPath(file)) ?? 0, parser: parserName });
+        delSymbolsByFile.run(fileId);
+        delRefsByFile.run(fileId);
+        delImportsByFile.run(fileId); // 只清"从本文件出发"的边；指向它的边属于别的文件，各自清理
       }
 
       // ── 阶段二：子表写入（fileId 一律取自映射） ──
