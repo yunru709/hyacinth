@@ -99,7 +99,12 @@ describe('scratchpad（Zone 5 临时记事本）', () => {
     expect(lines[0]).toBe(scratchpadPathLine());
     expect(lines[0]).toContain(homeRelative(scratchpadPath()));
     expect(lines[0]).not.toContain(path.resolve(scratchpadPath()));
-    expect(fs.readFileSync(scratchpadPath(), 'utf-8')).toContain('memory.md'); // 与 memory 同目录的提示
+    // 预置必须写明**用途**（2026-09-19 用户定）：先记这儿 → 写时整理 → 快满时精炼成记忆 ✓
+    // （原断言是字面量 'memory.md' —— 旧措辞的偶然细节 ✗，一改文案就撞死，换成钉住用途 ✓）
+    const seedText = fs.readFileSync(scratchpadPath(), 'utf-8');
+    expect(seedText, '要写明「新东西先记这儿」').toContain('先记这儿');
+    expect(seedText, '要写明「快满时精炼为记忆」').toContain('精炼');
+    expect(seedText, '要说明它比 memory 更临时').toContain('memory');
   });
 
   it('⑤ 幂等：已存在时**绝不覆盖**（agent 写的笔记不能被吞）', () => {
