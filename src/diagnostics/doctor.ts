@@ -9,8 +9,9 @@
  *   5. 配置文件（~/.agent/config.json）
  *   6. 知识库状态（kb.sqlite、files/ 目录）
  *   7. API Key 检测
+ *   8. xref cache 体检（总量 / top 库 / 孤儿清单；--fix 回收孤儿）
  *
- * --fix 参数自动安装缺失依赖
+ * --fix 参数自动安装缺失依赖、并回收孤儿索引库
  */
 
 import os from 'node:os';
@@ -19,6 +20,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import Database from '../tools/sqlite.js';
+import { isForbiddenAnchor } from '../tools/xref/anchor.js';
 
 // 本文件编译为 ESM，作用域内没有 require。
 // doctor 由 dist/index.js 运行，createRequire 以 dist/diagnostics/ 本文件为基准解析，
@@ -206,6 +208,145 @@ function checkKnowledgeBase(): CheckResult {
   };
 }
 
+/** xref cache 体检的原始数据（纯函数产出，便于测试 —— 打印只是它的一个消费者） */
+export interface XrefCacheReport {
+  total_bytes: number;
+  dbs: {
+    name: string;
+    path: string;
+    bytes: number;
+    root_dir: string;
+    last_used_at: string;
+    /** 孤儿 = 能读到 root_dir，但那个目录已不存在（读不到的不算，避免误删） */
+    orphan: boolean;
+    /**
+     * 可疑根 = root_dir 落在禁区（主目录本身 / 主目录的祖先）。
+     * 与"孤儿"不同：目录**存在**，但把它当项目根会把无关目录整片扫进来 ——
+     * 这正是 2026-09-19 那起 1.18GB 事故的特征（root = C:\Users\74689）。
+     */
+    suspect_root: boolean;
+  }[];
+}
+
+/** 该库的真实占用（主库 + -wal + -shm；只算主库会低估，WAL 实测可达主库 55%） */
+function dbTripleBytes(base: string): number {
+  let total = 0;
+  for (const p of [base, `${base}-wal`, `${base}-shm`]) {
+    try { total += fs.statSync(p).size; } catch { /* 不存在则跳过 */ }
+  }
+  return total;
+}
+
+/**
+ * 扫描 xref cache，产出体检报告。
+ * 打不开的库（被别的会话占用 / 损坏）**按未知处理、不算孤儿** —— 宁可漏报也不能误删。
+ */
+export function xrefCacheReport(cacheDir: string): XrefCacheReport {
+  if (!fs.existsSync(cacheDir)) return { total_bytes: 0, dbs: [] };
+  const dbs: XrefCacheReport['dbs'] = [];
+  for (const name of fs.readdirSync(cacheDir)) {
+    if (!name.startsWith('xref-') || !name.endsWith('.sqlite')) continue;
+    const full = path.join(cacheDir, name);
+    let rootDir = '';
+    let lastUsed = '';
+    let db: ReturnType<typeof Database> | null = null;
+    try {
+      db = Database(full, { readonly: true });
+      const get = (k: string): string =>
+        (db!.prepare('SELECT value FROM meta WHERE key = ?').get(k) as { value?: string } | undefined)?.value ?? '';
+      rootDir = get('root_dir');
+      lastUsed = get('last_used_at');
+    } catch {
+      // 打不开（非数据库 / 被占用）→ rootDir 留空 → 不判孤儿（安全优先）
+    } finally {
+      // **必须 finally 关闭**：构造成功但 prepare 抛错时，若 close() 只写在 try 末尾就永远不会执行
+      //（实测后果：体检后缓存文件被独占，后续清理 EBUSY —— 由治理测试的清理阶段抓住）
+      try { db?.close(); } catch { /* 关不掉也无妨，不掩盖上面的判定结果 */ }
+    }
+    let suspectRoot = false;
+    if (rootDir) {
+      try {
+        suspectRoot = isForbiddenAnchor(rootDir);
+      } catch {
+        suspectRoot = false; // 判定不了就不判可疑
+      }
+    }
+    dbs.push({
+      name,
+      path: full,
+      bytes: dbTripleBytes(full),
+      root_dir: rootDir,
+      last_used_at: lastUsed,
+      orphan: !!rootDir && !fs.existsSync(rootDir.replace(/[/\\]+$/, '')),
+      suspect_root: suspectRoot,
+    });
+  }
+  return { total_bytes: dbs.reduce((a, d) => a + d.bytes, 0), dbs };
+}
+
+/** 回收孤儿库（三件套一起删），返回删掉的清单与回收字节数 */
+export function reclaimOrphans(report: XrefCacheReport): { removed: string[]; bytes: number } {
+  const removed: string[] = [];
+  let bytes = 0;
+  for (const d of report.dbs) {
+    // 孤儿（根没了）与可疑根（根落在禁区）都可回收 —— 后者是事故形态，留着只会继续误导
+    if (!d.orphan && !d.suspect_root) continue;
+    for (const p of [d.path, `${d.path}-wal`, `${d.path}-shm`]) {
+      try { fs.rmSync(p, { force: true }); } catch { /* 被占用则留给下次 */ }
+    }
+    removed.push(d.name);
+    bytes += d.bytes;
+  }
+  return { removed, bytes };
+}
+
+/**
+ * xref cache 体检（任务单四.3）。**只读报告 + 可选回收孤儿** —— 活跃库一律不动
+ * （last_used_at 只用于展示，回收的唯一依据是"根目录真的没了"）。
+ */
+function checkXrefCache(fix: boolean): CheckResult {
+  const cacheDir = path.join(os.homedir(), '.agent', 'cache');
+  const report = xrefCacheReport(cacheDir);
+  if (report.dbs.length === 0) {
+    return { label: 'xref cache', ok: true, detail: '无索引库（尚未构建过）' };
+  }
+
+  const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`;
+  const orphans = report.dbs.filter((d) => d.orphan);
+  const suspects = report.dbs.filter((d) => d.suspect_root && !d.orphan);
+  const top = [...report.dbs].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
+  const active = report.dbs.filter((d) => !d.orphan && d.bytes > 50 * 1024 * 1024).length;
+
+  const lines: string[] = [`合计 ${mb(report.total_bytes)} / ${report.dbs.length} 个库`];
+  lines.push('top 库：');
+  for (const d of top) lines.push(`    ${mb(d.bytes).padStart(10)}  ${d.name}`);
+  if (orphans.length > 0) {
+    lines.push(`孤儿 ${orphans.length} 个（root_dir 已不存在，共 ${mb(orphans.reduce((a, d) => a + d.bytes, 0))}）：`);
+    for (const o of orphans) lines.push(`    ${o.name}  ← 根已消失：${o.root_dir}`);
+  }
+
+  if (suspects.length > 0) {
+    lines.push(`可疑根 ${suspects.length} 个（root_dir 落在禁区，会把无关目录整片扫进来）：`);
+    for (const s of suspects) lines.push(`    ${s.name}  ← 根=${s.root_dir}`);
+  }
+
+  let reclaimed = '';
+  if (fix && (orphans.length > 0 || suspects.length > 0)) {
+    const r = reclaimOrphans(report);
+    reclaimed = ` ｜ 已回收 ${mb(r.bytes)}（${r.removed.length} 个）`;
+  } else if (orphans.length > 0 || suspects.length > 0) {
+    lines.push('（加 --fix 可回收这些库）');
+  }
+
+  const detail = lines.join('\n') + reclaimed;
+  const ok = orphans.length === 0 && suspects.length === 0;
+  if (active > 0) {
+    // 大库不是"错"，但值得点出来 —— 任务单四.4 的阈值同源
+    lines.push(`提示：${active} 个活跃库超 50MB，可考虑收窄构建范围（只索引需要的子目录）。`);
+  }
+  return { label: 'xref cache', ok, detail };
+}
+
 function checkApiKeys(): CheckResult {
   const envKeys = [
     'ANTHROPIC_API_KEY',
@@ -279,6 +420,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     checkConfig(),
     checkKnowledgeBase(),
     checkApiKeys(),
+    checkXrefCache(!!opts.fix),
   ];
 
   let allOk = true;

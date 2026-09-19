@@ -26,7 +26,9 @@ import type {
   XrefSymbol, XrefRef, XrefImport, XrefFile, ParsedFile,
 } from './schema.js';
 import { ParserRegistry, createParserRegistry } from './parser.js';
+import fsSync from 'node:fs';
 import { toProjectKey } from '../../utils/misc.js';
+import { resolveAnchor } from './anchor.js';
 import { languageOfExtension, supportForLanguage } from './languages/index.js';
 import { resolveTsLike } from './languages/resolve-helpers.js';
 import type { ResolveContext } from './languages/types.js';
@@ -81,6 +83,34 @@ function formatStaleNotice(s: StaleCheck): string {
   const sampled = s.total > s.checked ? `（抽样 ${s.checked}/${s.total}）` : '';
   return `\n\n⚠️ 索引可能陈旧${sampled}：检查的 ${s.checked} 个文件中有 ${s.stale.length} 个在索引后已变更（如 ${sample}${more}）。`
     + `\n   索引构建于 ${s.builtAt ?? '未知'}；结果可能不全（**不含新增文件**）→ 建议先运行 xref_build。`;
+}
+
+/** 单库告警阈值（任务单四.4） */
+export const DB_SIZE_WARN_BYTES = 200 * 1024 * 1024;
+/** cache 总量告警阈值（任务单四.4） */
+export const CACHE_SIZE_WARN_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * 体积告警（纯函数，便于断言）。只在超阈值时给话，且必须给**可操作的下一步** ——
+ * "库太大了"这种提示没有操作性，等于没提示。
+ */
+export function sizeWarnings(dbBytes: number, cacheBytes: number): string[] {
+  const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`;
+  const out: string[] = [];
+  if (dbBytes > DB_SIZE_WARN_BYTES) {
+    out.push(
+      `⚠ 单个索引库 ${mb(dbBytes)} 超阈值 ${mb(DB_SIZE_WARN_BYTES)}：`
+      + `建议 xref clean 后**收窄构建范围**（只索引需要的子目录），`
+      + `并确认项目根是否选对了（大仓库被当根会把无关目录扫进来）。`,
+    );
+  }
+  if (cacheBytes > CACHE_SIZE_WARN_BYTES) {
+    out.push(
+      `⚠ xref cache 合计 ${mb(cacheBytes)} 超阈值 ${mb(CACHE_SIZE_WARN_BYTES)}：`
+      + `跑 \`hyacinth doctor\` 看 top 库与孤儿清单，用 --fix 回收。`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -159,15 +189,64 @@ export class XrefManager {
   private resolveCache = new Map<string, string | null>();
   /** 项目内所有 go.mod（{dir, module 名}），undefined = 尚未探测 */
   private goModules: { dir: string; name: string }[] | undefined = undefined;
+  /** 项目锚判定结果（诊断用：让人看得出"为什么索引落在这个键上"） */
+  private anchorInfo: { root: string; reason: string; warning?: string } | null = null;
+
+  /**
+   * 记租约（写 meta 键值，**不动 schema** —— 四表契约不变）。
+   *   last_used_at  最近一次使用：doctor 据此区分"活跃库"与"长期没动"的库
+   *   lease.<pid>   本进程租约：多 session 共库时看得出谁还活着
+   * 幂等：同键反复写只是更新值。
+   */
+  private touchLease(): void {
+    if (!this.db) return;
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+    stmt.run('last_used_at', now);
+    stmt.run(`lease.${process.pid}`, now);
+  }
+
+  /** 该库的真实磁盘占用（主库 + WAL + SHM） */
+  private dbBytesOnDisk(): number {
+    if (!this.dbPath) return 0;
+    let total = 0;
+    for (const p of [this.dbPath, `${this.dbPath}-wal`, `${this.dbPath}-shm`]) {
+      try { total += fsSync.statSync(p).size; } catch { /* 不存在则跳过 */ }
+    }
+    return total;
+  }
+
+  /** cache 目录下所有 xref 库的合计占用 */
+  private cacheBytesOnDisk(): number {
+    const dir = path.join(os.homedir(), '.agent', 'cache');
+    let total = 0;
+    try {
+      for (const name of fsSync.readdirSync(dir)) {
+        if (!name.startsWith('xref-')) continue;
+        try { total += fsSync.statSync(path.join(dir, name)).size; } catch { /* 跳过 */ }
+      }
+    } catch { /* cache 目录不存在 */ }
+    return total;
+  }
+
+  /** 项目锚信息（构建输出 / 诊断用）——锚决定 projectKey，即"同一项目的多入口收敛到同一份索引" */
+  getAnchorInfo(): { root: string; reason: string; warning?: string } | null {
+    return this.anchorInfo;
+  }
 
   /** 初始化数据库（创建 if not exists，运行 schema DDL） */
   async init(rootDir: string): Promise<void> {
     // 先校验根目录：不合理就抛错，**连垃圾库文件都不会被创建**（见 assertIndexableRoot 注释）
-    assertIndexableRoot(rootDir);
-    this.rootDir = rootDir;
+    // 项目锚：把"裸 cwd"升级为真正的项目根（见 anchor.ts 的依据链）。同一个项目从仓库根启动
+    // 与从子目录启动，必须收敛到**同一份索引** —— 这正是锚的用途（此前会各建一个库、互相看不见）。
+    const anchor = resolveAnchor(rootDir);
+    this.anchorInfo = anchor;
+    // 先校验根目录：不合理就抛错，**连垃圾库文件都不会被创建**（见 assertIndexableRoot 注释）
+    assertIndexableRoot(anchor.root);
+    this.rootDir = anchor.root;
     this.resolveCache.clear();
     this.goModules = undefined;
-    const projectKey = toProjectKey(rootDir);
+    const projectKey = toProjectKey(anchor.root);
     const cacheDir = path.join(os.homedir(), '.agent', 'cache');
     await fs.mkdir(cacheDir, { recursive: true });
     this.dbPath = path.join(cacheDir, `xref-${projectKey}.sqlite`);
@@ -180,6 +259,10 @@ export class XrefManager {
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA_DDL);
     this.migrate();
+    // 租约：记录"这个库最近被谁/何时用过"——doctor 的孤儿判定与清理安全都依赖它。
+    // **必须在 DDL/迁移之后**：meta 表先得存在（首版插在 pragma 之后 ⇒ no such table: meta，
+    // 被幂等测试当场抓住）。
+    this.touchLease();
   }
 
   /** 幂等迁移：老库补 mtime_ms 列（CREATE TABLE IF NOT EXISTS 不会补列） */
@@ -568,6 +651,7 @@ export class XrefManager {
     // 更新 meta
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('built_at', new Date().toISOString());
     this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('root_dir', this.rootDir);
+    this.touchLease();
     // 刚重建过 → 自检结果必然过期，清掉缓存；否则 TTL 窗口内会误报"新鲜"
     staleCacheByDb.delete(this.dbPath);
     this.parserByPath.clear(); // 同理：重建后各文件的产出解析器可能已变
@@ -586,12 +670,18 @@ export class XrefManager {
       parserBreakdown[row.parser] = row.c;
     }
     const duration = Date.now() - startedAt;
+    // 体积：**只算主库会低估** —— WAL 实测可达主库的 55%，故三件套一起算
+    const dbBytes = this.dbBytesOnDisk();
+    const cacheBytes = this.cacheBytesOnDisk();
     return {
       files: indexed,
       symbols: count('symbols'),
       refs: count('refs'),
       imports: count('imports'),
       duration_ms: duration,
+      db_bytes: dbBytes,
+      cache_bytes: cacheBytes,
+      size_warnings: sizeWarnings(dbBytes, cacheBytes),
       language_breakdown: langBreakdown,
       parser_breakdown: parserBreakdown,
       mode,
@@ -1555,7 +1645,21 @@ export class XrefManager {
         ? `✅ Xref database deleted: ${targetPath}`
         : `Database not found or already deleted: ${targetPath}`;
     } catch (err) {
-      return `Error: cannot delete ${targetPath}: ${(err as Error).message}`;
+      // 区分「被占用」与「不存在」：Windows 上目标库被别的会话打开时删除会失败，
+      // 统一报"删不掉"会让人以为是权限问题而白折腾 —— 明确说是被占用 + 给出下一步。
+      const e = err as NodeJS.ErrnoException;
+      const code = e.code ?? '';
+      const locked =
+        code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' ||
+        /busy|being used|locked|另一个程序|正由另一进程/i.test(e.message ?? '');
+      if (locked) {
+        return `Error: 索引库被占用，无法删除（可能是其它会话正在使用）: ${targetPath}` +
+          `\n  提示：先关闭占用它的 session / 进程再重试；库文件本身没坏，不影响继续使用。`;
+      }
+      if (code === 'ENOENT') {
+        return `Database not found or already deleted: ${targetPath}`;
+      }
+      return `Error: cannot delete ${targetPath}: ${e.message}`;
     }
   }
 

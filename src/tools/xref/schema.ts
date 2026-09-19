@@ -120,6 +120,12 @@ export interface BuildStats {
   unresolved_imports?: number;
   /** 未解析导入样例（最多 10 条，形如 `a.ts → ./b.js`） */
   unresolved_samples?: string[];
+  /** 本次构建后该库的真实磁盘占用（主库 + -wal + -shm；只算主库会低估，WAL 实测可达主库 55%） */
+  db_bytes?: number;
+  /** cache 目录下所有 xref 库的合计占用 */
+  cache_bytes?: number;
+  /** 体积告警（超阈值时给出可操作的下一步；未超则为空数组） */
+  size_warnings?: string[];
   /** 解析成功但指向 npm 包等外部依赖的说明符条数（设计上不入图，不算缺失） */
   external_imports?: number;
 }
