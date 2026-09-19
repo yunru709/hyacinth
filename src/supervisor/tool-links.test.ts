@@ -17,6 +17,8 @@ import {
   TOOL_LINKS_VERSION,
   ToolLinkRegistry,
   defaultToolLinks,
+  getCurrentToolLinks,
+  initToolLinksFromDisk,
   loadToolLinks,
   parseToolLinks,
   resolveToolLinks,
@@ -195,6 +197,53 @@ describe('ToolLinkRegistry + resolveToolLinks（清单 → 执行序列）', () 
     });
     expect(resolveToolLinks(manifest, reg, 'afterToolExecute:edit')).toHaveLength(1);
     expect(resolveToolLinks(manifest, reg, 'afterToolExecute:bash')).toHaveLength(1);
+  });
+});
+
+describe('initToolLinksFromDisk（读盘→校验→装进当前清单；保旧语义）', () => {
+  it('① 合法清单 ⇒ applied，且当前清单真的换了', () => {
+    fs.writeFileSync(
+      toolLinksPath(),
+      JSON.stringify({ version: TOOL_LINKS_VERSION, links: [{ on: 'afterToolExecute:edit', handler: 'core.ok' }] }),
+      'utf8',
+    );
+    const r = initToolLinksFromDisk({ eventNames: ['afterToolExecute'], handlerIds: ['core.ok'] });
+    expect(r.applied).toBe(true);
+    expect(getCurrentToolLinks().links.map((l) => l.handler)).toEqual(['core.ok']);
+  });
+
+  it('② 语义错（handler 未注册）⇒ **不 applied、当前清单保旧**（这条最要紧：写错不该静默停掉消费者）', () => {
+    const before = getCurrentToolLinks();
+    fs.writeFileSync(
+      toolLinksPath(),
+      JSON.stringify({ version: TOOL_LINKS_VERSION, links: [{ on: 'afterToolExecute:edit', handler: 'core.nope' }] }),
+      'utf8',
+    );
+    const r = initToolLinksFromDisk({ eventNames: ['afterToolExecute'], handlerIds: ['core.ok'] });
+    expect(r.applied).toBe(false);
+    expect(r.errors.join('\n')).toContain('unknown handler "core.nope"');
+    expect(getCurrentToolLinks()).toBe(before); // 同一个对象：**没被换掉**
+  });
+
+  it('③ 结构错（坏 JSON）⇒ 不 applied、保旧、给出原因', () => {
+    const before = getCurrentToolLinks();
+    fs.writeFileSync(toolLinksPath(), '{ 坏 JSON', 'utf8');
+    const r = initToolLinksFromDisk({ eventNames: ['afterToolExecute'], handlerIds: ['core.ok'] });
+    expect(r.applied).toBe(false);
+    expect(r.errors.join(' ')).toContain('invalid JSON');
+    expect(getCurrentToolLinks()).toBe(before);
+  });
+
+  it('③ 文件不存在 ⇒ applied（装载出厂默认）+ existed=false', () => {
+    fs.rmSync(toolLinksPath(), { force: true });
+    // ⚠️ 注意：文件不存在时装载的是**出厂默认**，而语义校验是**照常做的** ——
+    // 所以这里的 handlerIds 必须给出**默认清单里那些** handler，否则会被判"未注册"而保旧
+    // （首版就是漏了这一点，用例自己把自己写红了）。
+    const defaultIds = defaultToolLinks().links.map((l) => l.handler);
+    const r = initToolLinksFromDisk({ eventNames: ['afterToolExecute'], handlerIds: defaultIds });
+    expect(r.applied).toBe(true);
+    expect(r.existed).toBe(false);
+    expect(getCurrentToolLinks().links.map((l) => l.handler)).toEqual(defaultIds);
   });
 });
 

@@ -260,6 +260,29 @@ export function getCurrentToolLinks(): ToolLinksManifest {
   return currentManifest;
 }
 
+/**
+ * 读盘 → 校验 → **装进当前清单**（启动时调用一次；watcher 变更时也调它）。
+ *
+ * 语义（照 extension-registry-watcher 的保旧模式）：
+ *   · 文件不存在 ⇒ 装载**出厂默认**（= 迁移前的行为，行为不回退）；
+ *   · 结构错（bad JSON / 非法条目）或**语义错**（事件名不在目录、handler 未注册）
+ *     ⇒ **不动当前清单**（保旧）并返回错误 —— 调用方只 warn，不抛。
+ *
+ * 为什么把"知识"当参数传进来：语义校验要事件目录（LOOP_HOOK_NAMES）与注册表 id，
+ * 它们分别住在 orchestrator 与运行时 ⇒ 由调用方（装配层）注入，本模块保持层次干净。
+ */
+export function initToolLinksFromDisk(knowledge: {
+  eventNames: readonly string[];
+  handlerIds: readonly string[];
+}): { applied: boolean; errors: string[]; path: string; existed: boolean } {
+  const { manifest, errors, path, existed } = loadToolLinks();
+  if (errors.length > 0) return { applied: false, errors, path, existed }; // 结构错 ⇒ 保旧
+  const semantic = validateToolLinks(manifest, knowledge);
+  if (semantic.length > 0) return { applied: false, errors: semantic, path, existed }; // 语义错 ⇒ 保旧
+  setCurrentToolLinks(manifest);
+  return { applied: true, errors: [], path, existed };
+}
+
 /** 替换当前清单（watcher 专用；**调用方负责先校验** —— 见 loadToolLinks + validateToolLinks） */
 export function setCurrentToolLinks(manifest: ToolLinksManifest): void {
   currentManifest = manifest;

@@ -54,6 +54,9 @@ import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { ConfigManager } from '../setup/config.js';
 import { createLogger } from '../logging/logger.js';
+import { initToolLinksFromDisk } from '../supervisor/tool-links.js';
+import { buildCoreToolLinkRegistry } from '../orchestrator/tool-link-handlers.js';
+import { LOOP_HOOK_NAMES } from '../orchestrator/loop-hooks.js';
 import type { ProviderRouter } from '../provider/router.js';
 import type { ModelRouter } from '../provider/model-router.js';
 import type { HeartbeatScheduler } from '../schedule/scheduler.js';
@@ -473,6 +476,21 @@ export async function createAgentAssembly(
   pluginManager.getHost().register('world-engine.createAgent', createWorldEngineFactory());
 
   await pluginManager.loadAll();
+
+  // ── 联动清单（第三圈）：把 ~/.agent/tool-links.json 装进"当前清单" ──
+  // 没有该文件 ⇒ 装载出厂默认（= 迁移前行为）；校验不过 ⇒ **保旧**并只 warn（不抛）。
+  // 关系是数据：改这个文件即可接线/断线，不必改代码（watcher 热更见 hot-reload）。
+  {
+    const applied = initToolLinksFromDisk({
+      eventNames: LOOP_HOOK_NAMES,
+      handlerIds: buildCoreToolLinkRegistry().ids(),
+    });
+    if (applied.errors.length > 0) {
+      logger.warn('联动清单校验失败，保留出厂默认', { errors: applied.errors, path: applied.path });
+    } else if (applied.existed) {
+      logger.info('联动清单已生效', { path: applied.path });
+    }
+  }
 
   // ── AutoGit（S4：git 自管理策略层，evolution 层消费 GitManager 原语）──
   // wireAutoGit 工厂内聚：new + onTurnEnd 观察者挂载（钩子体系首个装配侧观察者）
