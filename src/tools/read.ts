@@ -1,7 +1,7 @@
 import { createReadStream, promises as fs, type Stats } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Tool } from './interface.js';
-import { recordFileRead } from './file-tracker.js';
+import { recordFileRead, recordPartialRead } from './file-tracker.js';
 import { getToolConfig } from './tool-config.js';
 import { detectLang, outline, findDeclRange } from '../utils/code-structure.js';
 
@@ -278,8 +278,20 @@ export class ReadTool implements Tool {
     }
     if (!stat.isFile()) throw new Error(`Path is not a file: ${filePath}`);
 
-    // 记录文件已被读取（支撑 write/edit 的 read-before-write 门控）
-    recordFileRead(filePath);
+    // 记录本次读取的**强度**（支撑 write/edit 的 read-before-write 门控）
+    //
+    // ⚠️ 这里必须区分"整份读过"与"只见过一部分"（2026-09-19 修）：
+    //   原先**无条件**记 recordFileRead ⇒ 只读 5 行也等于"完整读过" ⇒ 之后一次**全量覆盖**
+    //   会被放行 —— 也就是"看 5 行就能覆盖整份文件"。而 write 门控的立身之本恰恰是防它。
+    //   规则（简单可预期，无隐藏状态）：**只有"要的是整份"才算完整读过** ——
+    //     · 未传 offset/limit 且非 outline/symbol ⇒ 完整（这也包括图片/PDF/二进制桩：
+    //       它们走默认参数 ⇒ 按完整计；否则内容看不到、又要求"完整读过"才能写 = 死胡同）
+    //     · 传了 offset/limit，或用 outline/symbol ⇒ 部分：只解锁**锚定 edit**，
+    //       不解锁整份覆盖（要覆盖，请做一次不带 offset/limit 的读取）
+    const wantsWholeFile = args.offset === undefined && args.limit === undefined
+      && args.outline !== true && typeof args.symbol !== 'string';
+    if (wantsWholeFile) recordFileRead(filePath);
+    else recordPartialRead(filePath);
 
     // sniff 512 bytes for type detection
     try {

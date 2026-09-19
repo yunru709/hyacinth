@@ -19,6 +19,7 @@
  *   | `edit` **字符串模式**（old_string 唯一匹配） | **能** | 锚点上下文即可 |
  *   | `multi_edit` | 同字符串模式 | 锚点上下文即可 |
  *   | `insert` 按行插入 | —（只加行、不覆盖） | 不受本门控约束（仅工作区围栏） |
+ *   | `read` 带 offset/limit 或 outline/symbol | — | **只算"部分见过"**：解锁锚定 edit，不解锁覆盖 |
  *
  * 依据：锚定替换只会改动 `old_string` 命中处；模型若在瞎猜，`old_string` 必然匹配不上，
  * 工具当场拒绝，损坏无从发生。而"行号"与"整份覆盖"都没有这个自校验锚点。
@@ -84,7 +85,8 @@ function refuseWithoutAnchor(filePath: string, content: string, reason: Reason, 
     '',
     'This is only PART of the file, so the operation is STILL BLOCKED — deliberately:',
     'proceeding from a partial view would drop whatever you have not seen.',
-    '→ Use `read` (offset/limit, or symbol/outline for code) to get the rest, then retry.',
+    '→ To UNLOCK an overwrite you need a **whole-file read**: call `read` with no offset/limit.',
+    '  (offset/limit or symbol/outline count as PARTIAL — they unlock anchored `edit`, not overwrite.)',
     '→ Or, if your change is local and anchored, use a string-mode `edit` — that is allowed now.',
   ].join('\n');
 }
