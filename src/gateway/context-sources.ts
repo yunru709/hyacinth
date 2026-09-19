@@ -27,7 +27,7 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
-import { readScratchpadForContext, ensureScratchpadFile } from '../context/scratchpad.js';
+import { readScratchpadForContext, ensureScratchpadFile, ensurePathLine } from '../context/scratchpad.js';
 import { scratchpadMaxChars } from '../context/context-config.js';
 // companion_memory 现按「当前 loop 的 activeRouter」判定，不再需要全局 getActiveRouter
 
@@ -102,6 +102,8 @@ export function registerContextSources(deps: ContextSourceDeps): void {
 
   // 首次启用：把预置内容落到磁盘（内含"这个记事本在哪、怎么用"的说明 ✓，幂等 ✓）
   ensureScratchpadFile();
+  // 每次启动校正**第一行**（路径是运行期推导的 ⇒ 换机器/换用户名后自动跟上；已正确则不写盘 ✓）
+  ensurePathLine();
 
   // ── 临时记事本（Zone 5）──────────────────────────────────────────────
   // 用户裁定（2026-09-19）：进 **Zone 5**、位置在**时间戳之后**；**不进消息流转**

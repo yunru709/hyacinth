@@ -28,6 +28,25 @@ export function scratchpadPath(): string {
   return path.join(os.homedir(), '.agent', 'prompts', 'persona', 'scratchpad.md');
 }
 
+/**
+ * 把 home 下的绝对路径渲染成 `~/…`（**运行期推导**，因此换机器/换用户名都正确 ✓）。
+ * 非 home 下（例如有人把 .agent 挪到别处）则原样返回绝对路径 —— 不假装 ✓。
+ *
+ * 为什么不用相对 cwd 渲染：cwd 每轮可能不同（工具在子目录跑），会渲染成 ../../Users/… 反而更难读 ✓。
+ */
+export function homeRelative(p: string): string {
+  const home = path.resolve(os.homedir());
+  const abs = path.resolve(p);
+  const rel = path.relative(home, abs);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return abs;
+  return '~/' + rel.split(path.sep).join('/');
+}
+
+/** 记事本第一行的**声明格式**（第一行永远只放这一句；由 ensurePathLine 维护） */
+export function scratchpadPathLine(): string {
+  return '# 临时记事本（Zone 5）· ' + homeRelative(scratchpadPath());
+}
+
 /** 默认上限（字符）。可在本地配置里改：`context.scratchpadMaxChars` */
 export const SCRATCHPAD_DEFAULT_MAX_CHARS = 8000;
 
@@ -55,22 +74,53 @@ export function readScratchpadForContext(maxChars: number = SCRATCHPAD_DEFAULT_M
   // 头一行自报位置与性质：模型据此知道"这是给我的便签"，也知道被截时该怎么办
   return [
     '# scratchpad',
-    `(系统提供 · 临时记事本；文件：${file}；不进消息历史，只出现在本轮的 Zone 5 live 区)`,
+    `(系统提供 · 临时记事本；文件：${homeRelative(file)}；不进消息历史，只出现在本轮的 Zone 5 live 区)`,
     '',
     shown,
   ].join('\n');
 }
 
 /** 首次使用时预置的初始内容 —— **声明这个记事本的位置**（用户要求 ✓） */
-export const SCRATCHPAD_SEED = [
-  '<!-- 临时记事本（Zone 5）',
-  '     位置：~/.agent/prompts/persona/scratchpad.md（与 memory.md 同目录）',
-  '     用法：直接用 edit 工具在这份文件上增删 —— 它每轮现读现注入，不进消息历史。',
-  '     性质：比 memory 更临时；记完即用、用完即删，别当长期记忆用（长期记忆放 memory.md）。',
-  '     上限：默认 8000 字符，超出会被截断并在注入文本里标注（配置项 context.scratchpadMaxChars）。',
-  '-->',
-  '',
-].join('\n');
+export function scratchpadSeed(): string {
+  return [
+    // ★ 第一行：本文件的位置（**运行期推导**，不写死路径 ✓）
+    scratchpadPathLine(),
+    '',
+    '<!-- 与 memory.md 同目录；用法：直接用 edit 工具在这份文件上增删 ——',
+    '     它每轮现读现注入，**不进消息历史**（所以不会像消息那样堆积）。',
+    '     性质：比 memory 更临时；记完即用、用完即删（长期记忆放 memory.md）。',
+    '     上限：默认 8000 字符，超出会被截断并在注入文本里标注（配置项 context.scratchpadMaxChars）。',
+    '-->',
+    '',
+  ].join('\n');
+}
+
+/**
+ * 校正**第一行**（仅在它与预期不符时重写第一行，其余字节原样保留 ✓）。
+ *
+ * 为什么要它：第一行声明的是"本文件在哪"，而位置是**运行期推导**的 ✓ ——
+ * 换机器/换用户名/挪目录后，第一行会自动跟上，**不需要任何人手改** ✓（用户要求"自动获取路径"）。
+ * 幂等：已正确则**不写盘**（避免每轮都动用户的文件 ✗）。
+ */
+export function ensurePathLine(): boolean {
+  const file = scratchpadPath();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch {
+    return false; // 文件还没建（先走 ensureScratchpadFile ✓）
+  }
+  const lines = raw.split('\n');
+  const want = scratchpadPathLine();
+  if (lines[0] === want) return false; // 已经正确 ⇒ 不写盘 ✓
+  lines[0] = want;
+  try {
+    fs.writeFileSync(file, lines.join('\n'), 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** 文件不存在时创建它并写入预置说明（幂等；已存在则原样不动 ✓） */
 export function ensureScratchpadFile(): boolean {
@@ -78,7 +128,7 @@ export function ensureScratchpadFile(): boolean {
   if (fs.existsSync(file)) return false;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, SCRATCHPAD_SEED, 'utf-8');
+    fs.writeFileSync(file, scratchpadSeed(), 'utf-8');
     return true;
   } catch {
     return false;
