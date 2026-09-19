@@ -42,6 +42,10 @@ export const SHARED_TOOL_INFRA = new Set([
   'sqlite',             // node:sqlite 薄封装
   'bundle-registry',    // 工具包注册表（bundle-tools 用）
   'types',              // 工具侧共享类型
+  // 引用自检（Phase 6 收敛）：write/edit 共用同**一份**实现 —— 原为两份内联副本（方案 A），
+  // 2026-09-19 按《工具联动架构研究报告 v1.1》改判为单一共享模块，理由见该文件头部
+  //（兜底必须永远在 + 核心消费者要覆盖子代理）。属纯分析模块，不含工具语义。
+  'reference-analysis',
 ]);
 
 /**
@@ -53,6 +57,14 @@ export const SHARED_TOOL_INFRA = new Set([
  *   - write→symbol-references  已按方案 A 内联：把 424 行实现**复制**进 write.ts 与 edit.ts
  *                              （工具独立 > DRY；两份一致性由 src/tools/inlined-copies-sync.test.ts 守住）
  *   - edit→symbol-references   同上
+ *
+ * ⚠️ 2026-09-19（同日稍晚，Phase 6）**改判**：方案 A 的两份副本已收敛为单一共享模块
+ *   src/tools/reference-analysis.ts，并登记进上面的 SHARED_TOOL_INFRA；
+ *   inlined-copies-sync.test.ts 一并删除（它守的东西不存在了）。
+ *   改判理由：① 兜底必须永远在（副本若改成插件订阅会随插件消失）；
+ *             ② 子代理跑同一套 stages，核心消费者自动覆盖，而插件订阅形态会漏掉它们。
+ *   注意：这不是"给规则 6 开口子"—— 登记的是**共享基础设施**，不是工具间耦合；
+ *   KNOWN_TOOL_COUPLINGS 依旧空集。
  *
  * **空集就是目标状态**：从此任何新出现的"工具依赖工具"都会被规则 6 直接拦下，
  * 不再有"已登记待修"这种中间态可以塞进去。
