@@ -22,5 +22,17 @@
     "wasm": "tree-sitter-java.wasm",
     "bytes": 414641,
     "sha256": "4fdeac4ca6ca089f06c6f7e562abcac1733cd465728cc7031ebb73c2019122c4"
+  },
+  "c": {
+    "pkg": "tree-sitter-c",
+    "wasm": "tree-sitter-c.wasm",
+    "bytes": 626154,
+    "sha256": "90c1677774593a0651a92659410944c4bc0253c6209539e433cb631fc9ee953c"
+  },
+  "cpp": {
+    "pkg": "tree-sitter-cpp",
+    "wasm": "tree-sitter-cpp.wasm",
+    "bytes": 3434931,
+    "sha256": "174eb0deb75b2ec7881bcacda9f995648d8e683956e5c2267e69ab6dc503fcbf"
   }
 }

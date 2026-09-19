@@ -33,7 +33,8 @@ const GRAMMARS = [
   { language: 'go', pkg: 'tree-sitter-go', wasm: 'tree-sitter-go.wasm' },
   { language: 'rust', pkg: 'tree-sitter-rust', wasm: 'tree-sitter-rust.wasm' },
   { language: 'java', pkg: 'tree-sitter-java', wasm: 'tree-sitter-java.wasm' },
-  // 待铺（官方包均自带 wasm，本机实测）：c 626kB / cpp 3.4MB
+  { language: 'c', pkg: 'tree-sitter-c', wasm: 'tree-sitter-c.wasm' },
+  { language: 'cpp', pkg: 'tree-sitter-cpp', wasm: 'tree-sitter-cpp.wasm' },
   // kotlin / swift：官方包**不含** wasm → 正则兜底（v2.2 备选路径：自建管线）
 ];
 
