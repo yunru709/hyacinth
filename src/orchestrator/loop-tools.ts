@@ -346,31 +346,7 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
     // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
     if (call?.name && isFlowTool(call.name)) continue;
 
-    // ── 引用自检（核心后置消费者，Phase 6）──────────────────────────────
-    // 改完文件后提示"谁引用了它"。**放核心而非 xref 插件的钩子订阅**，两个理由：
-    //   ① 兜底永远在：xref 未挂载 / 索引陈旧时走内置字符串扫描 = 从前的行为，与插件有无无关；
-    //   ② 子代理同样覆盖：子代理跑同一套 stages，核心消费者自动生效（插件订阅会漏掉它们，
-    //      E2 已定性子代理不接插件钩子）。
-    // 输入取**结构事实账本**（diff-channel 的 before/after）+ 工具入参，不反推 ——
-    // 此刻磁盘上已是新内容，反推不出来（B1 增记 before/after 正是为此）。
-    let refNote = '';
-    if (call && (call.name === 'edit' || call.name === 'write') && typeof call.input.file_path === 'string') {
-      try {
-        const { popDiff: popForRefs } = await import('../tools/diff-channel.js');
-        const entry = popForRefs(call.input.file_path);
-        if (entry?.before !== undefined && entry.after !== undefined) {
-          refNote = await analyzeReferences(ctx.referenceAnalysis, {
-            toolName: call.name,
-            filePath: call.input.file_path,
-            before: entry.before,
-            after: entry.after,
-            args: call.input,
-          });
-        }
-      } catch {
-        // 引用自检失败不影响工具返回值（与从前一致）
-      }
-    }
+    const refNote = await referenceNoteFor(ctx, call);
 
     const sanitized = sanitizeToolResult(refNote ? `${result.content}\n\n${refNote}` : result.content);
     const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
@@ -389,10 +365,15 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
 
     // 显示工具结果摘要
     ctx.outputHandler?.onToolResult?.(content, result.is_error ?? false, result.tool_use_id);
-    // 消费 diff 通道
-    const { popDiff: popD2 } = await import('../tools/diff-channel.js');
-    const diffData = popD2(result.tool_use_id);
-    if (diffData) ctx.outputHandler?.onDiff?.(result.tool_use_id, diffData.filePath, diffData.lines);
+    // diff 通知：**键用 filePath**（原先用 tool_use_id 查按 filePath 索引的账本 ⇒ 永不命中 ⇒
+    // 通知从未触发 —— 即缺陷票③）。此处 peek 读、随后消费一次：既修好通知，又不饿死引用自检。
+    const { peekDiff: peekD2, popDiff: popD2 } = await import('../tools/diff-channel.js');
+    const diffFile = call && typeof call.input.file_path === 'string' ? call.input.file_path : undefined;
+    const diffData = diffFile ? peekD2(diffFile) : undefined;
+    if (diffData && diffFile) {
+      ctx.outputHandler?.onDiff?.(result.tool_use_id, diffData.filePath, diffData.lines);
+      popD2(diffFile);
+    }
     // 真实结果摘要（P2：区分成败）
     outcomes.push({ id: result.tool_use_id, name: call?.name ?? result.tool_use_id, ok: !(result.is_error ?? false) });
   }
@@ -558,12 +539,13 @@ export async function runToolInline(
     // 验证证据账本：inline 路径的验证类命令也记证据（P1-B）
     if (isVerificationEvidence(name, input)) ctx.addEvidence();
     ctx.outputHandler?.onToolResult?.(result, false, id);
-    // 消费 diff 通道（edit/write 按 filePath 写入）
+    // diff 通知（edit/write/multi_edit 按 filePath 写入）—— **读而不删**：
+    // 引用自检（flushInlineResults 内）还要用同一条事实；消费在 flushInlineResults 末尾统一做。
     if (name === 'edit' || name === 'write' || name === 'multi_edit') {
-      const { popDiff: popD } = await import('../tools/diff-channel.js');
+      const { peekDiff: peekD } = await import('../tools/diff-channel.js');
       const fp = (input as Record<string, unknown>)?.file_path as string;
       if (fp) {
-        const diffData = popD(fp);
+        const diffData = peekD(fp);
         if (diffData) ctx.outputHandler?.onDiff?.(id, diffData.filePath, diffData.lines);
       }
     }
@@ -615,6 +597,41 @@ function findWriteConflicts(calls: ToolCall[], projectDir: string): Set<number> 
  * Flush inline tool results to the conversation store and run dependency analysis.
  * Called after the assistant message has been appended to maintain correct message ordering.
  */
+/**
+ * 引用自检注记（Phase 6 核心消费者）—— **两条工具执行路径共用这一份实现**。
+ *
+ * 为什么必须有这份助手（P0 教训，2026-09-19）：消费者原先只内联在 `executeTools` 的结果循环里 ✗，
+ * 而 inline 路径（`flushInlineResults`）**完全不经它** ⇒ 真实 provider 多数在流内发 TOOL_USE
+ * （`llm.ts` 的 executeSingleInline）⇒ **功能在生产里多半不触发**。端到端实测当场抓到。
+ *
+ * 为何不搬到 `afterToolExecute` 汇合点：汇合点（stages/tools.ts）在结果**已 append 之后** ✗，
+ * 那时无法再追加进 tool_result（只能改成"下轮 pending 注记"，语义会变）。故取"一处实现 + 两处调用"，
+ * 两处同在 loop-tools.ts、相邻函数 ⇒ 漂移风险远低于"两份实现"（那正是"内联副本"的老坑）。
+ *
+ * 三个不变的设计要点：① 放核心（兜底与插件有无无关 ✓ 子代理自动覆盖 ✓）；
+ * ② 输入取**结构事实账本**（diff-channel 的 before/after）+ 工具入参，不反推（磁盘上已是新内容）；
+ * ③ 任何异常都返回空串 —— 自检失败绝不影响工具返回值。
+ */
+async function referenceNoteFor(ctx: ToolExecContext, call: ToolCall | undefined): Promise<string> {
+  if (!call || (call.name !== 'edit' && call.name !== 'write')) return '';
+  const filePath = call.input.file_path;
+  if (typeof filePath !== 'string') return '';
+  try {
+    const { peekDiff } = await import('../tools/diff-channel.js');
+    const entry = peekDiff(filePath); // **读而不删**：UI 通知同样要这条事实，消费在路径末尾统一做
+    if (entry?.before === undefined || entry.after === undefined) return '';
+    return await analyzeReferences(ctx.referenceAnalysis, {
+      toolName: call.name,
+      filePath,
+      before: entry.before,
+      after: entry.after,
+      args: call.input,
+    });
+  } catch {
+    return ''; // 自检失败不影响工具返回值（与从前一致）
+  }
+}
+
 export async function flushInlineResults(ctx: ToolExecContext, toolCalls: ToolCall[]): Promise<ToolExecOutcome[]> {
   const outcomes: ToolExecOutcome[] = [];
   // Dependency impact analysis (same logic as runToolDispatch)
@@ -647,16 +664,29 @@ export async function flushInlineResults(ctx: ToolExecContext, toolCalls: ToolCa
     }
     // 真实结果摘要（P2：区分成败）
     outcomes.push({ id: tc.id, name: tc.name, ok: !stored.isError });
+    // ── 引用自检（与批量路径**同一份实现**，见 referenceNoteFor）──
+    // P0 修复点：inline 是真实 provider 的常态路径，此前完全不经消费者。
+    const refNote = await referenceNoteFor(ctx, tc);
     const toolResultMessage: Message = {
       role: 'user',
       content: {
         type: 'tool_result',
         tool_use_id: tc.id,
-        content: stored.content,
+        content: refNote ? `${stored.content}\n\n${refNote}` : stored.content,
         is_error: stored.isError,
       } as ToolResultContent,
     };
     await ctx.conversationStore.append(ctx.sessionDir, toolResultMessage);
+
+    // **唯一消费点（本路径末）**：上面的 UI 通知与引用自检都只 peek（不删），故在此显式消费一次。
+    // 谁都不吃亏、也不留残留（多工具写同一文件时各自消费自己的键）。
+    if (isWriteTool(tc.name)) {
+      const fp = tc.input?.file_path;
+      if (typeof fp === 'string') {
+        const { popDiff: popOnce } = await import('../tools/diff-channel.js');
+        popOnce(fp);
+      }
+    }
   }
   return outcomes;
 }

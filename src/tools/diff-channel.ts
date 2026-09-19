@@ -26,6 +26,17 @@ export function pushDiff(filePath: string, lines: DiffLine[], texts?: { before: 
   channel.set(path.normalize(filePath), { filePath, lines, ...(texts ?? {}) });
 }
 
+/**
+ * 读而不删 —— 供**多个**消费者共用一条结构事实（UI 通知 + 引用自检）。
+ *
+ * 为什么需要（2026-09-19 P0 教训）：本账本原先只有 popDiff（读即消费）⇒
+ * inline 路径的 UI 通知先 pop 掉 ⇒ 引用自检再也拿不到 ⇒ 功能在**真实 provider 的常态路径**上不触发 ✗。
+ * 结构事实账本的语义应是"事实可被多个消费者读"，故补 peek；**消费仍需显式 pop 一次**（每路径在末尾）。
+ */
+export function peekDiff(filePath: string): DiffEntry | undefined {
+  return channel.get(path.normalize(filePath));
+}
+
 export function popDiff(filePath: string): DiffEntry | undefined {
   const key = path.normalize(filePath);
   const d = channel.get(key);
