@@ -87,19 +87,19 @@ describe('withSessionDirLock', () => {
     await fs.writeFile(lockPath, '', 'utf-8'); // 模拟"已创建、还没写入内容"的活锁
 
     let acquired = false;
+    // 窗口取得**极短**（5×10ms），我们只关心一件事：尝试者会不会把**活锁**删掉/抢走。
+    // ⚠️ 首版写成"等它超时前我手动 rm 释放、再断言它拿到了" —— 那依赖 `fs.rm` 成功，
+    //    而 Windows 上 .lock 的删除在负载下会 EPERM（本项目已知环境问题）⇒ 锁没释放 ⇒
+    //    等待者超时抛错 ⇒ 在我 await 之前就 reject ⇒ 未处理错误 ⇒ 全量跑时假红。
+    //    改成"注定拿不到"的形态后，断言不依赖任何释放动作，负载再大也确定。
     const waiter = withSessionDirLock(
       dir,
       async () => { acquired = true; },
-      { staleMs: 60_000, retryMs: 10, maxAttempts: 200 }, // 远未超时 ⇒ 必须一直等
+      { staleMs: 60_000, retryMs: 10, maxAttempts: 5 }, // 远未超时 ⇒ 必然重试到耗尽
     );
-
-    await new Promise((r) => setTimeout(r, 80));
+    await expect(waiter).rejects.toThrow(/lock timeout/); // 等它跑完（并吃掉这次"预期内的拒绝"）
     expect(acquired, '新鲜的空锁必须被当成活锁（不得被抢走）').toBe(false);
-    await expect(fs.access(lockPath)).resolves.toBeUndefined(); // 锁文件仍在（没被误删）
-
-    await fs.rm(lockPath, { force: true }); // 释放
-    await waiter; // 现在应能拿到
-    expect(acquired).toBe(true);
+    await expect(fs.access(lockPath)).resolves.toBeUndefined(); // 且**没被误删**（旧实现会删它）
   });
 
 });
