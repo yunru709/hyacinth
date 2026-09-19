@@ -106,18 +106,27 @@ export function toolLinksPath(): string {
   return path.join(os.homedir(), '.agent', 'tool-links.json');
 }
 
-/** 出厂默认清单：**与今天的行为逐条对应**（没有清单文件时，一切照旧） */
+/**
+ * 出厂默认清单：**与今天的行为逐条对应**（没有清单文件时，一切照旧）。
+ *
+ * ⚠️ 为什么这里**没有** `core.dependency-impact-enrich`（依赖影响面）：
+ *   它是**批量级**的——一次算出**所有**被改文件的合并影响、再一次性写入 pending
+ *   （见 loop-tools 里那段 `editedFiles.map(getImpact)`）；而本清单的处理器是**按调用**
+ *   触发的（每次工具调用一次）⇒ 纳入它会让"合并列表"退化成"只剩最后一次调用"。
+ *   要纳入，得先有一个**批量级事件**（如 `afterToolBatch`）——那是新钩子，属另一件事，
+ *   故本轮明确留白（与 veto/intercept 同款处理：**不假装支持**）。
+ *
+ */
 export function defaultToolLinks(): ToolLinksManifest {
   return {
     version: TOOL_LINKS_VERSION,
     links: [
-      // 顺序 = 执行顺序（今天的可见顺序：诊断在前、引用自检在后）
+      // 顺序 = 执行顺序（今天的可见顺序：工具结果 → 诊断 → 引用自检）
       { on: 'afterToolExecute:write', handler: 'core.diagnostics-append', enabled: true },
       { on: 'afterToolExecute:edit', handler: 'core.diagnostics-append', enabled: true },
       { on: 'afterToolExecute:write', handler: 'core.references-append', enabled: true },
       { on: 'afterToolExecute:edit', handler: 'core.references-append', enabled: true },
-      { on: 'afterToolExecute:edit', handler: 'core.dependency-impact-enrich', enabled: true },
-      { on: 'afterToolExecute:write', handler: 'core.dependency-impact-enrich', enabled: true },
+      // 证据账本只对 bash 有意义（"跑过验证类命令"）；副作用型，run 返回空串
       { on: 'afterToolExecute:bash', handler: 'core.evidence-ledger-append', enabled: true },
     ],
   };
@@ -234,15 +243,46 @@ export function loadToolLinks(): { manifest: ToolLinksManifest; errors: string[]
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// 「当前清单」持有者（进程级配置，与 config-center / extension-registry 同法）
+// ────────────────────────────────────────────────────────────────────────────
+/**
+ * 为什么是模块级持有者（而不是每 loop 一份）：
+ *   · 清单是**进程级配置**（一份文件、一个真相），与"多会话/子代理各一份"的语义不符；
+ *   · 热更（watcher）只需更新**一个**地方 ⇒ 所有 loop 立刻看到新清单 ✓。
+ * 处理器注册表则可以每装配一份（见 ToolLinkRegistry 注释）——但**核心处理器是无状态的**
+ * 纯函数，所以实现上用了进程级注册表（buildCoreToolLinkRegistry），省掉一条装配链。
+ * ⚠️ 将来若出现**有状态**的处理器（如批量级累积），必须改成每 loop/每装配一份。
+ */
+let currentManifest: ToolLinksManifest = defaultToolLinks();
+
+/** 当前生效的清单（消费者每次读它 ⇒ 热更即时生效） */
+export function getCurrentToolLinks(): ToolLinksManifest {
+  return currentManifest;
+}
+
+/** 替换当前清单（watcher 专用；**调用方负责先校验** —— 见 loadToolLinks + validateToolLinks） */
+export function setCurrentToolLinks(manifest: ToolLinksManifest): void {
+  currentManifest = manifest;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // 处理器注册面
 // ────────────────────────────────────────────────────────────────────────────
 
-/** 处理器的运行入参 —— 有意保持**最小**：将来加 kind 时，这里是第一个要动的地方 */
+/**
+ * 处理器的运行入参 —— 有意保持**最小**：将来加 kind 时，这里是第一个要动的地方。
+ *
+ * `payload` 是**调用方（内核后置序列）**塞进来的上下文（工具入参、能力探针、副作用通道…）；
+ * 本模块刻意只声明为 unknown：supervisor 层不认识 ToolCall / ToolExecContext，保持层次干净
+ * （verify:layers 规则 4/5）。处理器自己声明它期待的形状（见 orchestrator/tool-link-handlers.ts）。
+ */
 export interface ToolLinkRunInput {
   /** 事件名（与原清单里的 "on" 一致，便于处理器自己判断） */
   event: string;
   /** 工具名（从事件名里拆出的那一段；可能为 undefined） */
   toolName?: string;
+  /** 调用方上下文（形状由处理器约定） */
+  payload?: unknown;
 }
 
 export interface ToolLinkHandler {

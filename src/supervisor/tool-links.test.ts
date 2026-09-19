@@ -114,12 +114,16 @@ describe('loadToolLinks（读文件 + 保旧语义的输入）', () => {
     const r = loadToolLinks();
     expect(r.existed).toBe(false);
     expect(r.errors).toEqual([]);
-    // 默认清单必须覆盖今天那几个消费者（写死断言，防默认值被悄悄改小）
+    // 默认清单必须覆盖今天那几个**按调用**的消费者（写死断言，防默认值被悄悄改小）
     const ids = new Set(r.manifest.links.map((l) => l.handler));
     expect(ids.has('core.references-append')).toBe(true);
     expect(ids.has('core.diagnostics-append')).toBe(true);
-    expect(ids.has('core.dependency-impact-enrich')).toBe(true);
     expect(ids.has('core.evidence-ledger-append')).toBe(true);
+    // **显式锁住一个决定**（2026-09-19）：依赖影响面**不在**默认清单里。
+    // 原因是它是**批量级**的（一次算所有被改文件的合并影响），而清单的处理器是**按调用**
+    // 触发的 ⇒ 纳入会让"合并列表"退化成"只剩最后一次调用"。要纳入需先有批量级事件。
+    // ⇒ 这条断言的作用是：若将来有人"顺手"把它加进默认清单，这里会红并指向上面这段原因。
+    expect(ids.has('core.dependency-impact-enrich')).toBe(false);
   });
 
   it('④ 坏文件（非 JSON）⇒ 默认 + 错误，绝不抛', () => {

@@ -21,7 +21,8 @@ import { isFlowTool } from '../tools/flow.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { LoopGuard, isMutating, ToolGuard } from '../repair/loop-guard.js';
 import { isWriteTool, isMutatingTool } from '../tools/side-effect.js';
-import { isVerificationEvidence } from '../tools/evidence.js';
+import { getCurrentToolLinks, resolveToolLinks } from '../supervisor/tool-links.js';
+import { buildCoreToolLinkRegistry } from './tool-link-handlers.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
 import type { GitManager } from '../evolution/git-manager.js';
@@ -338,18 +339,13 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
   for (const result of results) {
     const call = executableCalls.find(c => c.id === result.tool_use_id);
 
-    // 验证证据账本：bash 跑过验证类命令 → 记一条证据（P1-B）
-    if (call?.name && isVerificationEvidence(call.name, call.input)) {
-      ctx.addEvidence();
-    }
-
     // Flow 工具结果不记入历史 — 状态由 Zone 5 注入体现
     if (call?.name && isFlowTool(call.name)) continue;
 
-    const diagNote = await diagnosticsNoteFor(call); // 诊断在前（保持现状的可见顺序）
-    const refNote = await referenceNoteFor(ctx, call);
+    // 按**清单**驱动：处理器与顺序来自 ~/.agent/tool-links.json（缺省 = 出厂默认 = 迁移前行为）
+    const linkNotes = await runDeclaredLinks(ctx, call);
 
-    const withNotes = [result.content, diagNote, refNote].filter((x) => x).join('\n\n');
+    const withNotes = [result.content, linkNotes].filter((x) => x).join('\n\n');
     const sanitized = sanitizeToolResult(withNotes);
     const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
       call.input.file_path.startsWith(bufferDir);
@@ -538,8 +534,6 @@ export async function runToolInline(
     const result = isBufferedRead
       ? sanitizeToolResult(rawResult)
       : ctx.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
-    // 验证证据账本：inline 路径的验证类命令也记证据（P1-B）
-    if (isVerificationEvidence(name, input)) ctx.addEvidence();
     ctx.outputHandler?.onToolResult?.(result, false, id);
     // diff 通知（edit/write/multi_edit 按 filePath 写入）—— **读而不删**：
     // 引用自检（flushInlineResults 内）还要用同一条事实；消费在 flushInlineResults 末尾统一做。
@@ -615,47 +609,42 @@ function findWriteConflicts(calls: ToolCall[], projectDir: string): Set<number> 
  * ③ 任何异常都返回空串 —— 自检失败绝不影响工具返回值。
  */
 /**
- * 写后诊断注记（联动体系的一员：从 write/edit 工具里搬出来的**后置消费者**）。
+ * 按**清单**驱动联动（第三圈的核心入口）—— 两条执行路径共用这一份。
  *
- * 搬出来的理由（三律③）：三处工具里写着**逐字相同**的 try/catch + 追加（write/edit/multi-edit），
- * 属"反应写进被联动的工具"；且它是**纯附加**（只看 process.cwd()，不依赖工具内部）⇒ 适合做消费者。
+ * 事件名取 `afterToolExecute:<工具名>`，处理器与**顺序**全部来自
+ * `~/.agent/tool-links.json`（没有该文件 ⇒ 出厂默认 = 迁移前的行为）。
+ * 因此"改关系"不再需要改代码：清单里删一行 = 断线，加一行 = 接线（诉求④）。
  *
- * "这次调用真的写了吗"的判据 = **diff 账本里有条目**（被读门控拒绝的调用不推 diff）——
- * 用 peek（读而不删），不抢别的消费者。
- * ⚠️ multi_edit 暂留内联：它**不推 diff**（见文件头说明），该判据对它无效。
+ * 为什么在这里（而不是各处直接调处理器）：两件事都必须**只有一份实现** ——
+ *   ① 事件名的拼法（将来若加"批量级事件"也只改这里）；
+ *   ② **失败隔离**（三律③）：任一处理器抛错都不得影响工具结果，故 try/catch 收在这一层。
+ * 今晚的 P0 教训也在这一句里：inline 与批量两条路径**必须都经过这里**，
+ * 否则"功能只在其中一条路径生效"这种缺陷单测看不出来（当时正是端到端实测才抓到的）。
  */
-async function diagnosticsNoteFor(call: ToolCall | undefined): Promise<string> {
-  if (!call || (call.name !== 'edit' && call.name !== 'write')) return '';
-  const filePath = call.input?.file_path;
-  if (typeof filePath !== 'string') return '';
-  try {
-    const { peekDiff } = await import('../tools/diff-channel.js');
-    if (!peekDiff(filePath)) return ''; // 没写成功（如被读门控拒绝）⇒ 不诊断
-    const { maybeRunDiagnostics } = await import('../tools/diagnostics.js');
-    return (await maybeRunDiagnostics(process.cwd())) ?? '';
-  } catch {
-    return ''; // 诊断失败不影响工具返回值（与从前一致）
+async function runDeclaredLinks(ctx: ToolExecContext, call: ToolCall | undefined): Promise<string> {
+  if (!call) return '';
+  const event = `afterToolExecute:${call.name}`;
+  const declared = resolveToolLinks(getCurrentToolLinks(), buildCoreToolLinkRegistry(), event);
+  const notes: string[] = [];
+  for (const { handler } of declared) {
+    try {
+      const out = await handler.run({
+        event,
+        toolName: call.name,
+        // 调用方上下文：清单模块只声明 unknown（保持 supervisor 层干净），
+        // 形状由 orchestrator/tool-link-handlers.ts 的 CoreHandlerPayload 约定
+        payload: {
+          input: call.input,
+          capability: ctx.referenceAnalysis,
+          effects: { addEvidence: () => ctx.addEvidence() },
+        },
+      });
+      if (out) notes.push(out);
+    } catch {
+      // 处理器失败不影响工具结果（三律③：订阅者失败不得影响宿主）
+    }
   }
-}
-
-async function referenceNoteFor(ctx: ToolExecContext, call: ToolCall | undefined): Promise<string> {
-  if (!call || (call.name !== 'edit' && call.name !== 'write')) return '';
-  const filePath = call.input.file_path;
-  if (typeof filePath !== 'string') return '';
-  try {
-    const { peekDiff } = await import('../tools/diff-channel.js');
-    const entry = peekDiff(filePath); // **读而不删**：UI 通知同样要这条事实，消费在路径末尾统一做
-    if (entry?.before === undefined || entry.after === undefined) return '';
-    return await analyzeReferences(ctx.referenceAnalysis, {
-      toolName: call.name,
-      filePath,
-      before: entry.before,
-      after: entry.after,
-      args: call.input,
-    });
-  } catch {
-    return ''; // 自检失败不影响工具返回值（与从前一致）
-  }
+  return notes.join('\n\n');
 }
 
 export async function flushInlineResults(ctx: ToolExecContext, toolCalls: ToolCall[]): Promise<ToolExecOutcome[]> {
@@ -692,14 +681,14 @@ export async function flushInlineResults(ctx: ToolExecContext, toolCalls: ToolCa
     outcomes.push({ id: tc.id, name: tc.name, ok: !stored.isError });
     // ── 引用自检（与批量路径**同一份实现**，见 referenceNoteFor）──
     // P0 修复点：inline 是真实 provider 的常态路径，此前完全不经消费者。
-    const diagNote = await diagnosticsNoteFor(tc); // 诊断在前（与批量路径一致）
-    const refNote = await referenceNoteFor(ctx, tc);
+    // 按清单驱动（与批量路径**同一套**：见 runDeclaredLinks 的说明）
+    const linkNotes = await runDeclaredLinks(ctx, tc);
     const toolResultMessage: Message = {
       role: 'user',
       content: {
         type: 'tool_result',
         tool_use_id: tc.id,
-        content: [stored.content, diagNote, refNote].filter((x) => x).join('\n\n'),
+        content: [stored.content, linkNotes].filter((x) => x).join('\n\n'),
         is_error: stored.isError,
       } as ToolResultContent,
     };

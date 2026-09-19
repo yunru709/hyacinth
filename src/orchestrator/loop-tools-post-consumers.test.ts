@@ -23,6 +23,7 @@ import { ConversationStore } from '../memory/conversation.js';
 import { LoopGuard } from '../repair/loop-guard.js';
 import { bootstrapSecurity } from '../kernel/security/index.js';
 import { WriteTool } from '../tools/write.js';
+import { defaultToolLinks, setCurrentToolLinks } from '../supervisor/tool-links.js';
 import type { ToolCall } from '../types.js';
 
 /** 诊断模块打桩：只关心"被调用了没有" */
@@ -140,5 +141,31 @@ describe('批量路径（runToolDispatch）：核心后置消费者', () => {
     // 若诊断判据退化成"只要调用了 write/edit 就跑"，这里会变成两次。
     const total = transcript().split('DIAG-MARKER').length - 1;
     expect(total).toBe(1);
+  });
+
+  it('#4 清单驱动：写 enabled:false ⇒ 该处理器不再运行（"改一处完成断线"的机器化证据）', async () => {
+    const { target } = makeProject();
+    const content = 'export function targetFn(): number {\n  return 1;\n}\n';
+
+    // 覆盖当前清单：关掉诊断、保留引用自检（正是把 ~/.agent/tool-links.json 换成这份的等价物）
+    setCurrentToolLinks({
+      version: 1,
+      links: [
+        { on: 'afterToolExecute:write', handler: 'core.diagnostics-append', enabled: false },
+        { on: 'afterToolExecute:write', handler: 'core.references-append', enabled: true },
+      ],
+    });
+    try {
+      await runToolDispatch(ctx, [{ id: 'w_cfg', name: 'write', input: { file_path: target, content } }]);
+      const text = transcript();
+      // 关掉的那条**不再运行**（默认清单里它是跑的 —— 见上一条用例的 DIAG-MARKER 断言）
+      expect(text).not.toContain('DIAG-MARKER');
+      // 保留的那条照常（证明不是"整份清单失灵"，而是**按条**生效）
+      expect(text).toContain('[References]');
+    } finally {
+      // 还原（清单是**进程级**持有者，不还原会污染同文件其他用例 —— 这也是它被设计成
+      // get/set 两个函数、而不是隐式全局的原因）
+      setCurrentToolLinks(defaultToolLinks());
+    }
   });
 });
