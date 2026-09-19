@@ -189,7 +189,7 @@ export function getDefaultConfig(): FullConfig {
       watchContextManifest: true,
       watchBundles: true,
       watchExtensionRegistry: true,
-    watchToolLinks: true,
+      watchToolLinks: true,
     },
     autoGit: {
       postTurnCommit: false, // 回合收尾提交默认关：待真实使用观察后再定默认值（方案红线 4）
