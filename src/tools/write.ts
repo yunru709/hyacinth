@@ -107,7 +107,9 @@ export class WriteTool implements Tool {
     recordFileWrite(filePath);
 
     // 计算 diff
-    try { pushDiff(filePath, computeDiff(oldContent, content, filePath)); } catch {}
+    try {
+      pushDiff(filePath, computeDiff(oldContent, content, filePath), { before: oldContent, after: content });
+    } catch {}
 
     // 计算行数
     const lineCount = content.split('\n').length;

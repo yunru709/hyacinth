@@ -196,7 +196,9 @@ export class EditTool implements Tool {
     const newContent = applyEol([...before, newString, ...after].join('\n'), detectEol(content));
 
     await fs.writeFile(filePath, newContent, 'utf-8');
-    try { pushDiff(filePath, computeDiff(content, newContent, filePath)); } catch {}
+    try {
+      pushDiff(filePath, computeDiff(content, newContent, filePath), { before: content, after: newContent });
+    } catch {}
 
     const replaced = end - start;
     // 生成变更摘要：显示替换后的内容
@@ -259,7 +261,9 @@ export class EditTool implements Tool {
     }
 
     await fs.writeFile(filePath, newContent, 'utf-8');
-    try { pushDiff(filePath, computeDiff(content, newContent, filePath)); } catch {}
+    try {
+      pushDiff(filePath, computeDiff(content, newContent, filePath), { before: content, after: newContent });
+    } catch {}
 
     const replacementCount = replaceAll ? matchCount : 1;
     // 生成变更摘要：显示 old_string 和 new_string 的对比
