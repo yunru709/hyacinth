@@ -2004,8 +2004,10 @@ export class AgentLoop {
       loopHooks: this.loopHooks,
       turnRecorder: this.turnRecorder,
       dependencyAnalyzer: this.dependencyAnalyzer,
-      // 引用分析能力（Phase 6）：插件经 ctx.registerStageService 注册/摘除，这里随取随用
-      referenceAnalysis: this.stageServices.get('referenceAnalysis') as
+      // 引用分析能力（Phase 6）：插件经 ctx.register 注册、卸载自动摘除；
+      // 这里**每回合现取**（ctx 字面量在每次工具批次时构造）⇒ 挂载/卸载即时生效，
+      // 取不到（xref 未挂载）时消费侧自动退核心兜底。
+      referenceAnalysis: this.pluginHost.get('referenceAnalysis') as
         | import('../tools/reference-analysis.js').ReferenceAnalysisCapability
         | undefined,
       gitManager: this.gitManager,

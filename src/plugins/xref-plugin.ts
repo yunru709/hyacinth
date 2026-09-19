@@ -39,6 +39,14 @@ export function createXrefPlugin(
       ctx.registerTool(new XrefQueryTool(xrefManager));
       ctx.registerTool(new XrefGraphTool(xrefManager));
 
+      // Phase 6：把「引用分析能力」注册进宿主服务表。
+      // ctx.register 的 disposer 会在**卸载时把服务恢复为注册前的值**（热替换可回滚），
+      // 正是任务单要的"挂载即注册、卸载即摘除"。
+      // 消费侧（loop-tools 后置序列）经 loop.pluginHost.get('referenceAnalysis') 取用；
+      // 取不到时自动退回核心内置的字符串扫描兜底 —— 故卸载后行为等于"从未挂载过"。
+      const { createReferenceAnalysisCapability } = await import('../tools/xref/reference-capability.js');
+      ctx.register('referenceAnalysis', createReferenceAnalysisCapability(xrefManager) as never);
+
       // 卸载时关闭 SQLite 连接
       ctx.add({
         dispose: () => { try { xrefManager.close(); } catch { /* ignore */ } },

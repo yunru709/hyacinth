@@ -265,14 +265,14 @@ function findProjectRoot(filePath: string): string {
 
 // ── 语言检测 ─────────────────────────────────────────────────
 
-function detectLang(filePath: string): LangConfig | null {
+export function detectLang(filePath: string): LangConfig | null {
   const ext = path.extname(filePath).toLowerCase();
   return ALL_LANGUAGES[ext] ?? null;
 }
 
 // ── 符号提取 ─────────────────────────────────────────────────
 
-function extractSymbols(text: string, lang: LangConfig): string[] {
+export function extractSymbols(text: string, lang: LangConfig): string[] {
   const symbols = new Set<string>();
   const ignored = lang.extraIgnored;
   for (const { pattern } of lang.declPatterns) {
@@ -391,6 +391,35 @@ interface ReferenceResult {
   text: string; // 追加到工具返回值的文本，空字符串表示无结果
 }
 
+/**
+ * 判定"这次改动涉及哪些符号" —— **兜底与能力共用这一份**。
+ *
+ * 两步（顺序即语义，不可省）：
+ *   ① 从变更片段提取声明 —— write 传全文时即命中；
+ *   ② 为空则退回"改动前内容里包住这段文本的声明" —— edit 传片段时的**常态**路径。
+ *
+ * 为什么必须是**一个函数**而不是"两处各自调用同样的工具"：Phase 6 第 2 步首版就是后者，
+ * 能力侧漏掉了第①步之外的兜底 ⇒ 索引明明新鲜却返回空、白白退兜底（被能力测试当场抓住）。
+ * 只要判定流程有两份实现，就一定有分叉的空间。
+ */
+export function resolveChangedSymbols(
+  filePath: string,
+  before: string,
+  oldText: string,
+  newText: string,
+  max = 3,
+): string[] {
+  const lang = detectLang(filePath);
+  if (!lang) return [];
+
+  let symbols = extractSymbols(`${oldText}\n${newText}`, lang);
+  if (symbols.length === 0) {
+    const enclosing = findEnclosingSymbol(before, oldText, lang);
+    if (enclosing) symbols = [enclosing];
+  }
+  return symbols.slice(0, max);
+}
+
 export function autoReferenceCheck(
   filePath: string,
   fileContent: string,
@@ -405,19 +434,9 @@ export function autoReferenceCheck(
     // 2. 检测项目根目录
     const projectRoot = findProjectRoot(filePath);
 
-    // 3. 提取符号：先从改动文本，再 fallback 外层符号
-    const changedText = oldString + '\n' + newString;
-    let symbols = extractSymbols(changedText, lang);
-
-    if (symbols.length === 0) {
-      const enclosing = findEnclosingSymbol(fileContent, oldString, lang);
-      if (enclosing) symbols = [enclosing];
-    }
-
+    // 3. 符号判定（与能力侧共用同一函数 —— 见 resolveChangedSymbols 的说明）
+    const symbols = resolveChangedSymbols(filePath, fileContent, oldString, newString);
     if (symbols.length === 0) return { text: '' };
-
-    // 最多 3 个符号
-    symbols = symbols.slice(0, 3);
 
     // 4. 扫描引用（只扫描同语言的文件）
     const refs = scanReferences(projectRoot, symbols, filePath, lang.srcExts, 500);

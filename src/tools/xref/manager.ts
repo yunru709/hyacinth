@@ -229,6 +229,18 @@ export class XrefManager {
     return total;
   }
 
+  /**
+   * 索引是否新鲜（**只读**判定，不触发重建）。
+   *
+   * 供 Phase 6 的能力侧使用：新鲜 → 给精确结果；不新鲜 → 返回空，让消费侧退核心兜底
+   * （宁可回到从前的精度，也不给出可能不全的"精确清单"—— 那是假阴性）。
+   * 空索引（checked === 0）不算新鲜：没建过索引谈不上精确。
+   */
+  isIndexFresh(): boolean {
+    const s = this.staleCheck();
+    return !!s && s.checked > 0 && s.stale.length === 0;
+  }
+
   /** 项目锚信息（构建输出 / 诊断用）——锚决定 projectKey，即"同一项目的多入口收敛到同一份索引" */
   getAnchorInfo(): { root: string; reason: string; warning?: string } | null {
     return this.anchorInfo;
