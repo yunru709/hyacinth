@@ -1,7 +1,15 @@
 /**
  * 工作区围栏测试 —— 写类工具限工作区、.git 拒写；读类/bash 不受限。
+ *
+ * ⚠️ 夹具纪律（2026-09-19 被 CI 教明白的）：
+ *   围栏判界用的是 **真实路径**（`resolveRealPathSync`：目标不存在时向上找最近存在的父目录）。
+ *   ⇒ 夹具必须用**真实存在**的目录，且"界外"要用另一个**真实目录**，**不能**用平台特有绝对路径
+ *      （如 `C:/Windows/...`）或凭空写 `/tmp/xxx`：
+ *       · `C:/Windows/...` 在 Linux 上被当成普通相对名 ⇒ 拼进 root 之内 ⇒ 断言"必须被拒"**红** ✗
+ *       · 不存在的 `/tmp/fence-root` 在 Linux 上会被解析到 `/tmp` ⇒ `/tmp` 之下一切都算"界内" ✗
+ *   正确样式见 `builtin-tool-contracts.test.ts` 的同名 describe（tmpRoot + path.join + 真 mkdir ✓）。
  */
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +37,22 @@ function makeFakeRegistry(initial: Tool[]) {
 }
 
 describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
-  const root = path.resolve('/tmp/fence-root');
+  // 真实存在的根 + 真实存在的"界外"（两者同级、互不包含）
+  let root: string;
+  let outside: string;
+  const made: string[] = [];
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'fence-root-'));
+    outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fence-outside-'));
+    made.push(root, outside);
+  });
+
+  afterAll(() => {
+    for (const d of made.splice(0)) {
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
 
   it('write/edit/multi_edit/insert 被包装；read/grep/glob/bash 不受影响', () => {
     const registry = makeFakeRegistry([
@@ -47,11 +70,11 @@ describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
     await expect(wrapped.execute({ file_path: 'src/a.ts' }, undefined)).resolves.toBe('W');
   });
 
-  it('工作区外路径被拒绝', async () => {
+  it('工作区外路径被拒绝（界外用另一个**真实目录** ⇒ 平台无关 ✓）', async () => {
     const registry = makeFakeRegistry([makeTool('write', 'W')]);
     applyWorkspaceFence(registry, root);
     const wrapped = registry.get('write')!;
-    const result = await wrapped.execute({ file_path: 'C:/Windows/system32/evil.txt' }, undefined);
+    const result = await wrapped.execute({ file_path: path.join(outside, 'evil.txt') }, undefined);
     expect(result).toMatch(/outside the workspace root/);
   });
 
@@ -69,7 +92,7 @@ describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
     const registry = makeFakeRegistry([makeTool('read', 'R')]);
     applyWorkspaceFence(registry, root);
     const read = registry.get('read')!;
-    await expect(read.execute({ file_path: 'C:/anywhere/file.txt' }, undefined)).resolves.toBe('R');
+    await expect(read.execute({ file_path: path.join(outside, 'file.txt') }, undefined)).resolves.toBe('R');
   });
 
   it('重复调用幂等（同源覆盖允许）', () => {
@@ -82,14 +105,13 @@ describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
   // ── 额外可写根（2026-09-19 用户裁定 (a)：放行 ~/.agent/prompts/persona/，让 edit 能写记事本）──
   // 这组用例是那条裁定的**边界守卫**：放行面只增不减，且**不**给出绕过 .git 的后门 ✓
   describe('额外可写根（extraWritableRoots）', () => {
-    // ⚠️ 夹具必须是**真实存在**的目录：围栏用真实路径（跟随符号链接）判界，
-    //    对不存在的路径会退到某个已存在的祖先 ⇒ 结果不可预期。
-    //    首版我用 /tmp/extra-writable（不存在）⇒ 两条红、一条**因错误的原因而绿**（假绿 ✗）。
-    const extra = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-'));
-    const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-sibling-'));
-    afterAll(() => {
-      try { fs.rmSync(extra, { recursive: true, force: true }); } catch { /* ignore */ }
-      try { fs.rmSync(sibling, { recursive: true, force: true }); } catch { /* ignore */ }
+    let extra: string;
+    let sibling: string;
+
+    beforeAll(() => {
+      extra = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-'));
+      sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-writable-sibling-'));
+      made.push(extra, sibling);
     });
 
     it('额外可写根**内**的路径放行', async () => {
@@ -104,9 +126,9 @@ describe('applyWorkspaceFence（主 Agent 工作区围栏）', () => {
       const registry = makeFakeRegistry([makeTool('edit', 'E')]);
       applyWorkspaceFence(registry, root, [extra]);
       const wrapped = registry.get('edit')!;
-      const outside = await wrapped.execute({ file_path: 'C:/Windows/system32/evil.txt' }, undefined);
-      expect(outside).toMatch(/outside the workspace root/);
-      // 与额外根"同级"但不在其内的路径也必须拒（防"前缀相同即放行"这类实现错误）
+      const other = await wrapped.execute({ file_path: path.join(outside, 'evil.txt') }, undefined);
+      expect(other).toMatch(/outside the workspace root/);
+      // 与额外根"同级"但不在其内的**真实目录**也必须拒（防"前缀相同即放行"这类实现错误）
       const sib = await wrapped.execute({ file_path: path.join(sibling, 'x') }, undefined);
       expect(sib, '与额外根同级、但不在其内的真实目录，仍必须拒').toMatch(/outside the workspace root/);
     });
