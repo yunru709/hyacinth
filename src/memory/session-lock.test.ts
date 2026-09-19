@@ -76,4 +76,30 @@ describe('withSessionDirLock', () => {
       withSessionDirLock(dir, async () => {}, { staleMs: 60_000, retryMs: 10, maxAttempts: 3 }),
     ).rejects.toThrow('lock timeout');
   });
+  it('空锁文件（open 与 write 之间的窗口）不得被误判为陈旧 —— 否则活锁被删、两个持有者并存', async () => {
+    // 实测根因（2026-09-19，由"并发串行化"那条断言在负载下抓到 maxActive=2）：
+    //   取锁是 open(wx) **先创建**、随后才 writeFile(pid/ts) ⇒ 这中间锁文件是**空的**；
+    //   并发读者 JSON.parse('') 抛错 → 旧实现的 catch 直接 return true（判陈旧）
+    //   ⇒ **删掉活锁** ⇒ 两个任务同时进入临界区。
+    // 本用例把那个窗口**确定性地**造出来（空文件 + 新鲜 mtime），不依赖机器负载。
+    const dir = await tmpDir();
+    const lockPath = path.join(dir, '.lock');
+    await fs.writeFile(lockPath, '', 'utf-8'); // 模拟"已创建、还没写入内容"的活锁
+
+    let acquired = false;
+    const waiter = withSessionDirLock(
+      dir,
+      async () => { acquired = true; },
+      { staleMs: 60_000, retryMs: 10, maxAttempts: 200 }, // 远未超时 ⇒ 必须一直等
+    );
+
+    await new Promise((r) => setTimeout(r, 80));
+    expect(acquired, '新鲜的空锁必须被当成活锁（不得被抢走）').toBe(false);
+    await expect(fs.access(lockPath)).resolves.toBeUndefined(); // 锁文件仍在（没被误删）
+
+    await fs.rm(lockPath, { force: true }); // 释放
+    await waiter; // 现在应能拿到
+    expect(acquired).toBe(true);
+  });
+
 });

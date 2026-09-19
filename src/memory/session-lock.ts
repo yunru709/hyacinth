@@ -73,7 +73,16 @@ export async function withSessionDirLock<T>(
   throw new Error(`Session directory lock timeout: ${sessionDir}`);
 }
 
-/** lock 文件陈旧判定：超时 或 记录 pid 已退出 → 可回收 */
+/**
+ * lock 文件陈旧判定：超时 或 记录 pid 已退出 → 可回收。
+ *
+ * ⚠️ **读不出内容 ≠ 陈旧**（2026-09-19 并发实测修正）：
+ * 取锁流程是 `open(lockPath,'wx')` **先创建**、随后才 `writeFile(pid/ts)` ——
+ * 这中间锁文件是**空的**。若把"解析失败"直接判为陈旧，并发读者就会**删掉活锁**，
+ * ⇒ 两个任务同时进入临界区（实测 maxActive 达到 2，而断言要求恒为 1）。
+ * 故解析失败时退化为**按文件 mtime** 判定：mtime 即取锁时刻，只有它真的老到
+ * 超过 staleMs 才回收。文件已不存在（正常释放）则返回 true —— 那只是"可以重试获取"。
+ */
 async function isStaleLock(lockPath: string, staleMs: number): Promise<boolean> {
   try {
     const raw = await fs.readFile(lockPath, 'utf-8');
@@ -90,7 +99,13 @@ async function isStaleLock(lockPath: string, staleMs: number): Promise<boolean> 
     }
     return false;
   } catch {
-    return true; // 无法解析 → 视为陈旧（安全删除重试）
+    // 内容读不出（空文件 / 半写 / 非法 JSON）——**不是**陈旧的证据，看 mtime
+    try {
+      const st = await fs.stat(lockPath);
+      return Date.now() - st.mtimeMs > staleMs;
+    } catch {
+      return true; // 文件已不存在 → 可以重试获取
+    }
   }
 }
 
