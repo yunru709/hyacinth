@@ -308,6 +308,9 @@ export interface FullConfig {
     watchContextManifest: boolean;
     watchBundles: boolean;
     watchExtensionRegistry: boolean;
+    /** 联动清单（第三圈）热更开关——**必须在此声明**：manager 判据是
+     *  "flag 存在且 get() 为 falsy ⇒ 跳过注册"，未声明则 get() 为 undefined ⇒ 永不注册 */
+    watchToolLinks: boolean;
   };
 
   /** git 自管理策略（Supervisor 方案 S4；evolution/auto-git.ts 消费） */

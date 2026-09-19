@@ -189,6 +189,11 @@ export class HotReloadManager {
         // 语义（读盘/校验/保旧）在 supervisor/tool-links.ts 的 initToolLinksFromDisk，
         // 本项只负责"何时重载"；与启动时那次装载调用同一函数 ⇒ 冷热语义必然一致。
         // toolLinksAccess 未装配时 build 返回 null 跳过注册。
+        // ⚠️ 新增 watcher 必须**三处一起动**（这条是活体验证当场踩出来的）：
+        //   ① 本表加条目（flag/load/build）；② 依赖经 runtime-contributions 透传；
+        //   ③ **在 runtime/defaults.ts 声明该 flag 的默认值** —— 否则 get() 为 undefined，
+        //      上面的 `!get(flag)` 判据会把它当成"用户显式关掉"而**跳过注册**（症状：冷启动正常、
+        //      热更永不触发，因为启动装载走的是另一条路，与 watcher 注册无关）。
         flag: 'hotReload.watchToolLinks',
         load: () => import('./tool-links-watcher.js').then((m) => ({ watch: m.watchToolLinks })),
         build: (d, ms) => (d.toolLinksAccess ? [{ access: d.toolLinksAccess, debounceMs: ms }] : null),
