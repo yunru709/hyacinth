@@ -30,6 +30,7 @@
  *   agents        → ContextSource 'agent-*' (index_only, factory.ts 注册)
  *   mcp           → ContextSource 'mcp-*' (index_only, factory.ts 注册)
  *   memory        → ContextSource 'memory' (factory.ts 注册)
+ *   scratchpad    → ContextSource 'scratchpad'（Zone 5；每轮现读 ~/.agent/prompts/persona/scratchpad.md）
  *                  + src/memory/store.ts (MemoryStore)
  *   timestamp     → section-resolver.ts resolveRuntime('runtime:timestamp')
  *   user_input    → section-resolver.ts resolveRuntime('runtime:userInput')
@@ -144,7 +145,10 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
         { name: 'session_tools',      source: 'runtime:tools_live',         priority: 4, type: 'runtime', description: '会话中热插拔的工具' },
         { name: 'orchestrator_hint',   source: 'runtime:orchestrator_hint',  priority: 5, type: 'runtime', description: '旁路Agent注入（意图/约束/纠正）' },
         { name: 'timestamp',          source: 'runtime:timestamp',          priority: 6, type: 'runtime', description: '当前时间戳' },
-        { name: 'user_input',         source: 'runtime:userInput',          priority: 7, type: 'runtime', description: '用户当前输入（每轮变化）' },
+        // 临时记事本：**紧跟在时间戳之后**（用户裁定），仍属 Zone 5 live ⇒ 不进消息流转 ✓
+        { name: 'scratchpad',         source: 'runtime:scratchpad',         priority: 7, type: 'runtime', description: '临时记事本（Zone 5；agent 用 edit 直接维护）' },
+        // user_input 顺延到 8：它是这一轮真正的用户输入，必须仍在最后 ✓
+        { name: 'user_input',         source: 'runtime:userInput',          priority: 8, type: 'runtime', description: '用户当前输入（每轮变化）' },
       ],
     },
   },

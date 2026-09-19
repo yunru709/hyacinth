@@ -27,6 +27,8 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
+import { readScratchpadForContext, ensureScratchpadFile } from '../context/scratchpad.js';
+import { scratchpadMaxChars } from '../context/context-config.js';
 // companion_memory 现按「当前 loop 的 activeRouter」判定，不再需要全局 getActiveRouter
 
 export interface ContextSourceDeps {
@@ -96,6 +98,22 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     cacheability: 'manifest',
     description: '跨会话项目记忆',
     getContent: () => memoryStore.formatForContext(),
+  });
+
+  // 首次启用：把预置内容落到磁盘（内含"这个记事本在哪、怎么用"的说明 ✓，幂等 ✓）
+  ensureScratchpadFile();
+
+  // ── 临时记事本（Zone 5）──────────────────────────────────────────────
+  // 用户裁定（2026-09-19）：进 **Zone 5**、位置在**时间戳之后**；**不进消息流转**
+  // （Zone 5 是每轮变化的 live 尾巴，不写历史 ⇒ 不会像消息那样把上下文堆满记事本）。
+  // 文件与 memory 同目录（~/.agent/prompts/persona/scratchpad.md），可直接用 edit 工具改。
+  // 现读现注入（同一轮内改完即生效）—— 与 companion_memory 的做法一致。
+  contextComposer.registerSource({
+    name: 'scratchpad',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '临时记事本（Zone 5；不进消息流转，与 memory 同目录）',
+    getContent: () => readScratchpadForContext(scratchpadMaxChars()),
   });
 
   // ── 陪伴模式 Memory ──────────────────────────────────────────────────

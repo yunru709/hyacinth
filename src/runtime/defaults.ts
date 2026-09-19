@@ -80,6 +80,7 @@ export function getDefaultConfig(): FullConfig {
       targetRatio: 0.15,
       clusterBudgetRatio: 0.7,
       zone5TailBudgetRatio: 0.15,
+      scratchpadMaxChars: 8000,
       zone4BudgetRatio: 0.5,
       intentBlock: false,
       longTermMemory: true,

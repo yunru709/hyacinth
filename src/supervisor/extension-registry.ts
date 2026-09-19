@@ -168,6 +168,7 @@ export const REPLACEABLE_POINTS: ReplaceablePoint[] = [
   { id: 'source:flow',                  kind: 'source', defaultImpl: 'builtin', description: '流程上下文', contract: SOURCE_CONTRACT },
   { id: 'source:memory',                kind: 'source', defaultImpl: 'builtin', description: '记忆区', contract: SOURCE_CONTRACT },
   { id: 'source:companion_memory',      kind: 'source', defaultImpl: 'builtin', description: '陪伴记忆区', contract: SOURCE_CONTRACT },
+  { id: 'source:scratchpad',            kind: 'source', defaultImpl: 'builtin', description: '临时记事本（Zone 5）', contract: SOURCE_CONTRACT },
   { id: 'source:session-tools',         kind: 'source', defaultImpl: 'builtin', description: '会话内工具索引', contract: SOURCE_CONTRACT },
   { id: 'source:intent_cluster_summary', kind: 'source', defaultImpl: 'builtin', description: '意图簇摘要', contract: SOURCE_CONTRACT },
   { id: 'source:image_store',           kind: 'source', defaultImpl: 'builtin', description: '图像存储索引', contract: SOURCE_CONTRACT },

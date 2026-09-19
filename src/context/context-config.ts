@@ -11,6 +11,7 @@ import type { RuntimeConfigCenter } from '../runtime/config-center.js';
  *   context.targetRatio            理想压缩目标比率（默认 0.15，原硬编码）
  *   context.clusterBudgetRatio     分簇预算占 historyBudget 比例（默认 0.7，原硬编码）
  *   context.zone5TailBudgetRatio   Zone5 尾部保护预算（默认 0.15，原 stages/context 硬编码）
+ *   context.scratchpadMaxChars     临时记事本（Zone 5）注入上限，默认 8000 字符
  *   context.zone4BudgetRatio       Zone4 检索预算（默认 0.5，原 section-resolver 硬编码）
  *   context.maxCompressRounds      最大压缩轮数（schema/defaults 已有，原 CompressorOrchestrator 硬编码 3，此前零消费）
  *   context.trimWindow             工具结果保护窗口（schema/defaults 已有，原 CompressorOrchestrator 硬编码 6，此前零消费）
@@ -47,6 +48,14 @@ export function targetRatio(): number {
 /** 分簇预算占 historyBudget 的比例（决策 H：留 30% 给其他 zone） */
 export function clusterBudgetRatio(): number {
   return getContextConfig<number>('clusterBudgetRatio', 0.7);
+}
+
+/**
+ * 临时记事本（Zone 5）注入上限（字符）—— 超出截断并在注入文本里标注。
+ * 与 zone5TailBudgetRatio 同法：模块级读取，调用方不必多传依赖 ✓
+ */
+export function scratchpadMaxChars(): number {
+  return getContextConfig<number>('scratchpadMaxChars', 8000);
 }
 
 export function zone5TailBudgetRatio(): number {
