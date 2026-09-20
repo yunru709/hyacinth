@@ -350,10 +350,15 @@ export class ConfigManager {
     await this.ensureDir();
     // ui 是用户偏好（主题等），单独管理写全局
     const { ui, ...businessConfig } = config;
+    // ⚠️ **顺序要紧** ✗：必须先写业务段，再「合并式」写回 ui。
+    // 反过来（先写 ui，再用不含 ui 的快照整体覆盖**同一个文件**）会把 ui 抹掉 ✓ ——
+    // 2026-09-20 用户报「切主题后又退回」就是这个：盘上永远没有 ui.* ⇒
+    // 任何一次配置重载都回到默认 ⇒ 画面退回 ✓（也解释了为何"开个页面就 merge 一次"会顶掉主题 ✓）。
+    // `saveUserSection` 是读-改-写 ⇒ 放在最后不会抹掉业务段 ✓。
+    await fs.writeFile(this.getConfigPath(), JSON.stringify(businessConfig, null, 2), 'utf-8');
     if (ui !== undefined) {
       await this.saveUserSection({ ui } as Partial<AgentConfig>);
     }
-    await fs.writeFile(this.getConfigPath(), JSON.stringify(businessConfig, null, 2), 'utf-8');
   }
 
   /**
