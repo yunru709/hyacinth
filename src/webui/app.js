@@ -412,6 +412,65 @@
   // ════════════════════════════════════════════════════════════
   // 事件分发（协议层 event → 视图）
   // ════════════════════════════════════════════════════════════
+  // ── 回合「过程」折叠块（用户 2026-09-20 要求：中间过程允许折叠 ✓）────────
+  // 背景：`say`（交付结论）与「过程」（思考 / 流式文本 / 工具调用 / 状态）原先混在同一
+  // 列表里；而 **`message.say` 事件前端根本没处理** ✗ ⇒ 用户看不到最终输出 ✓
+  // （后端早已发出：events.ts MESSAGE_SAY ⇐ message.ts onSay() ⇐ loop.ts onSay(pending)）
+  // 设计：过程收进 <details>，**默认展开**（保底：某回合没调 say 时正文仍看得见 ✓）；
+  //      `say` 到达时自动收起 ⇒「最终输出」醒目、「中间过程」可折叠 ✓
+  let turnProcessBody = null;
+  let processTextNode = null;
+
+  function resetProcessGroup() {
+    turnProcessBody = null;
+    processTextNode = null;
+  }
+
+  function ensureProcessBody() {
+    const ml = $('#message-list');
+    if (!ml) return null;
+    if (turnProcessBody && turnProcessBody.isConnected) return turnProcessBody;
+    const det = el('details', 'process-group');
+    det.open = true;                    // 默认展开 ⇒ 万一本回合没有 say，正文仍看得见 ✓
+    det.appendChild(el('summary', '', '过程'));
+    const body = el('div', 'process-body');
+    det.appendChild(body);
+    ml.appendChild(det);
+    turnProcessBody = body;
+    processTextNode = null;
+    return body;
+  }
+
+  /** 往「过程」块里追加一个节点，并刷新摘要里的条数 ✓ */
+  function appendProcess(node) {
+    const body = ensureProcessBody();
+    if (!body) return;
+    body.appendChild(node);
+    const det = body.parentElement;
+    const summary = det && det.querySelector ? det.querySelector('summary') : null;
+    if (summary) summary.textContent = `过程（${body.children.length}）`;
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+    scrollChat();
+  }
+
+  /** 流式文本：累积进「过程」块里的同一条（不是每条事件各起一个气泡 ✓） */
+  function appendProcessText(content) {
+    if (!content) return;
+    if (!processTextNode || !processTextNode.isConnected) {
+      processTextNode = el('div', 'process-text', '');
+      appendProcess(processTextNode);
+    }
+    processTextNode.textContent += content;
+    scrollChat();
+  }
+
+  /** 收起「过程」块（`say` 交付到达时调用 ✓） */
+  function collapseProcessGroup() {
+    const body = turnProcessBody;
+    const det = body && body.parentElement;
+    if (det && det.tagName === 'DETAILS') det.open = false;
+  }
+
   function handleEvent(type, payload) {
     switch (type) {
       case 'ui.connected':
@@ -446,6 +505,7 @@
         break;
       case 'message.turn_start':
         resetStreaming();
+        resetProcessGroup();   // 新回合 ⇒ 「过程」块另起一块 ✓
         showThinking(true);
         if (currentView() === 'companion') companionResetDialogue('…');
         break;
@@ -456,9 +516,29 @@
         } else if (companionActive) {
           // 陪伴会话的内容只属于陪伴视图：主界面不渲染（流式也不进）
         } else {
-          appendAssistantStream(payload && payload.content);
+          appendProcessText(payload && payload.content);
         }
         break;
+      case 'message.say': {
+        // ★ say = 交付结论（模型的"嘴"）。后端一直在发这个事件，而前端此前**没有这个分支** ✗
+        //   ⇒「最终输出看不到」的根因就在这一处 ✓（TUI 走 onText 回退路，所以它显示得出来）
+        //   现在：渲染成**醒目的交付气泡**，并把本回合的「过程」块自动收起 ✓
+        showThinking(false);
+        resetStreaming();
+        if (companionActive) break;      // 陪伴会话走 companion.say，不进主界面 ✓
+        const sayText = (payload && payload.content) || '';
+        if (sayText) {
+          const wrap = bubbleAssistant(sayText);
+          wrap.classList.add('msg-delivery');   // 专属样式 ⇒ 一眼看出"这是交付" ✓
+          const ml = $('#message-list');
+          if (ml) ml.appendChild(wrap);
+        }
+        collapseProcessGroup();
+        resetProcessGroup();             // 交付之后若还有过程，另起一块 ✓
+        if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+        scrollChat();
+        break;
+      }
       case 'companion.say':
         handleCompanionSay(payload);
         break;
@@ -470,15 +550,15 @@
       case 'message.tool_use':
         showThinking(false);
         if (companionActive) break; // 陪伴会话的工具调用在陪伴视图呈现
-        appendMsg('tool', `${(payload && payload.name) || '工具'}(${(payload && payload.inputSummary) || ''})`);
+        appendProcess(bubbleTool((payload && payload.name) || '工具', (payload && payload.inputSummary) || ''));
         break;
       case 'message.tool_result':
         if (companionActive) break;
         // 工具级错误通过 isError 标志醒目显示（不触发回合级 message.error，避免误 resetStreaming）
         if (payload && payload.isError) {
-          appendMsg('error', '  ↳ ' + ((payload && payload.content) || ''));
+          appendProcess(bubbleSystem('⚠️  ↳ ' + ((payload && payload.content) || '')));
         } else {
-          appendMsg('system', '  ↳ ' + ((payload && payload.content) || ''));
+          appendProcess(bubbleSystem('  ↳ ' + ((payload && payload.content) || '')));
         }
         break;
       case 'message.status': {
@@ -486,7 +566,7 @@
         const level = (payload && payload.level) || 'info';
         // 过滤旁路 agent 内部标记，不渲染到聊天区
         if (msg === 'bypass-start' || msg === 'bypass-end') break;
-        appendMsg('system', `[${level}] ${msg}`);
+        appendProcess(bubbleSystem(`[${level}] ${msg}`));
         break;
       }
       case 'message.error':

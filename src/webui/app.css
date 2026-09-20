@@ -522,3 +522,58 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
    app.js 会持续把 `visualViewport.height` 写进 --app-vh（桌面端两者相等 ⇒ 无副作用 ✓）；
    万一该变量没写上，回落 100dvh ⇒ 再回落到上面那两行 ✓ */
 #app-shell { height: var(--app-vh, 100dvh); }
+
+/* ══════════════════════════════════════════════════════════════════
+   回合「过程」折叠块 + 交付输出（用户 2026-09-20 要求 ✓）
+
+   背景：`say`（交付结论）与「过程」（思考 / 流式文本 / 工具调用 / 状态）原先混在
+   同一个列表里；而 **`message.say` 事件前端根本没处理** ✗ ⇒ 用户看不到最终输出
+   （后端其实早已发出：`events.ts` 的 MESSAGE_SAY ⇐ `ui-protocol/domains/message.ts`
+   的 `onSay()` ⇐ `orchestrator/loop.ts` 的 `outputHandler.onSay(pending)`）✓
+
+   设计：过程收进 <details>，**默认展开**（保底：万一某回合没调 say，正文仍看得见 ✓），
+        `say` 到达时自动收起 ⇒「最终输出」醒目、「中间过程」可折叠 ✓
+   ══════════════════════════════════════════════════════════════════ */
+.process-group {
+  border: 1px dashed var(--hyacinth-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hyacinth-card) 55%, transparent);
+}
+.process-group > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--hyacinth-muted-foreground);
+}
+.process-group > summary::-webkit-details-marker { display: none; }
+.process-group > summary::before { content: '▸ '; }
+.process-group[open] > summary::before { content: '▾ '; }
+.process-group[open] > summary { border-bottom: 1px solid var(--hyacinth-border); }
+.process-body { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; }
+.process-text {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--hyacinth-muted-foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 交付输出（say）：回合的"最终输出"，与「过程」区分开 ✓ ────────────────
+   说明：`.msg-delivery` 加在 bubbleAssistant 生成的外层包裹上，
+   所以用后代选择器给里面的气泡换一套更醒目的样式 ✓ */
+.msg-delivery .message-bubble {
+  border-color: var(--hyacinth-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hyacinth-primary) 35%, transparent);
+}
+.msg-delivery .message-bubble::before {
+  content: '交付';
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--hyacinth-primary) 14%, transparent);
+  color: var(--hyacinth-primary);
+}
