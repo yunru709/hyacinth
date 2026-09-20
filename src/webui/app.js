@@ -236,6 +236,7 @@
   function clearChat() {
     const ml = $('#message-list');
     if (ml) ml.innerHTML = '';
+    histPending = [];
   }
 
   function scrollChat() {
@@ -345,38 +346,81 @@
   }
 
   // ── 历史渲染（协议 message.history 返回 HistoryMessage[]）──
+  // ── 历史回放的「过程缓冲」（与实时路径同一套折叠规则 ✓）──────────────
+  // 实测事实（读真实 events.jsonl ✓）：交付正文**没有独立 text 事件**，
+  // 它藏在 say 的 tool_call 里（input.content）⇒ 原先一律当折叠小条渲染，
+  // 于是刷新后**回复被埋在 JSON 里** ✗ ⇒ 现在认出 say 并单独渲染 ✓
+  let histPending = [];   // 延迟渲染：折不折叠取决于「后面有没有交付」✓
+
+  function histPush(node) { if (node) histPending.push(node); }
+
+  /** 冲刷过程块：collapse=true（后面有交付）⇒ 收起；false ⇒ **保持展开**（不藏正文 ✓） */
+  function flushHistoryProcess(collapse) {
+    if (!histPending.length) return;
+    const ml = $('#message-list');
+    if (ml) {
+      const det = el('details', 'process-group');
+      det.open = !collapse;
+      det.appendChild(el('summary', '', `过程（${histPending.length}）`));
+      const body = el('div', 'process-body');
+      for (const n of histPending) body.appendChild(n);
+      det.appendChild(body);
+      ml.appendChild(det);
+    }
+    histPending = [];
+  }
+
+  /** 从历史条目里取出「交付正文」（只认 say 的 tool_call ✓） */
+  function historySayText(m) {
+    if (!m || m.type !== 'tool_call' || m.name !== 'say') return null;
+    const raw = m.input && typeof m.input === 'object' ? m.input.content : null;
+    return typeof raw === 'string' && raw.trim() ? raw : null;
+  }
+
   function renderHistoryMsg(m) {
     const ml = $('#message-list');
     if (!ml) return;
+    // ① say 交付 ⇒ 醒目气泡，并把之前累积的过程收起 ✓
+    const sayText = historySayText(m);
+    if (sayText) {
+      flushHistoryProcess(true);
+      const dwrap = bubbleAssistant(sayText);
+      dwrap.classList.add('msg-delivery');
+      ml.appendChild(dwrap);
+      return;
+    }
+    // ② say 的工具回执只是 ok 噪音 ⇒ 跳过 ✓
+    if (m && m.type === 'tool_result' && m.name === 'say') return;
     const type = m && m.type;
     const content = (m && (m.content || m.text)) || '';
     switch (type) {
       case 'user_input':
       case 'user':
+        flushHistoryProcess(false);
         ml.appendChild(bubbleUser(content));
         break;
       case 'text':
       case 'assistant':
-        ml.appendChild(bubbleAssistant(content));
+        histPush(el('div', 'process-text', content));
         break;
       case 'thinking':
-        ml.appendChild(bubbleThinking(content));
+        histPush(bubbleThinking(content));
         break;
       case 'tool_call':
-        ml.appendChild(bubbleTool(
+        histPush(bubbleTool(
           (m && m.name) || '工具',
           (m && (m.inputSummary || (m.input ? JSON.stringify(m.input) : ''))) || content
         ));
         break;
       case 'tool_result':
-        ml.appendChild(bubbleSystem('↳ ' + content));
+        histPush(bubbleSystem('  ↳ ' + content));
         break;
       case 'system':
       case 'status':
-        ml.appendChild(bubbleSystem(content));
+        histPush(bubbleSystem(content));
         break;
       case 'error':
-        ml.appendChild(bubbleSystem('⚠️ ' + content));
+        histPush(bubbleSystem('⚠️ ' + content));
         break;
       case 'stop':
       case 'usage':
@@ -385,7 +429,7 @@
         break; // 结束/用量/会话标记不渲染
       default:
         // 未知类型：仅当有实际内容才按助手消息渲染
-        if (content) ml.appendChild(bubbleAssistant(content));
+        if (content) histPush(el('div', 'process-text', content));
         break;
     }
   }
@@ -403,6 +447,7 @@
         return;
       }
       msgs.forEach(renderHistoryMsg);
+      flushHistoryProcess(false);
       scrollChat();
     } catch (e) {
       // 历史加载失败静默（聊天可继续发送）

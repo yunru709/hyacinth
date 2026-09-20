@@ -139,6 +139,43 @@ const results = [
   ['④ 交付到达后过程块自动收起', !!(last && last.processOpen === false)],
   ['⑤ 无控制台异常', errors.length === 0],
 ];
+// ── 历史回放阶段（换会话/刷新后，交付还能不能正确显示 ✓）──────────────────
+// 走真实用户路径：会话管理 → 点「加载」刚用的那个会话 → 看历史里
+//   ① 是否出现「交付气泡」(.msg-delivery) ② 过程是否收进折叠块
+// 为什么必须测这一段：交付正文在 events.jsonl 里是 say 的 tool_call（input.content），
+//   历史渲染若认不出它，就会把整段正文**埋进一个折叠的工具小条**里 ✗（原状）
+let histDelivery = 0;
+let histGroups = 0;
+try {
+  await evaluate(`location.hash = '#/sessions'`);
+  await sleep(1500);
+  for (let i = 0; i < 30; i++) {
+    const n = await evaluate(`document.querySelectorAll('#sessions-tbody button[data-action="load"]').length`);
+    if (n > 0) break;
+    await sleep(500);
+  }
+  const sid = await evaluate(`(() => { const r = document.querySelector('#sessions-tbody tr'); return r ? (r.dataset.sessionId || '') : ''; })()`);
+  const clicked = await evaluate(`(() => { const b = document.querySelector('#sessions-tbody button[data-action="load"]'); if (!b) return 'no-button'; b.click(); return 'clicked'; })()`);
+  console.log('  历史阶段：加载会话 ' + (sid || '(首行)') + ' ⇒ ' + clicked);
+  for (let i = 0; i < 30; i++) {
+    await sleep(500);
+    const st = await evaluate(`(() => ({
+      d: document.querySelectorAll('.msg-delivery').length,
+      g: document.querySelectorAll('.process-group').length,
+    }))()`);
+    histDelivery = st.d; histGroups = st.g;
+    if (st.d > 0) break;
+  }
+  const h = await evaluate(`(() => { const ml = document.querySelector('#message-list'); return { kids: ml ? ml.children.length : 0, text: ml ? (ml.innerText || '') : '' }; })()`);
+  console.log('  历史阶段结果：交付气泡=' + histDelivery + '  过程块=' + histGroups + '  列表子节点=' + h.kids);
+  if (h.text) console.log('  历史文本节选 = 「' + h.text.replace(/\s+/g, ' ').slice(0, 100) + '」');
+  await shot('2-history');
+} catch (e) {
+  console.log('  历史阶段异常：' + e.message);
+}
+results.push(['⑥ 历史回放：交付气泡出现（不再被埋进工具小条）', histDelivery > 0]);
+results.push(['⑦ 历史回放：过程收进折叠块', histGroups > 0]);
+
 let pass = 0;
 for (const [n, ok] of results) { console.log('  ' + (ok ? '✓' : '✗') + ' ' + n); if (ok) pass++; }
 console.log(`Σ ${pass}/${results.length}`);
