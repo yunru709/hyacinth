@@ -305,84 +305,6 @@ button:not(:disabled), [role='button'], a, select { cursor: pointer; }
    清晨的花园：暖白纸 + 叶绿墨线花穗 + 紫罗兰水彩晕染。
    设计语言：水彩 —— 柔和渐变晕染、圆润、清新绿紫对比。
    （不是「奶油+赤陶」的 AI 默认脸：水彩绿紫 + 花穗插画是世界观） */
-html[data-theme='light'] {
-  --hyacinth-user-bg-scrim: rgba(250, 251, 247, 0.45);
-  --hyacinth-aurora:
-    radial-gradient(560px 360px at 80% 20%, rgba(169, 143, 238, 0.12), transparent 66%);
-
-  --neutral-0: #ffffff;
-  --neutral-50: #f6f8f3;
-  --neutral-100: #fdfefc;
-  --neutral-150: #eef2e9;
-  --neutral-200: #e3e9db;
-  --neutral-250: #d5ddc9;
-  --neutral-300: #c2cdaF;
-  --neutral-400: #98a68e;
-  --neutral-500: #6f7d66;
-  --neutral-600: #55624d;
-  --neutral-700: #404b3a;
-  --neutral-800: #2b3327;
-  --neutral-900: #1a2016;
-
-  /* Primary —— 紫罗兰墨（昼园里花色偏墨紫） */
-  --primary-50: #f1eefe;
-  --primary-100: #e3dcfb;
-  --primary-200: #c9baf6;
-  --primary-300: #a98fee;
-  --primary-400: #8a67df;
-  --primary-500: #6d4ac4;
-  --primary-600: #5a3aa8;
-  --primary-700: #472d85;
-  --primary-800: #362164;
-  --primary-900: #251643;
-
-  /* Accent —— 叶绿 */
-  --accent-50: #ecf7ee;
-  --accent-100: #d0ecd6;
-  --accent-200: #a4d9b1;
-  --accent-300: #6fc086;
-  --accent-400: #43a461;
-  --accent-500: #2b8a4c;
-  --accent-600: #1f6e3b;
-  --accent-700: #18562f;
-  --accent-800: #124324;
-  --accent-900: #0b2c18;
-
-  --state-success: #1f6e3b;
-  --state-warning: #9a6700;
-  --state-error: #c2372f;
-  --state-info: #2b6f8a;
-
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --hyacinth-radius-small: 6px;
-  --hyacinth-radius-medium: 10px;
-  --hyacinth-radius-large: 14px;
-
-  --shadow-sm: 0 1px 2px rgba(26, 32, 22, 0.05);
-  --shadow-md: 0 4px 14px rgba(26, 32, 22, 0.08);
-  --shadow-lg: 0 12px 32px rgba(26, 32, 22, 0.11);
-
-  --font-display: "KaiTi", "STKaiti", "Noto Serif SC", "Palatino Linotype", serif;
-
-  /* 昼园背景画：紫/青水彩晕染 + 叶绿墨线花穗 */
-  --hyacinth-bg-image:
-    radial-gradient(760px 460px at 90% -6%, rgba(109, 74, 196, 0.09), transparent 62%),
-    radial-gradient(620px 420px at -4% 30%, rgba(67, 164, 97, 0.08), transparent 60%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900' viewBox='0 0 1440 900'%3E%3Cdefs%3E%3Cfilter id='w' x='-60%25' y='-60%25' width='220%25' height='220%25'%3E%3CfeGaussianBlur stdDeviation='52'/%3E%3C/filter%3E%3C/defs%3E%3Cg filter='url(%23w)'%3E%3Cellipse cx='1280' cy='120' rx='230' ry='170' fill='%23c9baf6' fill-opacity='0.24'/%3E%3Cellipse cx='120' cy='760' rx='260' ry='190' fill='%23a4d9b1' fill-opacity='0.22'/%3E%3Cellipse cx='640' cy='880' rx='220' ry='130' fill='%23a5f3fc' fill-opacity='0.16'/%3E%3C/g%3E%3Cg fill='none' stroke='%23405b46' stroke-opacity='0.30' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1160 900 C 1150 760 1166 620 1156 470'/%3E%3Cpath d='M1158 868 C 1096 812 1080 716 1108 640'/%3E%3Cpath d='M1160 872 C 1222 816 1238 722 1208 648'/%3E%3C/g%3E%3Cg fill='%236d4ac4' fill-opacity='0.13' stroke='%236d4ac4' stroke-opacity='0.26'%3E%3Cellipse cx='1156' cy='462' rx='8' ry='13'/%3E%3Cellipse cx='1141' cy='481' rx='8' ry='13'/%3E%3Cellipse cx='1171' cy='483' rx='8' ry='13'/%3E%3Cellipse cx='1133' cy='503' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='505' rx='8' ry='13'/%3E%3Cellipse cx='1128' cy='526' rx='8' ry='13'/%3E%3Cellipse cx='1165' cy='528' rx='8' ry='13'/%3E%3Cellipse cx='1136' cy='548' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='550' rx='8' ry='13'/%3E%3Cellipse cx='1146' cy='568' rx='8' ry='13'/%3E%3Cellipse cx='1162' cy='585' rx='8' ry='13'/%3E%3Cellipse cx='1155' cy='443' rx='6' ry='10'/%3E%3C/g%3E%3C/svg%3E");
-
-  --hyacinth-bubble-assistant-bg: var(--neutral-150);
-  --hyacinth-bubble-assistant-border: var(--neutral-250);
-
-  --scrollbar-thumb: var(--neutral-250);
-  --scrollbar-thumb-hover: var(--neutral-300);
-
-  color-scheme: light;
-  --hyacinth-ring: var(--accent-500);
-}
 
 /* ── dark（深夜 · 纯净极简）───────────────────────────────────
    给想要「没有任何装饰」的用户：近纯黑、无插画、无环境光，
@@ -707,7 +629,127 @@ html[data-theme='rainy'] {
 
 /* @@themes:start @@ */
 
-/* ── mono（极简 · 素白 · 冷灰 · 一处克制强调）· 原型：Quiet Product Precision ── */
+/* ── hyacinth（夜园 · 夜色 · 紫只做一处信号）· 原型：Dark Luminous Control ── */
+html[data-theme='hyacinth'] {
+  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
+  --neutral-0: #08090e;
+  --neutral-50: #0a0c12;
+  --neutral-100: #0d0f15;
+  --neutral-150: #0f1219;
+  --neutral-200: #11141d;
+  --neutral-250: #141720;
+  --neutral-300: #161a24;
+  --neutral-400: #4a515f;
+  --neutral-500: #7d8899;
+  --neutral-600: #95a0b0;
+  --neutral-700: #b1bac7;
+  --neutral-800: #cdd3de;
+  --neutral-900: #e9edf5;
+
+  --primary-0: #16122a;
+  --primary-50: #1f1a3b;
+  --primary-100: #28214c;
+  --primary-150: #31295d;
+  --primary-200: #3a306d;
+  --primary-250: #43387e;
+  --primary-300: #4c3f8f;
+  --primary-400: #6c5db8;
+  --primary-500: #8b7ae0;
+  --primary-600: #a99cf0;
+  --primary-700: #c0b7f5;
+  --primary-800: #d8d1fa;
+  --primary-900: #efecff;
+
+  --accent-0: #07211f;
+  --accent-50: #092d2a;
+  --accent-100: #0b3a36;
+  --accent-150: #0d4641;
+  --accent-200: #0f524c;
+  --accent-250: #115f58;
+  --accent-300: #136b63;
+  --accent-400: #218f84;
+  --accent-500: #2fb3a4;
+  --accent-600: #6fd6c9;
+  --accent-700: #97e4da;
+  --accent-800: #bef1ea;
+  --accent-900: #e6fffb;
+
+  /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 4px 18px rgba(5, 6, 12, 0.45);
+  --shadow-lg: 0 12px 40px rgba(5, 6, 12, 0.52);
+  --hyacinth-bg-image: none;
+  --hyacinth-surface-blur: none;
+  --hyacinth-aurora: radial-gradient(520px 340px at 84% 6%, rgba(139, 122, 224, 0.10), transparent 62%);
+  --hyacinth-user-bg-scrim: rgba(8, 9, 14, 0.6);
+}
+
+/* ── light（昼园 · 晨光纸面 · 冷白 ＋ 一点苔绿）· 原型：Quiet Product Precision ── */
+html[data-theme='light'] {
+  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
+  --neutral-0: #ffffff;
+  --neutral-50: #fbfbfc;
+  --neutral-100: #f6f8fa;
+  --neutral-150: #f2f4f7;
+  --neutral-200: #edf0f4;
+  --neutral-250: #e9edf2;
+  --neutral-300: #e4e9ef;
+  --neutral-400: #a1aab5;
+  --neutral-500: #5d6b7a;
+  --neutral-600: #45525f;
+  --neutral-700: #333f4b;
+  --neutral-800: #222d38;
+  --neutral-900: #101a24;
+
+  --primary-0: #f0faf7;
+  --primary-50: #d5ede8;
+  --primary-100: #bae1d9;
+  --primary-150: #a0d4ca;
+  --primary-200: #85c7ba;
+  --primary-250: #6abbab;
+  --primary-300: #4fae9c;
+  --primary-400: #379987;
+  --primary-500: #1f8471;
+  --primary-600: #15695a;
+  --primary-700: #105448;
+  --primary-800: #0b4036;
+  --primary-900: #062b24;
+
+  --accent-0: #f3f6f9;
+  --accent-50: #ebeff3;
+  --accent-100: #e3e8ed;
+  --accent-150: #dbe1e8;
+  --accent-200: #d3dae2;
+  --accent-250: #cbd3dc;
+  --accent-300: #c3ccd6;
+  --accent-400: #97a3b0;
+  --accent-500: #6b7a89;
+  --accent-600: #526171;
+  --accent-700: #404f5e;
+  --accent-800: #2f3d4b;
+  --accent-900: #1d2b38;
+
+  /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
+  --radius-sm: 5px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 2px 10px rgba(16, 26, 36, 0.08);
+  --shadow-lg: 0 8px 26px rgba(16, 26, 36, 0.10);
+  --hyacinth-bg-image: none;
+  --hyacinth-surface-blur: none;
+  --hyacinth-aurora: none;
+  --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
+}
+
+/* ── mono（极简 · 素白 · 冷灰 · 纯结构）· 原型：Quiet Product Precision ── */
 html[data-theme='mono'] {
   /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
   --neutral-0: #ffffff;
@@ -828,7 +870,7 @@ html[data-theme='cyber'] {
   --hyacinth-user-bg-scrim: rgba(7, 8, 12, 0.66);
 }
 
-/* ── paper（报纸 · 近白纸 · 墨黑 · 衬线 · 一处朱印）· 原型：Soft Editorial Minimalism ── */
+/* ── paper（报纸 · 近白纸 · 墨黑 · 衬线 · 一枚朱印）· 原型：Soft Editorial Minimalism ── */
 html[data-theme='paper'] {
   /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
   --neutral-0: #fefdfb;
@@ -889,7 +931,7 @@ html[data-theme='paper'] {
   --hyacinth-user-bg-scrim: rgba(254, 253, 251, 0.55);
 }
 
-/* ── terminal（终端 · 纯黑 · 单色荧光 · 零圆角）· 原型：Crisp Enterprise Console（单色变体） ── */
+/* ── terminal（终端 · 纯黑 · 单色荧光 · 零圆角）· 原型：Crisp Enterprise Console（单色） ── */
 html[data-theme='terminal'] {
   /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
   --neutral-0: #000000;
@@ -952,66 +994,6 @@ html[data-theme='terminal'] {
   --hyacinth-user-bg-scrim: rgba(0, 0, 0, 0.74);
 }
 
-/* ── sunset（日落 · 深紫暮色 · 一处琥珀 · 大圆角）· 原型：Dark Luminous Control（暖色变体） ── */
-html[data-theme='sunset'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #150e17;
-  --neutral-50: #19111b;
-  --neutral-100: #1c141f;
-  --neutral-150: #201723;
-  --neutral-200: #231926;
-  --neutral-250: #271c2a;
-  --neutral-300: #2a1f2e;
-  --neutral-400: #5f5164;
-  --neutral-500: #94839a;
-  --neutral-600: #a898ad;
-  --neutral-700: #c1b4c4;
-  --neutral-800: #d9cfdb;
-  --neutral-900: #f2ebf2;
-
-  --primary-0: #241305;
-  --primary-50: #351e07;
-  --primary-100: #462909;
-  --primary-150: #57340b;
-  --primary-200: #683e0d;
-  --primary-250: #79490f;
-  --primary-300: #8a5411;
-  --primary-400: #b26f1e;
-  --primary-500: #d98a2b;
-  --primary-600: #f0ab5e;
-  --primary-700: #f4c38b;
-  --primary-800: #f9dbb9;
-  --primary-900: #fdf3e6;
-
-  --accent-0: #241019;
-  --accent-50: #2d141f;
-  --accent-100: #371925;
-  --accent-150: #401d2c;
-  --accent-200: #492132;
-  --accent-250: #532638;
-  --accent-300: #5c2a3e;
-  --accent-400: #7b4359;
-  --accent-500: #9a5b74;
-  --accent-600: #b87e93;
-  --accent-700: #cb9eaf;
-  --accent-800: #ddbdca;
-  --accent-900: #f0dde6;
-
-  /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 24px;
-  --radius-2xl: 28px;
-  --shadow-sm: 0 0 0 0 transparent;
-  --shadow-md: 0 4px 16px rgba(21, 14, 23, 0.40);
-  --shadow-lg: 0 10px 32px rgba(21, 14, 23, 0.46);
-  --hyacinth-bg-image: none;
-  --hyacinth-surface-blur: none;
-  --hyacinth-aurora: radial-gradient(680px 420px at 80% 10%, rgba(217, 138, 43, 0.13), transparent 64%);
-  --hyacinth-user-bg-scrim: rgba(21, 14, 23, 0.55);
-}
-
 /* ── glacier（冰川 · 冷白 · 钢蓝 · 中圆角）· 原型：Quiet Product Precision（冷亮版） ── */
 html[data-theme='glacier'] {
   /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
@@ -1066,6 +1048,66 @@ html[data-theme='glacier'] {
   --shadow-sm: 0 0 0 0 transparent;
   --shadow-md: 0 3px 14px rgba(15, 30, 51, 0.09);
   --shadow-lg: 0 10px 30px rgba(15, 30, 51, 0.12);
+  --hyacinth-bg-image: none;
+  --hyacinth-surface-blur: none;
+  --hyacinth-aurora: none;
+  --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
+}
+
+/* ── celadon（青瓷 · 青瓷釉面 · 温润哑光 · 器物感）· 原型：Soft Editorial Minimalism（器物变体） ── */
+html[data-theme='celadon'] {
+  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
+  --neutral-0: #fbfdfb;
+  --neutral-50: #f6f9f7;
+  --neutral-100: #f2f6f3;
+  --neutral-150: #edf2ef;
+  --neutral-200: #e8eeea;
+  --neutral-250: #e4ebe6;
+  --neutral-300: #dfe7e2;
+  --neutral-400: #9fada6;
+  --neutral-500: #5f736a;
+  --neutral-600: #475a52;
+  --neutral-700: #374740;
+  --neutral-800: #26342f;
+  --neutral-900: #16211d;
+
+  --primary-0: #f1f8f4;
+  --primary-50: #e1efe7;
+  --primary-100: #d0e5db;
+  --primary-150: #c0dcce;
+  --primary-200: #b0d2c1;
+  --primary-250: #9fc9b5;
+  --primary-300: #8fbfa8;
+  --primary-400: #67a78c;
+  --primary-500: #3f8f6f;
+  --primary-600: #2c7057;
+  --primary-700: #215945;
+  --primary-800: #174232;
+  --primary-900: #0c2b20;
+
+  --accent-0: #faf6f2;
+  --accent-50: #f3ece6;
+  --accent-100: #ebe2d9;
+  --accent-150: #e4d8cd;
+  --accent-200: #dccdc1;
+  --accent-250: #d5c3b4;
+  --accent-300: #cdb9a8;
+  --accent-400: #ac9581;
+  --accent-500: #8a7159;
+  --accent-600: #6b5743;
+  --accent-700: #554535;
+  --accent-800: #403226;
+  --accent-900: #2a2018;
+
+  /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-2xl: 26px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 2px 12px rgba(22, 33, 29, 0.08);
+  --shadow-lg: 0 8px 28px rgba(22, 33, 29, 0.10);
   --hyacinth-bg-image: none;
   --hyacinth-surface-blur: none;
   --hyacinth-aurora: none;

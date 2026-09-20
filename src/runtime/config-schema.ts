@@ -420,7 +420,7 @@ export interface FullConfig {
   ui?: {
     /** WebUI 主题。hyacinth=夜园(默认·深色) / light=昼园 / dark=深夜 /
      *  glass=琉璃 / ink=墨韵 / rainy=雨夜 */
-    theme: 'hyacinth' | 'light' | 'dark' | 'glass' | 'ink' | 'rainy' | 'mono' | 'cyber' | 'paper' | 'terminal' | 'sunset' | 'glacier';
+    theme: 'hyacinth' | 'light' | 'dark' | 'glass' | 'ink' | 'rainy' | 'sunset' | 'mono' | 'cyber' | 'paper' | 'terminal' | 'glacier' | 'celadon';
   };
 }
 

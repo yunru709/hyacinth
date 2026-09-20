@@ -2163,22 +2163,22 @@
   // ════════════════════════════════════════════════════════════
 
   const THEMES = [
-    { id: 'hyacinth', name: '夜园', desc: '夜花园 · 萤光花穗',
-      swatches: ['#0f1120', '#161930', '#a78bfa', '#2dd4bf', '#eceefa'] },
-    { id: 'light', name: '昼园', desc: '水彩花园 · 清晨',
-      swatches: ['#f6f8f3', '#fdfefc', '#c9baf6', '#43a461', '#1a2016'] },
-    { id: 'mono', name: '极简', desc: '素白 · 冷灰 · 一处克制强调',
+    { id: 'hyacinth', name: '夜园', desc: '夜色 · 紫只做一处信号',
+      swatches: ['#0a0c12', '#0f1219', '#8b7ae0', '#2fb3a4', '#e9edf5'] },
+    { id: 'light', name: '昼园', desc: '晨光纸面 · 冷白 ＋ 一点苔绿',
+      swatches: ['#fbfbfc', '#f2f4f7', '#1f8471', '#6b7a89', '#101a24'] },
+    { id: 'mono', name: '极简', desc: '素白 · 冷灰 · 纯结构',
       swatches: ['#f9fafb', '#eef0f3', '#475569', '#64748b', '#0f172a'] },
     { id: 'cyber', name: '赛博朋克', desc: '近黑 · 电子青为唯一强调 · 硬直角',
       swatches: ['#090b10', '#0e1117', '#22c1d6', '#6d6488', '#e8ecf4'] },
-    { id: 'paper', name: '报纸', desc: '近白纸 · 墨黑 · 衬线 · 一处朱印',
+    { id: 'paper', name: '报纸', desc: '近白纸 · 墨黑 · 衬线 · 一枚朱印',
       swatches: ['#faf8f5', '#f2efea', '#4a4438', '#9c4232', '#17150f'] },
     { id: 'terminal', name: '终端', desc: '纯黑 · 单色荧光 · 零圆角',
       swatches: ['#030403', '#080c08', '#35d06a', '#a08a3c', '#e4ece4'] },
-    { id: 'sunset', name: '日落', desc: '深紫暮色 · 一处琥珀 · 大圆角',
-      swatches: ['#19111b', '#201723', '#d98a2b', '#9a5b74', '#f2ebf2'] },
     { id: 'glacier', name: '冰川', desc: '冷白 · 钢蓝 · 中圆角',
       swatches: ['#f9fbfd', '#edf3f9', '#2f6bbf', '#3f8f9c', '#0f1e33'] },
+    { id: 'celadon', name: '青瓷', desc: '青瓷釉面 · 温润哑光 · 器物感',
+      swatches: ['#f6f9f7', '#edf2ef', '#3f8f6f', '#8a7159', '#16211d'] },
   ];
 
   const THEME_IDS = THEMES.map((t) => t.id);
