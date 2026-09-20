@@ -496,14 +496,26 @@ export function subscribeConfig(
   applyRouteMode(configCenter.get<string>('provider.routeMode') ?? 'auto');
 
   // session.maxTurns 变更 → 即时更新
+  // 去重：只在**本会话实际生效值变化**时才提示 ✓
+  // 背景（2026-09-20 用户报「同一句堆了 7 行」✗）：配置中心是**进程级单例** ⇒
+  // 别的会话改一次配置，**所有会话的 watch 都会回调** ✗ ⇒ 每个会话都给自己的界面推一条 ✗
+  // ⇒ 值没变就别说 "updated" ✓
+  // ⚠️ 种子必须取**注册时刻的当前生效值** ✓ —— 只记"上次通知过什么"是不够的 ✗：
+  //    会话**首次**收到（别的会话引发的）回调时，"上次"还是 null ⇒ 照样推一条 ✗（实测踩过 ✓）
+  let lastMaxTurnsNotified: number | null = configCenter.get<number>('session.maxTurns') ?? null;
   configCenter.watch('session.maxTurns', (event) => {
     if (typeof event.newValue === 'number' && event.newValue > 0) {
       hooks.setMaxTurns(event.newValue);
-      outputHandler?.onStatus?.(`maxTurns updated to ${event.newValue}`, 'info');
+      if (lastMaxTurnsNotified !== event.newValue) {
+        lastMaxTurnsNotified = event.newValue;
+        outputHandler?.onStatus?.(`maxTurns updated to ${event.newValue}`, 'info');
+      }
     }
   });
 
   // session.maxContext 变更 → 即时更新（裁剪到当前模型上限）
+  // 同理：种子 = 本会话**当前生效**的上下文上限（别的会话的回声不该提示我 ✓）
+  let lastMaxContextApplied: number | null = deps.getCurrentMaxContextTokens() ?? null;
   configCenter.watch('session.maxContext', (event) => {
     if (typeof event.newValue === 'number' && event.newValue > 0) {
       const activeP = deps.getActiveProvider();
@@ -513,13 +525,15 @@ export function subscribeConfig(
       );
       const clamped = Math.min(event.newValue, modelLimit);
       hooks.setMaxContextTokens(clamped);
-      if (clamped < event.newValue) {
+      // 去重（同上 ✓）：按**最终要显示的文案**判，capped / updated 两支都覆盖 ✓
+      if (lastMaxContextApplied !== clamped) {
+        lastMaxContextApplied = clamped;
         outputHandler?.onStatus?.(
-          `maxContextTokens capped to ${clamped} (model limit: ${modelLimit})`,
-          'warn',
+          clamped < event.newValue
+            ? `maxContextTokens capped to ${clamped} (model limit: ${modelLimit})`
+            : `maxContextTokens updated to ${clamped}`,
+          clamped < event.newValue ? 'warn' : 'info',
         );
-      } else {
-        outputHandler?.onStatus?.(`maxContextTokens updated to ${clamped}`, 'info');
       }
     }
   });
