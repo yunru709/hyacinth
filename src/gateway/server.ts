@@ -29,6 +29,8 @@ export interface ServerOptions {
   maxTurns?: number;
   maxContext?: number;
   apiKey?: string;
+  /** 监听地址（缺省 127.0.0.1；对外开放见 http-webhook 的 fail-closed 守卫） */
+  host?: string;
   corsOrigin?: string;
   /** WebUI 静态资源目录（serve --webui 时启用；http-webhook 用 @fastify/static 托管） */
   webuiRoot?: string;
@@ -86,6 +88,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     maxTurns,
     maxContext,
     apiKey: options.apiKey,
+    host: options.host,
     corsOrigin: options.corsOrigin,
     webuiRoot: options.webuiRoot,
   });
@@ -168,6 +171,13 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   await manager.startAll(agentFactory, sessionService);
 
   console.log(`HTTP API: http://localhost:${port}`);
+  // 对外开放时，localhost 这个地址对其它设备没用 ✗ ⇒ 一并列出可达网址 ✓
+  try {
+    const { listLanUrls } = await import('../channels/builtin/http-webhook.js');
+    if ((options.host ?? '127.0.0.1').startsWith('127.') === false && (options.host ?? '127.0.0.1') !== 'localhost') {
+      for (const u of listLanUrls(port)) console.log(`         可从局域网访问: ${u}`);
+    }
+  } catch { /* 提示失败不影响启动 */ }
 
   return { manager, port };
 }

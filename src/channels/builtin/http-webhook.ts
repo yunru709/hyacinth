@@ -30,6 +30,7 @@ import { getModelContextWindow } from '../../setup/model-defaults.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
 import { registerMediaRoutes, isPublicReadRoute } from '../../gateway/media-routes.js';
 import { LocalModelModule } from '../../local-model/index.js';
+import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import type { UiWsSessionBackend } from './ui-ws-session.js';
@@ -60,6 +61,39 @@ function isPublicWebUIRoute(url: string): boolean {
     path.startsWith('/vendor/') ||
     path.startsWith('/assets/')
   );
+}
+
+/**
+ * 监听地址是否"只对本机"（fail-closed 判定用）。
+ * 认 127.x / ::1 / localhost；其余（含 0.0.0.0 与内网地址）都算"对外开放"。
+ */
+export function isLoopbackHost(host: unknown): boolean {
+  // 配置里的值类型是宽松的（ChannelConfig 是索引类型）⇒ 在边界处收成字符串 ✓
+  const h = String(host ?? '').trim().toLowerCase();
+  return h === 'localhost' || h === '::1' || h.startsWith('127.');
+}
+
+/**
+ * 列出本机**可达**的局域网网址（对外开放时提示用）。
+ *
+ * 为什么要"全列"而不是猜一个 ✗：多网卡 / VPN 虚拟网卡 / Docker 都会各有一个地址，
+ * 猜错比全列更糟（用户会拿着一个连不上的地址反复试 ✓）。
+ * 私有网段（192.168 / 10 / 172.16-31）标为"家里网"，其余标为"其它网卡"。
+ */
+export function listLanUrls(port: number): string[] {
+  const out: string[] = [];
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const addr of ifaces[name] ?? []) {
+      if (addr.family !== 'IPv4' || addr.internal) continue;
+      const ip = addr.address;
+      // 链路本地（169.254.*）不是可用地址 ⇒ 列出来只会让用户困惑 ✗（实测本机就有 3 个）
+      if (ip.startsWith('169.254.')) continue;
+      const isPrivate = ip.startsWith('192.168.') || ip.startsWith('10.') || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+      out.push('http://' + ip + ':' + port + '/' + (isPrivate ? '  ← 家里网' : '  ← 其它网卡（VPN/Docker 之类）'));
+    }
+  }
+  return out;
 }
 
 function authHook(apiKey: string | null) {
@@ -205,6 +239,25 @@ export class HttpWebhookChannel implements ChannelHandler {
       logger.warn('No HYACINTH_API_KEY set — HTTP API will reject all requests except /api/health. Set the environment variable or use --api-key.');
     }
 
+    // ── 硬约束（fail-closed）：对外开放**必须**有钥匙 ──────────────────
+    // 为什么放在这里而不是命令行 ✗：配置文件同样能改监听地址 ✓ ——
+    // 只有放在"真正读取地址"的地方，两条入口才一起管住 ✓。
+    // 用户画像是非技术背景、会长期开着不管 ⇒ 宁可启动失败（他立刻能看见），
+    // 也不要"门开着、但没人知道该配钥匙" ✗。
+    if (!isLoopbackHost(host) && !apiKey) {
+      const msg = [
+        '',
+        '【拒绝启动】监听地址 ' + host + ' 是对外开放的（局域网可见），但没有配置访问钥匙。',
+        '  对外开放必须配钥匙，否则同网任何人都能让这台电脑执行命令、改文件。',
+        '  任选一种方式配钥匙：',
+        '    · 启动时加：--api-key <一串足够长的钥匙>',
+        '    · 或设环境变量：HYACINTH_API_KEY=<同一串钥匙>',
+        '  若要只在本机使用，请把监听地址改回 127.0.0.1（默认值）。',
+        '',
+      ].join('\n');
+      logger.error(msg);
+      throw new Error('拒绝启动：对外开放但未配置 apiKey（另见启动日志）');
+    }
     const fastify = (await import('fastify')).default;
     this.app = fastify({ logger: false });
 
@@ -488,7 +541,20 @@ export class HttpWebhookChannel implements ChannelHandler {
     const addr = this.app.server?.address();
     this.actualPort = (addr && typeof addr === 'object') ? addr.port : (port as number);
     this.status = 'active';
-    logger.info(`HTTP API listening on ${host}:${this.actualPort}${apiKey ? ' (auth enabled)' : ' (auth: only /api/health)'}`);
+    if (isLoopbackHost(host)) {
+      logger.info(`HTTP API listening on ${host}:${this.actualPort}（只对本机）${apiKey ? ' (auth enabled)' : ''}`);
+    } else {
+      // 对外开放：把**每个**可达网址列出来 —— 用户拿对地址比什么都省事 ✓
+      const urls = listLanUrls(this.actualPort);
+      logger.info([
+        'HTTP API 已**对外开放**（监听 ' + host + ':' + this.actualPort + '）—— 同一局域网内的设备可以访问：',
+        ...urls.map((u) => '   ' + u),
+        '   钥匙接在网址后面： http://<上面某个地址>/  →  实际填写为  http://<地址>/?token=<你的钥匙>',
+        '   提示：钥匙会留在浏览器的历史记录里；建议存成书签，别把带钥匙的网址转发给别人。',
+        '   注意：媒体库与陪伴场景图这类"只读图片"端点不需要钥匙（浏览器显示图片时无法携带钥匙），',
+        '         所以同网的人可以拉到这些图片；但**执行命令、改文件**仍必须凭钥匙 ✓。',
+      ].join('\n'));
+    }
   }
 
   async stop(): Promise<void> {
