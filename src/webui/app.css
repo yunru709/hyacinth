@@ -257,6 +257,100 @@
       #app-shell > .body-area > aside { display: none; }
       .provider-grid { grid-template-columns: 1fr; }
     }
+    /* ── 窄屏导航：侧栏变身「可开合抽屉」──────────────────────────────
+       背景（2026-09-20 实测 ✗）：原先 ≤640px 那条是 `display:none` ⇒ 直接隐藏侧栏，
+       窄屏**没有导航入口** ✗；而且它挂在 `#app-shell > .body-area > aside` 上，
+       而那个容器**根本没有 body-area 类**（已补 ✓）⇒ 历史上从未生效 ✗。
+       现在：≤900px 起侧栏离屏，头部出现菜单键，点开滑出 + 遮罩，选完自动收回 ✓。
+       注意：这里**必须显式写 display:flex** —— 否则旧规则（≤640px 的 display:none）仍然生效 ✗ */
+    #nav-drawer-btn { display: none; }
+    #nav-backdrop { display: none; }
+    @media (max-width: 900px) {
+      #nav-drawer-btn { display: inline-flex; }
+      #app-shell > .body-area > aside {
+        display: flex;
+        position: fixed;
+        top: 48px;
+        bottom: 0;
+        left: 0;
+        z-index: 60;
+        width: min(280px, 82vw);
+        transform: translateX(-100%);
+        transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      #app-shell.nav-open > .body-area > aside { transform: translateX(0); }
+      #app-shell.nav-open #nav-backdrop {
+        display: block;
+        position: fixed;
+        inset: 48px 0 0 0;
+        z-index: 55;
+        background: rgba(0, 0, 0, 0.45);
+      }
+      /* 抽屉展开时：主区不收窄（覆盖式，不挤压阅读宽度 ✓） */
+      #app-shell > .body-area > main { width: 100%; }
+      .provider-grid { grid-template-columns: 1fr; }
+      /* 会话表格（窄屏，2026-09-20 实测修正 ✗→✓）：
+         原写法给 table 设 min-width:780px，但外层套着 overflow-hidden ⇒ 列被**裁掉且够不着** ✗
+         （实测：表 783px，滚动容器 scrollWidth 却只有 430 ⇒ 根本没得滚）。
+         正道：① 容器允许横向滚动 ② 「名称」列与「会话 ID」**恒为同一值**
+         （协议层无 name 字段，app.js 里 nameSpan 直接填 s.id ✓）⇒ 窄屏省掉它，给操作列让位 ✓ */
+      #sessions-table-wrap { overflow-x: auto; }
+      #sessions-table-wrap table { min-width: 560px; }
+      [data-dom-id="sessions-panel"] thead th:nth-child(4),
+      #sessions-tbody td:nth-child(4) { display: none; }
+    }
+    /* ── 窄屏（≤640px）：头部瘦身（截图实证：模型徽标曾被裁到只剩一个字母 ✗）── */
+    @media (max-width: 640px) {
+      .brand-wordmark { display: none; }              /* 品牌字标让位给模型名 ✓ */
+      #header-model-name { max-width: 92px; }
+      #header-model-provider { display: none; }       /* 提供商小徽标在手机上省略 ✓ */
+      #composer-hint { display: none; }               /* 提示语折行 ✗ ⇒ 收起（回车仍是发送 ✓） */
+    }
+    /* ── 窄屏：设置页两处实测缺陷（2026-09-20 量出来的数字 ✓）────────────────
+       ① 开关被压扁：设计宽 40px，430px 视口下实测只剩 14~21px ✗
+          ⇒ 它处在 flex 行里被挤压 ⇒ 禁止收缩 ✓（宽屏下该属性无副作用 ✓）
+       ② 长路径/长标识溢出：实测 138→168 被裁 ✗（如 prompts/persona/SOUL.md）
+          ⇒ 允许在任意字符处折行 ✓ */
+    /* 设置页开关：禁止被 flex 压扁（实测 430 下会被挤到 14~21px，设计宽 40px ✗）
+       ⚠️ 这条被误删过一次（我拿它当了 old_string ⇒ 整行被替换掉 ✗）⇒ 探针当场报红 ✓ */
+    .settings-toggle { flex-shrink: 0; }
+    /* ── 对话空状态（首屏引导；原先那里是一大片空区 ✗）──────────────────
+       注意：这类元素带 `flex` 类（display:flex），**会压过 `hidden` 属性**（UA 的 [hidden]
+       是 display:none，但类选择器优先级更高）⇒ 必须显式补一条，否则"隐藏"不生效 ✗ */
+    #chat-empty[hidden],
+    #message-list[hidden] { display: none !important; }
+    .chat-suggestion {
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--hyacinth-border);
+      background-color: var(--hyacinth-card);
+      color: var(--hyacinth-foreground);
+      cursor: pointer;
+      transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+    }
+    .chat-suggestion:hover,
+    .chat-suggestion:focus-visible {
+      border-color: var(--hyacinth-primary);
+      color: var(--hyacinth-primary);
+    }
+
+    .zone-section-source,
+    .zone-section-name,
+    .prompt-source-path,
+    .prompt-source-name { overflow-wrap: anywhere; }
+    /* ── 会话表操作按钮：任何宽度下都不许折成两行（实测 42px = 两行 ✗）──────
+       注：光给容器开横滚不够 —— 按钮自己会被挤窄后折行 ⇒ 必须显式禁止折行 ✓；
+       表格因此超出容器时，由 #sessions-table-wrap 的横滚兜住 ✓ */
+    #sessions-tbody button[data-action] { white-space: nowrap; }
+    /* 时间列同理会竖向折行（实测 430 下断成 3 行 ✗）⇒ 一并禁止折行；
+       表格因此更宽时由容器横滚兜住（容器已开 auto ✓） */
+    #sessions-tbody td:nth-child(6) span,
+    #sessions-tbody td:nth-child(7) span,
+    [data-dom-id="sessions-panel"] thead th:nth-child(6),
+    [data-dom-id="sessions-panel"] thead th:nth-child(7) { white-space: nowrap; }
+
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     [data-icon] { display: inline-flex; align-items: center; justify-content: center; }

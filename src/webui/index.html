@@ -43,6 +43,10 @@
   <!-- Header -->
   <header data-nav-key="header" class="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-3 gap-3">
     <div class="flex items-center gap-3 min-w-0">
+      <!-- 窄屏导航菜单键（≤900px 才显示；宽屏由 CSS 隐藏 ✓） -->
+      <button id="nav-drawer-btn" class="p-1.5 -ml-1 shrink-0 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" aria-label="打开导航" aria-expanded="false">
+        <i data-lucide="menu" class="w-5 h-5"></i>
+      </button>
       <a href="#/companion" data-dom-id="companion-entry" class="companion-entry-btn" aria-label="陪伴模式">
         <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
       </a>
@@ -78,7 +82,9 @@
   </header>
 
   <!-- Body area -->
-  <div class="flex flex-1 overflow-hidden">
+  <div class="body-area flex flex-1 overflow-hidden">
+    <!-- 窄屏导航遮罩：点击关闭抽屉（宽屏恒为 display:none ✓） -->
+    <div id="nav-backdrop"></div>
     <!-- Sidebar -->
     <aside data-nav-key="sidebar" class="w-[260px] shrink-0 border-r border-border bg-card flex flex-col">
       <div class="p-3">
@@ -120,8 +126,27 @@
     <main id="hyacinth-main" data-nav-key="main" class="flex-1 overflow-hidden relative bg-background">
       <section data-view="chat" class="view-section h-full">
       <div id="chat-wrapper" class="h-full flex flex-col min-w-0">
-        <!-- Message canvas -->
-        <div id="message-list" class="flex-1 overflow-y-auto px-4 py-5 space-y-5" data-scroll-region="primary"></div>
+        <!-- Message canvas（无消息时收起，让位给下面的空状态 ✓） -->
+        <div id="message-list" class="flex-1 overflow-y-auto px-4 py-5 space-y-5" data-scroll-region="primary" hidden></div>
+
+        <!-- 空状态（首屏引导）：尚无消息时显示 —— 原先这里是一大片空区 ✗
+             app.js 用 MutationObserver 盯 message-list 子节点自动切换 ✓ -->
+        <div id="chat-empty" class="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-10 text-center">
+          <div class="flex flex-col items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+              <i data-lucide="hexagon" class="w-6 h-6 text-primary"></i>
+            </div>
+            <h2 class="text-lg font-semibold text-foreground">开始对话</h2>
+            <p class="text-sm text-muted-foreground max-w-md leading-relaxed">
+              直接输入你的问题即可；也可以从下面挑一个开始。
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center justify-center gap-2 max-w-2xl">
+            <button type="button" class="chat-suggestion" data-prompt="你能帮我做什么？">你能帮我做什么？</button>
+            <button type="button" class="chat-suggestion" data-prompt="介绍一下这个项目">介绍一下这个项目</button>
+            <button type="button" class="chat-suggestion" data-prompt="帮我写一段脚本">帮我写一段脚本</button>
+          </div>
+        </div>
 
         <!-- Composer -->
         <div id="chat-composer" class="shrink-0 border-t border-border bg-card p-3">
@@ -143,7 +168,7 @@
               </button>
             </div>
           </div>
-          <div class="mt-2 flex items-center justify-between text-xs text-muted-foreground px-1">
+          <div id="composer-hint" class="mt-2 flex items-center justify-between text-xs text-muted-foreground px-1">
             <span>Enter 发送 / Shift+Enter 换行</span>
           </div>
         </div>
@@ -306,7 +331,7 @@
 
         <!-- Session list table -->
         <div class="flex-1 overflow-auto p-5">
-          <div class="rounded-lg border border-border bg-card overflow-hidden">
+          <div id="sessions-table-wrap" class="rounded-lg border border-border bg-card overflow-hidden">
             <table class="w-full text-left border-collapse">
               <thead class="bg-muted sticky top-0 z-10">
                 <tr>

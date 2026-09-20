@@ -2892,8 +2892,66 @@
           e.preventDefault();
           navigate();
         }
+        // 窄屏抽屉：选完导航自动收起（宽屏无副作用：类本来就没加 ✓）
+        setNavDrawer(false);
       });
     });
+
+    // ── 窄屏导航抽屉（≤900px）────────────────────────────────────
+    // 背景：原先窄屏是直接 `display:none` 隐藏侧栏 ⇒ **没有导航入口** ✗。
+    // 现在改为覆盖式抽屉：菜单键开合、点遮罩/选完导航/Esc 收起、回到宽屏自动复位 ✓。
+    const drawerBtn = $('#nav-drawer-btn');
+    if (drawerBtn) {
+      drawerBtn.addEventListener('click', () => {
+        const shell = $('#app-shell');
+        setNavDrawer(!(shell && shell.classList.contains('nav-open')));
+      });
+    }
+    const drawerBackdrop = $('#nav-backdrop');
+    if (drawerBackdrop) drawerBackdrop.addEventListener('click', () => setNavDrawer(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') setNavDrawer(false);
+    });
+    // 视口变宽（如平板横竖切换 / 窗口拉大）⇒ 抽屉状态复位，避免残留遮挡 ✓
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 900) setNavDrawer(false);
+    });
+
+    // ── 对话空状态（首屏引导）──────────────────────────────────────
+    // 背景：原先首屏是一大片空区 ✗（新用户不知道该干什么 ✓）。
+    // 现在：无消息 ⇒ 显示引导 + 三条建议；有消息 ⇒ 收起 ✓。
+    // 触发用 **MutationObserver 一处挂钩** ⇒ 自动覆盖所有路径
+    // （appendMsg / clearChat / appendAssistantStream / renderHistoryMsg / loadHistory）✓
+    const emptyMsgList = $('#message-list');
+    const emptyPanel = $('#chat-empty');
+    if (emptyMsgList && emptyPanel) {
+      const syncChatEmpty = () => {
+        const has = emptyMsgList.children.length > 0;
+        emptyPanel.hidden = has;
+        emptyMsgList.hidden = !has;
+      };
+      syncChatEmpty();
+      new MutationObserver(syncChatEmpty).observe(emptyMsgList, { childList: true });
+      // 建议按钮：**填入输入框**（不直接发送 ⇒ 用户仍可改 ✓）
+      $$('#chat-empty .chat-suggestion').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const inp = $('#chat-input');
+          if (!inp) return;
+          inp.value = btn.dataset.prompt || btn.textContent || '';
+          inp.focus();
+          try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { /* ignore */ }
+        });
+      });
+    }
+  }
+
+  /** 窄屏导航抽屉开合（宽屏下该 class 无任何样式 ⇒ 调用亦无副作用 ✓） */
+  function setNavDrawer(open) {
+    const shell = $('#app-shell');
+    if (!shell) return;
+    shell.classList.toggle('nav-open', !!open);
+    const btn = $('#nav-drawer-btn');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
   // ════════════════════════════════════════════════════════════
