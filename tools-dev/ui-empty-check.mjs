@@ -102,19 +102,31 @@ results.push(['② 未自动发送（仍停首屏）', s1.empty === 'visible' &&
 await shot('2-suggestion-filled');
 
 // ③ 注入假消息节点 → 观察器应自动切换
-await evaluate(`(() => {
-  const ml = document.querySelector('#message-list');
-  const d = document.createElement('div'); d.id = 'probe-msg'; d.textContent = 'probe';
-  ml.appendChild(d);
-})()`);
-await sleep(500);
-const s2 = await evaluate(STATE);
-console.log(`③ 有消息后：引导=${s2.empty}  消息区=${s2.list}  子节点=${s2.listChildren}`);
-results.push(['③ 有消息 ⇒ 引导自动收起、消息区显示', s2.empty === 'hidden' && s2.list === 'visible']);
+// ★ 教训（当场踩到 ✗）：**应用自身的渲染会在轮询/重绘里清空列表** ⇒ 注入可能被清掉 ⇒
+//   所以这里必须「**边注入边轮询**」，且第④步删除时**要守卫 null**（否则探针自己抛错崩掉 ✗）
+let injectedOk = false;
+let s2 = null;
+for (let i = 0; i < 12; i++) {
+  await evaluate(`(() => {
+    const ml = document.querySelector('#message-list');
+    if (!ml) return;
+    if (!document.querySelector('#probe-msg')) {
+      const d = document.createElement('div');
+      d.id = 'probe-msg';
+      d.textContent = 'probe';
+      ml.appendChild(d);
+    }
+  })()`);
+  await sleep(250);
+  s2 = await evaluate(STATE);
+  if (s2.empty === 'hidden' && s2.list === 'visible') { injectedOk = true; break; }
+}
+console.log(`③ 有消息后：引导=${s2 ? s2.empty : '?'}  消息区=${s2 ? s2.list : '?'}  子节点=${s2 ? s2.listChildren : '?'}`);
+results.push(['③ 有消息 ⇒ 引导自动收起、消息区显示', injectedOk]);
 await shot('3-with-message');
 
-// ④ 清空 → 引导应回来
-await evaluate(`document.querySelector('#probe-msg').remove()`);
+// ④ 清空 → 引导应回来（守卫：节点可能已被应用清掉 ⇒ 不能直接 .remove() ✗）
+await evaluate(`(() => { const n = document.querySelector('#probe-msg'); if (n) n.remove(); })()`);
 await sleep(500);
 const s3 = await evaluate(STATE);
 console.log(`④ 清空后：引导=${s3.empty}  消息区=${s3.list}  子节点=${s3.listChildren}`);

@@ -2917,6 +2917,25 @@
       if (window.innerWidth > 900) setNavDrawer(false);
     });
 
+    // ── 视口高度校准（真机致伤 ✗ 2026-09-20）──────────────────────
+    // 用户实报「主页看不到发消息的地方」；我在无头浏览器里六种尺寸都量到输入框可见 ✗（复现不了）。
+    // 机制：平板/手机浏览器的工具栏会占掉高度，而 100vh **包含**那部分 ⇒
+    // shell 底部（正是输入框）被推出可视区，又因 shell 是 overflow:hidden ⇒ **永远够不着** ✗
+    // 对策：用 `visualViewport.height`（真实可见高）写进 CSS 变量 --app-vh，
+    // 由 CSS 用它设 shell 高 ⇒ 输入框必定落在可视区内 ✓（桌面端两者相等 ⇒ 无副作用 ✓）
+    const syncAppVh = () => {
+      const vv = window.visualViewport;
+      const h = Math.round((vv && vv.height) || window.innerHeight || 0);
+      if (h > 0) document.documentElement.style.setProperty('--app-vh', h + 'px');
+    };
+    syncAppVh();
+    window.addEventListener('resize', syncAppVh);
+    window.addEventListener('orientationchange', syncAppVh);
+    if (window.visualViewport) {
+      // 工具栏收起/键盘弹出时都会触发 ⇒ 跟着校准 ✓
+      window.visualViewport.addEventListener('resize', syncAppVh);
+    }
+
     // ── 对话空状态（首屏引导）──────────────────────────────────────
     // 背景：原先首屏是一大片空区 ✗（新用户不知道该干什么 ✓）。
     // 现在：无消息 ⇒ 显示引导 + 三条建议；有消息 ⇒ 收起 ✓。

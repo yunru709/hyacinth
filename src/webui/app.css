@@ -492,3 +492,33 @@
 #thinking-indicator { display: none; }
 #thinking-indicator.active { display: flex; }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   移动端视口高度修正（2026-09-20 · 用户实报「主页看不到发消息的地方」✗）
+
+   现象：用户说主页找不到输入框；我在无头浏览器里量了 **6 种尺寸**
+   （含矮屏 1180×560 / 820×620 / 430×620）⇒ 输入框**全部可见** ✗ ⇒ 复现不了。
+   关键线索：输入框在每种尺寸下**底边都恰好等于视口高**
+   （例：y=793 + 高 107 = 900 = 视口高）⇒ 它就贴在**最底边**上。
+
+   机制（最符合现象）：平板/手机浏览器的地址栏、底部工具栏会占掉高度，
+   而 `100vh` 是**"包含那些工具栏"的高度** ⇒ shell 底部被压到**可视区之外**，
+   又因为 shell 是 `overflow: hidden`（页面滚不动）⇒ 输入框**永远够不着** ✗。
+
+   对策：改用**动态视口高 `100dvh`**（工具栏收起时自动变大），
+        并留出**安全区**（刘海 / Home 指示条）；旧写法保留在前作兜底 ✓。
+   注：用 ID 选择器写在最后 ⇒ 稳过 Tailwind 的 `.h-screen`（类选择器优先级更低）✓
+   ══════════════════════════════════════════════════════════════════ */
+html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
+#app-shell { height: 100vh; height: 100dvh; width: 100%; }
+/* 安全区：不写死数值，由系统给（没有则 0 ✓）；box-sizing 保证内边距算在高度内 ✓ */
+#app-shell { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+/* 兜底：万一高度仍不足，让"空状态区"自己可滚，**绝不把输入框挤出可视区** ✓ */
+#chat-wrapper { min-height: 0; }
+#chat-empty { min-height: 0; overflow-y: auto; }
+/* ── 再加一层保险：用 JS 校准出来的「真实可见高」设 shell 高度 ─────────────
+   为什么不能只靠 100dvh：部分平板浏览器里 100vh/100dvh 仍把工具栏算进去 ⇒
+   底部（**正是输入框所在**）被推出可视区，而 shell 是 overflow:hidden ⇒ 够不着 ✗。
+   app.js 会持续把 `visualViewport.height` 写进 --app-vh（桌面端两者相等 ⇒ 无副作用 ✓）；
+   万一该变量没写上，回落 100dvh ⇒ 再回落到上面那两行 ✓ */
+#app-shell { height: var(--app-vh, 100dvh); }
