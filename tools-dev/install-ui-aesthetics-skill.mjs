@@ -1,4 +1,10 @@
-// tools-dev/install-ui-aesthetics-skill.mjs —— 安装 ui-aesthetics skill（合订版 ✓）
+// tools-dev/install-ui-aesthetics-skill.mjs —— 安装 ui-aesthetics skill（**合订版**，已被原生形态取代 ⚠️）
+//
+// ⚠️ 2026-09-20 起：框架已**原生支持「文件夹式 skill」**（`<name>/SKILL.md` ＋ 子文件 ✓，
+//    见 `src/skills/loader.ts` 与 `docs/user-guide.md` 的「自定义技能」一节 ✓）
+//    ⇒ 本脚本的"合订成一个 .md"做法**不再必要** ✓（当时是为绕开"只认平铺 .md"的限制 ✗）。
+//    本脚本**保留**作为两样东西的配方 ✓：① 从**被墙的 GitHub** 抓 skill（镜像 gh-proxy.com ✓）
+//    ② 抓取清单与体积核对 ✓。安装现行形态请按 user-guide 的文件夹布局直接拷贝 ✓。
 //
 // 为什么是"合订"而不是原样搬目录 ✗（依据：读源码得到 ✓，非推测）：
 //   · 本机加载器 `src/skills/loader.ts` 的 `scanSkillsDir` ＋ `skill-watcher.ts:71`
