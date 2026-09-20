@@ -1031,6 +1031,74 @@ export async function runTui(
   // 自动检测配置驱动渠道（飞书等），有配置则自动注册
   await registerConfigChannels(channelManager, process.cwd());
 
+  // ── 网页版渠道：宿主装配（配置驱动；**默认不开** ✓）────────────────────
+  // 为什么注册在这里，而不是放进 channels/plugins/ 交给自动发现托管 ✗：
+  //   HTTP 渠道 start() 需要 sessionManager / cwd / 上下文默认值，而**插件目录不许直连
+  //   memory**（分层规则 5 ✗，UI 侧白名单里没有 memory）；宿主装配处（本文件）的白名单
+  //   本就含 memory / provider / setup ✓ —— 这正是"本地宿主装配豁免"的用途 ✓。
+  // 默认行为不变：只有配置里 `channels.webui.enabled === true` 才注册 ✓。
+  // 渠道管理器随后会注入 agentFactory，并随 startAll 一同启动 ✓。
+  try {
+    // 读配置：**与飞书/微信渠道同一条读法** ✓（auto-detect.ts 用的也是 ConfigManager ⇒
+    // 不依赖 RuntimeConfigCenter 在这一刻是否就绪 ✓）
+    const { ConfigManager } = await import('../setup/config.js');
+    const cfgMgr = new ConfigManager(process.cwd());
+    await cfgMgr.loadEnvKeys();
+    const agentCfg = await cfgMgr.load();
+    const webuiCfg = ((agentCfg.channels ?? {}) as Record<string, unknown>).webui as
+      | { enabled?: boolean; port?: number; host?: string; noAuth?: boolean; apiKey?: string }
+      | undefined;
+
+    if (webuiCfg?.enabled === true) {
+      const { HttpWebhookChannel } = await import('../channels/builtin/http-webhook.js');
+      const { DEFAULT_MAX_CONTEXT_TOKENS } = await import('../setup/config.js');
+      const nodePath = await import('node:path');
+      const { existsSync } = await import('node:fs');
+      const { fileURLToPath } = await import('node:url');
+
+      const cwd = process.cwd();
+      const here = nodePath.dirname(fileURLToPath(import.meta.url));
+      // 静态页面目录：源码树优先（开发/本机），其次构建产物 ✓；两处都没有就让渠道自己决定
+      const webuiRoot = [
+        nodePath.resolve(here, '../../src/webui'),
+        nodePath.resolve(here, '../../webui'),
+        nodePath.resolve(cwd, 'src/webui'),
+      ].find((p) => existsSync(p));
+
+      let maxTurns = 100;
+      try {
+        const { getDefaultConfig } = await import('../runtime/defaults.js');
+        const d = getDefaultConfig().session as { maxTurns?: number };
+        if (typeof d.maxTurns === 'number') maxTurns = d.maxTurns;
+      } catch { /* 取不到就用保守值 ✓ */ }
+
+      const host = webuiCfg.host ?? '127.0.0.1';
+      const port = webuiCfg.port ?? 3100;
+
+      channelManager.register(new HttpWebhookChannel(), {
+        port,
+        host,
+        noAuth: webuiCfg.noAuth === true,
+        apiKey: webuiCfg.apiKey,
+        cwd,
+        sessionManager,
+        webuiRoot,
+        maxTurns,
+        // 显式给数 ⇒ http-webhook 里 `?? getModelContextWindow(provider…)` 短路，
+        // 不依赖 provider（渠道管理器这条路上并不注入它 ✓）
+        maxContext: DEFAULT_MAX_CONTEXT_TOKENS,
+        enabled: true,
+      });
+
+      chatLog.addSystem(
+        `🌐 网页版渠道已注册（${host}:${port}${webuiCfg.noAuth === true ? '，未校验钥匙' : ''}）`,
+      );
+    }
+  } catch (err) {
+    // 注册失败不许影响 TUI 启动 ✓（渠道是附加能力，不是主链路）
+    chatLog.addSystem(`⚠ 网页版渠道注册失败：${String(err).slice(0, 140)}`);
+  }
+
   // 调用所有插件的 onGatewayInit 钩子（如飞书 SDK 日志拦截）
   const cleanupFns: Array<() => void> = [];
   for (const plugin of getChannelPlugins()) {
