@@ -60,9 +60,12 @@ export class MCPSystem {
   private statusCallback?: (event: MCPStatusEvent) => void;
 
   // 外部依赖（通过 register 方法注入）
-  private toolRegistry?: ToolRegistry;
-  private contextComposer?: LayeredContextComposer;
-  private supervisor?: LifecycleSupervisor;
+  // 共享实例（2026-09-20 方案 (b)）：一份 MCPSystem 同时服务**多个会话** ✓
+  private toolRegistries = new Set<ToolRegistry>();
+  private contextComposers = new Set<LayeredContextComposer>();
+  private supervisors = new Set<LifecycleSupervisor>();
+  /** start() 幂等守卫：共享实例被多个会话装配触发时，也只真正启动一次 ✓ */
+  private startPromise?: Promise<void>;
 
   constructor(deps: MCPSystemDeps) {
     this.cwd = deps.cwd;
@@ -72,8 +75,14 @@ export class MCPSystem {
     this.bridge = new MCPBridge([]);
   }
 
-  /** 启动所有 MCP Server */
+  /** 启动所有 MCP Server（**幂等** ✓ 共享实例被多个会话装配触发也只启动一次） */
   async start(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.doStart();
+    return this.startPromise;
+  }
+
+  private async doStart(): Promise<void> {
     this.currentConfigs = await this.configLoader.load(this.cwd);
 
     // 连接前清扫上次异常退出遗留的孤儿 MCP 子进程树（失败不影响启动）
@@ -105,6 +114,7 @@ export class MCPSystem {
     this.managers = [];
     this.bridge.updateClients([], []);
     this.currentConfigs = [];
+    this.startPromise = undefined;   // 允许 stop 之后再 start ✓
     this.logger.info('MCPSystem stopped');
   }
 
@@ -147,19 +157,22 @@ export class MCPSystem {
 
   /** 注册到 ToolRegistry */
   registerToToolRegistry(registry: ToolRegistry): void {
-    this.toolRegistry = registry;
+    if (this.toolRegistries.has(registry)) return;   // 幂等：同一会话重复注册直接跳过 ✓
+    this.toolRegistries.add(registry);
     this.bridge.registerToRegistry(registry);
   }
 
   /** 注册到 ContextComposer — 每个 Server 注册为独立 ContextSource */
   registerToContextComposer(composer: LayeredContextComposer): void {
-    this.contextComposer = composer;
+    if (this.contextComposers.has(composer)) return;
+    this.contextComposers.add(composer);
     this.syncContextSources(composer);
   }
 
   /** 注册到 LifecycleSupervisor */
   registerToLifecycleSupervisor(supervisor: LifecycleSupervisor): void {
-    this.supervisor = supervisor;
+    if (this.supervisors.has(supervisor)) return;
+    this.supervisors.add(supervisor);
     for (const manager of this.managers) {
       supervisor.registerMCPServer(manager.getProcessManager());
     }
@@ -258,6 +271,13 @@ export class MCPSystem {
     }
     const effectiveConfig = resolved ? { ...config, command: resolved.command, args: resolved.args } : config;
 
+    // 去重守卫（共享后必需 ✓）：共享实例会被**多个会话**的装配/插件管理器反复添加同一份配置，
+    // 不加守卫就会重复 spawn 同一个 server ✗
+    if (this.managers.some((m) => m.getName() === config.name)) {
+      this.logger.info(`MCP server 「${config.name}」 already added, skipping duplicate`);
+      return;
+    }
+
     const manager = new MCPServerManager(effectiveConfig);
     const ok = await manager.connect();
     if (!ok) {
@@ -276,18 +296,19 @@ export class MCPSystem {
     this.syncBridge();
 
     // 注册到 ToolRegistry
-    if (this.toolRegistry) {
-      this.bridge.registerToRegistry(this.toolRegistry);
+    // 新连上的 server 的工具，要注册进**所有**会话的 registry ✓
+    for (const registry of this.toolRegistries) {
+      this.bridge.registerToRegistry(registry);
     }
 
     // 注册到 ContextComposer — 热插拔与持久化使用不同 cacheability
-    if (this.contextComposer) {
-      this.registerServerContextSource(config.name, manager, this.contextComposer, isHotPlug);
+    for (const composer of this.contextComposers) {
+      this.registerServerContextSource(config.name, manager, composer, isHotPlug);
     }
 
     // 注册到 LifecycleSupervisor
-    if (this.supervisor) {
-      this.supervisor.registerMCPServer(manager.getProcessManager());
+    for (const supervisor of this.supervisors) {
+      supervisor.registerMCPServer(manager.getProcessManager());
     }
 
     this.emitStatus({ type: 'added', name: config.name, tools: manager.getClient().getTools().map(t => t.name) });
@@ -302,13 +323,13 @@ export class MCPSystem {
     const oldToolNames = manager.getClient().getTools().map(t => t.name);
 
     // 注销工具
-    if (this.toolRegistry) {
-      this.bridge.unregisterTools(name, this.toolRegistry);
+    for (const registry of this.toolRegistries) {
+      this.bridge.unregisterTools(name, registry);
     }
 
     // 注销 ContextSource
-    if (this.contextComposer) {
-      this.contextComposer.unregisterSource(`mcp-${name}`);
+    for (const composer of this.contextComposers) {
+      composer.unregisterSource(`mcp-${name}`);
     }
 
     // 断开连接

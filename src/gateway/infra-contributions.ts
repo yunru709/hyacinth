@@ -14,7 +14,7 @@ import { AssemblyRunner } from './assembly-runner.js';
 import type { AssemblyResults } from './assembly-runner.js';
 import { MemoryStore } from '../memory/memory-store.js';
 import { HeartbeatScheduler } from '../schedule/scheduler.js';
-import { MCPSystem } from '../mcp/index.js';
+import { acquireSharedMcpSystem } from '../mcp/shared.js';
 import { trackMcpSystemForShutdown } from '../mcp/shutdown.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { ScheduleConfig } from '../schedule/types.js';
@@ -57,9 +57,16 @@ export async function runInfraContributions(
       needs: ['cwd'],
       provides: ['mcpSystem'],
       mount: ({ cwd }) => {
-        const mcpSystem = new MCPSystem({ cwd: cwd as string });
+        // ── 共享实例（2026-09-20 方案 (b)）──────────────────────────────
+        // 装配是**按会话**跑的 ⇒ 原先每开一个网页/标签就 `new MCPSystem` 一次 ✗ ⇒
+        // 每个会话都 spawn 一整套 MCP 子进程（日志实证：5 次探针 ⇒ 5 次
+        // 「MCPSystem started: 1/1」✗；反复开页面堆到 **290 个进程** ⇒ 网页被拖成"半死" ✗）
+        // 改为**同一 cwd 全进程共用一份** ⇒ **开再多会话，后台也只有一套 MCP** ✓
+        // （工具不会少给：每个会话仍各自 registerToToolRegistry 进自己的 registry ✓）
+        const { system: mcpSystem, created } = acquireSharedMcpSystem(cwd as string);
         // 退出收割：无论进程以何种方式退出，杀掉 MCP 子进程树，防孤儿进程累积
-        trackMcpSystemForShutdown(mcpSystem);
+        // （该函数本身幂等 ✓ 这里只对「首次创建」挂一次，语义更清楚 ✓）
+        if (created) trackMcpSystemForShutdown(mcpSystem);
         return { mcpSystem };
       },
     },
