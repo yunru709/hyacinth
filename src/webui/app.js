@@ -951,6 +951,140 @@
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
   }
 
+  /**
+   * 通道行操作 —— 接 model.setChannelModel / resetChannelModel / removeChannel ✓
+   * 优先用**行内表单**（点「改模型」在本行展开两个输入框 ✓）。
+   * ⚠️ 刻意不用 window.prompt ✗：无头探针遇到原生对话框会卡住 ✓
+   */
+  function channelOps(c, row) {
+    const ops = el('div', 'flex items-center gap-1.5 justify-end flex-wrap');
+    const mkBtn = (label, title, color) => {
+      const b = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors', label);
+      if (title) b.title = title;
+      if (color) b.style.color = color;
+      return b;
+    };
+    const rebuild = () => { renderOpsInto(ops, c, row); };
+    rebuild();
+    return ops;
+  }
+
+  /** 画（或重画）操作区内容：默认三个按钮 ✓ */
+  function renderOpsInto(ops, c, row) {
+    ops.innerHTML = '';
+    const mkBtn = (label, title, color) => {
+      const b = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors', label);
+      if (title) b.title = title;
+      if (color) b.style.color = color;
+      return b;
+    };
+
+    // ── 改模型：行内表单（provider + model）──
+    const editBtn = mkBtn('改模型', '临时切换该通道的提供商/模型（仅本进程有效，重启复原）');
+    editBtn.onclick = () => {
+      ops.innerHTML = '';
+      const pIn = document.createElement('input');
+      pIn.placeholder = 'provider';
+      pIn.value = c.provider || '';
+      pIn.className = 'w-24 text-[11px] px-2 py-1 rounded-md border border-border bg-background text-foreground';
+      const mIn = document.createElement('input');
+      mIn.placeholder = 'model';
+      mIn.value = c.model || '';
+      mIn.className = 'w-36 text-[11px] px-2 py-1 rounded-md border border-border bg-background text-foreground';
+      const ok = mkBtn('确定');
+      const cancel = mkBtn('取消');
+      cancel.onclick = () => renderOpsInto(ops, c, row);
+      ok.onclick = () => {
+        if (!connected) { renderOpsInto(ops, c, row); return; }
+        ok.disabled = true;
+        client.request('model.setChannelModel', {
+          name: c.name,
+          provider: pIn.value.trim() || c.provider,
+          model: mIn.value.trim() || undefined,
+        })
+          .then(() => { appendMsg('system', '通道 ' + c.name + ' 已切换模型'); loadModel(); })
+          .catch((e) => { ok.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message)); });
+      };
+      ops.appendChild(pIn); ops.appendChild(mIn); ops.appendChild(ok); ops.appendChild(cancel);
+    };
+    ops.appendChild(editBtn);
+
+    // ── 复位：丢弃临时改动，回到持久化配置 ✓
+    const rsBtn = mkBtn('复位', '撤销临时改动，恢复为配置文件里的设置');
+    rsBtn.onclick = () => {
+      if (!connected) return;
+      rsBtn.disabled = true;
+      client.request('model.resetChannelModel', { name: c.name })
+        .then(() => { appendMsg('system', '通道 ' + c.name + ' 已复位'); loadModel(); })
+        .catch((e) => { rsBtn.disabled = false; appendMsg('error', '复位失败: ' + (e && e.message)); });
+    };
+    ops.appendChild(rsBtn);
+
+    // ── 删除：main 不可删（协议层也会拒 ✓，这里提前挡一道 ✓）──
+    if (c.name === 'main') {
+      ops.appendChild(el('span', 'text-[10px] text-muted-foreground', '主通道不可删'));
+    } else {
+      const rmBtn = mkBtn('删除', '从通道注册表移除该通道', 'var(--state-error)');
+      rmBtn.onclick = () => {
+        if (!connected) return;
+        rmBtn.disabled = true;
+        client.request('model.removeChannel', { name: c.name })
+          .then(() => { appendMsg('system', '通道 ' + c.name + ' 已删除'); loadModel(); })
+          .catch((e) => { rmBtn.disabled = false; appendMsg('error', '删除失败: ' + (e && e.message)); });
+      };
+      ops.appendChild(rmBtn);
+    }
+  }
+
+  /**
+   * 角色映射面板 —— 接 model.listRoles / setChannelRole ✓
+   * 语义：哪个通道干哪件事（压缩 / 规划 / 子 Agent …）✓
+   */
+  async function buildRolesPanel(channels) {
+    const wrap = el('div', 'px-4 py-3 border-t border-border');
+    wrap.appendChild(el('div', 'text-xs font-semibold text-foreground mb-2', '角色映射（哪个通道干哪件事）'));
+    let roles = {};
+    try {
+      const r = await client.request('model.listRoles');
+      roles = (r && r.roles) || {};
+    } catch (e) { /* 取不到就显示空态 ✓ */ }
+    const names = Object.keys(roles);
+    if (!names.length) {
+      wrap.appendChild(el('div', 'text-xs text-muted-foreground', '（暂无角色映射信息）'));
+      return wrap;
+    }
+    const grid = el('div', 'grid grid-cols-1 sm:grid-cols-2 gap-2');
+    names.forEach((role) => {
+      const line = el('div', 'flex items-center gap-2');
+      line.appendChild(el('span', 'text-xs font-mono text-muted-foreground w-24 shrink-0', role));
+      const sel = document.createElement('select');
+      sel.className = 'flex-1 text-xs px-2 py-1 rounded-md border border-border bg-background text-foreground';
+      const o0 = document.createElement('option');
+      o0.value = 'main';
+      o0.textContent = '（主通道）';
+      sel.appendChild(o0);
+      channels.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.name;
+        o.textContent = c.name;
+        sel.appendChild(o);
+      });
+      sel.value = roles[role] || 'main';
+      sel.title = '把「' + role + '」这个角色交给哪个通道'+'';
+      sel.onchange = () => {
+        if (!connected) return;
+        sel.disabled = true;
+        client.request('model.setChannelRole', { role, channel: sel.value })
+          .then(() => { appendMsg('system', '角色映射：' + role + ' → ' + sel.value); loadModel(); })
+          .catch((e) => { sel.disabled = false; appendMsg('error', '设置失败: ' + (e && e.message)); });
+      };
+      line.appendChild(sel);
+      grid.appendChild(line);
+    });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
   function renderChannels(channels) {
     const box = document.querySelector('[aria-labelledby="channels-heading"] .bg-card');
     if (!box) return;
@@ -975,8 +1109,11 @@
       if (c.baseUrl) caps.appendChild(el('span', 'text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-border', '自定义端点'));
       if (!c.name && !c.apiKeyEnv && !c.baseUrl) caps.appendChild(el('span', 'text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-border', '—'));
       row.appendChild(caps);
+      row.appendChild(channelOps(c, row));
       box.appendChild(row);
     });
+    // 角色映射面板（异步取 roles ⇒ 取到再挂 ✓）
+    buildRolesPanel(channels).then((panel) => { if (box.isConnected) box.appendChild(panel); }).catch(() => { /* ignore */ });
   }
 
   function renderLocalModels(models) {
