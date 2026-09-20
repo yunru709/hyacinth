@@ -541,6 +541,7 @@
     switch (type) {
       case 'ui.connected':
         if (payload && payload.sessionId) currentSessionId = payload.sessionId;
+        bindSlashSuggestOnce();   // 斜杠命令建议（只绑一次 ✓）
         connected = true;
         setOnline('connected');
         resetReconnect();
@@ -1244,6 +1245,151 @@
   // ════════════════════════════════════════════════════════════
   // 聊天发送
   // ════════════════════════════════════════════════════════════
+  // ── 斜杠命令（接 command.list / command.execute ✓ 2026-09-20）──────────
+  // 此前 `command` **整域闲置** ✗ ⇒ 网页里打 `/命令` 只会被当成普通消息发给模型 ✗
+  // 协议语义（读 command.ts 得到 ✓）：
+  //   · 纯 UI 命令（clear/help/exit/restart/new）**协议层不执行** ⇒ 回 `ui-only` ⇒ 前端本地处理 ✓
+  //   · 后端命令 ⇒ 委托执行；未接入则回 `backend-not-wired` ✓
+  let commandCache = null;      // command.list 结果（进程内缓存 ⇒ 只拉一次 ✓）
+  let cmdDropdown = null;
+  let slashBound = false;
+
+  async function getCommands() {
+    if (commandCache) return commandCache;
+    try {
+      const res = await client.request('command.list');
+      commandCache = (res && res.categories) || [];
+    } catch (e) { commandCache = []; }
+    return commandCache;
+  }
+
+  /** 分类树 → 扁平清单（含 `父/子` 路径 ✓） */
+  function flattenCommands(cats) {
+    const out = [];
+    const walk = (cmds, prefix) => {
+      (cmds || []).forEach((c) => {
+        const full = prefix ? prefix + '/' + c.name : c.name;
+        out.push({ name: full, leaf: c.name, description: c.description || '', args: c.args || '' });
+        if (c.children && c.children.length) walk(c.children, full);
+      });
+    };
+    (cats || []).forEach((cat) => walk(cat.commands, ''));
+    return out;
+  }
+
+  /** 建议下拉容器：挂在输入框所在容器上（绝对定位在输入框上方 ✓） */
+  function ensureCmdDropdown() {
+    if (cmdDropdown && cmdDropdown.isConnected) return cmdDropdown;
+    const host = $('#chat-composer');
+    if (!host) return null;
+    host.style.position = 'relative';
+    cmdDropdown = el('div', 'absolute left-2 right-2 bottom-full mb-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-card shadow-lg z-20');
+    cmdDropdown.hidden = true;
+    host.appendChild(cmdDropdown);
+    return cmdDropdown;
+  }
+
+  /** 输入变化 → 刷新建议（只在以 / 开头时显示 ✓） */
+  async function updateCmdSuggest() {
+    const input = $('#chat-input');
+    const box = ensureCmdDropdown();
+    if (!input || !box) return;
+    const v = input.value;
+    if (!v.startsWith('/')) { box.hidden = true; box.innerHTML = ''; return; }
+    const q = v.slice(1).toLowerCase();
+    const all = flattenCommands(await getCommands());
+    const hits = all.filter((c) => !q || c.leaf.toLowerCase().startsWith(q) || c.name.toLowerCase().includes(q)).slice(0, 12);
+    box.innerHTML = '';
+    if (!hits.length) {
+      box.appendChild(el('div', 'px-3 py-2 text-xs text-muted-foreground', '没有匹配的命令'));
+    } else {
+      hits.forEach((c) => {
+        const row = el('button', 'w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-center gap-2');
+        row.appendChild(el('span', 'font-mono text-foreground', '/' + c.name));
+        if (c.args) row.appendChild(el('span', 'text-muted-foreground', c.args));
+        row.appendChild(el('span', 'ml-auto text-[10px] text-muted-foreground truncate max-w-[45%]', c.description));
+        row.onclick = () => { input.value = '/' + c.name + ' '; input.focus(); box.hidden = true; };
+        box.appendChild(row);
+      });
+    }
+    box.hidden = false;
+  }
+
+  /** 绑定建议交互（只需一次 ✓；由 ui.connected 触发 ⇒ DOM 必已就绪 ✓） */
+  function bindSlashSuggestOnce() {
+    if (slashBound) return;
+    const input = $('#chat-input');
+    if (!input) return;
+    slashBound = true;
+    input.addEventListener('input', () => { updateCmdSuggest().catch(() => { /* ignore */ }); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && cmdDropdown) { cmdDropdown.hidden = true; }
+    });
+  }
+
+  /** 纯 UI 命令的本地处理（协议层不执行这些 ⇒ 别发过去 ✓） */
+  function handleLocalCommand(leaf) {
+    if (leaf === 'clear') { clearChat(); appendMsg('system', '已清空当前视图（历史仍保留在会话里）'); return; }
+    if (leaf === 'help') {
+      appendMsg('system', '可用命令（输入 / 开头即可筛选）：');
+      getCommands().then((cats) => {
+        flattenCommands(cats).slice(0, 40).forEach((c) => {
+          appendMsg('system', '  /' + c.name + (c.args ? ' ' + c.args : '') + (c.description ? '  —— ' + c.description : ''));
+        });
+      }).catch(() => { /* ignore */ });
+      return;
+    }
+    if (leaf === 'new') {
+      client.request('session.create', { type: 'normal' })
+        .then((meta) => client.request('session.switch', { sessionId: meta && meta.id ? meta.id : meta }))
+        .then(() => { appendMsg('system', '已新建会话'); loadHistory(); loadSessions(); })
+        .catch((e) => appendMsg('error', '新建失败: ' + (e && e.message)));
+      return;
+    }
+    appendMsg('system', '「/' + leaf + '」请在终端（TUI）里使用 ✓');
+  }
+
+  /** 执行斜杠命令（返回 true 表示已接管，不再走 message.chat ✓） */
+  function runSlashCommand(raw) {
+    const m = /^\/([^\s]+)\s*([\s\S]*)$/.exec(raw);
+    if (!m) return false;
+    const name = m[1];
+    const args = (m[2] || '').trim();
+    const leaf = name.split('/').pop();
+    // ① 纯 UI 命令 ⇒ 本地处理（协议层会回 ui-only ⇒ 发了也白搭 ✓）
+    if (leaf === 'clear' || leaf === 'help' || leaf === 'new' || leaf === 'exit' || leaf === 'restart') {
+      handleLocalCommand(leaf);
+      return true;
+    }
+    // ② 后端命令 ⇒ 交给协议层 ✓
+    if (!connected) { appendMsg('error', '尚未连接后端，无法执行命令'); return true; }
+    setBusy(true);
+    client.request('command.execute', { name, args })
+      .then((res) => {
+        setBusy(false);
+        if (res && res.unsupported) {
+          const why = res.reason === 'backend-not-wired' ? '（该命令后端未接入）' : '（该命令由界面本地处理）';
+          appendMsg('system', '/' + name + ' ' + why);
+          return;
+        }
+        if (res && res.ok === false) {
+          appendMsg('error', '/' + name + ' 失败: ' + (res.reason || '未知原因'));
+          return;
+        }
+        const out = res && res.result !== undefined ? res.result : res;
+        let text = '';
+        try { text = typeof out === 'string' ? out : JSON.stringify(out, null, 2); } catch (e) { text = String(out); }
+        appendMsg('system', '/' + name + ' ⇒ ' + (text.length > 1200 ? text.slice(0, 1200) + ' …' : text));
+        // 命令可能改变配置/模型/会话 ⇒ 顺手刷新一次状态 ✓
+        refreshState();
+        if (currentView() === 'model') loadModel();
+        if (currentView() === 'sessions') loadSessions();
+        if (currentView() === 'settings') loadSettings();
+      })
+      .catch((e) => { setBusy(false); appendMsg('error', '命令执行失败: ' + (e && e.message)); });
+    return true;
+  }
+
   function sendChat() {
     const input = $('#chat-input');
     if (!input) return;
@@ -1253,6 +1399,12 @@
     input.value = '';
     if (!connected) {
       appendMsg('error', '尚未连接后端，无法发送');
+      return;
+    }
+    // 斜杠命令 ⇒ 分流（此前整域闲置 ⇒ `/命令` 会被当普通消息发给模型 ✗ 已修 ✓）
+    if (text.startsWith('/')) {
+      if (cmdDropdown) cmdDropdown.hidden = true;
+      runSlashCommand(text);
       return;
     }
     setBusy(true);
