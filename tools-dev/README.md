@@ -1,0 +1,42 @@
+# tools-dev —— WebUI 开发用探针（**不是产品代码**，不参与构建/发布 ✓）
+
+## 为什么会有这些脚本
+
+改 WebUI 的视觉/交互时，「我看了一眼觉得对」**不算数** ✗ —— 这些脚本用
+**Chrome DevTools Protocol** 直接驱动真实浏览器，把布局与交互**量成数字**再断言 ✓。
+
+## 特点
+
+- **零依赖**：只用 Node 自带能力（`WebSocket` / `fetch`）⇒ 不需要 puppeteer / playwright ✓
+  （对比：`scripts/verify-webui.cjs` 依赖 playwright，而仓库并未安装该依赖 ✗）
+- **不打扰你**：自起无头 Chrome，用独立 profile ✓
+- **浏览器路径可配**：环境变量 `CHROME_PATH` 优先，否则自动探测常见位置（含 Edge 兜底）✓
+
+## 三个脚本
+
+| 脚本 | 作用 | 断言数 |
+|---|---|---|
+| `ui-final.mjs` | **总验收**：4 视图（chat/model/sessions/settings）× 4 视口（1440/1180/820/430） | 24 |
+| `ui-verify.mjs` | **窄屏导航抽屉**：侧栏移出 / 菜单键出现 / 点开滑出 / 遮罩关闭 / 回宽屏复位 | 7 |
+| `ui-empty-check.mjs` | **对话空状态**：引导可见 / 点建议填入但不发送 / 有消息自动收起 / 清空自动回来 | 5 |
+
+`ui-final` 已剔除三类**误报**（否则会去"修"本来正确的东西 ✗）：
+1. `.sr-only`（屏幕阅读器专用元素，故意 1px + clip）
+2. 带 `text-overflow: ellipsis` 的元素（故意截断显示 `…`）
+3. 位于 `overflow-x: auto/scroll` 容器内部的元素（合法溢出，本就能滚）
+
+## 用法
+
+```bash
+# 服务需先跑起来（跑 hyacinth tui 即自带；或 hyacinth webui --lan）
+node tools-dev/ui-final.mjs
+```
+
+输出为「逐项 ✓/✗ + 汇总 + 控制台异常」；截图落在 `%TEMP%\webui-final` 等目录 ✓
+
+## 血泪提示（写探针时的坑，同一族 ✗）
+
+- **空集合会让 `some()` 恒为 false** ⇒ 断言**假绿** ✗
+  ⇒ 必须「**先等数据、再断言非空**」，否则一个按钮都没找到时也会报 ✓
+- **固定 `sleep` 等异步加载** ⇒ 偶发"样本为空"误判 ✗ ⇒ 要**轮询**到数据出现为止
+- 别拿**已存在的规则行**当 `old_string` 去编辑 CSS ⇒ 那条会被**整行替换掉** ✗（我真干过一次）
