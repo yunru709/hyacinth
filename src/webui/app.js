@@ -217,6 +217,26 @@
     // 保留空函数以兼容既有调用点（ui.connected）。
   }
 
+  // 上一次的上限（迭代级 context_update 不带该字段 ⇒ 靠 state.update 记下来 ✓）
+  let lastMaxContextTokens = 0;
+
+  /**
+   * 迭代级上下文刷新 —— 接 `message.context_update` ✓
+   * 此前前端**没有这个分支** ✗ ⇒ 长回合里进度条不动（只在回合结束跳一下 ✗）。
+   * 语义：**每轮迭代都发、不表示回合结束**（与 state.update 的区别就在这 ✓）。
+   */
+  function applyContextUpdate(p) {
+    if (!p) return;
+    const used = p.tokensUsed != null ? p.tokensUsed : null;
+    const max = lastMaxContextTokens || 0;
+    const bar = $('#header-context-bar');
+    const text = $('#header-context-text');
+    if (used != null && max > 0 && bar) {
+      bar.style.width = Math.max(0, Math.min(100, (used / max) * 100)) + '%';
+    }
+    if (used != null && text) text.textContent = `${fmtTokens(used)} / ${fmtTokens(max)}`;
+  }
+
   function updateHeader(snap) {
     if (!snap) return;
     const name = $('#header-model-name');
@@ -228,6 +248,7 @@
     const pct = snap.contextUsagePct != null ? snap.contextUsagePct : 0;
     if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
     if (text) text.textContent = `${fmtTokens(snap.tokensUsed)} / ${fmtTokens(snap.maxContextTokens)}`;
+    if (snap.maxContextTokens) lastMaxContextTokens = snap.maxContextTokens;   // 供迭代级刷新复用 ✓
   }
 
   // ════════════════════════════════════════════════════════════
@@ -649,6 +670,10 @@
         break;
       case 'message.ask_user':
         showAskUser(payload);
+        break;
+      case 'message.context_update':
+        // 迭代级：每轮迭代都发 ⇒ 进度条**实时**动 ✓（不表示回合结束 ✓）
+        applyContextUpdate(payload);
         break;
       case 'state.update':
         updateHeader(payload);
