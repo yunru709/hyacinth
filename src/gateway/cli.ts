@@ -308,6 +308,9 @@ export async function runCli(): Promise<void> {
       // 对外开放（局域网可访问）：--lan 等价 0.0.0.0；--host 可显式指定 ✓
       // 没配钥匙时会被通道里的 fail-closed 守卫拒绝启动 ✓（这是有意的 ✓）
       host: options.lan ? '0.0.0.0' : options.host,
+      // 早期测试：不校验钥匙（用户 2026-09-20 要求；对外开放时会大声警告 ✓）
+      // options 的静态类型是 string（commander 实际给 boolean）⇒ 显式收成布尔 ✓
+      noAuth: !!options.noAuth,
       webuiRoot,
     });
 
@@ -399,6 +402,7 @@ export async function runCli(): Promise<void> {
     .description('启动 WebUI 服务（HTTP API + WebUI 静态页面，默认端口 3100）')
     .option('-p, --port <port>', 'WebUI 服务端口', '3100')
     .option('--lan', '对外开放：同一局域网内的设备也能访问（必须同时配 --api-key，否则拒绝启动）')
+    .option('--no-auth', '不校验钥匙（**仅早期测试**；对外开放时同网人人可用）')
     .option('--host <addr>', '监听地址（缺省 127.0.0.1 = 只对本机）')
     .option('--provider <type>', 'Provider 类型')
     .option('--model <name>', '模型名称')

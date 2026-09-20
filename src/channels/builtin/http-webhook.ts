@@ -235,6 +235,8 @@ export class HttpWebhookChannel implements ChannelHandler {
     this.maxContext = config.maxContext as number ?? getModelContextWindow(this.provider.getProviderType(), this.provider.getModel());
 
     const apiKey = getApiKey(config);
+    // 早期测试开关（用户 2026-09-20 要求）：显式声明"我知道风险"才放行 ✓
+    const noAuth = config.noAuth === true || config.noAuth === 'true';
     if (!apiKey) {
       logger.warn('No HYACINTH_API_KEY set — HTTP API will reject all requests except /api/health. Set the environment variable or use --api-key.');
     }
@@ -244,7 +246,13 @@ export class HttpWebhookChannel implements ChannelHandler {
     // 只有放在"真正读取地址"的地方，两条入口才一起管住 ✓。
     // 用户画像是非技术背景、会长期开着不管 ⇒ 宁可启动失败（他立刻能看见），
     // 也不要"门开着、但没人知道该配钥匙" ✗。
-    if (!isLoopbackHost(host) && !apiKey) {
+    if (noAuth && !isLoopbackHost(host)) {
+      logger.warn([
+        '⚠️ 已启用 --no-auth：对外监听 ' + host + ' 时**不校验钥匙** —— 同一局域网内任何设备都能进来 ✓',
+        '   （早期测试用 ✓；测完去掉 --no-auth 即恢复"要钥匙" ✓）',
+      ].join('\n'));
+    }
+    if (!isLoopbackHost(host) && !apiKey && !noAuth) {
       const msg = [
         '',
         '【拒绝启动】监听地址 ' + host + ' 是对外开放的（局域网可见），但没有配置访问钥匙。',
@@ -262,7 +270,10 @@ export class HttpWebhookChannel implements ChannelHandler {
     this.app = fastify({ logger: false });
 
     // ── 安全加固（全路由）───────────────────────────────────────────
-    this.app.addHook('preHandler', authHook(apiKey));
+    // --no-auth：早期测试时整个跳过（含 WS，见下）✓
+    if (!noAuth) {
+      this.app.addHook('preHandler', authHook(apiKey));
+    }
 
     this.app.addHook('onSend', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.header('X-Content-Type-Options', 'nosniff');
@@ -469,15 +480,17 @@ export class HttpWebhookChannel implements ChannelHandler {
         // fail-closed：未配置 apiKey 时拒绝 WS 升级（与 REST 的 401 行为一致）。
         // 旧实现在 apiKey 为空时直接放行 = 无凭据即可驱动完整 agent。
         // 浏览器 WebSocket 无法设置 Authorization 头 → 额外接受 ?token= 查询参数。
-        if (!apiKey) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-        if (!checkWsAuth(request, apiKey)) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
+        if (!noAuth) {
+          if (!apiKey) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          if (!checkWsAuth(request, apiKey)) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
         }
       }
 
@@ -546,6 +559,9 @@ export class HttpWebhookChannel implements ChannelHandler {
     } else {
       // 对外开放：把**每个**可达网址列出来 —— 用户拿对地址比什么都省事 ✓
       const urls = listLanUrls(this.actualPort);
+      if (noAuth) {
+        logger.warn('⚠️ 当前 **不校验钥匙**（--no-auth）⇒ 上面这些网址谁拿到都能用 ✓（早期测试用 ✓）');
+      }
       logger.info([
         'HTTP API 已**对外开放**（监听 ' + host + ':' + this.actualPort + '）—— 同一局域网内的设备可以访问：',
         ...urls.map((u) => '   ' + u),

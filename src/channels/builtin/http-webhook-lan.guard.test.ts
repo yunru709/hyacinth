@@ -91,4 +91,37 @@ describe('对外开放的安全守卫（fail-closed）', () => {
       if (typeof anyCh.stop === 'function') await anyCh.stop();
     }
   });
+
+  it('【早期测试】对外开放 + noAuth ⇒ 守卫放行（不因缺钥匙被拒）', async () => {
+    delete process.env.HYACINTH_API_KEY;
+    delete process.env.AGENT_API_KEY;
+
+    const channel = new HttpWebhookChannel();
+    const provider = { getProviderType: () => 'anthropic', getModel: () => 'claude-sonnet-5' } as never;
+
+    let err: unknown = null;
+    try {
+      await channel.start({ port: 0, host: '0.0.0.0', provider, cwd: process.cwd(), noAuth: true } as never);
+    } catch (e) {
+      err = e;
+    }
+    // 只排除守卫那条（其它原因允许 —— 本例测的就是"守卫不再拦它" ✓）
+    if (err) expect(String(err)).not.toMatch(/拒绝启动/);
+    if (!err) {
+      const anyCh = channel as unknown as { stop?: () => Promise<void> };
+      if (typeof anyCh.stop === 'function') await anyCh.stop();
+    }
+  });
+
+  it('【默认不变】不带 noAuth 时，对外开放 + 无钥匙 ⇒ 仍然拒绝启动', async () => {
+    delete process.env.HYACINTH_API_KEY;
+    delete process.env.AGENT_API_KEY;
+
+    const channel = new HttpWebhookChannel();
+    const provider = { getProviderType: () => 'anthropic', getModel: () => 'claude-sonnet-5' } as never;
+
+    await expect(
+      channel.start({ port: 0, host: '0.0.0.0', provider, cwd: process.cwd() } as never),
+    ).rejects.toThrow(/拒绝启动/);
+  });
 });

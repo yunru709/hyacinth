@@ -31,6 +31,8 @@ export interface ServerOptions {
   apiKey?: string;
   /** 监听地址（缺省 127.0.0.1；对外开放见 http-webhook 的 fail-closed 守卫） */
   host?: string;
+  /** 早期测试：不校验钥匙（用户 2026-09-20 要求；对外开放时会大声警告） */
+  noAuth?: boolean;
   corsOrigin?: string;
   /** WebUI 静态资源目录（serve --webui 时启用；http-webhook 用 @fastify/static 托管） */
   webuiRoot?: string;
@@ -89,6 +91,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
     maxContext,
     apiKey: options.apiKey,
     host: options.host,
+    noAuth: options.noAuth,
     corsOrigin: options.corsOrigin,
     webuiRoot: options.webuiRoot,
   });
