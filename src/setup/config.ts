@@ -134,9 +134,24 @@ export interface ClawbotChannelConfigEntry {
 }
 
 /** 渠道配置集合 */
+/** WebUI 渠道配置（跟着 tui 一起启动的那个网页版 ✓） */
+export interface WebUiChannelConfigEntry {
+  /** 是否随我一起启动（**默认 false** ✓ —— 不开就与从前完全一致 ✓） */
+  enabled?: boolean;
+  /** 监听端口（默认 3100 ✓） */
+  port?: number;
+  /** 监听地址（默认 127.0.0.1 = 只对本机 ✓；0.0.0.0 = 对外开放 ✓） */
+  host?: string;
+  /** 早期测试：不校验钥匙 ✓（对外开放时通道会大声警告 ✓） */
+  noAuth?: boolean;
+  /** 访问钥匙（对外开放建议配 ✓；也可用环境变量 HYACINTH_API_KEY ✓） */
+  apiKey?: string;
+}
+
 export interface ChannelsConfig {
   feishu?: FeishuChannelConfigEntry;
   clawbot?: ClawbotChannelConfigEntry;
+  webui?: WebUiChannelConfigEntry;
 }
 
 /** Agent 配置（非敏感） */
@@ -245,6 +260,13 @@ const DEFAULT_CONFIG: AgentConfig = {
       requireMention: true,
       tuiSync: false,
       sessionMode: 'per_user',
+    },
+    // 网页版（跟着 tui 一起起来的那个）：默认**不开** ✓ ⇒ 与从前完全一致 ✓
+    webui: {
+      enabled: false,
+      port: 3100,
+      host: '127.0.0.1',
+      noAuth: false,
     },
     clawbot: {
       enabled: false,

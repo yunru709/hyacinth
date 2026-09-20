@@ -43,7 +43,8 @@ import { createLogger } from '../logging/logger.js';
 import { TuiChannel } from '../channels/builtin/tui-channel.js';
 import { ChannelManager } from '../channels/manager.js';
 import { MessageQueue, QueueMessageMode } from '../channels/index.js';
-import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
+import { registerConfigChannels, getChannelPlugins, registerChannelPlugin } from '../channels/auto-detect.js';
+import { webuiChannelPlugin } from '../channels/builtin/webui-plugin.js';
 import type { AgentFactory, ChannelMessageEvent } from '../channels/interface.js';
 import {
   filterCommands,
@@ -1029,6 +1030,9 @@ export async function runTui(
   channelManager.register(tuiChannel, { enabled: true });
 
   // 自动检测配置驱动渠道（飞书等），有配置则自动注册
+  // 网页版登记为"配置驱动的渠道" ✓ ⇒ 配好 channels.webui.enabled 后**跟着 tui 一起起来** ✓
+  // （与微信同一机制 ✓；默认不开 ⇒ 现有行为不变 ✓）
+  registerChannelPlugin(webuiChannelPlugin);
   await registerConfigChannels(channelManager, process.cwd());
 
   // 调用所有插件的 onGatewayInit 钩子（如飞书 SDK 日志拦截）
