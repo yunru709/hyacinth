@@ -2477,7 +2477,6 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
   - **数据流**：多模态/渠道模块调用 `store()` 写入 → Agent 通过 `view_image` 工具读取 → `listForContext()` 把"待看图片"注入上下文提示。
 - **函数 `compressImageIfLarge(buf, mime)`**：超 300KB 才处理；动态 `import('sharp')`（缺失则原样返回）；长边超 2048 则 `resize(fit:'inside')`；带 alpha 的 PNG 走 PNG palette 压缩，否则转 JPEG 质量 80。任何异常静默回退原始字节。
 - **函数 `detectImagePaths(text)`**：正则匹配 Windows/Unix/相对路径 + 图片扩展名，再用 `fs.statSync` 校验真存在且是文件。
-- **函数 `buildUserContentWithInlineImages(...)`**：渠道已下载 base64 时直接构造 `MessageContent[]`（image 块 + 文本标注块 + 原输入），并把图片写入 imageStore。
 - **函数 `buildUserContentWithImages(userInput, imageStore)`**：从文本检测本地磁盘图片路径 → 读取 → 超 500KB 压缩 → base64 → 入 store → 拼 image 块 + token 估算警告文本块。
 - **函数 `createViewImageTool(imageStore, pendingInjections)`**：返回标准 `Tool` 形状对象（name=`view_image`、description、inputSchema、execute）。`execute` 支持三态：无参/'list'/'all' 列出所有；有效 id 回填 base64 到 `pendingInjections` 数组（供下一轮注入上下文）；未知 id 报错并列出可用项。
 - **对外依赖方向**（只进不出）：`node:fs`、`node:path`、`../types`（只读类型）。`pendingInjections` 数组由外部（循环/上下文构造器）持有并读取，故本模块把图片内容"推"出到外部。

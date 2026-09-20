@@ -42,10 +42,69 @@ import {
   resolveClawbotConfig,
   type ClawbotChannelConfig,
 } from './clawbot-config.js';
-import { ClawbotClient, ClawbotAPIError, type ClawbotIncomingMessage } from './clawbot-client.js';
+import { ClawbotClient, ClawbotAPIError, type ClawbotIncomingMessage, type ImageItem } from './clawbot-client.js';
 import { ClawbotAuthManager, type AuthCallbacks } from './clawbot-auth.js';
 import { ClawbotMessageQueue } from './clawbot-message-queue.js';
 import { ClawbotTypingController } from './clawbot-typing.js';
+import crypto from 'node:crypto';
+
+// ── 微信图片下载 + 解密 ───────────────────────────────────────
+
+/**
+ * 下载并解密微信 ClawBot 图片（**实测结论**，2026-09-19：真实抓包 + 本地解密验证）。
+ *
+ * 微信**不给可直接使用的图片 URL**，而是：
+ *   · `image_item.media.full_url` —— CDN 下载地址（带 encrypted_query_param 凭据）
+ *   · `image_item.aeskey`         —— 32 位 hex 字符串，**hex 解码为 16 字节**即 AES-128 密钥
+ *   · `image_item.media.aes_key`  —— 同一把密钥的 base64 形式（解开就是那串 hex）
+ *
+ * ⚠ 下载回来的是**密文**，必须解密后才是真正的图片字节：
+ *   算法 **AES-128-ECB**、填充默认 **PKCS#7**、无 IV。
+ *   取错字段（旧代码认 `image_item.url`，而微信并不下发）或漏掉解密，
+ *   图片就会被"静默丢弃" —— 这正是此前的 bug。
+ *
+ * 失败一律返回 null（由调用方记日志），不抛：单张图拿不到不应拖垮整条消息。
+ *
+ * （导出**仅供测试**：用自造密文把"hex 密钥 + AES-128-ECB + PKCS#7"这套常量钉死 ——
+ *   它是实测结论，协议里没有任何东西会提醒后人别改坏它。）
+ */
+export async function fetchWeixinImage(
+  image: ImageItem['image_item'],
+): Promise<{ data: string; media_type: string } | null> {
+  try {
+    const url = image.media?.full_url;
+    if (!url) return null;
+
+    // 密钥：优先 aeskey（hex）；缺失时从 media.aes_key（base64）还原出同一串 hex
+    const keyHex =
+      image.aeskey ??
+      (image.media?.aes_key
+        ? Buffer.from(image.media.aes_key, 'base64').toString('utf8')
+        : undefined);
+    if (!keyHex || !/^[0-9a-fA-F]{32}$/.test(keyHex)) return null;
+
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const cipher = Buffer.from(await resp.arrayBuffer());
+
+    const decipher = crypto.createDecipheriv('aes-128-ecb', Buffer.from(keyHex, 'hex'), null);
+    const plain = Buffer.concat([decipher.update(cipher), decipher.final()]);
+
+    // 魔数自检：密钥不对时绝不把垃圾字节当图片塞进上下文
+    const mediaType =
+      plain[0] === 0xff && plain[1] === 0xd8 ? 'image/jpeg'
+        : plain[0] === 0x89 && plain[1] === 0x50 ? 'image/png'
+          : plain[0] === 0x47 && plain[1] === 0x49 ? 'image/gif'
+            : null;
+    if (!mediaType) return null;
+
+    return { data: plain.toString('base64'), media_type: mediaType };
+  } catch {
+    // ⚠ 密钥不对时 `decipher.final()` 会**抛** bad decrypt（PKCS#7 去填充失败），
+    //   而不是安静地返回垃圾字节 —— 所以这里必须兜住，才能兑现"失败一律返回 null"的契约。
+    return null;
+  }
+}
 
 // ── 日志 ──────────────────────────────────────────────────────
 
@@ -409,18 +468,18 @@ export class ClawbotChannel implements ChannelHandler {
           content += item.text_item?.text ?? '';
           break;
         case 2: // IMAGE
-          // 微信图片消息：尝试从 URL 下载（如果提供了 URL）
-          if (item.image_item?.url) {
-            try {
-              const imgResp = await fetch(item.image_item.url);
-              if (imgResp.ok) {
-                const buf = Buffer.from(await imgResp.arrayBuffer());
-                const contentType = imgResp.headers.get('content-type') || 'image/png';
-                images.push({ data: buf.toString('base64'), media_type: contentType });
-              }
-            } catch {
-              this.logger.error('failed to download image from ClawBot message');
-            }
+          // 微信图片**不给可直接用的 URL**：内容在 CDN 上是 AES-128-ECB 密文，
+          // 须 media.full_url 下载 + aeskey 解密（实测结论，详见 fetchWeixinImage）。
+          // 旧实现只认 `image_item.url`（微信实际不下发此字段）⇒ 图片被静默丢弃；
+          // 纯图片消息更会在下方 `!content && images.length === 0` 处直接 return、连队列都不进。
+          try {
+            const img = await fetchWeixinImage(item.image_item);
+            if (img) images.push(img);
+            else this.logger.error('clawbot image: 字段缺失或下载/解密失败，已跳过');
+          } catch (err) {
+            this.logger.error(
+              `clawbot image failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
           break;
         // 语音/文件/视频暂不处理（后续可扩展）

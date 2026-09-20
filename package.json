@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "hyacinth": "dist/index.js"
+    "hyacinth": "dist/bootstrap.js"
   },
   "scripts": {
     "build": "tsc && node scripts/copy-prompts.cjs && node scripts/copy-webui.cjs && node scripts/clean-tests.cjs && node scripts/clean-maps.cjs && node scripts/copy-grammars.cjs",

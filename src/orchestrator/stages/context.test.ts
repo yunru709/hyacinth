@@ -183,6 +183,33 @@ describe('context 阶段（builtin:layered-composer）', () => {
     expect(st.pendingImageInjections.length).toBe(1); // 调用方负责清空原数组
   });
 
+  it('渠道附图：注入语如实标为「刚收到」，落盘只留「请重发」标记（无本地路径）', async () => {
+    const append = vi.fn().mockResolvedValue(undefined);
+    const ctx = makeCtx({
+      conversationStore: { readAll: vi.fn(), append, replace: vi.fn() },
+    });
+    await stage.run(
+      baseState({
+        activeProvider: provider({ vision: true }) as never,
+        pendingImageInjections: [
+          { imgId: 'img_chan', data: 'CHANNEL_B64_SENTINEL', media_type: 'image/png', fromChannel: true } as never,
+        ],
+      }),
+      ctx,
+    );
+
+    const appended = JSON.stringify(append.mock.calls[0][1]);
+    expect(appended, '渠道图 base64 不得落盘').not.toContain('CHANNEL_B64_SENTINEL');
+    expect(appended).toContain('MediaStripped');
+    expect(appended, '渠道图无本地路径 ⇒ 标记应提示「需要时请重发」').toContain('请重发');
+
+    const composeArg = (ctx as never as { require(k: string): { compose: ReturnType<typeof vi.fn> } }).require('contextComposer').compose;
+    const hist = JSON.stringify(composeArg.mock.calls[0][0].history as Message[]);
+    expect(hist, '图必须进本轮请求，否则模型根本没看到').toContain('CHANNEL_B64_SENTINEL');
+    expect(hist, '渠道图是「刚收到」，不该写成 Re-examining').not.toContain('Re-examining Image');
+    expect(hist).toContain("from the user's message");
+  });
+
   it('压缩不触发：token 低于阈值时 compressor.compress 不被调用', async () => {
     const compress = vi.fn().mockResolvedValue(null);
     const ctx = makeCtx({ compressor: { compress } });

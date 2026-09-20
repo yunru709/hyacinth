@@ -178,3 +178,43 @@ describe('AgentLoop maxContextTokens 兜底链（490ef42 回归）', () => {
     expect(makeLoop(cfg, { maxContextTokens: 777 })).toBe(777);
   });
 });
+
+// ── 渠道附图：base64 不落盘（2026-09-19 改造锁定）─────────────────────
+
+describe('渠道附图：不落盘 base64（与工具图同构）', () => {
+  it('落盘只有纯文本 + 剥离标记；base64 仅存在于本轮请求', async () => {
+    const { provider } = makeProvider();
+    // 视觉模型 → 才会走渠道图分支
+    (provider as unknown as { getCapabilities: () => unknown }).getCapabilities = () => ({ vision: true });
+    const services = makeServices(provider);
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+
+    const SENTINEL = 'Q0hBTk5FTF9JTUFHRV9TRU5USU5FTA==';
+    (loop as unknown as { channelImages: unknown }).channelImages = [
+      { data: SENTINEL, media_type: 'image/png' },
+    ];
+
+    // ★ 必须走 run()：输入处理段（渠道图分支 + append 用户消息）在 _runInternal 里，
+    //   而 harness 默认用的 runTurn() 是 _runInternal 内部调用的方法 ⇒ 会整段绕过。
+    await (loop as unknown as { run(input: string): Promise<void> }).run('look at this');
+
+    const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
+    // 防空过：append 必须真的被调用过，否则下面所有 not.toContain 都是假绿（首版就这么翻过车）
+    expect(cs.append, 'append 未被调用 ⇒ 后续 not.toContain 断言全为空过').toHaveBeenCalled();
+    const appended = JSON.stringify(cs.append.mock.calls.map((c) => c[1]));
+    // ★ 核心：base64 绝不落盘（改造前 loop.ts 把渠道图 base64 直接 append 进历史 ⇒ 每轮重发）
+    expect(appended, '渠道图 base64 落进了历史 —— 会被每轮重发').not.toContain(SENTINEL);
+    expect(appended, '落盘的 user 消息不该带 image 块').not.toContain('"type":"image"');
+    expect(appended, '应落一行剥离标记').toContain('MediaStripped');
+    expect(appended, '渠道图无本地路径 ⇒ 标记提示重发').toContain('渠道附图');
+
+    // 模型本轮确实看到了图（context 阶段把它注入了 compose 的历史）
+    const composer = (services as unknown as { contextComposer: { compose: ReturnType<typeof vi.fn> } }).contextComposer;
+    const composed = JSON.stringify(composer.compose.mock.calls.map((c) => c[0]?.history));
+    expect(composed, '图没进本轮请求 ⇒ 模型根本没看到').toContain(SENTINEL);
+    expect(composed).toContain('"type":"image"');
+
+    // 一次性消费
+    expect((loop as unknown as { channelImages: unknown }).channelImages).toBeNull();
+  });
+});

@@ -28,7 +28,7 @@ Thumbs.db
 
 # 本地打包产物（npm pack 生成的 .tgz，不应提交）
 *.tgz
-# ���ɲ���û����� ~/.agent/generation��Դ��Ŀ¼��Ӧ������
+# 生成产物（用户环境 ~/.agent/generation，源码目录不应残留）
 /outputs/generation/
 tsconfig.tsbuildinfo
 
