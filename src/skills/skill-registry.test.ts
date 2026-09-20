@@ -121,3 +121,48 @@ describe('skills/loader 加载器', () => {
     }
   });
 });
+
+describe('loader 目录式 skill（一个文件夹 ＋ SKILL.md ＋ 子文件 ✓）', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-dir-'));
+  });
+
+  it('目录式：从 <name>/SKILL.md 载入，并带上 dir（相对路径的基准 ✓）', () => {
+    const d = path.join(root, 'folder-skill');
+    fs.mkdirSync(path.join(d, 'references'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'SKILL.md'), '---\nname: folder-skill\ndescription: 目录式\n---\n\n主体内容\n\n细则见 references/a.md\n', 'utf-8');
+    fs.writeFileSync(path.join(d, 'references', 'a.md'), '细则 A\n', 'utf-8');
+
+    const reg = new SkillRegistry();
+    expect(scanSkillsDir(root, reg)).toEqual(['folder-skill']);
+    const s = reg.get('folder-skill');
+    expect(s?.promptTemplate).toContain('主体内容');
+    expect(s?.dir).toBe(d);
+  });
+
+  it('**子文件不会被当成独立 skill**（关键负向判据 ✓）', () => {
+    const d = path.join(root, 'x');
+    fs.mkdirSync(path.join(d, 'references', 'deep'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'SKILL.md'), '---\nname: x\ndescription: d\n---\nbody\n', 'utf-8');
+    fs.writeFileSync(path.join(d, 'references', 'a.md'), '---\nname: a\ndescription: 不该被注册\n---\nX\n', 'utf-8');
+    fs.writeFileSync(path.join(d, 'references', 'deep', 'b.md'), '---\nname: b\ndescription: 也不该\n---\nY\n', 'utf-8');
+
+    const reg = new SkillRegistry();
+    scanSkillsDir(root, reg);
+    expect(reg.getAll().map((s) => s.name)).toEqual(['x']);
+  });
+
+  it('单文件 .md 仍可用（向后兼容 ✓），且不带 dir', () => {
+    fs.writeFileSync(path.join(root, 'flat.md'), '---\nname: flat\ndescription: 单文件\n---\nbody\n', 'utf-8');
+    const reg = new SkillRegistry();
+    expect(scanSkillsDir(root, reg)).toEqual(['flat']);
+    expect(reg.get('flat')?.dir).toBeUndefined();
+  });
+
+  it('目录里没有 SKILL.md ⇒ 不注册也不炸 ✓', () => {
+    fs.mkdirSync(path.join(root, 'noentry', 'sub'), { recursive: true });
+    const reg = new SkillRegistry();
+    expect(scanSkillsDir(root, reg)).toEqual([]);
+  });
+});

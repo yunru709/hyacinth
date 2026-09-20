@@ -53,6 +53,13 @@ export class SkillTool implements Tool {
     // 清理未替换的占位符
     rendered = rendered.replaceAll(/\{\{(\w+)\}\}/g, '($1)');
 
-    return rendered;
+    // 目录式 skill：激活时把子文件目录一并给出 ✓
+    // （否则主体里「细则见 references/x.md」这类相对路径无从解析 ✗）
+    const dirNote = skill.dir
+      ? '\n\n---\nSkill directory: ' + skill.dir +
+        '\n(子文件都在此目录下；主体里给出的相对路径以它为基准，按需用 read 工具取 ✓)'
+      : '';
+
+    return rendered + dirNote;
   }
 }

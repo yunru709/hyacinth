@@ -43,12 +43,19 @@ export function watchSkills(deps: SkillWatcherDeps): WatcherHandle[] {
 
   function reloadSkill({ filename, dir }: WatchTrigger): void {
     if (!filename) return;
-    const filePath = path.join(dir, filename);
-    const skillName = filename.replace(/\.md$/, '');
+    // 路径里带分隔符 ⇒ 事件来自某个 skill 的**文件夹内部**（主体或子文件 ✓）
+    // ⇒ 取第一段当 skill 名，主体固定为 <名字>/SKILL.md ✓
+    const hasSep = /[\\/]/.test(filename);
+    const top = filename.split(/[\\/]/)[0];
+    const skillName = hasSep ? top : top.replace(/\.md$/, '');
+    const filePath = hasSep
+      ? ['SKILL.md', 'skill.md'].map((f) => path.join(dir, top, f)).find((p) => fs.existsSync(p))
+      : path.join(dir, filename);
     try {
+      if (!filePath) throw new Error("no main file");
       fs.accessSync(filePath);
       // 文件存在 → 重新加载
-      const skill = loadSkillFile(filePath);
+      const skill = loadSkillFile(filePath, hasSep ? path.join(dir, top) : undefined);
       if (skill) {
         if (skillRegistry.has(skill.name)) {
           skillRegistry.unregister(skill.name);
@@ -68,7 +75,10 @@ export function watchSkills(deps: SkillWatcherDeps): WatcherHandle[] {
     name: 'skill-watcher',
     debounceMs: deps.debounceMs,
     paths: () => dirs,
-    filter: (filename) => filename.endsWith('.md'),
+    // 递归监听：目录式 skill 的**子文件**改动也要能重载主体 ✓
+    recursive: true,
+    // 放行：① 顶层 .md（单文件式）② 带分隔符的路径（文件夹内部 ✓）
+    filter: (filename) => filename.endsWith('.md') || /[\\/]/.test(filename),
     reload: reloadSkill,
   });
 }

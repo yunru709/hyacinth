@@ -237,6 +237,13 @@ export interface SkillDefinition {
   promptTemplate: string;
   /** 关联的工具名称列表 */
   relatedTools: string[];
+  /**
+   * 【目录式 skill】主体文件所在目录（绝对路径 ✓）
+   * 只有「一个文件夹 ＋ SKILL.md」这种形态才有；单文件 .md 形态为 undefined ✓。
+   * 用途：主体里写「细则见 references/x.md」这类**相对路径**时，以此目录为基准用 read 工具取 ✓
+   * （注入文本里会带上这一行，否则相对路径无从解析 ✗）
+   */
+  dir?: string;
   /** 来源：内置 / 文件加载 / 插件注册 */
   source: 'builtin' | 'file' | 'plugin';
 }

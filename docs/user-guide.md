@@ -140,7 +140,9 @@ hyacinth [options] [prompt]
 
 ## 自定义技能（Skills）
 
-在 `~/.agent/skills/`（用户级）或 `.agent/skills/`（项目级）创建带 YAML frontmatter 的 `.md` 文件，同名时项目级覆盖用户级：
+技能放在 `~/.agent/skills/`，保存即热重载、经 `use_skill` 按需注入。有两种形态：
+
+**① 单文件**（内容少时够用）—— 一个带 YAML frontmatter 的 `.md`：
 
 ```markdown
 ---
@@ -154,7 +156,24 @@ tools: read, bash, glob
 {{task}}
 ```
 
-保存即热重载，经 `use_skill` 按需注入上下文。
+**② 文件夹**（内容多时用）—— 一个主体 ＋ 若干子文件，子文件可再嵌套：
+
+```text
+~/.agent/skills/my-skill/
+├── SKILL.md                  ← 主体（frontmatter ＋ 主要内容 ＋ 细则清单与相对路径）
+└── references/               ← 子文件（可以再嵌套子目录）
+    ├── color-system.md
+    └── deep/motion.md
+```
+
+主体 `SKILL.md` 的格式与单文件完全相同（`name` 取自 frontmatter），只是把细节挪进子文件、
+在主体里用**相对路径**指路，例如「配色规则见 `references/color-system.md`」。
+
+启用时**只注入主体**，并附带一行 `Skill directory: <该文件夹绝对路径>` ——
+模型据此按需用 `read` 工具去读子文件，因此主体不必塞满细节。
+
+⚠️ 子文件放在子目录里**不会被当成独立技能加载**；`name` 缺失则不加载；
+同一目录下同时存在 `foo.md` 与 `foo/` 时加载顺序取决于目录列举顺序 ⇒ **别这么放**。
 
 ## 子 Agent 委托
 

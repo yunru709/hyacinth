@@ -35,7 +35,7 @@ function extractBody(content: string): string {
 /**
  * 从 .md 文件加载一个 skill
  */
-function loadSkillFile(filePath: string): SkillDefinition | null {
+function loadSkillFile(filePath: string, baseDir?: string): SkillDefinition | null {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const meta = parseFrontmatter(content);
@@ -48,6 +48,8 @@ function loadSkillFile(filePath: string): SkillDefinition | null {
       description: meta.description || meta.name,
       promptTemplate: body,
       relatedTools: tools,
+      // 只有目录式 skill 才带 dir ⇒ 单文件形态保持 undefined ✓
+      ...(baseDir ? { dir: baseDir } : {}),
       source: 'file',
     };
   } catch {
@@ -63,11 +65,26 @@ function scanSkillsDir(dir: string, registry: SkillRegistry): string[] {
   try {
     const entries = fs.readdirSync(dir);
     for (const entry of entries) {
+      const full = path.join(dir, entry);
+      let stat: fs.Stats;
+      try { stat = fs.statSync(full); } catch { continue; }
+
+      // ── 目录式 skill：<name>/SKILL.md ──
+      // 子文件（含再嵌套的子目录）**刻意不递归扫描** ⇒ 不会被注册成独立 skill ✓
+      if (stat.isDirectory()) {
+        const main = ['SKILL.md', 'skill.md'].map((f) => path.join(full, f)).find((p) => fs.existsSync(p));
+        if (!main) continue;
+        const dirSkill = loadSkillFile(main, full);
+        if (dirSkill) {
+          registry.register(dirSkill);
+          loaded.push(dirSkill.name);
+        }
+        continue;
+      }
+
+      // ── 单文件 skill：<name>.md（向后兼容 ✓，不带 dir）──
       if (!entry.endsWith('.md')) continue;
-      const filePath = path.join(dir, entry);
-      const stat = fs.statSync(filePath);
-      if (!stat.isFile()) continue;
-      const skill = loadSkillFile(filePath);
+      const skill = loadSkillFile(full);
       if (skill) {
         registry.register(skill);
         loaded.push(skill.name);

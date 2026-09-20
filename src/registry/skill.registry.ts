@@ -53,7 +53,16 @@ export class SkillRegistry extends GenericRegistry<SkillDefinition> {
     return names
       .map(name => this.items.get(name))
       .filter((s): s is SkillDefinition => s != null && !this._disabled.has(s.name))
-      .map(s => `[Skill: ${s.name}]\nDescription: ${s.description}\nRelated Tools: ${s.relatedTools.join(', ')}\nPrompt Template:\n${s.promptTemplate}`)
+      .map((s) => {
+        // 目录式 skill：连"子文件在哪儿"一并交代 ⇒ 主体里的相对路径才解析得了 ✓
+        const dirNote = s.dir
+          ? '\nSkill directory: ' + s.dir +
+            '\n(该 skill 的子文件都在此目录下；主体里给出的相对路径以它为基准，需要细节时用 read 工具取 ✓)'
+          : '';
+        return '[Skill: ' + s.name + ']\nDescription: ' + s.description +
+          '\nRelated Tools: ' + s.relatedTools.join(', ') + dirNote +
+          '\nPrompt Template:\n' + s.promptTemplate;
+      })
       .join('\n\n');
   }
 

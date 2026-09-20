@@ -85,7 +85,11 @@
 
 ### Skill 文件规范
 
-外部 Skill 放在 `.agent/skills/*.md`，**必须有 YAML frontmatter**：
+外部 Skill 放在 `~/.agent/skills/`（**只扫用户级** ✓），**必须有 YAML frontmatter**。
+两种形态：**① 单文件** `<name>.md`；**② 文件夹** `<name>/SKILL.md` ＋ 子文件（可再嵌套，
+如 `<name>/references/x.md` ✓）——文件夹形态下**只会注入主体**，并附带一行
+`Skill directory: <绝对路径>` ⇒ 主体里用相对路径指路、需要细节时**自己用 `read` 去读** ✓；
+子文件**不会**被当成独立 Skill 加载 ✓。形态①示意：
 
 ```markdown
 ---
@@ -97,6 +101,7 @@ tools: tool1,tool2
 正文内容...
 ```
 
+- 形态②的 `name` 同样取自主体 frontmatter（不是文件夹名 ⇒ 两者可不同 ✓）
 - `name` 必填，否则不加载
 - `tools` 可选，逗号分隔
 - 修改/删除 skill 文件即时生效（热加载），无需重启
