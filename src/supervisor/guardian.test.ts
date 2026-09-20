@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveRestartAction,
   shouldStopRestarting,
+  resolvePostExitAction,
   RESTART_WINDOW_MS,
   RESTART_WINDOW_MAX,
 } from './guardian.js';
@@ -66,5 +67,29 @@ describe('guardian crash-loop protection（失控循环防护）', () => {
 
   it('空历史 → 继续拉起', () => {
     expect(shouldStopRestarting([], now)).toBe(false);
+  });
+});
+
+describe('guardian post-exit rollback（升级后首启失败自动回退判定）', () => {
+  const pending = { version: '1.2.3', lastGood: '1.2.2' };
+
+  it('pending 存在且指针指向 pending.version → rollback', () => {
+    expect(resolvePostExitAction(pending, { version: '1.2.3', lastGood: '1.2.2' })).toBe('rollback');
+  });
+
+  it('无 pending → exit', () => {
+    expect(resolvePostExitAction(null, { version: '1.2.3', lastGood: '1.2.2' })).toBe('exit');
+  });
+
+  it('无指针 → exit', () => {
+    expect(resolvePostExitAction(pending, null)).toBe('exit');
+  });
+
+  it('指针已指向 lastGood（健康版本，非升级后状态）→ exit，防误回滚', () => {
+    expect(resolvePostExitAction(pending, { version: '1.2.2', lastGood: '1.2.2' })).toBe('exit');
+  });
+
+  it('lastGood 与当前版本相同（无回退目标）→ exit', () => {
+    expect(resolvePostExitAction({ version: '1.2.3', lastGood: '1.2.3' }, { version: '1.2.3', lastGood: '1.2.3' })).toBe('exit');
   });
 });

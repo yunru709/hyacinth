@@ -30,7 +30,7 @@ import crypto from 'node:crypto';
 import { UI_EVENT, type CompanionSayEvent } from '../events.js';
 import { nextSayId } from '../tools/companion-say.js';
 import { getSayHistoryStore } from '../companion/say-history.js';
-import { ImageStore, buildUserContentWithMedia, buildUserContentWithInlineImages, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
+import { ImageStore, buildUserContentWithMedia, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
 import { createLoopHookBus, type LoopHookBus, type LoopHooks } from './loop-hooks.js';
 import { type ToolExecContext } from './loop-tools.js';
 import { removeLastRoundFromJsonl, cleanCompanionJsonl, removeTriggerFromJsonl } from './loop-session.js';
@@ -399,7 +399,7 @@ export class AgentLoop {
   /** 图片索引存储（会话级） */
   readonly imageStore = new ImageStore();
   /** 待注入图片队列（view_image 工具填充，下次 compose 前消费） */
-  readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string; origin?: string }> = [];
+  readonly pendingImageInjections: Array<{ imgId: string; data: string; media_type: string; origin?: string; fromChannel?: boolean }> = [];
   /** 原生视频/音频待注入（view_media 产出；context 阶段按 inputTypes 门控注入） */
   readonly pendingMediaInjections: Array<{ type: 'video' | 'audio'; media_type: string; data: string; origin?: string }> = [];
   /** 渠道预取图片（渠道层在 run() 前写入，_runInternal 一次性消费） */
@@ -1242,9 +1242,22 @@ export class AgentLoop {
         || (inputTypes?.includes('audio') ?? false);
       let userContent: MessageContent | MessageContent[];
       if (hasVision && this.channelImages && this.channelImages.length > 0) {
-        // 渠道预取图片（飞书/HTTP 等已下载为 base64）
-        userContent = buildUserContentWithInlineImages(userInput, this.channelImages, this.imageStore);
+        // 渠道预取图片（飞书/微信/HTTP 已下载为 base64）。
+        // **base64 不落盘** —— 改走 pending 注入（本轮请求只读一次），盘上只留一行剥离标记，
+        // 与工具图（view_media）同构 ✓
+        // 依据（用户 2026-09-19 裁定）：图在到达那轮已被模型看过、描述留在它自己的回复里
+        // ⇒ 没有理由持久化原图；重启后取不回也没关系，需要时请用户重发。
+        for (const img of this.channelImages) {
+          const imgId = this.imageStore.store(img.data, img.media_type);
+          this.pendingImageInjections.push({
+            imgId,
+            data: img.data,
+            media_type: img.media_type,
+            fromChannel: true,
+          });
+        }
         this.channelImages = null; // 一次性消费
+        userContent = { type: 'text' as const, text: userInput };
       } else if (hasMediaCap) {
         // 多模态统一管线：图片/视频/音频路径检测 → 原生或抽帧降级
         userContent = await buildUserContentWithMedia(userInput, {

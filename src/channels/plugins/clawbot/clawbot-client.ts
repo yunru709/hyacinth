@@ -63,12 +63,36 @@ export interface TextItem {
 export interface ImageItem {
   type: 2;
   image_item: {
-    /** CDN 下载/上传 URL 或 base64 data URL */
-    url?: string;
     /** 图片宽度 */
     width?: number;
     /** 图片高度 */
     height?: number;
+    /**
+     * 旧字段：CDN URL。
+     * ⚠ 2026-09-19 实测：微信**并不下发这个字段**（见下方 media）——
+     * 曾经据此判断是否下载，导致图片被静默丢弃。
+     */
+    url?: string;
+    /**
+     * 实测字段（2026-09-19 抓包确认）：32 位 hex 字符串。
+     * **hex 解码成 16 字节**后即 AES-128 密钥。
+     */
+    aeskey?: string;
+    /** 实测字段：媒体描述符（真正的下载地址与密钥都在这里） */
+    media?: {
+      /** 下载凭据（拼在 full_url 的 query 里，两者等价） */
+      encrypt_query_param?: string;
+      /** 同一把密钥的 base64 形式（解开就是 aeskey 那串 hex） */
+      aes_key?: string;
+      /** CDN 下载地址；**下载回来的是密文**，需用 aeskey 解密 */
+      full_url?: string;
+    };
+    /** 实测字段：各档位字节数 */
+    hd_size?: number;
+    mid_size?: number;
+    thumb_size?: number;
+    thumb_width?: number;
+    thumb_height?: number;
   };
 }
 

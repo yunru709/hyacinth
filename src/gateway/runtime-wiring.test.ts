@@ -295,3 +295,79 @@ describe('陪伴模式推送目标：按能力选（历史写死 feishu）', () 
     }
   });
 });
+
+// ── 定时任务模式隔离：按「任务所属渠道」判断，跨渠道不串 ──────────────
+//
+// 回归锁定：曾用进程级聚合的 isCompanionModeActive()（"任一渠道在陪伴 ⇒ true"）做过滤，
+// 导致**一个渠道进入陪伴模式后，其它渠道的 normal 任务被静默跳过**（"一个 loop 陪聊，
+// 别的 loop 干不了正事"）。判据必须落到 task.channel 自己的模式上。
+//
+// 判别力说明：把 resolveChannelLoop 换成探针，只看"是否走到了执行分支" ——
+// 旧实现下第一个用例必红（任务被跳过 ⇒ 探针一次都没被调到）。
+
+describe('定时任务模式隔离：按任务所属渠道判断（跨渠道不串）', () => {
+  /** 造一套最小依赖：本地 loop 记录 notifyTaskFired，resolveChannelLoop 仅计数 */
+  function makeDeps() {
+    const local = makeLoop();
+    let resolveCalls = 0;
+    const resolveChannelLoop = (() => {
+      resolveCalls++;
+      return { loop: local.loop, channel: 'clawbot', level: 'direct' };
+    }) as Any;
+    const { scheduler, fire } = makeScheduler();
+    installSchedulerHandler({
+      heartbeatScheduler: scheduler,
+      loop: local.loop,
+      channelLoops: new Map<string, ChannelLoopEntry>(),
+      resolveChannelLoop,
+      configCenter: makeConfigCenter(),
+    } as Any);
+    return { local, fire, resolveCalls: () => resolveCalls };
+  }
+
+  it('某渠道在陪伴模式时，**其它渠道**的 normal 任务照常执行（不被连坐）', async () => {
+    const { switchRouterForChannel, clearChannelRouter } = await import('../context/profiles.js');
+    switchRouterForChannel('tui', 'companion'); // 只有 tui 陪伴；全局默认仍是 normal
+    try {
+      const { fire, resolveCalls } = makeDeps();
+
+      await fire({ name: 'W1', channel: 'clawbot', mode: 'normal', action: { type: 'agent', target: 'x' } });
+
+      expect(
+        resolveCalls(),
+        'clawbot 的 normal 任务被 tui 的陪伴模式连坐跳过了 —— 模式隔离必须按任务所属渠道判断',
+      ).toBeGreaterThan(0);
+    } finally {
+      clearChannelRouter('tui');
+    }
+  });
+
+  it('同一渠道在陪伴模式时，它自己的 normal 任务仍被正确跳过', async () => {
+    const { switchRouterForChannel, clearChannelRouter } = await import('../context/profiles.js');
+    switchRouterForChannel('tui', 'companion');
+    try {
+      const { fire, resolveCalls, local } = makeDeps();
+
+      await fire({ name: 'W2', channel: 'tui', mode: 'normal', action: { type: 'agent', target: 'x' } });
+
+      expect(resolveCalls(), 'tui 自己处于陪伴模式，它的 normal 任务应当被跳过').toBe(0);
+      expect(local.calls.length).toBe(0);
+    } finally {
+      clearChannelRouter('tui');
+    }
+  });
+
+  it('同一渠道在陪伴模式时，它的 companion 任务照常执行', async () => {
+    const { switchRouterForChannel, clearChannelRouter } = await import('../context/profiles.js');
+    switchRouterForChannel('tui', 'companion');
+    try {
+      const { fire, local } = makeDeps();
+
+      await fire({ name: 'W3', channel: 'tui', mode: 'companion', action: { type: 'agent', target: 'x' } });
+
+      expect(local.calls.length, 'companion 任务应由本地 loop 执行（并广播到持久渠道）').toBeGreaterThan(0);
+    } finally {
+      clearChannelRouter('tui');
+    }
+  });
+});

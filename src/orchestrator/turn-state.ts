@@ -22,13 +22,18 @@ import type { Plan } from './plan-store.js';
 
 // ─── 支撑类型 ──────────────────────────────────────────────────────
 
-/** 待注入图片（view_image 工具填充，context 阶段消费） */
+/** 待注入图片（view_image / view_media 工具或渠道附图填充，context 阶段消费） */
 export interface PendingImage {
   imgId: string;
   data: string;
   media_type: string;
   /** 来源路径（view_media 入队时填入）—— 落盘标记靠它带上位置，便于再次取回 ✓ */
   origin?: string;
+  /**
+   * 渠道附图（无本地路径）。base64 同样**不落盘**（与工具图同构），
+   * 区别只在文案：落盘标记记「来源未记录…需要时请重发」，注入语用「刚收到」而非 "Re-examining"。
+   */
+  fromChannel?: boolean;
 }
 
 /** 流内工具执行结果（inline tool） */

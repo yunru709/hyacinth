@@ -102,6 +102,41 @@ export function removeMarker(name: string): boolean {
   }
 }
 
+// ─── 升级待定案标记（guardian 自动回退依据） ───────────────────────
+//
+// update 命令切指针后写入；guardian 据此判定"升级后首启失败 → 回退"，
+// 或新版本存活超过 UPDATE_STABLE_MS 后清除（升级定案）。
+// 回退判定以 指针.version === pending.version 为准，防止误回滚健康版本。
+
+export const UPDATE_PENDING_MARKER = 'pending-update.json';
+/** 新版本存活超过该时长即视为升级定案，清除 pending */
+export const UPDATE_STABLE_MS = 60_000;
+
+export interface UpdatePending {
+  version: string;
+  lastGood: string;
+}
+
+export function writeUpdatePending(p: UpdatePending): void {
+  writeMarker(UPDATE_PENDING_MARKER, JSON.stringify(p));
+}
+
+export function readUpdatePending(): UpdatePending | null {
+  const raw = readMarker(UPDATE_PENDING_MARKER);
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as Partial<UpdatePending>;
+    if (typeof p.version !== 'string' || typeof p.lastGood !== 'string') return null;
+    return { version: p.version, lastGood: p.lastGood };
+  } catch {
+    return null;
+  }
+}
+
+export function clearUpdatePending(): boolean {
+  return removeMarker(UPDATE_PENDING_MARKER);
+}
+
 // ─── 重启原因存档 ───────────────────────────────────────────────────
 
 export interface RestartReason {

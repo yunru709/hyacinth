@@ -2,7 +2,7 @@ import { GenericRegistry, type RegistryItem } from './base.js';
 import type { Tool } from '../tools/interface.js';
 import type { ToolDefinition } from '../types.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
-import { getActiveRouterName } from '../context/profiles.js';
+import { getRouterNameForChannel } from '../context/profiles.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
@@ -256,11 +256,14 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
         } catch { /* 读取失败不阻塞 */ }
         return undefined;
       };
-      // 自动检测当前模式（正常/陪伴），用于任务隔离
+      // 自动检测当前模式（正常/陪伴），用于任务隔离。
+      // ⚠ 必须**按本 loop 所属渠道**取（getChannel() 读的正是本会话 meta.json）：
+      //   用全局 getActiveRouterName() 的话，TUI 处于陪伴模式时，
+      //   在别的渠道（如微信）建的任务会被**错标成陪伴任务**从而被隔离。
+      // 判据与调度侧的过滤、以及 loop 自身的模式判定三者同源。
       const getMode = (): 'normal' | 'companion' | undefined => {
-        const routerName = getActiveRouterName();
-        if (routerName === 'companion') return 'companion';
-        return 'normal';
+        const routerName = getRouterNameForChannel(getChannel());
+        return routerName === 'companion' ? 'companion' : 'normal';
       };
       this.register(createAddTaskTool(heartbeatScheduler, getChannel, getSessionId, getMode));
       this.register(createRemoveTaskTool(heartbeatScheduler, getMode));

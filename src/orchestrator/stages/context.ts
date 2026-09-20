@@ -152,7 +152,13 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
             role: 'user',
             content: [
               { type: 'image', source: { type: 'base64', media_type: pi.media_type, data: pi.data } },
-              { type: 'text', text: `[Re-examining Image #${pi.imgId}]` },
+              {
+                type: 'text',
+                // 渠道附图是"刚收到"，不是"再看一次" ⇒ 注入语如实区分（落盘标记另由 strippedMarker 处理）
+                text: pi.fromChannel
+                  ? `[Image #${pi.imgId} from the user's message]`
+                  : `[Re-examining Image #${pi.imgId}]`,
+              },
             ],
           };
           // 本轮请求**带图**（模型只看这一次 —— 这就是"看完即剥离"）✓

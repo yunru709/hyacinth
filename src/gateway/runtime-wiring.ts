@@ -35,7 +35,7 @@ import type { MachineRegistry } from '../machine/index.js';
 import type { BypassManager } from '../bypass/manager.js';
 import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
-import { isCompanionModeActive } from '../context/profiles.js';
+import { getRouterNameForChannel } from '../context/profiles.js';
 import { createLogger } from '../logging/logger.js';
 import { getChannelSessionRegistry, registerChannelSession, createOwnedSessionGetter } from '../session-channel.js';
 
@@ -191,11 +191,18 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
   heartbeatScheduler.setHandler(async (task) => {
     logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type, channel: task.channel });
 
-    // 模式隔离：跳过不属于当前模式的任务
+    // 模式隔离：按**该任务所属渠道**的模式判断。
+    // ⚠ 不能用进程级聚合的 isCompanionModeActive()（"任一渠道在陪伴 ⇒ true"）——
+    //   那会让某个渠道进入陪伴模式后，**其它渠道的 normal 任务被静默跳过**。
+    // 判据与 loop 自身同源（getRouterNameForChannel 的回退语义 = getRouterForChannel），
+    // 保证"任务过滤"与"该渠道实际处于什么模式"永远一致。
+    // 无 channel 的任务（历史数据 / 手工登记）由该函数内部回退到全局默认名。
     if (task.mode) {
-      const currentMode = isCompanionModeActive() ? 'companion' : 'normal';
-      if (task.mode !== currentMode) {
-        logger.info(`Task "${task.name}" skipped: mode "${task.mode}" ≠ current "${currentMode}"`);
+      const channelMode = getRouterNameForChannel(task.channel) === 'companion' ? 'companion' : 'normal';
+      if (task.mode !== channelMode) {
+        logger.info(
+          `Task "${task.name}" skipped: mode "${task.mode}" ≠ channel "${channelMode}" (${task.channel ?? 'no-channel'})`,
+        );
         return;
       }
     }

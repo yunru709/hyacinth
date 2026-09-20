@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, installUpdate } from '../update/index.js';
+import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, smokeTestRelease, resolveInstallRoot, readPointer, writePointerAtomic, pruneReleases, releaseDir } from '../update/index.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import type { ProviderType, ProviderConfig } from '../types.js';
@@ -35,12 +35,14 @@ import { DEFAULT_PERSONA_DIR, ensurePersonaFiles } from '../setup/persona-bootst
 import {
   RESTART_SESSION_MARKER,
   RESTART_CONTINUATION_MARKER,
+  RESTART_EXIT_CODE,
   RESTART_AFTER_UPDATE_EXIT_CODE,
   GUARDIAN_ENV,
   consumeMarker,
   markerIsFresh,
   removeMarker,
   writeRestartReason,
+  writeUpdatePending,
   takeRestartContinuation,
 } from '../supervisor/protocol.js';
 import { createLogger } from '../logging/logger.js';
@@ -179,7 +181,7 @@ export async function runCli(): Promise<void> {
   program
     .name('hyacinth')
     .description('AI Agent with context management')
-    .version((() => { try { return JSON.parse(fsSync.readFileSync(path.resolve(path.dirname(process.argv[1]), '..', 'package.json'), 'utf-8')).version; } catch { return '0.0.0'; } })())
+    .version((() => { try { return JSON.parse(fsSync.readFileSync(path.join(resolveInstallRoot(process.argv[1]), 'package.json'), 'utf-8')).version; } catch { return '0.0.0'; } })())
     .option('-i, --interactive', '交互模式')
     .option('-p, --provider <type>', 'Provider: anthropic | openai | deepseek | local')
     .option('-m, --model <name>', '模型名称')
@@ -303,12 +305,24 @@ export async function runCli(): Promise<void> {
       maxContext: parseInt(options.maxContext || String(DEFAULT_MAX_CONTEXT_TOKENS), 10),
       apiKey: options.apiKey,
       corsOrigin: options.corsOrigin,
+      // 对外开放（局域网可访问）：--lan 等价 0.0.0.0；--host 可显式指定 ✓
+      // 没配钥匙时会被通道里的 fail-closed 守卫拒绝启动 ✓（这是有意的 ✓）
+      host: options.lan ? '0.0.0.0' : options.host,
       webuiRoot,
     });
 
     // WebUI 模式：后端就绪后自动拉起默认浏览器
     if (webuiEnabled) {
-      openBrowser(`http://127.0.0.1:${port}`);
+      // 对外开放时，127.0.0.1 对"别的设备"没用 ✗ ⇒ 打开本机内网地址（本机自己访问同样有效 ✓）
+      let openUrl = `http://127.0.0.1:${port}`;
+      if (options.lan || options.host) {
+        try {
+          const { listLanUrls } = await import('../channels/builtin/http-webhook.js');
+          const urls = listLanUrls(port);
+          if (urls.length > 0) openUrl = urls[0]!.split('  ←')[0]!.trim();
+        } catch { /* 取不到就用本机地址 */ }
+      }
+      openBrowser(openUrl);
     }
 
     const shutdown = async () => {
@@ -365,6 +379,8 @@ export async function runCli(): Promise<void> {
     .command('serve')
     .description('启动 HTTP API 服务器 (Start HTTP API server)')
     .option('-p, --port <port>', 'API 服务器端口', '3000')
+    .option('--lan', '对外开放：同一局域网内的设备也能访问（必须同时配 --api-key，否则拒绝启动）')
+    .option('--host <addr>', '监听地址（缺省 127.0.0.1 = 只对本机）')
     .option('--api-key <key>', 'API 认证密钥（或设置 HYACINTH_API_KEY 环境变量）')
     .option('--cors-origin <origin>', 'CORS 允许的域名（默认 *）')
     .option('--provider <type>', 'Provider 类型')
@@ -382,6 +398,8 @@ export async function runCli(): Promise<void> {
     .command('webui')
     .description('启动 WebUI 服务（HTTP API + WebUI 静态页面，默认端口 3100）')
     .option('-p, --port <port>', 'WebUI 服务端口', '3100')
+    .option('--lan', '对外开放：同一局域网内的设备也能访问（必须同时配 --api-key，否则拒绝启动）')
+    .option('--host <addr>', '监听地址（缺省 127.0.0.1 = 只对本机）')
     .option('--provider <type>', 'Provider 类型')
     .option('--model <name>', '模型名称')
     .option('--max-turns <n>', '轮次统计上限', '100')
@@ -1115,12 +1133,10 @@ export async function runCli(): Promise<void> {
     .description('Update hyacinth from GitHub releases or local source')
     .option('--repo <owner/name>', 'GitHub repo, e.g. user/hyacinth-ai')
     .option('--source <path>', 'Local source path (for dev builds)')
-    .action(async (options: { repo?: string; source?: string }) => {
+    .option('--rollback', '回退到上一可用版本（lastGood）')
+    .action(async (options: { repo?: string; source?: string; rollback?: boolean }) => {
       const { execSync } = await import('node:child_process');
-      const p = await import('node:path');
-      const os = await import('node:os');
-      const installDir = p.resolve(p.dirname(process.argv[1]), '..', '..');
-
+      const installDir = resolveInstallRoot(process.argv[1]);
       const cfg = loadConfig();
       const repo = options.repo || cfg.repo || '';
       const sourcePath = options.source || cfg.sourcePath || '';
@@ -1128,9 +1144,45 @@ export async function runCli(): Promise<void> {
       if (options.repo) { cfg.repo = options.repo; saveConfig(cfg); }
       if (options.source) { cfg.sourcePath = options.source; saveConfig(cfg); }
 
+      // ── 回退 ──
+      if (options.rollback) {
+        const pointer = readPointer(installDir);
+        if (!pointer || !pointer.lastGood || pointer.lastGood === pointer.version) {
+          process.stderr.write('[update] 无回退基线（lastGood）。\n');
+          process.exit(1);
+        }
+        writePointerAtomic(installDir, { version: pointer.lastGood, lastGood: pointer.lastGood });
+        process.stderr.write(`[update] 已回退到 v${pointer.lastGood}。正在重启...\n`);
+        writeRestartReason({ code: RESTART_EXIT_CODE, source: 'rollback', detail: `v${pointer.lastGood}` });
+        process.exit(RESTART_EXIT_CODE);
+      }
+
+      /** 升级收尾：冒烟 → 双壳副本 → 原子切指针 → 写 pending → 43 重启 */
+      const finishUpdate = (newVer: string, currentVersion: string): never => {
+        if (!smokeTestRelease(installDir, newVer)) {
+          process.stderr.write(`[update] 新版本 v${newVer} 自检未通过，已保留旧版本运行（未切换指针）。\n`);
+          process.exit(1);
+        }
+        // 双壳副本：新版壳写入 installDir/dist（旧 shim 与新 bin 都指向合法壳）
+        const srcBootstrap = path.join(releaseDir(installDir, newVer), 'dist', 'bootstrap.js');
+        if (fsSync.existsSync(srcBootstrap)) {
+          fsSync.mkdirSync(path.join(installDir, 'dist'), { recursive: true });
+          fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'bootstrap.js'));
+          fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'index.js'));
+        }
+        // 原子切指针 + 写 pending（guardian 据此自动回退/定案）
+        writePointerAtomic(installDir, { version: newVer, lastGood: currentVersion });
+        pruneReleases(installDir, 3, [`v${newVer}`, `v${currentVersion}`]);
+        writeUpdatePending({ version: newVer, lastGood: currentVersion });
+        process.stderr.write(`[update] ✅ 已更新到 v${newVer}。正在自动重启...\n`);
+        // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
+        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer}` });
+        process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
+      };
+
       if (repo) {
         // ── 远程 ──
-        const currentVersion = JSON.parse(fsSync.readFileSync(p.join(installDir, 'package.json'), 'utf-8')).version;
+        const currentVersion = JSON.parse(fsSync.readFileSync(path.join(installDir, 'package.json'), 'utf-8')).version;
         const result = await checkForUpdate(repo, currentVersion, msg => process.stderr.write(`[update] ${msg}\n`));
         if (!result) { process.stderr.write('[update] 检查失败\n'); process.exit(1); }
         const { version, downloadUrl } = result;
@@ -1142,7 +1194,7 @@ export async function runCli(): Promise<void> {
         }
         process.stderr.write('\n');
 
-        const tmpDir = p.join(os.tmpdir(), `hyacinth-update-${Date.now()}`);
+        const tmpDir = path.join(os.tmpdir(), `hyacinth-update-${Date.now()}`);
         await downloadWithProgress(downloadUrl, tmpDir, p => {
           const bar = '█'.repeat(Math.floor(p.percent / 5)) + '░'.repeat(20 - Math.floor(p.percent / 5));
           process.stderr.write(`\r[update] 下载: ${bar} ${p.percent}% (${(p.downloaded / 1024 / 1024).toFixed(1)}MB / ${(p.total / 1024 / 1024).toFixed(1)}MB)`);
@@ -1150,36 +1202,33 @@ export async function runCli(): Promise<void> {
         process.stderr.write('\n');
 
         process.stderr.write('[update] 解压中...\n');
-        const zipPath = p.join(tmpDir, 'release.zip');
+        const zipPath = path.join(tmpDir, 'release.zip');
         execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tmpDir}' -Force"`, { stdio: 'pipe' });
 
         const extractedDir = findExtractedDir(tmpDir);
-        installUpdate(extractedDir, installDir, msg => process.stderr.write(`[update] ${msg}\n`));
+        const { version: newVer } = stageRelease(extractedDir, installDir, {
+          currentVersion,
+          onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
+        });
         fsSync.rmSync(tmpDir, { recursive: true, force: true });
-        process.stderr.write(`[update] ✅ 已更新到 v${version.latest}。正在自动重启...\n`);
-        // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
-        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${version.latest}` });
-        process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
+        finishUpdate(newVer, currentVersion);
 
       } else if (sourcePath) {
         // ── 本地 ──
         process.stderr.write(`[update] 本地编译: ${sourcePath}\n`);
         execSync('pnpm build', { cwd: sourcePath, stdio: 'inherit' });
-        const dst = p.join(installDir, 'dist');
-        fsSync.rmSync(dst, { recursive: true, force: true });
-        fsSync.cpSync(p.join(sourcePath, 'dist'), dst, { recursive: true });
-        // 同步 package.json（版本号来源）
-        fsSync.cpSync(p.join(sourcePath, 'package.json'), p.join(installDir, 'package.json'));
-        const newVer = JSON.parse(fsSync.readFileSync(p.join(sourcePath, 'package.json'), 'utf-8')).version;
-        process.stderr.write(`[update] ✅ 已更新到 v${newVer}。正在自动重启...\n`);
-        // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
-        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer}` });
-        process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
+        const currentVersion = JSON.parse(fsSync.readFileSync(path.join(installDir, 'package.json'), 'utf-8')).version;
+        const { version: newVer } = stageRelease(sourcePath, installDir, {
+          currentVersion,
+          onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
+        });
+        finishUpdate(newVer, currentVersion);
 
       } else {
         process.stderr.write('请先配置更新源:\n');
         process.stderr.write('  hyacinth update --repo <owner/name>  (远程)\n');
         process.stderr.write('  hyacinth update --source <path>       (本地)\n');
+        process.stderr.write('  hyacinth update --rollback            (回退到上一版本)\n');
         process.exit(1);
       }
     });

@@ -17,7 +17,17 @@ import {
   RESTART_AFTER_UPDATE_EXIT_CODE,
   RESTART_AFTER_PLUGIN_EXIT_CODE,
   GUARDIAN_ENV,
+  readUpdatePending,
+  clearUpdatePending,
+  UPDATE_STABLE_MS,
+  type UpdatePending,
 } from './protocol.js';
+import {
+  resolveInstallRoot,
+  readPointer,
+  writePointerAtomic,
+  type ReleasePointer,
+} from '../update/releases.js';
 
 export type RestartAction = 'restart' | 'restart-clean' | 'exit';
 
@@ -34,6 +44,24 @@ export function resolveRestartAction(
 ): RestartAction {
   if (code === RESTART_EXIT_CODE || code === RESTART_AFTER_PLUGIN_EXIT_CODE) return 'restart';
   if (code === RESTART_AFTER_UPDATE_EXIT_CODE) return 'restart-clean';
+  return 'exit';
+}
+
+export type PostExitAction = 'rollback' | 'exit';
+
+/**
+ * 子进程非预期退出（'exit'）后，是否判定为"升级后首启失败"并回退：
+ * - 存在 pending 标记，且指针指向 pending.version（升级确实发生过）
+ * - lastGood 不同于当前版本（确有回退目标）
+ * 以指针为准，防止把健康版本的正常退出误判为回退。
+ */
+export function resolvePostExitAction(
+  pending: UpdatePending | null,
+  pointer: ReleasePointer | null,
+): PostExitAction {
+  if (pending && pointer && pointer.version === pending.version && pending.lastGood !== pending.version) {
+    return 'rollback';
+  }
   return 'exit';
 }
 
@@ -63,7 +91,8 @@ export function shouldStopRestarting(restartTimes: number[], now: number): boole
 
 export function runGuardian(args: string[]): void {
   const node = process.execPath;
-  const entry = process.argv[1]; // dist/index.js
+  const entry = process.argv[1]; // dist/index.js（双壳布局下恒为合法壳）
+  const installDir = resolveInstallRoot(entry);
   /** guardian 主动拉起的时间戳序列（失控循环检测输入） */
   const restartTimes: number[] = [];
 
@@ -72,7 +101,19 @@ export function runGuardian(args: string[]): void {
       stdio: 'inherit',
       env: { ...process.env, [GUARDIAN_ENV]: '1' },
     });
+
+    // 升级定案：新版本存活超过 UPDATE_STABLE_MS 即视为稳定，清除 pending
+    let stableTimer: NodeJS.Timeout | null = null;
+    if (readUpdatePending()) {
+      stableTimer = setTimeout(() => {
+        clearUpdatePending();
+        process.stderr.write('[guardian] 新版本已稳定运行，升级定案。\n');
+      }, UPDATE_STABLE_MS);
+      stableTimer.unref?.();
+    }
+
     child.on('exit', (code, signal) => {
+      if (stableTimer) clearTimeout(stableTimer);
       const action = resolveRestartAction(code, signal);
       if (action === 'restart' || action === 'restart-clean') {
         const now = Date.now();
@@ -93,6 +134,17 @@ export function runGuardian(args: string[]): void {
           start([]); // 更新完成 → 默认入口（剥离 update 子命令参数）
         }
       } else {
+        // 升级后首启失败 → 自动回退到 lastGood 并重启
+        if (resolvePostExitAction(readUpdatePending(), readPointer(installDir)) === 'rollback') {
+          const pending = readUpdatePending()!;
+          writePointerAtomic(installDir, { version: pending.lastGood, lastGood: pending.lastGood });
+          clearUpdatePending();
+          process.stderr.write(
+            `[guardian] 新版本 v${pending.version} 启动失败，已自动回退到 v${pending.lastGood}，重新拉起。\n`,
+          );
+          start([]);
+          return;
+        }
         process.exit(code ?? (signal ? 1 : 0));
       }
     });
