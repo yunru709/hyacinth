@@ -10,7 +10,7 @@
  * 用最小替身即可（且不会起监听 ⇒ 无端口抖动 ✗）。
  */
 import { describe, it, expect } from 'vitest';
-import { webuiChannelPlugin } from './webui-plugin.js';
+import { webuiChannelPlugin } from './index.js';
 
 function fakeManager() {
   const items = new Map<string, unknown>();

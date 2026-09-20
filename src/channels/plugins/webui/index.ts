@@ -15,13 +15,13 @@
  * · **默认不开** ✓：`enabled !== true` ⇒ 直接返回 ⇒ 对任何现有用户"一个字都不变" ✓。
  * · **幂等** ✓：若该渠道已被注册（例如 `serve` / `webui` 那条路径先注册了）⇒ 跳过，绝不重复注册 ✓。
  */
-import type { ChannelPlugin } from '../auto-detect.js';
-import { HttpWebhookChannel, WEBUI_SESSION_PREFIXES, isLoopbackHost } from './http-webhook.js';
-import { registerChannelPrefixes } from '../../session-channel.js';
+import type { ChannelPlugin } from '../../auto-detect.js';
+import { HttpWebhookChannel, WEBUI_SESSION_PREFIXES, isLoopbackHost } from '../../builtin/http-webhook.js';
+import { registerChannelPrefixes } from '../../../session-channel.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLogger } from '../../logging/logger.js';
+import { createLogger } from '../../../logging/logger.js';
 
 const logger = createLogger('webui-plugin');
 
