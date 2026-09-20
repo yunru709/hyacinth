@@ -98,7 +98,9 @@ const start = await evaluate(SNAP);
 console.log('  卡片数 = ' + start.labels.length + '  → ' + start.labels.join(' / '));
 console.log('');
 const rows = [];
-let prev = start;
+// ⚠️ 首轮基线刻意设为"空值" ✓：第一张卡「夜园」**就是当前主题** ⇒ 点它画面当然"没变" ✗
+//    （上一版拿初始状态当基线 ⇒ **必然假红一次** ✓ 已知却未修 ✗ ⇒ 这版修掉 ✓）
+let prev = { bg: null, primary: null };
 let sameAsPrev = 0;
 
 for (let i = 0; i < start.labels.length; i++) {
