@@ -107,6 +107,10 @@
           <i data-lucide="folder-clock" class="w-4 h-4 text-muted-foreground"></i>
           <span class="font-medium">会话管理</span>
         </a>
+        <a href="#/schedule" data-dom-id="nav-schedule" data-nav-item="schedule" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
+          <i data-lucide="calendar-clock" class="w-4 h-4"></i>
+          <span>定时任务</span>
+        </a>
         <a href="#/settings" data-dom-id="nav-settings" data-nav-item="settings" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
           <i data-lucide="sliders-horizontal" class="w-4 h-4 text-muted-foreground"></i>
           <span class="font-medium">设置</span>
@@ -354,6 +358,32 @@
         </div>
       </div>
     </section>
+      <section data-view="schedule" class="view-section h-full" hidden>
+      <div class="h-full flex flex-col" data-dom-id="schedule-panel">
+        <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 class="text-lg font-semibold text-foreground">定时任务</h1>
+            <p id="schedule-status" class="text-xs text-muted-foreground mt-0.5">加载中…</p>
+          </div>
+          <button id="schedule-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span>
+          </button>
+        </div>
+        <div class="shrink-0 px-5 py-3 border-b border-border bg-background flex flex-wrap items-center gap-2">
+          <input id="schedule-name" type="text" placeholder="任务名称" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground min-w-[140px]" />
+          <select id="schedule-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+            <option value="daily">每天定点</option>
+            <option value="interval">每隔一段时间</option>
+          </select>
+          <input id="schedule-value" type="text" placeholder="09:30 或 30（分钟）" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[190px]" />
+          <button id="schedule-add-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加</span>
+          </button>
+          <span id="schedule-hint" class="text-xs text-muted-foreground"></span>
+        </div>
+        <div id="schedule-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
+      </div>
+      </section>
       <section data-view="settings" class="view-section h-full" hidden>
       <style id="critical-layout">
         .settings-root { position: relative; display: flex; height: 100%; width: 100%; }

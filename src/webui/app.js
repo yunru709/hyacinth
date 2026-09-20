@@ -133,9 +133,9 @@
   // ════════════════════════════════════════════════════════════
   // SPA hash 路由
   // ════════════════════════════════════════════════════════════
-  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'companion'];
+  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'companion'];
   // data-view → data-nav-item 映射（导航里 model 对应 models）
-  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings' };
+  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule' };
 
   function currentView() {
     const h = (location.hash || '#/chat').replace(/^#\//, '');
@@ -161,6 +161,7 @@
     if (view === 'model' && connected) loadModel();
     if (view === 'sessions' && connected) loadSessions();
     if (view === 'settings' && connected) loadSettings();
+    if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
     if (view === 'settings' && connected) loadToolsAndMCP();
     if (view === 'companion' && connected) loadCompanion();
     // 离开陪伴视图：停场景轮询、清 live 场景状态（下次进入重新加载）
@@ -550,6 +551,7 @@
         if (currentView() === 'sessions') loadSessions();
         if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); loadVoiceManager(); }
         if (currentView() === 'companion') loadCompanion();
+        if (currentView() === 'schedule') loadSchedule();   // 定时任务视图（首屏就在该视图时也要加载 ✓）
         refreshState();
         // 同步陪伴模式状态（后端可能因 startup.defaultMode='companion' 已激活）
         client.request('companion.get').then((res) => {
@@ -1388,6 +1390,147 @@
       })
       .catch((e) => { setBusy(false); appendMsg('error', '命令执行失败: ' + (e && e.message)); });
     return true;
+  }
+
+  // ── 定时任务视图（schedule 域；2026-09-20 接入 ✓）────────────────────
+  // 此前 schedule **整域闲置** ✗ ⇒ 定时任务在平板上"看不到、管不了" ✗（终端里却能配 ✓）。
+  // 六个方法全接：list / addDaily / add / toggle / remove / runtime ✓
+  let scheduleBound = false;
+  /** 删除采用"两段点击"确认 —— 刻意不用 window.confirm ✗（无头探针遇原生对话框会卡 ✓） */
+  let schedulePendingDelete = null;
+
+  function scheduleTypeLabel(t) {
+    const map = { daily: '每天定点', interval: '固定间隔', cron: 'cron', 'fixed-time': '单次定时', random: '随机' };
+    return map[t] || t || '—';
+  }
+
+  function fmtTime(s) {
+    if (!s) return '—';
+    try { return new Date(s).toLocaleString(); } catch (e) { return String(s); }
+  }
+
+  function scheduleRow(t) {
+    const row = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-3');
+    const left = el('div', 'min-w-[160px] flex-1');
+    left.appendChild(el('div', 'text-sm font-medium text-foreground', t.name || t.id));
+    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', scheduleTypeLabel(t.scheduleType) + ' · 下次 ' + fmtTime(t.nextRunAt)));
+    row.appendChild(left);
+    const stat = el('div', 'text-xs text-muted-foreground');
+    stat.textContent = '跑了 ' + (t.runCount || 0) + ' 次' + ((t.errorCount || 0) ? ' · 出错 ' + t.errorCount + ' 次' : '') + (t.channel ? ' · 渠道 ' + t.channel : '');
+    row.appendChild(stat);
+
+    // 启用开关 ⇒ schedule.toggle ✓
+    const sw = document.createElement('input');
+    sw.type = 'checkbox';
+    sw.checked = !!t.enabled;
+    sw.className = 'w-3.5 h-3.5 accent-[var(--hyacinth-primary)] shrink-0 cursor-pointer';
+    sw.title = t.enabled ? '已启用（点击停用）' : '已停用（点击启用）';
+    sw.onchange = () => {
+      if (!connected) { sw.checked = !sw.checked; return; }
+      sw.disabled = true;
+      client.request('schedule.toggle', { id: t.id, enabled: sw.checked })
+        .then(() => { appendMsg('system', '任务「' + t.name + '」已' + (sw.checked ? '启用' : '停用')); loadSchedule(); })
+        .catch((e) => { sw.checked = !sw.checked; sw.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message)); });
+    };
+    row.appendChild(sw);
+
+    // 删除（两段确认 ✓）
+    const del = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors', '删除');
+    del.style.color = 'var(--state-error)';
+    del.onclick = () => {
+      if (!connected) return;
+      if (schedulePendingDelete !== t.id) {
+        schedulePendingDelete = t.id;
+        del.textContent = '再点一次确认';
+        setTimeout(() => { if (schedulePendingDelete === t.id) { schedulePendingDelete = null; del.textContent = '删除'; } }, 4000);
+        return;
+      }
+      schedulePendingDelete = null;
+      del.disabled = true;
+      client.request('schedule.remove', { id: t.id })
+        .then((res) => { appendMsg('system', (res && res.ok) ? '任务「' + t.name + '」已删除' : '删除未生效'); loadSchedule(); })
+        .catch((e) => { del.disabled = false; appendMsg('error', '删除失败: ' + (e && e.message)); });
+    };
+    row.appendChild(del);
+    return row;
+  }
+
+  async function loadSchedule() {
+    const listEl = $('#schedule-list');
+    if (!listEl) return;
+    bindScheduleOnce();
+    let data = null;
+    try { data = await client.request('schedule.list'); } catch (e) { data = null; }
+    if (!data) {
+      listEl.innerHTML = '';
+      listEl.appendChild(el('div', 'text-sm text-state-error', '取不到定时任务（后端可能未就绪）'));
+      return;
+    }
+    const tasks = data.tasks || [];
+    const st = data.status || null;
+    let pending = null;
+    try { const rt = await client.request('schedule.runtime'); pending = rt && rt.pendingTaskName; } catch (e) { /* ignore */ }
+    const statusEl = $('#schedule-status');
+    if (statusEl) {
+      const bits = [];
+      if (st) bits.push((st.running ? '调度器运行中' : '调度器已停止') + ' · 启用 ' + (st.enabledTaskCount || 0) + '/' + (st.taskCount || 0));
+      bits.push('共 ' + tasks.length + ' 个任务');
+      if (pending) bits.push('正在执行：' + pending);
+      statusEl.textContent = bits.join(' · ');
+    }
+    listEl.innerHTML = '';
+    if (!tasks.length) {
+      listEl.appendChild(el('div', 'text-sm text-muted-foreground', '还没有定时任务。上面填个名称和时间，点「添加」即可。'));
+      return;
+    }
+    tasks.forEach((t) => listEl.appendChild(scheduleRow(t)));
+  }
+
+  /** 绑定工具条（只绑一次 ✓；由 loadSchedule 触发 ⇒ 视图 markup 必已在 ✓） */
+  function bindScheduleOnce() {
+    if (scheduleBound) return;
+    const addBtn = $('#schedule-add-btn');
+    if (!addBtn) return;
+    scheduleBound = true;
+    const refresh = $('#schedule-refresh-btn');
+    if (refresh) refresh.onclick = () => { loadSchedule(); };
+    const hint = (msg, ok) => {
+      const h = $('#schedule-hint');
+      if (!h) return;
+      h.textContent = msg || '';
+      h.style.color = ok ? 'var(--state-success)' : 'var(--state-error)';
+    };
+    addBtn.onclick = () => {
+      if (!connected) { hint('尚未连接后端'); return; }
+      const nameEl = $('#schedule-name');
+      const typeEl = $('#schedule-type');
+      const valEl = $('#schedule-value');
+      const name = (nameEl && nameEl.value || '').trim();
+      const type = (typeEl && typeEl.value) || 'daily';
+      const val = (valEl && valEl.value || '').trim();
+      if (!name) { hint('请先填任务名称'); return; }
+      if (type === 'daily') {
+        if (!/^\d{1,2}:\d{2}$/.test(val)) { hint('时间格式应为 HH:mm，例如 09:30'); return; }
+        addBtn.disabled = true;
+        client.request('schedule.addDaily', { name, time: val })
+          .then(() => { hint('已添加：' + name + '（每天 ' + val + '）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
+          .catch((e) => hint('添加失败: ' + (e && e.message)))
+          .finally(() => { addBtn.disabled = false; });
+        return;
+      }
+      const mins = Number(val);
+      if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例如 30'); return; }
+      addBtn.disabled = true;
+      client.request('schedule.add', {
+        name,
+        scheduleType: 'interval',
+        schedule: { intervalMs: Math.round(mins * 60000) },
+        action: { type: 'scheduled', target: name, payload: {} },
+      })
+        .then(() => { hint('已添加：' + name + '（每 ' + mins + ' 分钟）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
+        .catch((e) => hint('添加失败: ' + (e && e.message)))
+        .finally(() => { addBtn.disabled = false; });
+    };
   }
 
   function sendChat() {
