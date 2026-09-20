@@ -1359,6 +1359,13 @@
     const args = (m[2] || '').trim();
     const leaf = name.split('/').pop();
     // ① 纯 UI 命令 ⇒ 本地处理（协议层会回 ui-only ⇒ 发了也白搭 ✓）
+    // ① 有对应页面的命令 ⇒ **直接跳过去**（用户指出：Web 有交互，不该学终端把结果打在聊天里 ✗）
+    const COMMAND_TO_VIEW = { schedule: 'schedule', model: 'model', sessions: 'sessions', settings: 'settings', companion: 'companion' };
+    if (COMMAND_TO_VIEW[leaf] && !args) {
+      location.hash = '#/' + COMMAND_TO_VIEW[leaf];
+      appendMsg('system', '已跳转到「' + leaf + '」页面 ✓');
+      return true;
+    }
     if (leaf === 'clear' || leaf === 'help' || leaf === 'new' || leaf === 'exit' || leaf === 'restart') {
       handleLocalCommand(leaf);
       return true;
@@ -2000,6 +2007,117 @@
   }
 
   // 读真实配置 → 回填全部控件
+  // ── 系统面板（设置页「系统」tab；2026-09-20）──────────────────────────
+  // 用户指出的方向：**Web 有交互能力 ⇒ 该给能点的东西，不该学终端去发命令** ✓
+  // 接三个后端已实测可用的能力：orchestrator / state.stats / process ✓
+  let systemBound = false;
+
+  function toggleSwitchStyle(el2, on) {
+    if (!el2) return;
+    el2.checked = !!on;
+  }
+
+  async function loadOrchestrator() {
+    const desc = $('#orch-desc');
+    const sw = $('#orch-toggle');
+    try {
+      const r = await client.request('orchestrator.get');
+      const o = (r && r.orchestrator) || {};
+      toggleSwitchStyle(sw, o.active);
+      const agents = Array.isArray(o.activeAgents) ? o.activeAgents : [];
+      if (desc) desc.textContent = o.active ? ('已启用' + (agents.length ? ' · 运行中：' + agents.join('、') : '')) : '未启用（开启后由编排器按复杂度分派旁路智能体）';
+    } catch (e) {
+      if (desc) desc.textContent = '取不到状态：' + ((e && e.message) || '未知错误');
+    }
+  }
+
+  async function loadSessionStats() {
+    const desc = $('#session-stats-desc');
+    if (!desc) return;
+    if (!currentSessionId) { desc.textContent = '（当前没有会话）'; return; }
+    try {
+      const r = await client.request('state.stats', { sessionId: currentSessionId });
+      const s = (r && r.stats) || {};
+      const bits = [];
+      if (s.turn_count != null) bits.push('轮次 ' + s.turn_count);
+      if (s.input_tokens != null || s.output_tokens != null) bits.push('token ↑' + (s.input_tokens || 0) + ' / ↓' + (s.output_tokens || 0));
+      if (s.current_context_tokens != null) bits.push('当前上下文 ' + fmtTokens(s.current_context_tokens));
+      if (s.compact_count != null) bits.push('压缩 ' + s.compact_count + ' 次');
+      desc.textContent = bits.length ? bits.join(' · ') : JSON.stringify(s);
+    } catch (e) {
+      desc.textContent = '取不到统计：' + ((e && e.message) || '未知错误');
+    }
+  }
+
+  async function loadProcesses() {
+    const box = $('#proc-list');
+    const cnt = $('#proc-count');
+    if (!box) return;
+    let list = [];
+    try {
+      const r = await client.request('process.list');
+      list = (r && r.processes) || [];
+    } catch (e) {
+      box.innerHTML = '';
+      box.appendChild(el('div', 'settings-desc', '取不到进程列表：' + ((e && e.message) || '未知错误')));
+      return;
+    }
+    if (cnt) cnt.textContent = list.length ? list.length + ' 个' : '';
+    box.innerHTML = '';
+    if (!list.length) {
+      box.appendChild(el('div', 'settings-desc', '当前没有后台进程 ✓（长跑任务会出现在这里）'));
+      return;
+    }
+    list.forEach((p) => {
+      const row = el('div', 'settings-row');
+      const left = el('div');
+      left.appendChild(el('div', 'settings-label font-mono', p.handle || p.id || '—'));
+      const meta = [p.command, p.description, p.status, p.startedAt].filter(Boolean).join(' · ');
+      if (meta) left.appendChild(el('div', 'settings-desc', meta));
+      row.appendChild(left);
+      const kill = el('button', 'settings-input', '终止');
+      kill.style.cssText += ';cursor:pointer;font-family:inherit;color:var(--state-error)';
+      kill.onclick = () => {
+        if (!connected) return;
+        kill.disabled = true;
+        client.request('process.kill', { handle: p.handle || p.id })
+          .then(() => { appendMsg('system', '已终止进程 ' + (p.handle || p.id)); loadProcesses(); })
+          .catch((e) => { kill.disabled = false; appendMsg('error', '终止失败: ' + (e && e.message)); });
+      };
+      row.appendChild(kill);
+      box.appendChild(row);
+    });
+  }
+
+  function loadSystemPanel() {
+    bindSystemOnce();
+    loadOrchestrator();
+    loadSessionStats();
+    loadProcesses();
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+  }
+
+  function bindSystemOnce() {
+    if (systemBound) return;
+    const sw = $('#orch-toggle');
+    if (!sw) return;
+    systemBound = true;
+    sw.onchange = () => {
+      if (!connected) { sw.checked = !sw.checked; return; }
+      sw.disabled = true;
+      client.request('orchestrator.setEnabled', { enabled: sw.checked })
+        .then((r) => {
+          const o = (r && r.orchestrator) || {};
+          appendMsg('system', '编排器已' + (o.active ? '启用' : '停用'));
+          loadOrchestrator();
+        })
+        .catch((e) => { sw.checked = !sw.checked; appendMsg('error', '切换失败: ' + (e && e.message)); })
+        .finally(() => { sw.disabled = false; });
+    };
+    const rf = $('#system-refresh-btn');
+    if (rf) rf.onclick = () => { loadSystemPanel(); };
+  }
+
   function loadSettings() {
     if (!connected) return;
     client.request('config.getAll').then(async (cfg) => {
@@ -2007,6 +2125,7 @@
       SETTINGS_MAP.forEach(([domId, path, type]) => applySettingValue(domId, path, type, cfg));
       // Zone 开关（zone1/2/3/5）：manifest 真源（.agent/context-manifest.json）
       loadManifestZoneToggles().catch(() => {});
+      loadSystemPanel();   // 系统面板（开关/统计/进程 ✓）
       // 陪伴角色下拉：选项来自协议层 companion.get（自动检测人格目录，无硬编码）
       try {
         const cstate = await client.request('companion.get');

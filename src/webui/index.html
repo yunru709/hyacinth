@@ -416,6 +416,7 @@
         #tab-appearance:checked ~ .settings-frame .settings-content #panel-context,
         #tab-tools:checked ~ .settings-frame .settings-content #panel-context,
         #tab-mcp:checked ~ .settings-frame .settings-content #panel-context { display: none; }
+        #tab-system:checked ~ .settings-frame .settings-content #panel-context { display: none; }
         #tab-turns:checked ~ .settings-frame .settings-content #panel-turns,
         #tab-compress:checked ~ .settings-frame .settings-content #panel-compress,
         #tab-modes:checked ~ .settings-frame .settings-content #panel-modes,
@@ -425,6 +426,7 @@
         #tab-appearance:checked ~ .settings-frame .settings-content #panel-appearance,
         #tab-tools:checked ~ .settings-frame .settings-content #panel-tools,
         #tab-mcp:checked ~ .settings-frame .settings-content #panel-mcp { display: flex; }
+        #tab-system:checked ~ .settings-frame .settings-content #panel-system { display: flex; }
 
         /* 主题选择卡片 */
         .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
@@ -522,6 +524,7 @@
         <input type="radio" name="settings-tab" id="tab-appearance" class="settings-tab-radio" data-dom-id="tab-appearance" aria-label="外观">
         <input type="radio" name="settings-tab" id="tab-tools" class="settings-tab-radio" data-dom-id="tab-tools" aria-label="工具">
         <input type="radio" name="settings-tab" id="tab-mcp" class="settings-tab-radio" data-dom-id="tab-mcp" aria-label="MCP">
+        <input type="radio" name="settings-tab" id="tab-system" class="settings-tab-radio" data-dom-id="tab-system" aria-label="系统">
 
         <div class="settings-frame">
           <nav class="settings-tabs" aria-label="设置分类">
@@ -565,6 +568,10 @@
             <label for="tab-mcp" class="settings-tab" data-dom-id="label-mcp">
               <i data-lucide="plug" class="w-4 h-4"></i>
               <span>MCP</span>
+            </label>
+            <label for="tab-system" class="settings-tab" data-dom-id="label-system">
+              <i data-lucide="activity" class="w-4 h-4"></i>
+              <span>系统</span>
             </label>
           </nav>
 
@@ -1385,6 +1392,29 @@
               </div>
 
               <!-- MCP 管理 -->
+              <div class="settings-panel" id="panel-system" data-dom-id="panel-system" role="tabpanel" aria-labelledby="label-system">
+                <div class="settings-card">
+                  <div class="settings-card-header"><i data-lucide="gauge" class="w-4 h-4"></i><span>运行状态</span></div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">上下文编排旁路（编排器）</div>
+                      <div class="settings-desc" id="orch-desc" data-dom-id="orch-desc">加载中…</div>
+                    </div>
+                    <input type="checkbox" id="orch-toggle" class="settings-toggle" data-dom-id="orch-toggle" aria-label="编排器开关" />
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">当前会话统计</div>
+                      <div class="settings-desc" id="session-stats-desc" data-dom-id="session-stats-desc">—</div>
+                    </div>
+                    <button id="system-refresh-btn" class="settings-input" data-dom-id="system-refresh" style="cursor:pointer;font-family:inherit">刷新</button>
+                  </div>
+                </div>
+                <div class="settings-card">
+                  <div class="settings-card-header"><i data-lucide="list" class="w-4 h-4"></i><span>后台进程</span><span id="proc-count" class="settings-desc" style="margin-left:auto"></span></div>
+                  <div id="proc-list" data-dom-id="proc-list"></div>
+                </div>
+              </div>
               <div class="settings-panel" id="panel-mcp" data-dom-id="panel-mcp" role="tabpanel" aria-labelledby="label-mcp">
                 <section class="settings-card">
                   <div class="settings-card-header">
