@@ -347,18 +347,47 @@ export async function createAgentAssembly(
   }
   toolRegistry.register(skillTool);
 
-  // MCP 启动（可能启动子进程，慢）与调度器启动、依赖分析并行
-  const [, , dependencyAnalyzer] = await Promise.all([
-    mcpSystem.start(),
+  // ── MCP 启动：**后台跑，不挡装配** ✓（2026-09-20 实测修正 ✗→✓）────────────────
+  // 为什么要改：原先这里是 `await Promise.all([mcpSystem.start(), …])`，
+  // 而 `start()` 要逐个 spawn MCP 子进程（npx 冷启动数秒，握手超时上限 30s ✗）⇒
+  // **整套会话装配被它拖住**，连带网页版首个连接（实测「连接中…」→「在线」要 4s+；
+  // 进程风暴时直接卡死 ✗）。而 MCP 是**可选**工具系统，**不该挡住主界面** ✗。
+  //
+  // 为什么这样改是安全的（两处前提已核实 ✓）：
+  //   ① 工具是**每回合现查**的 —— orchestrator/stages/context.ts 里
+  //      `toolRegistry.getToolDefinitions(...)` 在每回合的 context 阶段调用
+  //      ⇒ 晚注册的工具**照样能被看见** ✓（不是装配时快照 ✗）
+  //   ② `bridge.registerToRegistry` **幂等且可重入**（内部先清旧注册再重注册 ✓）
+  //      ⇒ 先挂注册面、连接完成后再补注册，不会重复注册 ✓
+  //
+  // 顺序：**先同步挂注册面**（零等待）⇒ 再后台启动 ⇒ 启动完成后补一次
+  // 「依赖连接态」的注册（ContextSource 与 supervisor 都需要 managers 已存在 ✓）
+  mcpSystem.registerToToolRegistry(toolRegistry);
+  void mcpSystem
+    .start()
+    .then(() => {
+      mcpSystem.registerToContextComposer(contextComposer);
+      if (supervisor) {
+        mcpSystem.registerToLifecycleSupervisor(supervisor);
+      }
+    })
+    .catch((err: unknown) => {
+      // MCP 起不来**不影响会话可用**（只是少了那批 MCP 工具）⇒ 只记日志，不抛 ✓
+      // ⚠️ 注意：插件声明的 MCP（plugins/manager.ts 的 connectPluginMcpServers）走
+      //    addExternalServers ⇒ 逐个 addServer，**不依赖 start() 已完成** ✓
+      //    （JS 单线程 ⇒ 与 start() 并发也只是各自 push，互不破坏 ✓；
+      //      唯一旧有隐患是"同一 server 被声明两次" ⇒ 与本次改动无关 ✓）
+      console.warn(
+        '[assembly] MCP 后台启动失败（会话仍可用，仅缺 MCP 工具）：',
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+
+  // 调度器启动 + 依赖分析仍按原样并行等待（都快 ✓）
+  const [, dependencyAnalyzer] = await Promise.all([
     heartbeatScheduler.start(),
     initDependencyAnalyzer(cwd),
   ] as const);
-
-  mcpSystem.registerToToolRegistry(toolRegistry);
-  mcpSystem.registerToContextComposer(contextComposer);
-  if (supervisor) {
-    mcpSystem.registerToLifecycleSupervisor(supervisor);
-  }
 
   // ── 插件系统（P6 收尾：PluginManager 创建经贡献批；依赖 MCP 就绪）──
   // loadAll 移至 loop 创建后：目录插件挂主循环钩子需要 loopHooks 总线（见下）
