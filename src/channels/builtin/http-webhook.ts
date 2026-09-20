@@ -691,6 +691,9 @@ export class HttpWebhookChannel implements ChannelHandler {
 
       const session = new UiWsSession(ws, sessionId, {
         cwd: this.cwd,
+        // 连接即登记、**不落盘**：此前这里是"每刷新建一个 0 文件空壳会话"的现场 ✗
+        // （首条用户消息到达时由 loop 物化，与 TUI 新建路径一致 ✓）
+        lazySession: true,
         configCenter: configCenter as unknown as UiWsSessionBackend['configCenter'],
         sessionStore: this.sessionManager,
         registry,

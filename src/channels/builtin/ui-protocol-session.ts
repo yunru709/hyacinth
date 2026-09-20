@@ -86,6 +86,8 @@ export interface UiProtocolSessionBackend {
    * 2026-09-17「跨渠道串台」事故的直接成因。
    */
   channel?: string;
+  /** 懒登记会话（见 AgentFactory.createAgent.lazySession）：只记 id 与路径，不建目录不写文件 */
+  lazySession?: boolean;
   /** 提供商元数据列表（model.listProviders 数据源，可选） */
   listProvidersMeta?: () => ProviderMetaLike[];
   /** 本地模型列表（model.listLocalModels 数据源；对应 LocalModelModule.list，可选） */
@@ -462,6 +464,8 @@ export class UiProtocolSession {
         // 会话归属渠道：由调用方决定 —— TUI 本地模式传 'tui'，浏览器 WebUI 走缺省 'webui'
         // （与 http-webhook 同源）。不得硬编码，理由见 UiProtocolSessionBackend.channel。
         channel: this.backend.channel ?? 'webui',
+        // 懒登记：WS 连接时只登记 sessionId，不落盘；首条消息才物化（防刷新留空壳 ✗）
+        lazySession: this.backend.lazySession,
       });
       this.components = result;
       this.loop = (result as { loop: AgentLoop }).loop;

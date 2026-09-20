@@ -123,6 +123,12 @@ export interface AgentFactory {
     channelsInfo?: unknown;
     /** 渠道标识 */
     channel?: string;
+    /**
+     * 懒登记会话：调用方已铸好 sessionId，但**只登记不落盘**（不建目录不写文件），
+     * 目录与 meta/events/stats 推迟到**首条用户消息**由 loop.materializeSessionIfNeeded() 物化。
+     * WebUI/桌面端每次 WS 连接都带一个全新 id ⇒ 不开此标志就会"每刷新一次留一个空壳会话" ✗
+     */
+    lazySession?: boolean;
   }): Promise<{ loop: ChannelSessionRunner }>;
 }
 

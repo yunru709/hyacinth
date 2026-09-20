@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { SessionManager } from '../memory/session.js';
 import { boot } from './boot.js';
 
@@ -103,5 +104,51 @@ describe('boot() 恢复策略', () => {
 
     // 显式指定 ⇒ 尊重调用方（跨渠道加载由 switch_session 等显式动作负责）
     expect(result.currentSessionId).toBe(foreign.id);
+  });
+
+  it('lazySession + 显式 id ⇒ 只登记不落盘（刷新不留空壳会话的回归守卫 ✓）', async () => {
+    const { cwd, sessionsRoot, sm } = await setup();
+    const id = 'webui_20260920-120000-abcd';
+
+    const result = await boot({
+      cwd,
+      sessionId: id,
+      shouldContinue: false,
+      channel: 'webui',
+      sessionManager: sm,
+      lazySession: true,
+    });
+
+    expect(result.currentSessionId).toBe(id);
+    expect(result.sessionDir).toBe(sm.getSessionDir(id));
+    // 关键判据：目录**不存在**（= 刷新不会留空壳）✓
+    expect(existsSync(sm.getSessionDir(id))).toBe(false);
+  });
+
+  it('lazySession 但目录已存在 ⇒ 正常恢复（懒登记不降级既有会话 ✓）', async () => {
+    const { cwd, sessionsRoot, sm } = await setup();
+    const created = await sm.create('normal', 'webui');
+
+    const result = await boot({
+      cwd,
+      sessionId: created.id,
+      shouldContinue: false,
+      channel: 'webui',
+      sessionManager: sm,
+      lazySession: true,
+    });
+
+    expect(result.currentSessionId).toBe(created.id);
+    expect(existsSync(path.join(sessionsRoot, created.id, 'meta.json'))).toBe(true);
+  });
+
+  it('不带 lazySession ⇒ 显式 id 立即建档（默认语义零变更 ✓）', async () => {
+    const { cwd, sessionsRoot, sm } = await setup();
+    const id = 'webui_20260920-130000-beef';
+
+    const result = await boot({ cwd, sessionId: id, shouldContinue: false, channel: 'webui', sessionManager: sm });
+
+    expect(result.currentSessionId).toBe(id);
+    expect(existsSync(path.join(sessionsRoot, id))).toBe(true);
   });
 });

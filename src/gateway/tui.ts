@@ -675,6 +675,7 @@ export async function runTui(
         // 只能靠猜值来区分语义（2026-09-17「TUI 与微信共用 session」事故的根源）。
         sessionId: options.sessionId ?? sessionId,
         channel: options.channel ?? 'tui',
+        lazySession: options.lazySession,
         sessionManager,
         shouldContinue,
         maxMessages,

@@ -170,8 +170,12 @@ export class SessionManager {
         await fs.access(sessionDir);
       } catch {
         return withSessionDirLock(sessionDir, async () => {
+          // ⚠️ 二次检查必须查 **meta.json**（物化标记），**不能查目录** ✗：
+          // withSessionDirLock 自己会先 mkdir(sessionDir)（session-lock.ts:39）⇒
+          // 查目录**必然成功** ⇒ 下面那段物化**永不执行** ⇒ 只留 0 文件空目录。
+          // 实测 2026-09-20：136 个 0 文件的 webui_ 空壳即由此产生 ✓
           try {
-            await fs.access(sessionDir);
+            await fs.access(path.join(sessionDir, 'meta.json'));
           } catch {
             await ensureDir(sessionDir);
             await ensureFile(path.join(sessionDir, 'conversation.jsonl'));
@@ -362,6 +366,25 @@ export class SessionManager {
         logger.info('Cleaned up expired session', { sessionId: session.id });
         deletedCount++;
       }
+    }
+
+    // ── 空壳目录回收（2026-09-20）──
+    // 判据：目录里**一个文件都没有** 且 mtime 早于 1 小时 ⇒ 是"只 mkdir、从未物化"的残留。
+    // 来源事故：WebUI 每次 WS 连接都 resume(全新 id) ⇒ 建目录但从不写文件
+    //   （resume 里那段死代码，已修 ✓）⇒ 实测累积 136 个。
+    // 1 小时宽限期：避免误删"正在物化"的目录 ✓
+    const EMPTY_DIR_GRACE_MS = 60 * 60 * 1000;
+    for (const session of sessions) {
+      const sessionDir = path.join(this.sessionsRoot, session.id);
+      try {
+        const st = await fs.stat(sessionDir);
+        if (now - st.mtimeMs < EMPTY_DIR_GRACE_MS) continue;
+        const entries = await fs.readdir(sessionDir);
+        if (entries.length > 0) continue;
+        await fs.rm(sessionDir, { recursive: true, force: true });
+        logger.info('Reaped empty session dir', { sessionId: session.id });
+        deletedCount++;
+      } catch { /* 目录已不存在/不可读 ⇒ 跳过 */ }
     }
 
     return deletedCount;

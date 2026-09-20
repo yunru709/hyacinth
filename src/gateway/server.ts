@@ -156,6 +156,7 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
         channelsInfo: options.channelsInfo as ChannelsInfo[] | undefined,
         channel: options.channel,
         sessionManager,
+        lazySession: options.lazySession,
       });
     },
   };

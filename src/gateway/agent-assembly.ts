@@ -135,6 +135,8 @@ export interface CreateAgentOptions {
   channel?: string;
   /** 外部注入的 SessionManager（避免多实例） */
   sessionManager?: SessionManager;
+  /** 懒登记会话（见 AgentFactory.createAgent.lazySession）：只记 id 与路径，不建目录不写文件 */
+  lazySession?: boolean;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -191,6 +193,7 @@ export async function createAgentAssembly(
     shouldContinue,
     channel: options.channel,
     sessionManager: options.sessionManager,
+    lazySession: options.lazySession,
   });
 
   // ── P-A 基础贡献批（行数收尾：gitManager/turnStore/turnRecorder/flowRegistry）──

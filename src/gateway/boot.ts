@@ -18,6 +18,7 @@ import { ProviderManager } from '../provider/manager.js';
 import type { Provider } from '../provider/interface.js';
 import { createLogger } from '../logging/logger.js';
 import { resolveChannelSession } from '../session-channel.js';
+import { existsSync } from 'node:fs';
 
 const logger = createLogger('factory');
 
@@ -26,6 +27,11 @@ export interface BootOptions {
   sessionId: string | undefined;
   shouldContinue: boolean | undefined;
   channel: string | undefined;
+  /**
+   * 懒登记：sessionId 已给定时**不落盘**（不建目录不写文件），首条消息才物化。
+   * WebUI 每次 WS 连接都铸新 id ⇒ 不开此标志会每次刷新留一个 0 文件空壳会话 ✗
+   */
+  lazySession?: boolean;
   /** 外部注入的 SessionManager（测试/嵌入式用） */
   sessionManager?: SessionManager;
 }
@@ -77,11 +83,23 @@ export async function boot(options: BootOptions): Promise<BootResult> {
   let sessionType: SessionType = 'normal';
 
   if (sessionId) {
-    const session = await sessionManager.resume(sessionId);
-    sessionDir = sessionManager.getSessionDir(session.id);
-    currentSessionId = session.id;
-    sessionType = session.type ?? 'normal';
-    logger.info('Resumed session', { sessionId: session.id, type: sessionType });
+    // ── 懒登记（WebUI/桌面端每次连接）：只记 id 与路径，**不建目录不写文件** ✓
+    // 动机（2026-09-20 实测）：每次 WS 连接都带一个全新 id 走 eager resume ⇒
+    //   刷新一次就在 ~/.agent/sessions 留一个 0 文件空壳（实测累积 136 个）✗
+    //   ⇒ 与 TUI 新建路径一致：推迟到首条消息由 loop.materializeSessionIfNeeded() 物化 ✓
+    // 目录已存在（同 id 重连/旧会话）⇒ 仍走 resume，语义不变 ✓
+    if (options.lazySession && !existsSync(sessionManager.getSessionDir(sessionId))) {
+      sessionDir = sessionManager.getSessionDir(sessionId);
+      currentSessionId = sessionId;
+      sessionType = 'normal';
+      logger.info('Registered lazy session (dir deferred to first message)', { sessionId, channel });
+    } else {
+      const session = await sessionManager.resume(sessionId);
+      sessionDir = sessionManager.getSessionDir(session.id);
+      currentSessionId = session.id;
+      sessionType = session.type ?? 'normal';
+      logger.info('Resumed session', { sessionId: session.id, type: sessionType });
+    }
   } else if (shouldContinue) {
     // 渠道隔离恢复：TUI 与飞书共享进程时，重启应恢复各自渠道的 session，
     // 而非全局最近（否则会把飞书 session 恢复给 TUI）。跨渠道加载由 switch_session 显式完成。

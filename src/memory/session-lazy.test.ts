@@ -108,3 +108,44 @@ describe('会话根目录隔离（HYACINTH_SESSIONS_ROOT）', () => {
     expect(sm.getSessionDir('x').startsWith(root)).toBe(true);
   });
 });
+
+describe('resume() 自动建档必须真的物化（死代码回归守卫 ✓）', () => {
+  it('未知 id ⇒ 建目录且补齐 meta/events/stats（而非只留 0 文件空目录 ✗）', async () => {
+    const sm = new SessionManager(process.cwd(), root);
+    const session = await sm.resume('webui_20260920-140000-cafe');
+    const dir = sm.getSessionDir(session.id);
+
+    expect(fs.existsSync(path.join(dir, 'meta.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'events.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'stats.json'))).toBe(true);
+  });
+});
+
+describe('cleanup() 回收空壳目录（只 mkdir、从未物化的残留 ✓）', () => {
+  it('空目录且超过宽限期 ⇒ 删除；有内容的会话不动 ✓', async () => {
+    const sm = new SessionManager(process.cwd(), root);
+    const keep = await sm.create('normal', 'tui');
+
+    const emptyId = 'webui_20260920-150000-dead';
+    const emptyDir = sm.getSessionDir(emptyId);
+    fs.mkdirSync(emptyDir, { recursive: true });
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(emptyDir, old, old);
+
+    await sm.cleanup();
+
+    expect(fs.existsSync(emptyDir)).toBe(false);
+    expect(fs.existsSync(sm.getSessionDir(keep.id))).toBe(true);
+  });
+
+  it('刚建的空目录（宽限期内）⇒ 不删（避免误删正在物化的会话 ✓）', async () => {
+    const sm = new SessionManager(process.cwd(), root);
+    const freshId = 'webui_20260920-160000-live';
+    const freshDir = sm.getSessionDir(freshId);
+    fs.mkdirSync(freshDir, { recursive: true });
+
+    await sm.cleanup();
+
+    expect(fs.existsSync(freshDir)).toBe(true);
+  });
+});
