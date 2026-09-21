@@ -144,9 +144,10 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
         { name: 'session_mcp',        source: 'runtime:mcp_live',           priority: 3, type: 'runtime', description: '会话中热插拔的 MCP 工具索引' },
         { name: 'session_tools',      source: 'runtime:tools_live',         priority: 4, type: 'runtime', description: '会话中热插拔的工具' },
         { name: 'orchestrator_hint',   source: 'runtime:orchestrator_hint',  priority: 5, type: 'runtime', description: '旁路Agent注入（意图/约束/纠正）' },
-        { name: 'timestamp',          source: 'runtime:timestamp',          priority: 6, type: 'runtime', description: '当前时间戳' },
-        // 临时记事本：**紧跟在时间戳之后**（用户裁定），仍属 Zone 5 live ⇒ 不进消息流转 ✓
-        { name: 'scratchpad',         source: 'runtime:scratchpad',         priority: 7, type: 'runtime', description: '临时记事本（Zone 5；agent 用 edit 直接维护）' },
+        { name: 'timestamp',          source: 'runtime:timestamp',          priority: 7, type: 'runtime', description: '当前时间戳' },
+          // 时间戳：**排在记事本之后**（2026-09-21 用户裁定修订，取代此前「紧跟时间戳之后」）——
+          // 判据 = **稳定的在前、易变的在后**：记事本很少改，时间戳每轮都可能变 ✓
+        { name: 'scratchpad',         source: 'runtime:scratchpad',         priority: 6, type: 'runtime', description: '临时记事本（Zone 5；agent 用 edit 直接维护）' },
         // user_input 顺延到 8：它是这一轮真正的用户输入，必须仍在最后 ✓
         { name: 'user_input',         source: 'runtime:userInput',          priority: 8, type: 'runtime', description: '用户当前输入（每轮变化）' },
       ],
