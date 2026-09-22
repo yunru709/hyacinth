@@ -7,6 +7,11 @@ libs/
 # GGUF model files (several GB each)
 models/
 
+# 兜底：万一 GGUF 权重 / llama.cpp 源码不在 models/ 或 libs/ 里（09-22 补）
+*.gguf
+llama.cpp/
+
+
 # Node modules
 node_modules/
 
