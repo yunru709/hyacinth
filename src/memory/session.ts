@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -141,7 +141,11 @@ export class SessionManager {
 
   /**
    * 创建新 session（含物化写入）
-   * type 为开放 SessionType（内置 normal/precise/companion，插件可扩展）
+   * type 为开放 SessionType（内置 normal/companion，插件可扩展）
+   *
+   * 2026-09-30：会话按**模式分桶** —— 目录＝ `sessions/<模式名>/<sessionId>/`。
+   * 分桶即约束：会话与模式一一归属，跨模式切换在结构上就说不通
+   * （设施层再补"列表过滤 + 明确拒绝"，两层合力，见 listByMode / loop.switchSession）。
    */
   async create(type: SessionType = 'normal', channel?: string): Promise<Session> {
     // 清理过期 session
@@ -149,7 +153,7 @@ export class SessionManager {
 
     const session = this.createLazy(channel);
     session.type = type;
-    await materializeLazySession(path.join(this.sessionsRoot, session.id), session);
+    await materializeLazySession(this.dirForNew(type, session.id), session);
     return session;
   }
 
@@ -161,7 +165,9 @@ export class SessionManager {
    */
   async resume(sessionId?: string): Promise<Session> {
     if (sessionId) {
-      const sessionDir = path.join(this.sessionsRoot, sessionId);
+      // 分桶后目录不再能由 id 直接拼出 ⇒ 走统一解析（桶内 → 旧扁平布局 → 默认桶）
+      const sessionDir =
+        this.resolveExistingDir(sessionId) ?? this.dirForNew('normal', sessionId);
 
       // 目录不存在 → 自动创建（首次调用或重启后重建）。
       // 跨进程互斥：TUI 与 WebUI 共享 sessions 目录，双进程同时建同一 session
@@ -249,7 +255,11 @@ export class SessionManager {
   }
 
   /**
-   * 列出所有 session
+   * 列出所有 session —— **两种布局都认**：
+   *   · 分桶（现行）：`sessions/<模式名>/<sessionId>/`
+   *   · 旧扁平（待迁移）：`sessions/<sessionId>/`
+   * 判据 = 该目录有没有 `meta.json`（会话物化标记）：有 ⇒ 它自己就是会话；
+   * 没有 ⇒ 当作模式桶，往下再扫一层。这样迁移做到一半也不会丢会话 ✓
    */
   async list(): Promise<Session[]> {
     await ensureDir(this.sessionsRoot);
@@ -259,38 +269,56 @@ export class SessionManager {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      const entryPath = path.join(this.sessionsRoot, entry.name);
 
-      const sessionDir = path.join(this.sessionsRoot, entry.name);
+      if (existsSync(path.join(entryPath, 'meta.json'))) {
+        const s = await this.readSessionAt(entryPath, entry.name);
+        if (s) sessions.push(s);
+        continue;
+      }
+
+      let inner: Array<{ isDirectory(): boolean; name: string }> = [];
       try {
-        const stat = await fs.stat(sessionDir);
-        // 读取 session 元信息
-        let sessionType: SessionType | undefined;
-        let projectKey = '';
-        let channel: string | undefined;
-        try {
-          const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
-          const meta = JSON.parse(metaRaw);
-          // 开放类型：接受任意合法字符串（含插件扩展的 session 类型）
-          if (typeof meta.type === 'string' && meta.type.length > 0) sessionType = meta.type as SessionType;
-          projectKey = meta.projectKey ?? '';
-          channel = meta.channel;
-        } catch { /* 旧 session 没有 meta.json，默认为 normal */ }
-        sessions.push({
-          id: entry.name,
-          projectKey,
-          createdAt: stat.birthtime.toISOString(),
-          updatedAt: stat.mtime.toISOString(),
-          type: sessionType ?? 'normal',
-          channel,
-        });
-      } catch {
-        // 跳过无法访问的目录
+        inner = await fs.readdir(entryPath, { withFileTypes: true });
+      } catch { continue; }
+      for (const sub of inner) {
+        if (!sub.isDirectory()) continue;
+        const s = await this.readSessionAt(path.join(entryPath, sub.name), sub.name);
+        if (s) sessions.push(s);
       }
     }
 
     // 按 createdAt 降序排列
     sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return sessions;
+  }
+
+  /** 读一个会话目录的元信息（列表与解析共用；读不到 meta 时按普通模式兜底） */
+  private async readSessionAt(sessionDir: string, id: string): Promise<Session | null> {
+    try {
+      const stat = await fs.stat(sessionDir);
+      let sessionType: SessionType | undefined;
+      let projectKey = '';
+      let channel: string | undefined;
+      try {
+        const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
+        const meta = JSON.parse(metaRaw);
+        // 开放类型：接受任意合法字符串（含插件扩展的 session 类型）
+        if (typeof meta.type === 'string' && meta.type.length > 0) sessionType = meta.type as SessionType;
+        projectKey = meta.projectKey ?? '';
+        channel = meta.channel;
+      } catch { /* 旧 session 没有 meta.json，默认为 normal */ }
+      return {
+        id,
+        projectKey,
+        createdAt: stat.birthtime.toISOString(),
+        updatedAt: stat.mtime.toISOString(),
+        type: sessionType ?? 'normal',
+        channel,
+      };
+    } catch {
+      return null; // 无法访问的目录 → 跳过
+    }
   }
 
   /**
@@ -326,10 +354,95 @@ export class SessionManager {
   }
 
   /**
-   * 获取 session 目录路径
+   * 桶名（= 模式名）—— 最小净化：只接受安全字符，防路径穿越；空/非法 → normal。
+   * 静态：解析与迁移都要用，且不依赖实例状态。
+   */
+  static bucketName(type: string | undefined): string {
+    const t = (type ?? '').trim();
+    return /^[A-Za-z0-9._-]{1,64}$/.test(t) ? t : 'normal';
+  }
+
+  /** 新建会话的目标目录：`sessions/<模式名>/<id>` */
+  private dirForNew(type: string | undefined, sessionId: string): string {
+    return path.join(this.sessionsRoot, SessionManager.bucketName(type), sessionId);
+  }
+
+  /**
+   * 已存在会话的目录：桶内 `sessions/<某模式>/<id>` → 旧扁平 `sessions/<id>`；
+   * 都没有 → null。
+   *
+   * 同步解析（调用方多为同步路径）⇒ 用 readdirSync：顶层只有"每个模式一个桶"
+   * ＋若干待迁移会话，量级很小 ✓
+   */
+  private resolveExistingDir(sessionId: string): string | null {
+    let names: string[] = [];
+    try {
+      names = readdirSync(this.sessionsRoot);
+    } catch { /* 根目录还不存在 → 视为不存在 */ }
+    for (const name of names) {
+      if (name === sessionId) continue;
+      const candidate = path.join(this.sessionsRoot, name, sessionId);
+      if (existsSync(candidate)) return candidate;
+    }
+    const legacy = path.join(this.sessionsRoot, sessionId);
+    return existsSync(legacy) ? legacy : null;
+  }
+
+  /**
+   * 获取 session 目录路径 —— **桶内优先，兼容旧扁平布局**。
+   *
+   * 分桶后目录不再能由 id 拼出（要先知道模式）⇒ 统一在这里解析；
+   * 找不到（尚未物化）时给默认桶路径（调用方若已知模式，应改用 dirForNew）。
    */
   getSessionDir(sessionId: string): string {
-    return path.join(this.sessionsRoot, sessionId);
+    return this.resolveExistingDir(sessionId) ?? this.dirForNew('normal', sessionId);
+  }
+
+  /**
+   * 把旧扁平布局的会话迁进各自的模式桶：`sessions/<id>` → `sessions/<meta.type>/<id>`。
+   *
+   * - **幂等 / 可重入**：只动"顶层含 meta.json 的目录"（= 会话本体）；已分桶的结构天然不匹配
+   * - **不丢数据**：目标已存在同名会话 ⇒ 跳过并计入 skipped（**绝不覆盖** ✗）
+   * - 单个失败不影响其余（计入 skipped，下次启动重试）
+   * - 返回 `{ moved, skipped }`：启动日志与验证都用它
+   */
+  async migrateLegacyLayout(): Promise<{ moved: string[]; skipped: string[] }> {
+    await ensureDir(this.sessionsRoot);
+    const moved: string[] = [];
+    const skipped: string[] = [];
+
+    for (const entry of await fs.readdir(this.sessionsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const from = path.join(this.sessionsRoot, entry.name);
+      const metaPath = path.join(from, 'meta.json');
+      if (!existsSync(metaPath)) continue; // 不是会话目录（可能已是桶）
+
+      let type = 'normal';
+      try {
+        const meta = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
+        if (typeof meta.type === 'string' && meta.type.trim()) type = meta.type.trim();
+      } catch { /* meta 损坏 → 归入 normal 桶，会话本体不丢 */ }
+
+      const bucket = SessionManager.bucketName(type);
+      const to = path.join(this.sessionsRoot, bucket, entry.name);
+      if (existsSync(to)) {
+        skipped.push(entry.name);
+        continue;
+      }
+      try {
+        await fs.mkdir(path.dirname(to), { recursive: true });
+        await fs.rename(from, to);
+        moved.push(`${entry.name} -> ${bucket}/`);
+        logger.info('session migrated to mode bucket', { id: entry.name, bucket });
+      } catch (err) {
+        skipped.push(entry.name);
+        logger.warn('session migrate failed (will retry next boot)', {
+          id: entry.name,
+          error: (err as Error).message,
+        });
+      }
+    }
+    return { moved, skipped };
   }
 
   /**
@@ -361,7 +474,9 @@ export class SessionManager {
     for (const session of sessions) {
       const updatedAtTime = new Date(session.updatedAt).getTime();
       if (now - updatedAtTime > maxAgeMs) {
-        const sessionDir = path.join(this.sessionsRoot, session.id);
+        // ⚠️ 分桶后目录必须**先解析**（不能由 id 拼 ✗）：`sessions/<id>` 那个位置现在是
+        // **模式桶**，直接拼会连整桶（该模式所有会话）一起删掉 ✗✗
+        const sessionDir = this.getSessionDir(session.id);
         await fs.rm(sessionDir, { recursive: true, force: true });
         logger.info('Cleaned up expired session', { sessionId: session.id });
         deletedCount++;
@@ -375,7 +490,7 @@ export class SessionManager {
     // 1 小时宽限期：避免误删"正在物化"的目录 ✓
     const EMPTY_DIR_GRACE_MS = 60 * 60 * 1000;
     for (const session of sessions) {
-      const sessionDir = path.join(this.sessionsRoot, session.id);
+      const sessionDir = this.getSessionDir(session.id); // 同上：必须先解析
       try {
         const st = await fs.stat(sessionDir);
         if (now - st.mtimeMs < EMPTY_DIR_GRACE_MS) continue;
@@ -389,4 +504,13 @@ export class SessionManager {
 
     return deletedCount;
   }
+}
+
+/**
+ * 便捷解析：给**不持有 SessionManager 实例**的调用方用（如旁路编排按 id 写 cluster
+ * 摘要 / 读 conversation_full）。分桶后目录不能再由 id 直接拼 ✗ ——
+ * 一律走这里，免得又散出几处 `path.join(homedir, '.agent', 'sessions', id)`。
+ */
+export function resolveSessionDir(sessionId: string, sessionsRoot?: string): string {
+  return new SessionManager(process.cwd(), sessionsRoot).getSessionDir(sessionId);
 }

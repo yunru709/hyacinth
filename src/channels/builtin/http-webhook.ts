@@ -429,9 +429,9 @@ export class HttpWebhookChannel implements ChannelHandler {
       const { id } = req.params as { id: string };
       try {
         const fs = await import('node:fs/promises');
-        const path = await import('node:path');
-        const os = await import('node:os');
-        const sessionDir = path.join(os.homedir(), '.agent', 'sessions', id);
+        // 会话目录走 SessionManager 解析 —— 分桶（sessions/<模式>/<id>）之后
+        // 不能再由 id 直接拼路径 ✗（拼错 = 删不掉，或删到什么都没有的地方）
+        const sessionDir = this.sessionManager.getSessionDir(id);
         await fs.rm(sessionDir, { recursive: true, force: true });
         return reply.send({ ok: true });
       } catch {

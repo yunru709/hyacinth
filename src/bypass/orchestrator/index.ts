@@ -39,6 +39,8 @@ import type { ToolDefinition } from '../../types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+// 会话目录解析：分桶（sessions/<模式>/<id>）之后不能再由 id 直接拼路径 ✗
+import { resolveSessionDir } from '../../memory/session.js';
 
 // ── 调试日志 ───────────────────────────────────────────────────
 
@@ -797,7 +799,7 @@ export class ContextOrchestrator extends BypassAgentBase {
 
   /** 写 session 目录下的文件（自动拼接 ~/.agent/sessions/{sessionId}/{relPath}） */
   private _writeFile(sessionId: string, relPath: string, content: string): void {
-    const filePath = path.join(os.homedir(), '.agent', 'sessions', sessionId, relPath);
+    const filePath = path.join(resolveSessionDir(sessionId), relPath);
     try {
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -836,7 +838,7 @@ export class ContextOrchestrator extends BypassAgentBase {
     line_start: number; line_end: number;
   }>> {
     if (!sessionId) return [];
-    const filePath = path.join(os.homedir(), '.agent', 'sessions', sessionId, 'cluster-index.json');
+    const filePath = path.join(resolveSessionDir(sessionId), 'cluster-index.json');
     try {
       const raw = await fs.promises.readFile(filePath, 'utf-8');
       return JSON.parse(raw) as Array<{
@@ -878,7 +880,7 @@ export class ContextOrchestrator extends BypassAgentBase {
     try {
       if (!sessionId || !ContextOrchestrator.SESSION_ID_RE.test(sessionId)) return results;
       const sc = this.sessionCtx(sessionId);
-      const fullPath = path.join(os.homedir(), '.agent', 'sessions', sessionId, 'conversation_full.jsonl');
+      const fullPath = path.join(resolveSessionDir(sessionId), 'conversation_full.jsonl');
       if (!fs.existsSync(fullPath)) return results;
       const lines = fs.readFileSync(fullPath, 'utf-8').split('\n').filter(l => l.trim());
       if (lines.length === 0) return results;

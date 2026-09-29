@@ -85,6 +85,19 @@ export async function boot(options: BootOptions): Promise<BootResult> {
 
   // ── Session ──────────────────────────────────────────────────────
   const sessionManager = options.sessionManager ?? new SessionManager(cwd);
+  // 会话布局迁移：旧扁平 `sessions/<id>/` → 分桶 `sessions/<模式>/<id>/`。
+  // 幂等、可重入；**失败不阻塞启动**（解析器两种布局都认 ⇒ 迁移没做完也能正常跑 ✓）
+  try {
+    const migrated = await sessionManager.migrateLegacyLayout();
+    if (migrated.moved.length > 0 || migrated.skipped.length > 0) {
+      logger.info('sessions migrated to mode buckets', {
+        moved: migrated.moved.length,
+        skipped: migrated.skipped.length,
+      });
+    }
+  } catch (err) {
+    logger.warn('session layout migration failed (continuing)', { error: (err as Error).message });
+  }
   let sessionDir: string;
   let currentSessionId: string;
   let sessionType: SessionType = 'normal';

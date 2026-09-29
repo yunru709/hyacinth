@@ -139,7 +139,10 @@ describe('boot() 恢复策略', () => {
     });
 
     expect(result.currentSessionId).toBe(created.id);
-    expect(existsSync(path.join(sessionsRoot, created.id, 'meta.json'))).toBe(true);
+    // 分桶布局：目录 = sessions/<模式名>/<id> ⇒ 用解析器取，别再手拼 ✗
+    const dir = sm.getSessionDir(created.id);
+    expect(dir.startsWith(sessionsRoot)).toBe(true);
+    expect(existsSync(path.join(dir, 'meta.json'))).toBe(true);
   });
 
   it('不带 lazySession ⇒ 显式 id 立即建档（默认语义零变更 ✓）', async () => {
@@ -149,6 +152,8 @@ describe('boot() 恢复策略', () => {
     const result = await boot({ cwd, sessionId: id, shouldContinue: false, channel: 'webui', sessionManager: sm });
 
     expect(result.currentSessionId).toBe(id);
-    expect(existsSync(path.join(sessionsRoot, id))).toBe(true);
+    const dir = sm.getSessionDir(id);
+    expect(dir.startsWith(sessionsRoot)).toBe(true);
+    expect(existsSync(dir)).toBe(true);
   });
 });
