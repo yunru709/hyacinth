@@ -19,7 +19,7 @@ export interface FullConfig {
     /** 自动选择模型（等价于 routeMode='auto'） */
     autoModel: boolean;
     /** 默认生成模式 */
-    defaultMode: 'balanced' | 'creative' | 'precise';
+    defaultMode: 'balanced' | 'creative';
     /** 温度 0.0~2.0 */
     temperature: number;
     /** Top-P 0.0~1.0 */
@@ -344,8 +344,11 @@ export interface FullConfig {
 
   /** 启动行为 */
   startup?: {
-    /** 启动时默认进入的模式。'normal' = 普通模式（默认），'companion' = 陪伴模式 */
-    defaultMode: 'normal' | 'companion';
+    /**
+     * 启动时默认进入的模式 = **模式名**（任意已注册模式，如 normal / companion / coding）。
+     * 缺省 'normal'。**不再限定闭集** —— 未来模式要能当默认模式。
+     */
+    defaultMode: string;
   };
 
   /**

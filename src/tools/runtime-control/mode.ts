@@ -32,6 +32,8 @@ export function createSwitchModeTool(agentLoop: AgentLoop): Tool {
     name: 'switch_mode',
     description:
       '切换上下文模式（通用入口）：列出可用模式 / 进入指定模式 / 退出到默认模式。' +
+      '注意 enter 切的是**上下文模式本身**；想要该模式**自己的会话**（隔离上下文、重启后仍在），' +
+      '用 new_session { type: "模式名" }。' +
       '触发词：切换模式、换模式、进入X模式、退出模式、现在是什么模式、有哪些模式。',
     inputSchema: {
       type: 'object',

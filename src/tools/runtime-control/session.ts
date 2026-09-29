@@ -167,7 +167,8 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
   return {
     name: 'new_session',
     description:
-      '创建新会话并立即切换。当前对话上下文将被清空。可选 channel 参数生成渠道前缀的会话 ID（如 tui / feishu / webui）。',
+      '创建新会话并立即切换。当前对话上下文将被清空。可选 channel 参数生成渠道前缀的会话 ID（如 tui / feishu / webui）。' +
+      '可选 type 参数 = **模式名**（会话类型即模式，两者是同一个东西）—— 想要某个模式"自己的会话"就用它。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -177,8 +178,8 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
         },
         type: {
           type: 'string',
-          enum: ['normal'],
-          description: 'Session type. Default: "normal".',
+          description: '会话类型 = 模式名（任意已注册模式，见 switch_mode list）。缺省 "normal"。'
+            + '新模式自己的会话就是这么起的：类型即模式，会话即该模式的隔离区。',
         },
       },
     },
@@ -186,7 +187,10 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
       try {
         const { SessionManager } = await import('../../memory/session.js');
         const sm = new SessionManager(cwd);
-        const sessionType = 'normal';
+        // 会话类型 = 模式（真源）。原先这里**写死 'normal'**（schema 也只允许 normal）
+        // ⇒ 新模式永远起不了自己的会话，只能靠各自模式自己换目录绕过去 ✗
+        const sessionType =
+          typeof args.type === 'string' && args.type.trim() ? args.type.trim() : 'normal';
         let channel = (args.channel as string | undefined);
 
         const path = await import('node:path');

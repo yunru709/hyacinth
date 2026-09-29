@@ -39,8 +39,8 @@ export interface BootOptions {
 export interface BootResult {
   configManager: ConfigManager;
   config: AgentConfig;
-  /** startup.defaultMode 决定的初始模式 */
-  defaultMode: 'normal' | 'companion';
+  /** startup.defaultMode 决定的初始模式（**模式名**，任意已注册模式） */
+  defaultMode: SessionType;
   sessionManager: SessionManager;
   sessionDir: string;
   currentSessionId: string;
@@ -58,8 +58,15 @@ export async function boot(options: BootOptions): Promise<BootResult> {
   const configManager = new ConfigManager(cwd);
   const config = await configManager.load();
   const startupMode = (config as unknown as Record<string, unknown>).startup as Record<string, unknown> | undefined;
-  const defaultMode: 'normal' | 'companion' =
-    startupMode?.defaultMode === 'companion' ? 'companion' : 'normal';
+  // 默认模式 = 配置里的**任意模式名**（不再强制闭集"只认 normal/companion" ✗）——
+  // 未来模式（coding / 助手人格…）要能当默认模式，这一处必须先开。
+  // 空/非字符串 → 普通模式；若名字没注册，boot 的 syncRouter 会静默保持当前 Router
+  // （会话仍在，只是没切过去 —— 可接受，但别指望"写错名字会报错"）。
+  const configuredDefault = startupMode?.defaultMode;
+  const defaultMode: SessionType =
+    typeof configuredDefault === 'string' && configuredDefault.trim()
+      ? configuredDefault.trim()
+      : 'normal';
 
   // ── 渠道前缀登记（注册式：核心不预置任何渠道前缀）────────────────
   // 必须在会话恢复/物化**之前**，因为有两条下游依赖：
