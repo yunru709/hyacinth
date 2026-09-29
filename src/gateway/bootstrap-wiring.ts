@@ -18,8 +18,8 @@ import type { MachineRegistry } from '../machine/index.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { Provider } from '../provider/interface.js';
 
-/** persona 引导：全局文件 + 内置 Prompt 目录同步，返回生效的 personaDir */
-export async function bootstrapPersona(personaDir: string | undefined): Promise<string> {
+/** persona 引导：全局文件 + 内置 Prompt 目录同步 + 声明式模式加载，返回生效的 personaDir */
+export async function bootstrapPersona(personaDir: string | undefined, cwd: string = process.cwd()): Promise<string> {
   const personaSetup = await ensureGlobalPersonaFiles();
   const effectivePersonaDir = personaDir ?? personaSetup.personaDir;
 
@@ -31,9 +31,16 @@ export async function bootstrapPersona(personaDir: string | undefined): Promise<
   await ensureGlobalPromptDir('agents');
   await ensureGlobalPromptDir('flows');
   await ensureGlobalPromptDir('skills');
-  await ensureGlobalPromptDir('precise');
   await ensureGlobalPromptDir('environment');
   // root 级文件 summary.md 由 loadPrompt 递归搜索找到，暂不单独同步
+
+  // ── 声明式模式 profile（.agent/modes/*.json：全局 + 项目同名覆盖）──
+  // 顺序要紧：**先注册框架自带钩子**，再加载 profile —— profile 按名引用钩子，
+  // 取不到时 DeclarativeRouter 会静默走"无钩子"分支（行为悄悄缺失）。
+  const { registerBuiltinModeHooks } = await import('../context/builtin-mode-hooks.js');
+  registerBuiltinModeHooks();
+  const { loadModeProfiles } = await import('../context/mode-profile-loader.js');
+  loadModeProfiles(cwd);
 
   return effectivePersonaDir;
 }

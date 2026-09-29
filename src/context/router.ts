@@ -318,8 +318,13 @@ export function timestampInjectProbability(gapMs: number): number {
   return TIMESTAMP_PROB_FLOOR + t * (1 - TIMESTAMP_PROB_FLOOR);
 }
 
-/** 解析 ctx.timestamp（'YYYY-MM-DD HH:mm'，本地时区）为 epoch ms；失败返回 null */
-function parseLocalTimestamp(ts: string): number | null {
+/**
+ * 解析 ctx.timestamp（'YYYY-MM-DD HH:mm'，本地时区）为 epoch ms；失败返回 null。
+ *
+ * 导出给声明式模式的同名判定复用（builtin-mode-hooks 的 timestamp 钩子）——
+ * 两处各自解析迟早会悄悄分叉。**行为零改动**，只是加了个 export。
+ */
+export function parseLocalTimestamp(ts: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts ?? '');
   if (!m) return null;
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
