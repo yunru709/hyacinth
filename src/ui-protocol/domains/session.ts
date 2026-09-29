@@ -4,7 +4,7 @@
 // 覆盖 UI 对会话管理的全部操作：
 //   session.list       列出所有会话（元数据数组）
 //   session.resume     恢复指定会话（不指定则恢复最近）
-//   session.create     创建新会话（type: normal|precise|companion, channel?）
+//   session.create     创建新会话（type: normal|companion, channel?）
 //   session.delete     删除会话（及其全部数据）
 //   session.getLatest  获取最近会话
 //
@@ -124,7 +124,13 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
   return {
     // ── session.list ───────────────────────────────────────
     async list(): Promise<{ sessions: SessionMeta[] }> {
-      const sessions = await sessionManager.list();
+      // **只列当前模式的会话**（会话与模式一一归属 ⇒ 列出别的模式的会话，只会诱使人
+      // 去切、然后被拒 ✗）。TUI 的 `/命令` 与 WebUI 都走这里 ⇒ 一处过滤，两处受益 ✓
+      //
+      // 优先走管理器的 listByMode（过滤的唯一入口）；测试里的轻量假件没有它 ⇒ 退回全量 ✗
+      const mode = (options.loop as { activeRouter?: { name?: string } } | undefined)?.activeRouter?.name ?? 'normal';
+      const sm = sessionManager as unknown as { listByMode?(m: string): Promise<BackendSession[]> };
+      const sessions = sm.listByMode ? await sm.listByMode(mode) : await sessionManager.list();
       return { sessions: sessions.map(toMeta) };
     },
 

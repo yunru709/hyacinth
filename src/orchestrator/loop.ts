@@ -769,6 +769,20 @@ export class AgentLoop {
    * 实测：微信渠道因此被反复切走、与 TUI 串台）。
    */
   async switchSession(newSessionDir: string): Promise<void> {
+    // ── 跨模式切换守卫（2026-09-30）────────────────────────────────
+    // 会话与模式一一归属（分桶即约束）⇒ **只能切到本模式的会话**。
+    // 判定不了（说不清）就放行 —— 拦错比放行错更糟：把一次正当切换拦掉，
+    // 人只会以为"会话丢了" ✗；能确定不同则**明确拒绝**（不静默，说清两边是什么）✗
+    const { sessionModeOfDir } = await import('../memory/session.js');
+    const targetMode = await sessionModeOfDir(newSessionDir);
+    const currentMode = this._sessionType ?? 'normal';
+    if (targetMode && targetMode !== currentMode) {
+      throw new Error(
+        `跨模式切换被拒绝：该会话属于「${targetMode}」模式，当前是「${currentMode}」模式。`
+        + `各模式的会话互不切换 —— 要进它，先用 switch_mode 切到「${targetMode}」模式，`
+        + `或用 new_session { type: "${targetMode}" } 起它自己的会话。`,
+      );
+    }
     this.pendingSessionDir = newSessionDir;
   }
 

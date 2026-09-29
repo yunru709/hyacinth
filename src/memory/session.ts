@@ -322,6 +322,19 @@ export class SessionManager {
   }
 
   /**
+   * 只列**某个模式**的会话 —— 列表过滤的唯一入口
+   * （`/命令`、WebUI 列表、agent 工具都该走它，别各自 filter ✗）。
+   *
+   * 为什么必须过滤：会话与模式一一归属（分桶即约束）⇒ 把别的模式的会话列出来，
+   * 只会诱使人去切，然后被拒 —— 白折腾一轮 ✓
+   */
+  async listByMode(mode: string): Promise<Session[]> {
+    const want = (mode ?? '').trim() || 'normal';
+    const all = await this.list();
+    return all.filter((s) => (s.type ?? 'normal') === want);
+  }
+
+  /**
    * 获取最近的 session
    */
   async getLatest(): Promise<Session | null> {
@@ -513,4 +526,22 @@ export class SessionManager {
  */
 export function resolveSessionDir(sessionId: string, sessionsRoot?: string): string {
   return new SessionManager(process.cwd(), sessionsRoot).getSessionDir(sessionId);
+}
+
+/**
+ * 会话目录所属的模式（`meta.type` 优先，其次从**桶名**反推）。判定不了 → null。
+ *
+ * `null` 的语义是"说不清" ⇒ 调用方**必须放行**：拦错比放行错更糟
+ * （把一次正当切换拦掉，人只会以为"会话丢了" ✗）。所以它只用于
+ * **能确定不同才拒绝**的准入判断（见 loop.switchSession 的跨模式守卫）。
+ */
+export async function sessionModeOfDir(sessionDir: string): Promise<string | null> {
+  try {
+    const meta = JSON.parse(await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8')) as { type?: string };
+    if (typeof meta.type === 'string' && meta.type.trim()) return meta.type.trim();
+  } catch { /* meta 缺失/损坏 → 退到桶名推断 */ }
+  const root = path.resolve(getSessionsRoot());
+  const parent = path.dirname(path.resolve(sessionDir));
+  if (parent !== root && path.dirname(parent) === root) return path.basename(parent);
+  return null;
 }

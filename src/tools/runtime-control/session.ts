@@ -126,10 +126,13 @@ export function createListSessionsTool(agentLoop: AgentLoop, cwd: string): Tool 
         const path = await import('node:path');
         const { SessionManager } = await import('../../memory/session.js');
         const sm = new SessionManager(cwd);
-        const sessions = await sm.list();
+        // 只列**当前模式**的会话（会话与模式一一归属 ⇒ 列别的模式的会话
+        // 只会诱使人去切、然后被拒 —— 白折腾一轮 ✗）
+        const currentMode = agentLoop.activeRouter?.name ?? 'normal';
+        const sessions = await sm.listByMode(currentMode);
 
         if (sessions.length === 0) {
-          return 'No sessions found. Use new_session to create one.';
+          return `No sessions found in mode "${currentMode}". Use new_session to create one.`;
         }
 
         const currentSessionId = path.basename((agentLoop as any).sessionDir as string);
@@ -267,8 +270,10 @@ export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool
         try {
           await fsPromises.access(sessionDir);
         } catch {
-          const sessions = await sm.list();
-          const ids = sessions.map((s) => s.id).join(', ');
+          // 只报**本模式**的可用会话（列别的模式的没意义：切过去也会被拒 ✗）
+          const ids = (await sm.listByMode(agentLoop.activeRouter?.name ?? 'normal'))
+            .map((s) => s.id)
+            .join(', ');
           return `Error: Session "${sessionId}" not found. Available sessions: ${ids || '(none)'}`;
         }
 
