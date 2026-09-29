@@ -20,7 +20,7 @@
 //   Injection      — 管动态注入（旁路 Agent 运行时插入内容）
 //   Compressor     — 管预算保护（超 token 时如何裁剪历史）
 //   ContextSource  — 管数据供应（运行时数据从哪来）
-//   activeConditions — 管条件开关（如 precise_mode 触发条件注入）
+//   activeConditions — 管条件开关（如 zone4_enabled 触发条件注入）
 //   filterHistory  — 管消息过滤（本文件，历史中哪些消息不显示）
 // ============================================================
 
@@ -39,8 +39,7 @@ import type { ComposeOptions, ContextComposer, ContextSource } from './interface
 import { createHash } from 'node:crypto';
 import type { GitManager } from '../evolution/git-manager.js';
 import { getManifestLoader } from '../hot-reload/manifest-watcher.js';
-import type { ContextProfile } from './profiles.js';
-import { NORMAL_PROFILE, getActiveRouter } from './profiles.js';
+import type { IContextRouter } from './router.js';
 import { resolveSection } from './section-resolver.js';
 import type { ResolverContext } from './section-resolver.js';
 import { getCacheStrategy } from './cache-strategy.js';
@@ -70,6 +69,27 @@ function shouldSkipHistoryMessage(msg: import('../types.js').Message): boolean {
   return false;
 }
 
+/**
+ * 给带时间锚点的历史消息补一个前置文本块，并**剥掉 `timestamp` 字段**。
+ *
+ * 为什么不干脆在落盘时就把时间写进正文：正文一被改写，历史回放、消息去重
+ * （isSameTextMessage）、引用匹配全都会看见那个前缀 ⇒ 时间只做"并排的字段"，
+ * 到**组装这一刻**才转成文本给模型看（用户裁定 2026-09-30）。
+ *
+ * 形状：`[sent at 2026-09-30 00:47]` 作为**同一条消息内**的前置文本块——
+ * 不新起一条消息，免得破坏 user/assistant 的交替结构。
+ * 无锚点的消息原样返回（引用不变，不做无谓拷贝）。
+ */
+export function withTimeAnchor(msg: Message): Message {
+  if (!msg.timestamp) return msg;
+  const { timestamp, ...rest } = msg;
+  const blocks = Array.isArray(rest.content) ? rest.content : [rest.content];
+  return {
+    ...rest,
+    content: [{ type: 'text' as const, text: `[sent at ${timestamp}]` }, ...blocks],
+  };
+}
+
 export interface LayeredComposeOptions {
   sessionDir: string;
   /** 当前 active Provider 的类型 — 决定缓存策略（断点 vs 自动前缀） */
@@ -89,8 +109,8 @@ export interface LayeredComposeOptions {
   zone3Hashes?: Set<string>;
   personaDir?: string;
   gitManager?: GitManager;
-  /** 当前模式 profile — 控制 section 过滤、persona 来源、memory 来源 */
-  profile?: ContextProfile;
+  /** 当前模式 Router（模式真源 = session type；由调用方传入本 loop 的 activeRouter） */
+  router?: IContextRouter;
   /** 旁路Agent 注入列表 */
   bypassInjections?: import('../bypass/types.js').Injection[];
   /** 历史消息变换（用于意图簇过滤等场景）。返回筛选后的消息，null/undefined = 不过滤。 */
@@ -108,7 +128,7 @@ export class LayeredContextComposer implements ContextComposer {
   private promptBuilder: SystemPromptBuilder;
   private tokenCounter: TokenCounter;
   private sources = new Map<string, ContextSource>();
-  /** 当前激活的条件（如 precise_mode）— 由策略设置 */
+  /** 当前激活的条件（如 zone4_enabled）— 由策略/插件设置 */
   activeConditions = new Set<string>();
   private persistentSections: SystemPromptSection[] = [];
   private cwd: string;
@@ -239,8 +259,7 @@ export class LayeredContextComposer implements ContextComposer {
       tokenCounter: this.tokenCounter,
       sessionDir: options.sessionDir,
       activeConditions: this.activeConditions,
-      profile: options.profile ?? NORMAL_PROFILE,
-      router: getActiveRouter(),
+      router: options.router,
       bypassInjections: options.bypassInjections,
     };
   }
@@ -364,7 +383,8 @@ export class LayeredContextComposer implements ContextComposer {
           : options.history;
         for (const msg of historyMsgs) {
           if (shouldSkipHistoryMessage(msg)) continue;
-          messages.push(msg);
+          // 时间锚点（若有）只在这一刻变成文本块 —— 存储里它是字段，请求体里没有字段
+          messages.push(withTimeAnchor(msg));
         }
         continue;
       }
@@ -375,7 +395,7 @@ export class LayeredContextComposer implements ContextComposer {
       // Router 可按"本轮该 section 的实际来源"覆写 role（如陪伴模式世界旁白 → assistant 内心独白）
       // 旁路Agent 注入也可指定 role
       const bypassRole = ctx.bypassInjections?.find(ij => ij.section === sec.name)?.role;
-      const roleOverride = bypassRole ?? ctx.router.roleForSection?.(sec.name);
+      const roleOverride = bypassRole ?? ctx.router?.roleForSection?.(sec.name);
       const sectionRole = (roleOverride ?? sec.role ?? zoneRole) as 'system' | 'user' | 'assistant';
       const zr: string = zoneRole; // widen to avoid TS narrowing
 

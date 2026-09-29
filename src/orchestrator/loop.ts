@@ -15,7 +15,7 @@ import type { EventStore } from '../memory/events.js';
 import { appendEvent } from '../memory/events.js';
 import type { StatsManager } from '../memory/stats.js';
 import type { SummaryStore } from '../memory/summary.js';
-import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent } from '../types.js';
+import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent, SessionType } from '../types.js';
 import { LLMOrchestrator } from './planner.js';
 import type { Plan } from './plan-store.js';
 import type { SkillRegistry } from '../skills/registry.js';
@@ -27,13 +27,11 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { UI_EVENT, type CompanionSayEvent } from '../events.js';
-import { nextSayId } from '../tools/companion-say.js';
-import { getSayHistoryStore } from '../companion/say-history.js';
+import { UI_EVENT } from '../events.js';
 import { ImageStore, buildUserContentWithMedia, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
 import { createLoopHookBus, type LoopHookBus, type LoopHooks } from './loop-hooks.js';
 import { type ToolExecContext } from './loop-tools.js';
-import { removeLastRoundFromJsonl, cleanCompanionJsonl, removeTriggerFromJsonl } from './loop-session.js';
+import { removeLastRoundFromJsonl, eraseLastToolRoundJsonl, removeTaskTriggerJsonl } from './loop-session.js';
 import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
 import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
@@ -60,7 +58,7 @@ import { LoopGuard, isMutating, ToolGuard } from '../repair/loop-guard.js';
 import { deriveDangerousTools } from '../tools/side-effect.js';
 import { ToolResultBuffer } from '../tools/result-buffer.js';
 import { sanitizeToolResult } from '../tools/injection-filter.js';
-import { getActiveRouter, getRouterForChannel, channelKeyOf, type ContextProfile } from '../context/profiles.js';
+import { channelKeyOf, getRouterByName } from '../context/profiles.js';
 import type { IContextRouter } from '../context/router.js';
 import { NormalRouter } from '../context/router.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
@@ -358,10 +356,10 @@ export class AgentLoop {
   /** 本轮用户消息的旁路注入缓存（preTurn 首轮产出，后续迭代复用） */
   private _bypassInjections?: import('../bypass/types.js').Injection[];
   /**
-   * 陪伴模式台词 TTS 钩子（factory 在 companion.tts.enabled 时装配）。
+   * 模式语音钩子（ModeVoiceHook；factory 在 TTS 能力启用时装配，当前由陪伴模式消费）。
    * postTurn 后台调用，实现方自行排队与降级，绝不阻塞回合。
    */
-  companionVoice?: {
+  modeVoice?: {
     onTurnEnd(
       text: string,
       character: string,
@@ -370,12 +368,9 @@ export class AgentLoop {
     ): void;
   };
 
-  /** 本轮通过 companion_say 的表达（turn-scoped；postTurn 时旁路用它维护世界） */
-  companionExpressions: Array<{ text: string; as: 'speak' | 'think'; tone?: string }> = [];
-
-  /** companion_say 工具执行时捕获表达 */
+  /** companion_say 等协议工具执行时捕获表达（转交当前 Router 的输出协议） */
   recordCompanionExpression(e: { text: string; as: 'speak' | 'think'; tone?: string }): void {
-    this.companionExpressions.push(e);
+    this.activeRouter.outputProtocol?.recordExpression(e);
   }
 
   /** 工具层向 UI 推送协议事件（companion.say / companion.voice 等） */
@@ -408,8 +403,20 @@ export class AgentLoop {
   pendingFallbackInfo: string | null = null;
   /** 降级链恢复主 Provider 通知（onRecover 回调写入，runTurn 一次性消费后清空） */
   pendingRecoverInfo: string | null = null;
-  /** 当前激活的上下文路由器，初始化为 NormalRouter，首次 syncRouter() 时同步到全局状态 */
+  /** 当前激活的上下文路由器，初始化为 NormalRouter，首次 syncRouter() 时按 session type 同步 */
   activeRouter: IContextRouter = new NormalRouter();
+  /**
+   * 当前会话类型 = 模式真源（boot 从 meta.json type 读入；切 Router 后跟随 Router 名）。
+   * syncRouter() 按它解析 Router；未知类型（无对应 Router 注册）保持当前 Router 不动。
+   */
+  private _sessionType: SessionType = 'normal';
+  get sessionType(): SessionType {
+    return this._sessionType;
+  }
+  /** 装配侧注入启动模式（boot 的 sessionType：恢复自 meta.json，新建为 startup.defaultMode） */
+  setSessionType(type: SessionType): void {
+    this._sessionType = type;
+  }
   /** Whether any tools were executed inline during the current stream */
   private inlineToolExecuted = false;
   /** Stores results from inline tool execution, keyed by tool_use_id */
@@ -785,6 +792,15 @@ export class AgentLoop {
     this.pendingCompression = null;
     this.clusterService.setDeepCompressState({ original: null, restore: false });
     this.lastContextTokens = 0;
+    // 会话类型跟随目标 session 的 meta.json（模式真源 = session type）。
+    // meta 缺失（未物化的懒登记目录）按 normal 处理 —— 物化时写入的也是 normal；
+    // 陪伴等模式目录一定有 meta（CompanionSessionManager.getOrCreate 落盘）。
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(next, 'meta.json'), 'utf-8')) as { type?: string };
+      this._sessionType = (meta.type as SessionType) ?? 'normal';
+    } catch {
+      this._sessionType = 'normal';
+    }
     // 重载摘要
     try {
       const persisted = await this.summaryStore.load(this.sessionDir);
@@ -826,14 +842,14 @@ export class AgentLoop {
     return removeLastRoundFromJsonl(this.sessionDir);
   }
 
-  /** 陪伴模式工具调用清理（B2 拆出至 loop-session.ts） */
-  private async cleanCompanionJsonl(): Promise<void> {
-    return cleanCompanionJsonl(this.sessionDir);
+  /** 模式回合清理：工具调用轮整轮抹除（Router.onPostTurn 经此调用；B2 拆出至 loop-session.ts） */
+  async eraseLastToolRoundJsonl(): Promise<void> {
+    return eraseLastToolRoundJsonl(this.sessionDir);
   }
 
-  /** 陪伴模式定时任务：移除触发词与工具链，保留模型自然回复（B2 拆出至 loop-session.ts） */
-  async removeTriggerFromJsonl(): Promise<void> {
-    return removeTriggerFromJsonl(this.sessionDir);
+  /** 模式回合清理：定时任务触发词+工具链移除，保留模型自然回复（B2 拆出至 loop-session.ts） */
+  async removeTaskTriggerJsonl(): Promise<void> {
+    return removeTaskTriggerJsonl(this.sessionDir);
   }
 
 
@@ -849,21 +865,24 @@ export class AgentLoop {
   }
 
   /**
-   * 同步**本渠道**的 Router 到当前 loop。
-   * 每轮 runTurn 开头调用。模式按渠道隔离：只跟随本渠道（this.channelKey）的 Router，
-   * 某个渠道进入/退出陪伴不会波及其它渠道的 session 与模式。
+   * 同步 Router 到当前会话类型（模式真源 = session type，见 _sessionType）。
+   * 每轮 runTurn 开头调用。传 target 时显式切到指定模式（切模式 = 切对应类型的 session，
+   * 由目标 Router 的 onActivate 完成）；不传则跟随当前 session type（恢复/新建后的首次对齐）。
    */
-  async syncRouter(): Promise<void> {
-    const targetRouter = getRouterForChannel(this.channelKey);
-    if (this.activeRouter?.name === targetRouter.name) return;
+  async syncRouter(target?: string): Promise<void> {
+    const name = target ?? this._sessionType ?? 'normal';
+    const targetRouter = getRouterByName(name);
+    // 未注册类型（如插件自定义 session type）→ 保持当前 Router 不动
+    if (!targetRouter || this.activeRouter?.name === targetRouter.name) return;
 
     // 切出旧 Router
     if (this.activeRouter) {
       await this.activeRouter.onDeactivate?.(this);
     }
 
-    // 切入新 Router
+    // 切入新 Router（其 onActivate 负责切到对应类型的 session）
     this.activeRouter = targetRouter;
+    this._sessionType = targetRouter.name as SessionType;
     await this.activeRouter.onActivate?.(this);
   }
 
@@ -1181,9 +1200,9 @@ export class AgentLoop {
 
     this.interrupted = false;
     this.abortController = new AbortController();
-    // 每次用户输入重置防重复检测窗口与本轮表达缓冲
+    // 每次用户输入重置防重复检测窗口与模式表达缓冲
     this.loopGuard.reset();
-    this.companionExpressions = [];
+    this.activeRouter.outputProtocol?.resetTurn();
     // 钩子事件用的回合计数（在 try 外声明，catch 里 onTurnError 也能读到）
     let turnCount = 0;
 
@@ -1277,6 +1296,13 @@ export class AgentLoop {
       };
       // 纯旁白轮：旁路产出仅作瞬态触发，不落盘（不污染档案、不被误当用户消息）
       if (!this.activeRouter.ephemeralInput) {
+        // 时间锚点：按概率把「这句是什么时候说的」并排写进这条消息（用户裁定 2026-09-30）。
+        // 只问**入站消息** —— 工具续跑轮次即便命中也不落盘，那些时间只该留在本轮 Zone 5。
+        const stamp = this.activeRouter.stampInboundMessage?.({
+          sessionDir: this.sessionDir,
+          timestamp: formatTimestamp(),
+        });
+        if (stamp) userMessage.timestamp = stamp;
         await this.conversationStore.append(this.sessionDir, userMessage);
       }
 
@@ -1480,47 +1506,14 @@ export class AgentLoop {
         this.outputHandler?.onStatus?.('bypass-start', 'info');
         await this.bypassManager.postTurn(postCtx);
         this.outputHandler?.onStatus?.('bypass-end', 'info');
-        // ── 陪伴表达契约：companion_say 说出的话才是"表达"；
-        // 普通 text 是内心独白，不驱动世界、不再自动 TTS ──
-        if (this.companionExpressions.length > 0) {
-          const spoken = this.companionExpressions.filter((e) => e.as === 'speak');
-          postAssistantOutput = spoken.map((e) => e.text).join('\n');
-        }
-        // ── 表达兜底：模型未按契约调用 companion_say 时（部分模型对
-        // 工具化表达依从性弱，尤其在历史全是纯文本角色扮演时），
-        // 把它的普通文本当作台词呈现，保证陪伴 UI 不会沉默。
-        // 合规模型（已调用工具且含 speak 表达）不受影响。 ──
-        if (
-          this.activeRouter?.name === 'companion' &&
-          postAssistantOutput &&
-          !this.companionExpressions.some((e) => e.as === 'speak')
-        ) {
-          // 兜底与工具路径一致：带 sayId（前端时序守卫依赖），事件名走协议层常量
-          const sayId = nextSayId();
-          this.emitUiEvent(UI_EVENT.COMPANION_SAY, {
-            mode: 'speak',
-            text: postAssistantOutput,
-            tone: '',
-            at: new Date().toISOString(),
-            sayId,
-          } satisfies CompanionSayEvent);
-          // 兜底路径同样落盘台词历史（companion.sayHistory 数据源；与工具路径共用 sayId）
-          getSayHistoryStore().append({
-            sayId,
-            character: (this.activeRouter as { activeCompanionName?: string }).activeCompanionName || '',
-            mode: 'speak',
-            text: postAssistantOutput,
-            at: new Date().toISOString(),
-          });
-          this.companionVoice?.onTurnEnd(
-            postAssistantOutput,
-            (this.activeRouter as { activeCompanionName?: string }).activeCompanionName || '',
-            (type, payload) => this.outputHandler?.onEvent?.(type, payload),
-            // overrides（第 4 参）：sayId 贯穿事件，供前端时序守卫；
-            // cfg 由 factory 装配的包装层每回合现读，无需在此传入
-            { sayId },
-          );
-        }
+        // ── 输出协议（模式槽位）：表达兜底 / UI 事件 / TTS —— 实现全在协议内。
+        // 表达兜底：模型未按契约调用协议工具时，普通文本当台词呈现；
+        // 合规模型（已调用工具）不受影响。 ──
+        await this.activeRouter?.outputProtocol?.onTurnEnd({
+          assistantOutput: postAssistantOutput,
+          emitUiEvent: (type, payload) => this.emitUiEvent(type, payload),
+          voice: this.modeVoice ?? null,
+        });
         // 清除本轮的旁路注入缓存和意图，下一轮用户消息重新 preTurn
         this._bypassInjections = undefined;
         this._currentIntent = null;
@@ -1716,7 +1709,7 @@ export class AgentLoop {
       } as SessionState,
     });
     initState.ephemeralInput = this.activeRouter.ephemeralInput ?? null;
-    initState.companionMode = this.activeRouter.name === 'companion';
+    initState.modeName = this.activeRouter.name;
     this.stageServices.set('sessionDir', this.sessionDir);
     const st = await this.pipeline.runSlot('input', initState, this.makeStageCtx());
     const history = st.history;

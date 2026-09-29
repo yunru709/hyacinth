@@ -26,11 +26,12 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Message } from '../types.js';
 import type { SectionEntry } from './manifest-types.js';
 import type { ResolverContext } from './section-resolver.js';
-import { filterToolRounds } from './companion-filter.js';
+import { filterToolRounds, materializeExpressions } from './companion-filter.js';
 import { CompanionSessionManager } from '../memory/companion-session.js';
 import { parseNarration } from '../world-engine/agent.js';
 import type { WorldEngine } from '../world-engine/agent.js';
 import { companionUserId, mainUserId } from '../provider/user-id.js';
+import { CompanionOutputProtocol } from '../companion/output-protocol.js';
 
 // ── SourceOverride ──────────────────────────────────────────
 
@@ -49,6 +50,46 @@ export interface SourceOverride {
    * 返回 undefined → 跳过此 section（不注入任何内容）。
    */
   resolve?: (ctx: ResolverContext) => Promise<string | undefined>;
+}
+
+// ── 输出协议（模式槽位的通用类型）──────────────────────────
+
+/** 一次模式表达（如陪伴台词：说出口的话 / 心声 / 动作） */
+export interface ModeExpression {
+  text: string;
+  as: 'speak' | 'think';
+  tone?: string;
+}
+
+/** 模式语音钩子（如陪伴 TTS；由装配层注入 loop） */
+export interface ModeVoiceHook {
+  onTurnEnd(
+    text: string,
+    character: string,
+    emit: (type: string, payload: unknown) => void,
+    overrides?: unknown,
+  ): void;
+}
+
+/**
+ * 模式输出协议：模式的"表达契约"（如陪伴模式「说话必须走 companion_say」）。
+ * 工具执行时经 loop.recordCompanionExpression 转发 recordExpression；
+ * 每轮输入阶段 resetTurn；回合收尾（bypass postTurn 后）调用 onTurnEnd。
+ * 未声明 = 该模式无表达契约（普通文本即输出）。
+ */
+export interface ModeOutputProtocol {
+  /** 协议工具执行时记录表达 */
+  recordExpression(e: ModeExpression): void;
+  /** 每轮输入阶段重置表达缓冲 */
+  resetTurn(): void;
+  /** 本轮已记录的表达 */
+  getExpressions(): readonly ModeExpression[];
+  /** 回合收尾：表达兜底 / UI 事件 / TTS。实现自持状态。 */
+  onTurnEnd(ctx: {
+    assistantOutput: string;
+    emitUiEvent(type: string, payload: unknown): void;
+    voice: ModeVoiceHook | null;
+  }): Promise<void>;
 }
 
 // ── IContextRouter ──────────────────────────────────────────
@@ -97,6 +138,34 @@ export interface IContextRouter {
   // ── History ──
   /** 在组装 Zone 3 之前过滤/变换历史消息 */
   filterHistory(history: Message[]): Message[];
+
+  /**
+   * 历史读入时对原始消息的变换（在压缩器/摘要看到之前执行）。
+   * 用于把模式的表达格式还原为自然文本（如陪伴模式把表达块文本化，
+   * 避免台词因「工具输出」被摘要丢弃导致失忆）。未实现 = 原样。
+   */
+  materializeHistory?(raw: Message[]): Message[];
+
+  /**
+   * **入站消息的时间锚点** —— 决定这条消息要不要带 `Message.timestamp`。
+   *
+   * 调用时机：用户消息**落盘之前**（loop 写 conversation store 时）。
+   * 返回 'YYYY-MM-DD HH:mm' = 命中；返回 null / 未实现 = 不带锚点。
+   *
+   * 与 `beforeSection` 的 timestamp 槽共用同一套「距上次注入的间隔 → 概率」基准
+   * （1 分钟内 50%、5 分钟以上必中、中间线性），两者都在**实际注入时**推进基准
+   * ⇒ "时间感"的新鲜度按真实间隔维持，而不是按轮次。
+   *
+   * 为什么只在入站消息上落锚点：工具续跑轮次同样会因为间隔而命中，但那个时间是
+   * "此刻几点"，只该待在本轮 Zone 5；只有"人说了这句话"才值得作为历史锚点长期留存
+   * （否则历史里会散落一堆只反映工具耗时的伪锚点）。
+   *
+   * 未实现（如陪伴模式）= 永不落锚点 —— 陪伴模式本就不注入时间戳。
+   */
+  stampInboundMessage?(ctx: { sessionDir?: string; timestamp: string }): string | null;
+
+  /** 输出协议：模式的表达契约（见 ModeOutputProtocol）。未声明 = 普通文本即输出。 */
+  outputProtocol?: ModeOutputProtocol;
 
   // ── Per-section 钩子 ──
   /**
@@ -147,6 +216,22 @@ export class NormalRouter implements IContextRouter {
 
   filterHistory(history: Message[]): Message[] {
     return history;
+  }
+
+  /**
+   * 入站消息的时间锚点（契约见 IContextRouter.stampInboundMessage）。
+   *
+   * 与 beforeSection 的 timestamp 槽**公用同一份基准 Map** —— 谁先命中谁推进基准，
+   * 于是"距上次注入的间隔"始终反映真实的时间感，而不是两个调用点各记一份、各自失真。
+   */
+  stampInboundMessage(ctx: { sessionDir?: string; timestamp: string }): string | null {
+    const key = ctx.sessionDir ?? '__default__';
+    const now = parseLocalTimestamp(ctx.timestamp) ?? Date.now();
+    const last = this._lastTimestampInjectAt.get(key);
+    const gapMs = last === undefined ? Number.POSITIVE_INFINITY : Math.max(0, now - last);
+    if (Math.random() >= timestampInjectProbability(gapMs)) return null; // 未命中不推进基准
+    this._lastTimestampInjectAt.set(key, now);
+    return ctx.timestamp;
   }
 
   /**
@@ -325,6 +410,14 @@ export class CompanionRouter implements IContextRouter {
     return filterToolRounds(history);
   }
 
+  /** 历史物化：表达块文本化后再进压缩器（台词不因「工具输出」被摘要丢弃） */
+  materializeHistory(raw: Message[]): Message[] {
+    return materializeExpressions(raw);
+  }
+
+  /** 输出协议：companion_say 表达契约（兜底台词 / 台词历史 / TTS） */
+  readonly outputProtocol = new CompanionOutputProtocol(() => this.activeCompanionName);
+
   /**
    * 陪伴模式旁白路由：解析 [[...]] 旁白 → 交给旁路落实进世界 → 返回剥离后的对话。
    * 纯旁白（无对话）时返回一个轻量触发，让陪伴角色对更新后的场景做出反应。
@@ -437,10 +530,11 @@ export class CompanionRouter implements IContextRouter {
       const existing = bypassMgr.getAgent('world-engine') as WorldEngine | undefined;
       if (existing) {
         const createAgent = loop.pluginHost?.get('world-engine.createAgent') as
-          | ((name: string) => WorldEngine)
+          | ((name: string, opts?: { worldDir?: string }) => WorldEngine)
           | undefined;
         if (createAgent) {
-          bypassMgr.register(createAgent(name));
+          // 世界数据落本陪伴 session 目录的 world/ 子目录（与角色目录同根）
+          bypassMgr.register(createAgent(name, { worldDir: companionDir }));
         }
       }
       // 激活陪伴模式的旁路Agent
@@ -458,6 +552,29 @@ export class CompanionRouter implements IContextRouter {
     this.worldEngineAgent = null;
 
     const channelKey = resolveChannelKey(loop);
+
+    // 模式真源 = session type：若当前 session 已是普通类型（用户在陪伴期间
+    // 显式 new_session/resume 走了），不再回拉旧 normal session —— 尊重用户的切换。
+    const curType = (() => {
+      try {
+        const meta = JSON.parse(readFileSync(path.join(loop.sessionDir, 'meta.json'), 'utf-8'));
+        return typeof meta?.type === 'string' ? meta.type : undefined;
+      } catch { return undefined; }
+    })();
+
+    if (curType !== 'companion') {
+      (loop as any)._normalSessionDir = undefined;
+      try {
+        const map = readActiveSessions();
+        if (map[channelKey]) {
+          delete map[channelKey];
+          writeActiveSessions(map);
+        }
+      } catch { /* ignore */ }
+      loop.setActiveUserId(mainUserId(path.basename(loop.sessionDir)));
+      (loop as any)._sessionSwitched = loop.sessionDir;
+      return;
+    }
 
     let normalDir = (loop as any)._normalSessionDir as string | undefined;
     // Fallback 1：loop 被重建 / 内存中无记录时，从持久化状态恢复该渠道切换前的 session
@@ -500,10 +617,10 @@ export class CompanionRouter implements IContextRouter {
 
     if (taskName !== null) {
       // 定时任务触发：删触发词+工具链，保留模型自然回复（看起来像主动搭话）
-      await loop.removeTriggerFromJsonl();
+      await loop.removeTaskTriggerJsonl();
     } else if (toolWasCalled) {
       // 普通工具调用：整轮抹除（用户消息+工具调用+回复全丢，模型不感知）
-      await loop.cleanCompanionJsonl();
+      await loop.eraseLastToolRoundJsonl();
     }
   }
 }

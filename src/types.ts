@@ -67,6 +67,18 @@ export type MessageContent = TextContent | ThinkingContent | ToolUseContent | To
 export interface Message {
   role: MessageRole;
   content: MessageContent | MessageContent[];
+  /**
+   * 入站消息的时间锚点（本地 'YYYY-MM-DD HH:mm'）——回答"这句是什么时候说的"。
+   *
+   * 写入时机：**只在用户消息落盘时**按概率写入（NormalRouter.stampInboundMessage，
+   * 与 Zone 5 的 `# currentDate` 共用「距上次注入的间隔 → 概率」那套基准）。
+   * 工具续跑与内部轮次（loopMsg / verification / evidence）不写——那些时间属于
+   * "此刻几点"，只该待在本轮 Zone 5 用完即弃（用户裁定 2026-09-30）。
+   *
+   * 组装时由 composer 转成一个前置文本块后**剥掉本字段**（见 withTimeAnchor）：
+   * 它只服务存储与 UI 读取，绝不作为字段进 API 请求体。
+   */
+  timestamp?: string;
   /** 所属意图簇 ID（旁路 orchestrator 归类后回填，用于按意图过滤历史） */
   _cluster_id?: string;
   /** 被簇级压缩的标记（方案 3.6/决策C：压缩不丢弃，追加标记；仅保留最近一次压缩记录） */
@@ -114,14 +126,13 @@ export type StreamEvent =
 
 /**
  * 会话类型 —— 开放可扩展：
- * 内置 normal / precise / companion 三种，插件/渠道可声明新类型（如 hub）。
+ * 内置 normal / companion 两种，插件/渠道可声明新类型（如 hub、coding）。
  * 用 `(string & {})` 保留字符串字面量提示，同时允许任意扩展名。
  */
-export type SessionType = 'normal' | 'precise' | 'companion' | (string & {});
+export type SessionType = 'normal' | 'companion' | (string & {});
 
 /** 内置会话类型常量（供代码引用，避免魔法字符串） */
 export const SESSION_TYPE_NORMAL = 'normal';
-export const SESSION_TYPE_PRECISE = 'precise';
 export const SESSION_TYPE_COMPANION = 'companion';
 
 export interface Session {
