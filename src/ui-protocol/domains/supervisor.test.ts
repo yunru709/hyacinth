@@ -11,23 +11,34 @@ import os from 'node:os';
 import { writeFileSync } from 'node:fs';
 
 import { createSupervisorDomain, type SupervisorStatus } from './supervisor.js';
+import { GUARDIAN_ENV } from '../../supervisor/protocol.js';
 
 describe('supervisor domain (S5)', () => {
   // 隔离 HOME，避免读到真实 ~/.agent/.restart-reason
   let savedHome: string | undefined;
   let tempHome: string;
+  /** 守护变量的原值（隔离用，见 isolateHome 的说明） */
+  let savedGuardian: string | undefined;
 
   async function isolateHome(): Promise<void> {
     savedHome = process.env.USERPROFILE ?? process.env.HOME;
     tempHome = await mkdtemp(path.join(tmpdir(), 'sup-domain-'));
     process.env.USERPROFILE = tempHome;
     process.env.HOME = tempHome;
+    // 守护变量也要隔离：agent 自己跑在 guardian 之下时，本测试进程会继承
+    // HYACINTH_GUARDIAN_CHILD=1 ⇒「测试进程无守护者」的断言会**假红**（真因是运行环境，
+    // 不是代码）。所以不假设环境，而是显式构造"无守护"这一前提。
+    savedGuardian = process.env[GUARDIAN_ENV];
+    delete process.env[GUARDIAN_ENV];
   }
 
   function restoreHome(): void {
     if (savedHome !== undefined) {
       process.env.USERPROFILE = savedHome;
       process.env.HOME = savedHome;
+    }
+    if (savedGuardian !== undefined) {
+      process.env[GUARDIAN_ENV] = savedGuardian;
     }
     void rm(tempHome, { recursive: true, force: true }).catch(() => {});
   }
@@ -48,6 +59,18 @@ describe('supervisor domain (S5)', () => {
       expect(status.plugins).toEqual([{ id: 'p1', state: 'mounted', deps: [] }]);
       expect(status.watchers).toEqual({ started: true, watcherCount: 13, debounceMs: 500 });
       expect(status.git).toEqual({ isRepo: true, dirty: true, lastAutoCommit: 'auto: pre-turn-1' });
+    } finally {
+      restoreHome();
+    }
+  });
+
+  it('守护变量存在 → guardian 为 true（与上一条互为正反证：证明"隔离"不是空断言）', async () => {
+    await isolateHome();
+    try {
+      process.env[GUARDIAN_ENV] = '1';
+      const domain = createSupervisorDomain({ getPluginHosts: () => [] });
+      const status = await (domain.status as (p: unknown, c: unknown) => Promise<SupervisorStatus>)({}, {});
+      expect(status.guardian).toBe(true);
     } finally {
       restoreHome();
     }
