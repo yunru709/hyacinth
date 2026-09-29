@@ -64,6 +64,13 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
   const { createDestroySubAgentTool } = await import('../tools/runtime-control/index.js');
   toolRegistry.register(createDestroySubAgentTool(agentRegistry, sessionDir));
 
+  // ── 模式切换的通用入口（**所有模式**可见，不是陪伴专有）──────────────
+  // 新模式从此自带入口：不必再为每个模式各写一把切换工具（陪伴就曾是这样 ✗）。
+  {
+    const { createSwitchModeTool } = await import('../tools/runtime-control/index.js');
+    toolRegistry.register(createSwitchModeTool(loop));
+  }
+
   // ── 陪伴模式工具注册 ──────────────────────────────────────────────
   const { createCompanionModeTool, createResetCompanionSessionTool } = await import('../tools/runtime-control/index.js');
   toolRegistry.register(createCompanionModeTool(loop, companionSessionManager));

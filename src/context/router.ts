@@ -264,6 +264,9 @@ export class NormalRouter implements IContextRouter {
 // 行为等价于 COMPANION_PROFILE + CompanionStrategy + 硬编码 companion 判断。
 
 const COMPANION_TOOL_ALLOWLIST = [
+  // switch_mode 是**模式无关**的通用入口 —— 每个模式都要能靠它进出，
+  // 所以哪怕这里是白名单，也必须显式列入（否则陪伴模式进得去、出不来 ✗）
+  'switch_mode',
   'companion_say', 'companion_mode', 'reset_companion_session',
   'add_task', 'list_tasks', 'remove_task', 'toggle_task',
   'read', 'write', 'edit',

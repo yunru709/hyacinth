@@ -64,6 +64,10 @@ const BUILTIN_COMMON: ToolBundle = {
     'add_task', 'list_tasks', 'remove_task', 'toggle_task',
     'mcp_status', 'session_stats',
     'diff_files', 'json_edit', 'http_request', 'archive',
+    // switch_mode 是**模式无关**的通用入口：任何模式下都必须能用它进出 ⇒ 必须进
+    // common（始终加载）。漏了它 = 默认 coding 包下"进得去、出不来" ✗
+    // （由 bundle-consistency 守卫测试当场抓出）。
+    'switch_mode',
     'companion_mode', 'reset_companion_session', 'trigger_compression',
     'disk_usage', 'view_image', 'view_media',
     'process_list', 'process_kill', 'process_output',

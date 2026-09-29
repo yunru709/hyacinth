@@ -10,6 +10,7 @@
 //   task.ts          — add/remove/list/toggle_task
 //   model-channel.ts — mcp_status + 模型通道管理
 //   companion.ts     — companion_mode / reset_companion_session
+//   mode.ts          — switch_mode（模式切换的通用入口：列出 / 进入 / 退出）
 // 消费方（tool.registry.ts / factory.ts）统一从此入口导入，零行为变化。
 
 export {
@@ -77,3 +78,6 @@ export {
   createCompanionModeTool,
   createResetCompanionSessionTool,
 } from './companion.js';
+
+/** 模式切换的通用入口（所有模式可见，非陪伴专有） */
+export { createSwitchModeTool } from './mode.js';
