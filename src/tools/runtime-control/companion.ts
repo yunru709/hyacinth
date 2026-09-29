@@ -2,7 +2,7 @@ import type { Tool } from '../interface.js';
 import type { AgentLoop } from '../../orchestrator/loop.js';
 import type { CompanionSessionManager } from '../../memory/companion-session.js';
 import { clearPromptCache } from '../../prompts/loader.js';
-import { switchRouter, switchRouterForChannel } from '../../context/profiles.js';
+import { switchToMode } from '../../context/mode-switch.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -38,7 +38,7 @@ export function createCompanionModeTool(
       '用户请求中出现的角色名必须填入 name 参数；没有角色名才省略。' +
       'action="activate"进入陪伴，action="create"新建角色并激活，action="deactivate"退出陪伴。' +
       '触发词：进入/退出/切换陪伴、找人聊天、创造角色。',
-    companionDescription:
+    modeDescription:
       '他离开了，道个别。',
     inputSchema: {
       type: 'object',
@@ -119,24 +119,16 @@ export function createCompanionModeTool(
               fs.writeFileSync(charConfig, JSON.stringify(defaultWorldEngineConfig(charName), null, 2), 'utf-8');
             }
 
-            // 拿到 CompanionRouter 单例
-            const companionRouter = switchRouterForChannel(loop.channelKey, 'companion');
-
+            // 同角色快速路径（幂等）：已在陪伴模式且角色未变 → 只清缓存直接返回
             if (loop.activeRouter.name === 'companion') {
-              // 已在陪伴模式 → 同角色提示，不同角色手动 deactivate→activate
               const currentName = (loop.activeRouter as any).activeCompanionName || '';
               if (currentName === charName) {
                 clearPromptCache();
                 return `已在情感陪伴模式（${charName}）中 💫`;
               }
-              await loop.activeRouter.onDeactivate?.(loop);
-              (companionRouter as any).activeCompanionName = charName;
-              await companionRouter.onActivate?.(loop);
-            } else {
-              // 从正常模式进入 → 设名字后 syncRouter 自动触发 onActivate
-              (companionRouter as any).activeCompanionName = charName;
-              await loop.syncRouter();
             }
+            // 统一模式切换编排（已激活重放生命周期 / 未激活 syncRouter）
+            await switchToMode(loop, 'companion', { activeCompanionName: charName });
             clearPromptCache();
 
             // 记住本次选择，下次不指定名称时自动用
@@ -189,17 +181,8 @@ export function createCompanionModeTool(
               fs.writeFileSync(charConfig, JSON.stringify(defaultWorldEngineConfig(charName), null, 2), 'utf-8');
             }
 
-            // 创建完直接激活
-            const companionRouter = switchRouterForChannel(loop.channelKey, 'companion');
-            if (loop.activeRouter.name === 'companion') {
-              // 已在陪伴模式 → 手动 deactivate→activate（syncRouter 检测不到 router 名变化）
-              await loop.activeRouter.onDeactivate?.(loop);
-              (companionRouter as any).activeCompanionName = charName;
-              await companionRouter.onActivate?.(loop);
-            } else {
-              (companionRouter as any).activeCompanionName = charName;
-              await loop.syncRouter();
-            }
+            // 创建完直接激活（统一模式切换编排）
+            await switchToMode(loop, 'companion', { activeCompanionName: charName });
             clearPromptCache();
 
             // 记住本次选择
@@ -244,9 +227,9 @@ export function createCompanionModeTool(
               }
             } catch { /* 文件操作失败不阻塞 */ }
 
-            // 通过 Router 切换模式（自动恢复 normal session）
-            switchRouterForChannel(loop.channelKey, 'normal');
-            await loop.syncRouter();
+            // 统一出口：`mode = null` 表示"回默认模式"，由 mode-switch 统一判定
+            // （不再在这里写死"回 normal" —— 那样模式一多就会逐个失效 ✗）
+            await switchToMode(loop, null);
             clearPromptCache();
 
             return '已退出情感陪伴模式，恢复正常模式 ✓';
@@ -273,7 +256,7 @@ export function createResetCompanionSessionTool(
   return {
     name: 'reset_companion_session',
     description: '清空陪伴记忆并开启新对话。触发词：清空记忆、重新开始、开新对话、启动新会话、重置会话。',
-    companionDescription:
+    modeDescription:
       '这样可以和他重新聊聊了。',
     inputSchema: {
       type: 'object',

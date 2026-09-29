@@ -6,18 +6,16 @@
 //   companion.activate    激活陪伴模式（切换 Router + Session + BypassAgent）
 //   companion.deactivate 退出陪伴模式（切回 normal Router + 恢复正常 session）
 //
-// 实装：委托 ContextProfile 的 switchRouter / getActiveRouterName /
-// clearPromptCache，以及 CompanionSessionManager（角色列表 / 目录管理），
+// 实装：委托 loop.syncRouter(name)（模式真源 = session type）/
+// getRouterByName，以及 CompanionSessionManager（角色列表 / 目录管理），
 // 通过闭包延迟解析。
 //
-// ★ 切换核心流程与 companion_mode 工具（src/tools/runtime-control.ts）逐行对齐 ★
-//   - 模式判断以 loop.activeRouter.name 为准（而非全局 _activeRouterName：
-//     二者在 syncRouter 执行前可能不同步）
+// ★ 切换核心流程与 companion_mode 工具（src/tools/runtime-control/companion.ts）对齐 ★
+//   - 模式判断以 loop.activeRouter.name 为准
 //   - 已激活且同角色 → 幂等返回
 //   - 已激活但换角色 → 手动 onDeactivate → 设 activeCompanionName → onActivate
-//     （不能用 syncRouter：它检测到 activeRouter.name 与全局一致会直接 return，
-//     不会触发 onActivate，换角色就不会生效）
-//   - 未激活 → 设 activeCompanionName → loop.syncRouter()（自动完成
+//     （syncRouter 同名检测会直接 return，不会触发 onActivate，换角色就不会生效）
+//   - 未激活 → 设 activeCompanionName → loop.syncRouter('companion')（自动完成
 //     onDeactivate → 切换 activeRouter → onActivate）
 //   - 切换后 clearPromptCache() + 写 .last-character（下次默认进该角色）
 //
@@ -61,8 +59,8 @@ export interface CompanionLoopLike {
     onActivate?(loop: unknown): Promise<void>;
     onDeactivate?(loop: unknown): Promise<void>;
   };
-  /** 同步 Router：检测 activeRouter.name 与全局不一致时执行 onDeactivate → 切换 → onActivate */
-  syncRouter?: () => Promise<void>;
+  /** 同步 Router：显式目标名切换（= loop.syncRouter(name)） */
+  syncRouter?: (target?: string) => Promise<void>;
 }
 
 /** CompanionSessionManager 的最小子集 */
@@ -77,10 +75,19 @@ export interface CompanionMgrLike {
   setLastCharacter?(name: string): void;
 }
 
-/** Router 切换函数类型 */
+/** Router 访问器（桥接层注入；背后是 loop.activeRouter + loop.syncRouter(target)） */
 export interface RouterSwitcherLike {
-  switchRouter(name: string): unknown;
+  /** 按名取 Router 实例（设 activeCompanionName 等模式参数用；未注册返回 undefined） */
+  getRouter(name: string): unknown;
+  /** 当前激活 Router 名（= loop.activeRouter.name；模式真源为 session type） */
   getActiveRouterName(): string;
+  /** 按名切换 Router（= loop.syncRouter(name)，显式目标；onActivate 负责切对应类型 session） */
+  syncRouter(name: string): Promise<void>;
+  /**
+   * 统一模式切换编排（context/mode-switch.switchToMode；已激活重放生命周期，未激活 syncRouter。可选）
+   * **mode = null 表示"回默认模式"** —— 哪个是默认由 mode-switch 判定，UI 侧不写死 ✗
+   */
+  switchToMode?(mode: string | null, params?: Record<string, unknown>): Promise<void>;
   /** 清空 prompt 加载缓存（切换角色后强制重载；对应 prompts/loader.clearPromptCache，可选） */
   clearPromptCache?(): void;
 }
@@ -286,8 +293,7 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
           const rs = getRouterSwitcher();
           active = rs?.getActiveRouterName() === 'companion';
           if (active) {
-            // 已激活时 switchRouter('companion') 是幂等的（设同名），无副作用
-            const cr = rs?.switchRouter('companion') as { activeCompanionName?: string } | undefined;
+            const cr = rs?.getRouter('companion') as { activeCompanionName?: string } | undefined;
             character = cr?.activeCompanionName || '';
           }
         } catch { /* router 不可用 */ }
@@ -334,11 +340,9 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
         }
       }
 
-      // ★ 拿到 CompanionRouter 单例并设角色名（switchRouter 副作用：全局名置为 companion）
-      const companionRouter = rs.switchRouter('companion') as {
+      // ★ 统一模式切换编排（经桥接的 switchToMode）：已激活重放生命周期 / 未激活 syncRouter
+      const companionRouter = rs.getRouter('companion') as {
         activeCompanionName?: string;
-        onActivate?(loop: unknown): Promise<void>;
-        onDeactivate?(loop: unknown): Promise<void>;
       };
 
       if (l.activeRouter?.name === 'companion') {
@@ -348,25 +352,20 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
           // 同角色 → 幂等
           return { active: true, character: currentName };
         }
-        // 换角色：syncRouter 检测到 activeRouter.name 与全局一致会直接 return，
-        // 必须手动执行 onDeactivate → 设新名字 → onActivate（与工具一致）
-        await l.activeRouter?.onDeactivate?.(l);
-        companionRouter.activeCompanionName = charName;
-        await companionRouter.onActivate?.(l);
+      }
+      companionRouter.activeCompanionName = charName;
+      if (rs.switchToMode) {
+        await rs.switchToMode('companion', { activeCompanionName: charName });
+      } else if (l.syncRouter) {
+        await l.syncRouter('companion');
       } else {
-        // 从正常模式进入 → 设名字后 syncRouter 自动触发 onDeactivate → 切换 → onActivate
-        companionRouter.activeCompanionName = charName;
-        if (l.syncRouter) {
-          await l.syncRouter();
-        } else {
-          // Fallback：loop 没有 syncRouter（极简后端），手动走核心步骤
-          const m = mgr();
-          m.setCharacter(charName);
-          const companionDir = m.getOrCreate();
-          await l.switchSession(companionDir);
-          l.setActiveUserId(`${charName}-companion`);
-          await l.bypassManager?.activateForMode('companion');
-        }
+        // Fallback：桥接与 loop 都没有切换编排（极简后端），手动走核心步骤
+        const m = mgr();
+        m.setCharacter(charName);
+        const companionDir = m.getOrCreate();
+        await l.switchSession(companionDir);
+        l.setActiveUserId(`${charName}-companion`);
+        await l.bypassManager?.activateForMode('companion');
       }
 
       // 切换完成：清 prompt 缓存（强制重载角色 persona），记住本次选择
@@ -379,9 +378,8 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
     // ── companion.deactivate ───────────────────────────────
     // 对齐 companion_mode 工具的 deactivate 分支：
     //   1. 判断 loop.activeRouter.name === 'companion'（否则幂等返回）
-    //   2. switchRouter('normal') → 设全局名
-    //   3. loop.syncRouter() → 触发 companionRouter.onDeactivate（停用 bypass + 切回 normal session）
-    //   4. clearPromptCache()
+    //   2. loop.syncRouter('normal') → 触发 companionRouter.onDeactivate（停 bypass + 切回普通 session）
+    //   3. clearPromptCache()
     async deactivate(): Promise<CompanionDeactivateResult> {
       const rs = router();
       const l = loop();
@@ -390,10 +388,13 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
         return { active: false };
       }
 
-      // ★ 核心：切回 normal，syncRouter 完成清理（onDeactivate 停 bypass + 切回 normal session）
-      rs.switchRouter('normal');
-      if (l.syncRouter) {
-        await l.syncRouter();
+      // ★ 核心：走**统一编排**回默认模式（mode = null：哪个是默认由 mode-switch 判定，
+      //   UI 侧不再写死"回 normal" ✗）—— 触发 onDeactivate：停 bypass + 切回对应 session
+      if (rs.switchToMode) {
+        await rs.switchToMode(null);
+      } else if (l.syncRouter) {
+        // 极简后端（没有统一编排桥接）退化为显式切内置模式 —— 保留旧行为，仅兜底
+        await l.syncRouter('normal');
       } else {
         await l.bypassManager?.deactivateAll();
       }

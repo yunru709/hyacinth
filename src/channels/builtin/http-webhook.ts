@@ -34,7 +34,8 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import type { UiWsSessionBackend } from './ui-ws-session.js';
-import { switchRouter, getActiveRouterName } from '../../context/profiles.js';
+import { getRouterByName } from '../../context/profiles.js';
+import { switchToMode } from '../../context/mode-switch.js';
 import { clearPromptCache } from '../../prompts/loader.js';
 
 const logger = createLogger('http-webhook');
@@ -683,7 +684,7 @@ export class HttpWebhookChannel implements ChannelHandler {
         toolRegistry?: unknown;
         bundleRegistry?: unknown;
         mcpSystem?: unknown;
-        loop?: { bypassManager?: unknown; sessionDir?: string };
+        loop?: { bypassManager?: unknown; sessionDir?: string; activeRouter?: { name?: string }; syncRouter?(target?: string): Promise<void> };
         sessionManager?: unknown;
         sessionDir?: string;
         companionSessionManager?: unknown;
@@ -730,7 +731,20 @@ export class HttpWebhookChannel implements ChannelHandler {
           (agentComponents?.mcpSystem as import('../../ui-protocol/domains/mcp.js').MCPSystemLike | undefined) ?? null,
         getCompanionMgr: () =>
           ((agentComponents as Record<string, unknown>)?.companionSessionManager as import('../../ui-protocol/domains/companion.js').CompanionMgrLike | undefined) ?? null,
-        getRouterSwitcher: () => ({ switchRouter, getActiveRouterName, clearPromptCache }),
+        getRouterSwitcher: () => {
+          const loop = agentComponents?.loop;
+          if (!loop) return null;
+          return {
+            getRouter: (name: string) => getRouterByName(name),
+            getActiveRouterName: () => loop.activeRouter?.name ?? 'normal',
+            syncRouter: (name: string) => loop.syncRouter?.(name) ?? Promise.resolve(),
+            // mode = null ⇒ 回默认模式（由 mode-switch 统一判定，桥接层不替它做选择）
+            switchToMode: async (mode: string | null, params?: Record<string, unknown>) => {
+              await switchToMode(loop as never, mode, params);
+            },
+            clearPromptCache,
+          };
+        },
         configureLocalModel: (config) => {
           if (config.ollamaUrl) {
             try { configCenter.set('localModel.ollamaUrl', config.ollamaUrl); } catch { /* noop */ }

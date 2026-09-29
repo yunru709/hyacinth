@@ -886,6 +886,15 @@ export class AgentLoop {
     await this.activeRouter.onActivate?.(this);
   }
 
+  /**
+   * 配置读取的公开窄面 —— 供模式切换等**外部编排**读少量配置（如默认模式
+   * `startup.defaultMode`）。`configCenter` 是 private，外部装配拿不到；
+   * 这里只开一个只读口子，不外露整个配置中心。
+   */
+  getConfigValue(key: string): unknown {
+    return this.configCenter?.get(key);
+  }
+
   /** 获取调度器 */
   getScheduler(): HeartbeatScheduler | null {
     return this.scheduler;

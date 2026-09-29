@@ -15,9 +15,9 @@
 // Fake 设计：模拟真实的 Router 生命周期闭环
 //   - makeRouterSim 构造 normal / companion 两个 Router 模拟对象
 //   - makeLoop 的 syncRouter 复刻 loop.ts 的真实行为：
-//     读全局名（state.activeName）→ 与 loop.activeRouter.name 不同
+//     显式目标名 → 按名解析 → 与 loop.activeRouter.name 不同
 //     → onDeactivate → 切换 activeRouter → onActivate
-//   - makeRouter 的 switchRouter 设置 state.activeName（全局副作用）
+//   - makeRouter 的 getRouter 提供按名取 Router（域设 activeCompanionName 用）
 //
 // P5-2 纯净化：协议层不再直读 ~/.agent/companion / 不再 import 全局单例，
 // 所有业务依赖经 createCompanionDomain 注入（mgr.listCharacters /
@@ -102,13 +102,14 @@ function makeLoop(
       register: () => {},
     },
     activeRouter: state.activeName === 'companion' ? sims.companion : sims.normal,
-    syncRouter: async () => {
-      // 复刻 loop.ts syncRouter：读全局名，与 activeRouter.name 不一致才切换
-      const target = state.activeName === 'companion' ? sims.companion : sims.normal;
-      if (loop.activeRouter.name === target.name) return;
+    syncRouter: async (target?: string) => {
+      // 复刻 loop.ts syncRouter(target)：显式目标 → 按名解析 → 与 activeRouter.name 不同才切换
+      const resolved = (target ?? 'normal') === 'companion' ? sims.companion : sims.normal;
+      state.activeName = resolved.name;
+      if (loop.activeRouter.name === resolved.name) return;
       await loop.activeRouter.onDeactivate?.(loop);
-      loop.activeRouter = target;
-      await target.onActivate?.(loop);
+      loop.activeRouter = resolved;
+      await resolved.onActivate?.(loop);
     },
   };
   return loop;
@@ -117,13 +118,28 @@ function makeLoop(
 function makeRouter(
   sims: { normal: RouterSim; companion: RouterSim },
   state: FakeRouterState,
+  loop: CompanionLoopLike,
 ): RouterSwitcherLike {
   return {
-    switchRouter: (name) => {
-      state.activeName = name; // 副作用：设全局激活名
-      return name === 'companion' ? sims.companion : sims.normal;
-    },
+    getRouter: (name) => (name === 'companion' ? sims.companion : sims.normal),
     getActiveRouterName: () => state.activeName,
+    // 桥接层背后即 loop.syncRouter(name)；测试里激活名由 loop mock 维护，这里只兜底记录
+    syncRouter: async (name) => {
+      state.activeName = name;
+    },
+    // 复刻 context/mode-switch.switchToMode：已激活重放生命周期，未激活 syncRouter
+    // mode = null ⇒ 回默认模式（生产侧由 mode-switch.resolveExitMode 判定；此处等价于内置默认）
+    switchToMode: async (mode, params) => {
+      const targetName = mode ?? 'normal';
+      const target = (targetName === 'companion' ? sims.companion : sims.normal) as unknown as Record<string, unknown>;
+      if (params) Object.assign(target, params);
+      if (state.activeName === targetName) {
+        await (loop.activeRouter as { onDeactivate?(l: unknown): Promise<void> })?.onDeactivate?.(loop);
+        await (target as { onActivate?(l: unknown): Promise<void> }).onActivate?.(loop);
+        return;
+      }
+      await loop.syncRouter?.(targetName);
+    },
     clearPromptCache: () => { state.clearPromptCacheCalled = true; },
   };
 }
@@ -153,7 +169,7 @@ function makeBackend(initName: 'normal' | 'companion' = 'normal') {
   };
   const sims = makeRouterSims(state, calls);
   const loop = makeLoop(sims, state, calls);
-  const router = makeRouter(sims, state);
+  const router = makeRouter(sims, state, loop);
   return { state, calls, loop, router };
 }
 
