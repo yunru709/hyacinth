@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import type { Tool } from './interface.js';
 import { detectEol, applyEol } from '../utils/eol.js';
+// 追加/插入是**我们自己**改的文件 ⇒ 必须告知读写门控（否则紧随其后的 edit 会被误判过期 ✗）
+import { recordFileTouch } from './file-tracker.js';
 
 /**
  * InsertTool — 在文件指定行号处插入内容。
@@ -36,6 +38,7 @@ export class InsertTool implements Tool {
       const fh = await fs.open(filePath, 'a');
       await fh.write(content);
       await fh.close();
+      recordFileTouch(filePath); // 告知读写门控：这次改动是我们做的（否则紧随其后的 edit 被误判过期 ✗）
       const lines = content.split('\n').length;
       return `Appended ${lines} line(s) to end of ${filePath}`;
     }
@@ -69,6 +72,7 @@ export class InsertTool implements Tool {
     // （applyEol 内部先 toLf 折平，因此不会把已有的 \r\n 变成 \r\r\n）。
     await fs.writeFile(filePath, applyEol(lines.join('\n') + '\n', detectEol(text ?? '')), 'utf-8');
 
+    recordFileTouch(filePath); // 同上：改是我们自己做的 ⇒ 别让紧随其后的编辑被判过期
     return `Inserted ${insertLines.length} line(s) at line ${lineNumber} in ${filePath}`;
   }
 }

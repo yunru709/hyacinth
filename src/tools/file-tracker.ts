@@ -56,12 +56,45 @@ export function recordFileRead(filePath: string): void {
   partialReads.delete(key); // 完整读过即覆盖"部分"标记
 }
 
-/** 记录只交出过**部分**内容（片段/头尾）。仅满足 edit/multi_edit，不满足 write */
+/**
+ * 记录只交出过**部分**内容（片段/头尾）。仅满足 edit/multi_edit，不满足 write。
+ *
+ * ⚠️ 2026-09-30 修（实测踩到）：**即使曾经完整读过，也必须刷新"见过的时间"**。
+ * 旧实现开头是 `if (records.has(key)) return;` ⇒ "完整读 → 文件被改 → 只再读几行"
+ * 这条路里，新读的那几行被**整条丢弃** ⇒ 判 stale ⇒ **新鲜的锚定 edit 被误拒**，
+ * 而且拒绝话术还写着"原样重发就会生效"（在那个状态下永远不会生效 ✗）。
+ *
+ * 不变量不变：本函数**只**写 `partialReads`，绝不碰 `records` ⇒
+ * `getLastReadTime`（write / 行模式的强度判据）仍是"上次**完整**读过的时间" ✓
+ * —— 所以"部分读不得解锁整份覆盖"这条安全边界**原样保留**。
+ */
 export function recordPartialRead(filePath: string): void {
   const key = normalize(filePath);
-  // 若已完整读过，不降级
-  if (records.has(key)) return;
-  partialReads.set(key, Date.now());
+  const now = Date.now();
+  const prev = partialReads.get(key);
+  if (prev !== undefined && prev > now) return; // 时钟回拨等异常：不倒退
+  partialReads.set(key, now);
+}
+
+/**
+ * 记录**我们自己改过**这个文件（如 `insert` 追加/插入）。
+ *
+ * 与 `recordPartialRead` 的区别（重要，别退化成别名 ✗）：
+ *   · 若此前**完整读过** ⇒ 把"完整读过的时间"一起刷新（改是刚做的 ⇒ 视图不算过期 ✓，
+ *     否则紧随其后的整份覆盖会被判 stale ✗）；
+ *   · 若此前**没完整读过** ⇒ **只记部分**（`insert` 允许不读就追加 ⇒ 绝不能因此
+ *     凭空授予"完整读过" ✗ —— 那正是门控要防的"看几行就覆盖整份"）。
+ */
+export function recordFileTouch(filePath: string): void {
+  const key = normalize(filePath);
+  const now = Date.now();
+  const full = records.get(key);
+  if (full) {
+    records.set(key, { readTime: Math.max(full.readTime, now), writeTime: now });
+    return;
+  }
+  const prev = partialReads.get(key);
+  if (prev === undefined || now > prev) partialReads.set(key, now);
 }
 
 /** 获取文件上次被本进程**完整**读取的时间。null = 从未完整读取 */
