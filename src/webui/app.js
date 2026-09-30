@@ -766,24 +766,38 @@
   }
 
   // ── permission 对话框（permission.request → resolve）──
-  let pendingPerm = null;
+  // 队列而非单变量：并发工具会同时排入多个权限请求；单变量会被后到的"顶掉"，
+  // 先到的请求永远等不到应答 ⇒ 该轮工具执行卡死 ✗
+  const permissionQueue = [];
 
   function showPermission(payload) {
     if (!payload) return;
-    pendingPerm = payload;
-    const t = $('#permission-text');
-    if (t) t.textContent = `${payload.toolName} 请求执行权限`;
+    permissionQueue.push(payload);
+    renderPermissionHead();
+  }
+
+  function renderPermissionHead() {
     const d = $('#permission-dialog');
+    const head = permissionQueue[0];
+    if (!head) { if (d) d.hidden = true; return; }
+    const t = $('#permission-text');
+    if (t) {
+      const more = permissionQueue.length > 1 ? `（另有 ${permissionQueue.length - 1} 项待处理）` : '';
+      t.textContent = `${head.toolName} 请求执行权限${more}`;
+    }
     if (d) d.hidden = false;
   }
 
   function resolvePermission(result) {
-    const d = $('#permission-dialog');
-    if (d) d.hidden = true;
-    if (pendingPerm) {
-      client.request('permission.resolve', { id: pendingPerm.id, result }).catch(() => {});
-      pendingPerm = null;
+    const head = permissionQueue.shift();
+    if (!head) return;
+    // aor = 解除全部限制 ⇒ 队列里其余一并放行（与 TUI 端同语义）
+    const batched = result === 'aor' ? permissionQueue.splice(0) : [];
+    client.request('permission.resolve', { id: head.id, result }).catch(() => {});
+    for (const p of batched) {
+      client.request('permission.resolve', { id: p.id, result }).catch(() => {});
     }
+    renderPermissionHead();
   }
 
   // ── ask_user 对话框（message.ask_user → askUserResolve）──

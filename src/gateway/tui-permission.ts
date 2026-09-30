@@ -87,7 +87,31 @@ export function createTuiPermission(deps: TuiPermissionDeps) {
         : result === 'always' ? theme.success('  \u25c6 Always allowed (this session)')
         : theme.success('  \u25c6 Approved'),
     );
+    // 并发工具（inline 并行执行）会同时排入多个权限请求 ⇒ 只放行队首会导致
+    // 「选了 AOR 仍要同意若干次」✗。按语义批量放行：
+    //   aor    = 解除全部限制      → 队列里所有待应答一并放行
+    //   always = 该工具总是允许    → 队列里同名工具的一并放行
+    //   yes/no = 只作用于当前这一个（no 之后逐个询问，尊重用户可能的分项决策）
+    let batched: PermissionRequest[] = [];
+    if (result === 'aor') {
+      batched = permissionQueue.splice(0);
+    } else if (result === 'always') {
+      batched = permissionQueue.filter((r) => r.toolName === req.toolName);
+      if (batched.length > 0) {
+        const ids = new Set(batched.map((r) => r.id));
+        for (let i = permissionQueue.length - 1; i >= 0; i -= 1) {
+          if (ids.has(permissionQueue[i]!.id)) permissionQueue.splice(i, 1);
+        }
+      }
+    }
+
     void protocolSend('permission.resolve', { id: req.id, result });
+    for (const r of batched) {
+      void protocolSend('permission.resolve', { id: r.id, result });
+    }
+    if (batched.length > 0) {
+      chatLog.addSystem(theme.dim(`  \u2191 一并放行 ${batched.length} 个待处理的权限请求`));
+    }
 
     if (permissionQueue.length > 0) {
       const next = permissionQueue[0]!;
