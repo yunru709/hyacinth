@@ -47,7 +47,7 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['gateway/plugin-contributions.ts', new Set(['plugins'])],
   ['gateway/plugin-manager-contribution.ts', new Set(['plugins'])],
   ['gateway/runtime-contributions.ts', new Set(['hot-reload', 'provider', 'tools'])],
-  ['gateway/runtime-wiring.ts', new Set(['context', 'setup'])],
+  ['gateway/runtime-wiring.ts', new Set(['setup'])], // context 直连已随模式等价化移除（模式真源 = session type）
   ['gateway/server.ts', new Set(['channels', 'memory', 'provider', 'runtime', 'setup', 'supervisor'])],
   ['gateway/tool-registration.ts', new Set(['rollback', 'tools'])],
   ['gateway/tui-format.ts', new Set(['memory'])], // 只读事件回放渲染（本地展示）

@@ -53,6 +53,14 @@
  *   - 白名单**只减不增**：每把一处直连改为经协议层调用就删一条；已登记但
  *     实际不再直连 → stale 违规（防豁免虚增）。基线由 T4 生成，T6 起递减。
  *
+ * 规则 7「泛化层禁模式名硬编码分支」（2026-09-25，模式等价化改造）
+ *   - 理由：模式真源 = session type（meta.json type → loop.sessionType），
+ *     模式差异必须表达为 Router/ModeProfile 数据与钩子；泛化层里出现
+ *     `=== 'companion'` 这类分支 = 某个模式拥有了别的模式没有的特权路径。
+ *   - 范围：src/orchestrator / src/registry / src/kernel / src/context
+ *     （模式实现自身——router.ts、companion-filter.ts、mode-*.ts——豁免）。
+ *     检测：与内置模式名 'companion' 的字符串相等比较。
+ *
  * 规则 6「工具之间零互相依赖」（2026-09-19，用户立的架构原则）
  *   - 理由：**工具是动态的、会一个一个地变动**；不能让"升级一个工具"导致
  *     "另一个工具出故障"。耦合的工具 = 一次改动影响面不可控。
@@ -398,6 +406,47 @@ if (toolCoupling.violations.length > 0 || toolCoupling.staleEntries.length > 0) 
   );
 }
 
+// ── 规则 7：泛化层禁模式名硬编码分支 ────────────────────────
+const MODE_HARDCODE_DIRS = ['src/orchestrator', 'src/registry', 'src/kernel', 'src/context'];
+const MODE_IMPL_EXEMPT = /(^|[\\/])(router|companion-filter|mode-profile|mode-profile-loader|mode-switch)\.ts$/;
+const MODE_NAME_COMPARE = /['"]companion['"]\s*(?:===|!==)|(?:===|!==)\s*['"]companion['"]/;
+
+function checkModeHardcoding() {
+  const violations = [];
+  let scanned = 0;
+  for (const dir of MODE_HARDCODE_DIRS) {
+    for (const f of walk(dir)) {
+      if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue;
+      if (MODE_IMPL_EXEMPT.test(f)) continue;
+      scanned++;
+      const src = readFileSync(f, 'utf-8');
+      const lines = src.split('\n');
+      lines.forEach((line, i) => {
+        if (line.trimStart().startsWith('//')) return; // 注释提及不算
+        if (MODE_NAME_COMPARE.test(line)) {
+          violations.push({ file: f, line: i + 1, text: line.trim() });
+        }
+      });
+    }
+  }
+  return { violations, scanned };
+}
+
+const modeHardcode = checkModeHardcoding();
+if (modeHardcode.violations.length > 0) {
+  failed = true;
+  console.error('❌ 规则 7「泛化层禁模式名硬编码分支」失败：');
+  for (const v of modeHardcode.violations) {
+    console.error(`   ${v.file}:${v.line}\n      → ${v.text}`);
+  }
+  console.error(
+    '\n规则：模式真源 = session type（meta.json type → loop.sessionType → Router 注册表）。\n' +
+      '泛化层（orchestrator/registry/kernel/context 非模式实现）不得出现与具体模式名的相等比较；\n' +
+      '模式差异一律表达为 IContextRouter / ModeProfile 声明与具名钩子。\n' +
+      '模式实现自身（router.ts / companion-filter.ts / mode-*.ts）与模式专属目录豁免。',
+  );
+}
+
 if (failed) process.exit(1);
 
 console.log('✅ verify:layers 通过');
@@ -406,3 +455,4 @@ console.log(`   · 规则 2 业务核心：扫描 ${core.count} 个业务文件�
 console.log(`   · 规则 3 装配层：${ASSEMBLY_FILES.join(', ')} 直接 new 业务类 ${assembly.actual.size} 个，全部在白名单内`);
 console.log(`   · 规则 4 监督层：扫描 ${supervisor.count} 个业务文件，仅契约叶（supervisor/protocol）可被依赖`);
 console.log(`   · 规则 5 UI 直连：扫描 ${uiDirect.scanned} 个 UI 侧文件，业务核心直连 ${uiDirect.violations.length} 处 + 白名单 stale ${uiDirect.staleEntries.length} 条`);
+console.log(`   · 规则 7 模式硬编码：扫描 ${modeHardcode.scanned} 个泛化层文件，模式名比较 ${modeHardcode.violations.length} 处`);
