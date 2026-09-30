@@ -120,7 +120,7 @@ input → bypass → context → llm → tools → finalize
 
 ### 3.2 记忆（`memory/`，9 文件）
 
-- `SessionManager`：会话建目录（conversation/events/stats/meta），normal/precise/companion 三型，`~/.agent/sessions/`。
+- `SessionManager`：会话建目录（conversation/events/stats/meta），normal/companion 等开放类型（session type 即上下文模式），`~/.agent/sessions/`。
 - `ConversationStore`：对话 JSONL 写入 + `conversation_full.jsonl` 全量存档（永不压缩，供意图簇标记 `_cluster_id`）。
 - `EventStore`/`StatsManager`/`SummaryStore`：事件、统计、摘要（分簇分桶）。
 - `MemoryStore`（跨会话项目记忆，/memory 命令）、`CompanionSessionManager`（按角色隔离目录）。
@@ -167,7 +167,7 @@ input → bypass → context → llm → tools → finalize
 
 ### 5.1 工具体系（`tools/`，64 文件，最大模块）
 
-- **契约**：`Tool` 接口 `{ name, description, inputSchema, execute }`（+可选 companionDescription/companionOnly/executionMode/setBackgroundRegistry），任何实现它的对象都是工具。
+- **契约**：`Tool` 接口 `{ name, description, inputSchema, execute }`（+可选 modeDescription/modeOnly/executionMode/setBackgroundRegistry；modeOnly 值 = session type，模式专属工具在其他模式硬隔离），任何实现它的对象都是工具。
 - **执行器** `ToolExecutor`：真实中断（AbortController+定时器）、并行执行、超时。
 - **内置工具**（`createDefaultRegistry` 16 个 + Git）：read/write/edit/multi_edit/insert/bash/glob/grep/git/restart/diff_files/json_edit/http_request/archive/db_query/disk_usage/generate_media。
 - **安全中间层**：`path-sandbox`（子 Agent 沙箱）、`allowlist`（白名单免确认）、`injection-filter`（工具结果注入清洗防 prompt injection）、`ToolResultBuffer`（>16KB 落盘 + 指针消息）、`BackgroundProcessRegistry`（asyncable 后台进程管理）。
@@ -397,7 +397,7 @@ P-F 热重载+返回。
 - `context-chain-contributions.ts`：P-B 批。压缩链拓扑：TokenCounter→StructuredSummarizer→CompressorOrchestrator，加 LayeredContextComposer。
 - `orchestrator-contributions.ts`：P-B 批。planStore、LLMOrchestrator（needs provider/planStore/sessionDir/modelRouter）、providerRouter（注册 main/local）、agentRegistry、toolExecutor（needs toolRegistry）、backgroundRegistry。
 - `plugin-manager-contribution.ts`：PluginManager 创建（needs toolRegistry/skillRegistry/contextComposer/mcpSystem/cwd）；loadAll/setHooks 留 factory。
-- `plugin-contributions.ts`：P-D 批。knowledge/xref/generation 三个插件 host.mount 挂载点，先后由 needs/provides 承载；knowledge 故障降级；generation 把 TTS 句柄回填 `loop.companionVoice`。
+- `plugin-contributions.ts`：P-D 批。knowledge/xref/generation 三个插件 host.mount 挂载点，先后由 needs/provides 承载；knowledge 故障降级；generation 把 TTS 句柄回填 `loop.modeVoice`（模式语音钩子槽位）。
 - `runtime-contributions.ts`：P-E 批（增量多批首个消费者）。ToolBundleRegistry（needs cwd）、HotReloadManager（needs 11 个依赖，依赖面最大）。
 
 ### 2.6 接线 `*-wiring.ts` / 引导家族
@@ -461,7 +461,7 @@ P-F 热重载+返回。
 - `finalize.ts`（`builtin:turn-finalize`）：回合收尾。三态判定表：toolCalled→继续下一轮（stop=false，不写 stop 事件）；flowStillActive→继续 loop（不写 stop 事件，死循环由 LoopGuard 兜底）；默认→写 stop 事件并 stop=true。每次先 `turnRecorder.endTurn`（尽力而为）。
 
 ### 3.5 `turn-state.ts`
-- `TurnState`（一次迭代的状态，阶段间显式传递）：按阶段分区——内核记账(turn/stop/stopReason/toolCalled)、input(history/userInput/hasPendingToolCalls/ephemeralInput/companionMode/...)、bypass(bypassInjections/intent/intentLabel/historyTransform)、context(toolDefinitions/messages/zoneBreakdown/lastContextTokens/summary/needsCompression/.../pendingImageInjections)、llm(activeProvider/streamText/toolCalls/inlineToolResults/cacheStats/fallbackInfo)、tools(toolResults/pendingAsyncResults/recentToolNames)、finalize(companionExpressions/activePlan/flowStillActive)。
+- `TurnState`（一次迭代的状态，阶段间显式传递）：按阶段分区——内核记账(turn/stop/stopReason/toolCalled)、input(history/userInput/hasPendingToolCalls/ephemeralInput/modeName/...)、bypass(bypassInjections/intent/intentLabel/historyTransform)、context(toolDefinitions/messages/zoneBreakdown/lastContextTokens/summary/needsCompression/.../pendingImageInjections)、llm(activeProvider/streamText/toolCalls/inlineToolResults/cacheStats/fallbackInfo)、tools(toolResults/pendingAsyncResults/recentToolNames)、finalize(activePlan/flowStillActive)。
 - `SessionState`（跨回合会话态，挂在 loop 实例）。
 - `createTurnState()`（工厂，runTurn 入口调用）。
 - 支撑类型：PendingImage、InlineToolResult、CacheTurnRecord、CacheStats、AsyncAgentResult、CompanionExpression、ToolExecSummary。
@@ -547,6 +547,7 @@ gateway/{cli,tui,server} ──► gateway/{factory,agent-assembly,boot,*-contri
 - **运行依赖**：AgentLoop 是执行链枢纽，上接 OutputHandler（解耦 UI），上接 pipeline（六阶段），阶段内通过 StageServiceMap 取服务；流输出经 OutputRouter 分派；循环守卫生效在 run/_runInternal 与 finalize 三态。
 - **安全/治理**：permission-chain/bypass/world-engine 等作为"插件"挂在 loop 钩子上（kernel 原语挂载面），fail-fast 或降级语义由装配方（bypass-wiring）控制。
 - **可插拔落点**：除了工厂/注册表式的 Tool/ContextSource/Skill/Agent 注册，还新增了 **kernel.pipeline 槽位级可替换**（改 config 换整模块，插件经 pluginHost 经 `kernel.pipeline` 运行时替换阶段），与贡献批/注册表共同构成"外部配置化 + 可插拔接口稳定"的实现。
+- **模式等价化（2026-09-25）**：上下文模式真源 = session type（meta.json `type` → `loop.sessionType` → Router 注册表按名解析）；泛化层（orchestrator/registry/kernel/context 非模式实现）由 verify:layers **规则 7** 守卫——禁止与具体模式名的相等比较（`=== 'companion'`），模式差异一律表达为 `IContextRouter` / `ModeProfile` 声明与具名钩子。配套槽位：Router 的 `outputProtocol`（模式表达契约）/ `materializeHistory`（历史物化）、loop 的 `modeVoice`（模式语音钩子）、Tool 的 `modeOnly`/`modeDescription`（模式专属工具）。
 
 ---
 
@@ -577,7 +578,7 @@ Manifest 只声明"有什么 section、每个 section 放哪个 zone、什么类
 | 3 | Injection | `section-resolver.ts`（bypass 注入） | 管动态注入（旁路 Agent 运行时插内容） |
 | 4 | Compressor | `compressor.ts` | 管预算保护（超 token 时裁剪历史、生成摘要） |
 | 5 | ContextSource | `interface.ts`（ContextSource 类型）+ 各注册点 | 管数据供应（运行时数据从哪来） |
-| 6 | activeConditions | `section-resolver.ts` / `composer.ts` | 管条件开关（如 precise_mode） |
+| 6 | activeConditions | `section-resolver.ts` / `composer.ts` | 管条件开关（如 zone4_enabled） |
 | 7 | filterHistory | `composer.ts` / `companion-filter.ts` | 管消息过滤（历史中哪些消息不显示） |
 
 另有 `tokenizer.ts`（令牌计数）、`retriever.ts`（全量历史池检索）、`truncating-composer.ts`（第二实现）、`context-config.ts`（外部可配置参数出口）、`cache-strategy.ts`（缓存策略）、`prompt-builder.ts`（系统提示词构建）。
@@ -587,11 +588,14 @@ Manifest 只声明"有什么 section、每个 section 放哪个 zone、什么类
 | 文件 | 职责 |
 |------|------|
 | `interface.ts` | 定义模块对外的核心接口与类型：`ComposeOptions`（扁平组装输入）、`ContextComposer`（组装接口）、`ContextComposerLike`（收窄后的最小消费者接口——阶段 B 产物，双签名 compose 重载 + `activeConditions` 字段）、`ContextSource`（数据源注册类型，含 `strategy` 与 `cacheability`）、策略与缓存声明类型。 |
-| `manifest-types.ts` | 菜单的**类型定义**（机制 1）。`SectionType`（static/template/runtime/retrieval/conditional）、`ContextSourceStrategy`（always_inline/index_only/lazy_expand/phase_bound）、`ConditionName`（precise_mode）、`SectionEntry`、`ZoneEntry`、`ContextManifest`。 |
+| `manifest-types.ts` | 菜单的**类型定义**（机制 1）。`SectionType`（static/template/runtime/retrieval/conditional）、`ContextSourceStrategy`（always_inline/index_only/lazy_expand/phase_bound）、`SectionEntry`（含 `condition?: string`）、`ZoneEntry`、`ContextManifest`。 |
 | `manifest-defaults.ts` | 默认 Manifest（兜底菜单）+ 详尽的 Zone/Section 布局文档。声明 Zone1~5 及全部默认 section。 |
 | `manifest-loader.ts` | `ManifestLoader` 加载器。加载优先级：`{cwd}/.agent/context-manifest.json`（项目覆盖）→ 默认 manifest。含 `load/reload/getZone/getEnabledZones/getSections/isZoneEnabled/setZoneEnabled`，支持校验、落盘、热重载。查询接口按 zone.order、按 section.priority 排序。 |
-| `profiles.ts` | Router 注册中心（机制 2）。维护 `routerRegistry` Map 与全局活跃 Router 名，提供 `registerRouter/switchRouter/getActiveRouter`。启动时注册 `NormalRouter`/`CompanionRouter`。并保留 deprecated 的 `ContextProfile`/`NORMAL_PROFILE`/`COMPANION_PROFILE` 与 `isCompanionModeActive` 等旧 API 作为向后兼容。 |
-| `router.ts` | 统一上下文路由器。定义 `IContextRouter` 接口（工具白/黑名单、skipSections/skipRuntimeSources、sourceOverrides、transformUserInput、filterHistory、beforeSection、roleForSection、onActivate/onDeactivate、getTaskPrompt、onPostTurn）。实现 `NormalRouter`（默认全pass-through）与 `CompanionRouter`（陪伴模式：精简工具、跳过框架 section、persona 与 memory 覆写、世界引擎旁路、时间戳概率注入、JSONL 清理等）。 |
+| `profiles.ts` | Router 注册中心（机制 2）。维护 `routerRegistry` Map，提供 `registerRouter`/`getRouterByName`/`listRouterNames`。启动时注册 `NormalRouter`/`CompanionRouter`。**模式真源 = session type**（meta.json 的 `type` → boot `sessionType` → `loop.setSessionType()` → `loop.syncRouter()` 按名解析；切模式 = 切对应类型的 session），无全局活跃名状态。 |
+| `router.ts` | 统一上下文路由器。定义 `IContextRouter` 接口（工具白/黑名单、skipSections/skipRuntimeSources、sourceOverrides、transformUserInput、ephemeralInput、filterHistory、**materializeHistory**、**outputProtocol**（模式输出协议槽位，见 `companion/output-protocol.ts`）、beforeSection、roleForSection、onActivate/onDeactivate、getTaskPrompt、onPostTurn）。实现 `NormalRouter`（默认 pass-through + 时间戳间隔概率注入）与 `CompanionRouter`（陪伴模式：精简工具、跳过框架 section、persona 与 memory 覆写、世界引擎旁路（world 数据落 session 目录 `world/`）、`[[旁白]]` 输入变换、表达块历史物化、JSONL 清理；onDeactivate 带「当前 session 已是普通类型则不回拉」守卫）。 |
+| `mode-profile.ts` | 声明式模式层。`ModeProfile`（.agent/modes/*.json 的类型：工具面/section 过滤/source 覆写/具名钩子引用/bypassMode/outputProtocol/taskPrompt/postTurnCleanup）+ 具名钩子注册表（`registerModeHook`/`getModeHook`）+ 输出协议工厂注册表（`registerModeOutputProtocol`）+ `DeclarativeRouter`（由 profile 构造的 IContextRouter：静态部分读声明，动态行为经具名钩子，激活/停用走通用编排）。新增「静态组装+少量钩子」型模式（如 coding）= 一个 JSON + 按需钩子，零改动泛化层。 |
+| `mode-profile-loader.ts` | 声明式模式加载器。扫描 `~/.agent/modes/*.json`（全局）+ `<cwd>/.agent/modes/*.json`（项目同名覆盖），构造 DeclarativeRouter 并注册进 Router 注册表；坏 JSON 跳过不阻塞。bootstrapPersona 时调用。 |
+| `mode-switch.ts` | 模式切换编排唯一实现（`switchToMode`）：未激活 → `loop.syncRouter(mode)`；已激活 → 参数就地更新后重放 onDeactivate → onActivate。companion_mode 工具 / ui-protocol companion 域 / context.mode 插件服务全部委托它（历史三处人肉对齐的编排就此收敛）。 |
 | `section-resolver.ts` | Section 内容解析器（机制 3+6）。`ResolverContext` 承载一切解析所需输入。`resolveSection()` 为统一入口：先走 Router `beforeSection` 钩子，再处理 bypass 注入（replace/append），再按 `type` 分发到 `resolveStatic/resolveTemplate/resolveRuntime/resolveRetrieval/resolveConditional`。另导出 `buildSoulSection`。 |
 | `composer.ts` | 核心组装器 `LayeredContextComposer`（机制 7 filterHistory + 组装主流程）。组装 LayeredContext，含 Zone 遍历、role 合并、Zone3 内容 hash 采集、缓存断点打点、token 统计。实现 `ContextComposer`（implements）。定义 `LayeredComposeOptions`、`LayeredContext`、`ZoneBreakdown`。 |
 | `tokenizer.ts` | 令牌计数。`TokenCounter` 基于 `js-tiktoken`（对应 'gpt-4' 模型），提供 `countTokens/countMessageTokens/countMessagesTokens`，含 role 开销、text/tool_use/tool_result/thinking/image 各 content 类型的开销模型。 |
@@ -615,7 +619,7 @@ Manifest 只声明"有什么 section、每个 section 放哪个 zone、什么类
 | Zone 4 | Context | 是 | user | 知识库检索结果（runtime:kb_context） | 可独立开关以省 tokens |
 | Zone 5 | Live | 是 | user | Flow 注入/渠道上下文/会话临时 MCP/工具/时间戳/用户输入 | 每轮变化，不缓存 |
 
-Zone1 的默认 sections 含 `persona_precise`（conditional, precise_mode）、`persona_soul`（static）、`tool_rules`、
+Zone1 的默认 sections 含 `persona_soul`（static）、`tool_rules`、
 `tool_bundles`、`skills`、`agents`、`mcp`、`memory`（均 runtime）、`attention`（static）。
 Zone3 含 `project_context`（retrieval）、`history_summary`（runtime:summary）、`history`（runtime:history）。
 Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`、`orchestrator_hint`、`timestamp`、`user_input`。
@@ -639,11 +643,11 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 1. **Router 介入**：`ctx.router.beforeSection` 若返回非 undefined，直接采用（null→跳过）。
 2. **Bypass 注入（Injection）**：按 section name 查 `bypassInjections`；`mode='replace'` 完全替代；`mode='append'` 追加到正常结果末尾。
 3. **按类型分发**：
-   - static：`persona_soul` 特殊处理（precise_mode 下不注入；Router `sourceOverrides` 可换 persona 源/追加；否则 `buildSoulSection` 拼 SOUL/IDENTITY/USER）；其他 static 走 `loadPrompt`。Router `skipSections` 优先。
+   - static：`persona_soul` 特殊处理（Router `sourceOverrides` 可换 persona 源/追加；否则 `buildSoulSection` 拼 SOUL/IDENTITY/USER）；其他 static 走 `loadPrompt`。Router `skipSections` 优先。
    - template：用 templateVars（cwd、toolNames）渲染 `loadPrompt` + `renderPrompt`。
    - runtime：按 source 前缀分派——`runtime:plan/impact/summary/timestamp/userInput/env/skills/agents/mcp/mcp_live/tools_live/mcp_status/tool_bundles/memory/history`。`runtime:memory` 允许 Router/profile 覆写 memory 源；`runtime:skills/agents/mcp` 用 `buildSourcePartsFromCtx` 按 cacheability 与 strategy 汇总；`runtime:history` 显式返回 undefined（由 composer 特判处理）。
    - retrieval：`runtime:projectContext` 走 `loadProjectContext`；`runtime:pool`/`runtime:git` 走 `Retriever`（用 fullHistory 池、excludeLast、excludeHashes、maxTokens=zone4BudgetRatio%，可选 gitManager）。
-   - conditional：`precise_mode` 条件满足才走 static 解析。
+   - conditional：`sec.condition` 命中 `ctx.activeConditions` 才走 static 解析（通用机制，当前内置无消费者）。
 4. 通用回退：任意 `runtime:*` 未命中特判时，从 `ctx.sources` 按 name 查找 ContextSource 取内容。
 
 ### 1.6 Cache 策略（cache-strategy）
@@ -677,14 +681,14 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | 文件 | 职责 |
 |------|------|
 | `index.ts` | 模块出口，重导出 SessionManager、ConversationStore、EventStore、StatsManager、SummaryStore 及事件类型。 |
-| `session.ts` | **会话管理**。`generateSessionId`（{channel}_YYYYMMDD-HHMMSS-XXXX）；`SessionManager`：create（normal/precise/companion，建目录+初始化 conversation.jsonl/events.jsonl/stats.json/meta.json）、resume（指定/最新/按渠道）、list、getLatest、getLatestByChannel（按渠道过滤防跨渠道串用 session）、getSessionDir、cleanup（按 AGENT_MAX_SESSION_AGE，默认 30 天清理过期）。sessions 根目录 `~/.agent/sessions/`。 |
+| `session.ts` | **会话管理**。`generateSessionId`（{channel}_YYYYMMDD-HHMMSS-XXXX）；`SessionManager`：create（开放 SessionType，内置 normal/companion，建目录+初始化 conversation.jsonl/events.jsonl/stats.json/meta.json）、resume（指定/最新/按渠道）、list、getLatest、getLatestByChannel（按渠道过滤防跨渠道串用 session）、getSessionDir、cleanup（按 AGENT_MAX_SESSION_AGE，默认 30 天清理过期）。sessions 根目录 `~/.agent/sessions/`。 |
 | `conversation.ts` | **对话持久化**。`ConversationStore`：append（写 conversation.jsonl + 同步全量存档）、readAll/readLast/count、truncate（超 maxMessages 截旧）、replace（原子写，压缩后写回）、FULL_FILE=`conversation_full.jsonl` 全量存档（永远追加、行号稳定），及 markCluster/markCompressed（给全量存档写 `_cluster_id`/`_compressed` 标记）。 |
 | `events.ts` | **事件存储**。`EventStore`（events.jsonl 追加/读取）。定义事件类型联合 `SessionEvent`：SessionStartEvent、UsageEvent、ToolCallEvent、UserInputEvent、ClusterAssignEvent（旁路意图簇归类，含行号范围）、BypassIntentEvent。 |
 | `stats.ts` | **统计追踪**。`StatsManager`（stats.json）：init/update/get/increment，字段为 SessionStats（input_tokens/output_tokens/turn_count/compact_count/current_context_tokens）；写失败时自动重建目录。 |
 | `summary.ts` | **摘要持久化**。`SummaryStore`：FULL_SUMMARY=`summaries/_full.md`；`clusterFile`/`capabilityFile` 分桶路径（summaries/cluster_{id}.md、summaries/summary.{capability}.md）；save/load；`saveClusterSummary`（clusterKey 白名单校验 `[a-zA-Z0-9_-]{1,64}`）、`getClusterSummary`（general 桶回退到全量摘要）。 |
 | `memory-store.ts` | **跨会话项目记忆**（/memory 命令）。`MemoryStore`：文件读写（readFile 路径），load/save/append/formatForContext（加 HEADER）/initializeIfNeeded。 |
 | `session-allowlist.ts` | **会话白名单**。`load/save/addTool/addCommand/isToolAllowed/isCommandAllowed`，存取 `allowlist.json`（allowedTools/allowedCommands）。 |
-| `companion-session.ts` | **陪伴模式会话**。`CompanionSessionManager`（全局单例）：按角色隔离目录 `~/.agent/companion/<角色名>/`，setCharacter/getOrCreate（自动建目录+初始化）、reset（归档对话文件、保留 world.json）、listCharacters（有 persona.md 的目录）、getLastCharacter/setLastCharacter（.last-character）。 |
+| `companion-session.ts` | **陪伴模式会话**。`CompanionSessionManager`（全局单例）：按角色隔离目录 `~/.agent/companion/<角色名>/`，setCharacter/getOrCreate（自动建目录+初始化）、reset（归档对话文件、保留 world/ 世界数据）、listCharacters（有 persona.md 的目录）、getLastCharacter/setLastCharacter（.last-character）。 |
 | 测试（2 个） | `memory.test.ts`、`memory-store.test.ts`。 |
 
 ### 2.2 数据流与关系
@@ -1152,7 +1156,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 ### 1.1 核心契约层
 
 **`interface.ts` — `Tool` 接口（全系统工具的唯一契约）**
-- 字段：`name`（全局唯一）、`description`（供 LLM 理解）、`companionDescription?`（陪伴模式下的拟人化替代描述）、`companionOnly?`（true 时普通模式工具列表完全不含，硬隔离）、`inputSchema`（JSON Schema）、`execute(args, signal?)`（返回 Promise<string>，signal 用于中断）、`executionMode?`（'sync' 默认 / 'asyncable'）、`setBackgroundRegistry?`（仅 asyncable 工具需要，注入后台进程注册表）。
+- 字段：`name`（全局唯一）、`description`（供 LLM 理解）、`modeDescription?`（模式专属拟人化替代描述，配 modeOnly 生效）、`modeOnly?`（值 = session type；声明后其他模式工具列表完全不含，硬隔离）、`inputSchema`（JSON Schema）、`execute(args, signal?)`（返回 Promise<string>，signal 用于中断）、`executionMode?`（'sync' 默认 / 'asyncable'）、`setBackgroundRegistry?`（仅 asyncable 工具需要，注入后台进程注册表）。
 - 设计要点：任何实现这 5-6 个字段的对象都是工具，天然可插拔且跨项目可移植（呼应项目模块化哲学第五条）。
 
 **`executor.ts` — `ToolExecutor` 调度执行器**
@@ -1305,7 +1309,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 - `RegisteredTool extends Tool`：附加 `source` 与 `mcpServer?`（来自哪个 MCP Server，mcp 工具名 `mcp__{清洗名}__{tool}`，清洗不可逆）。
 - 额外能力：
   - 热插拔追踪：`markHotAdded/getHotAddedNames/clearHotAdded`（供 hot-reload/tool-watcher 与 Zone 5 session_tools）。
-  - `getToolDefinitions(companionMode?)`：生成 LLM 用定义数组；过滤 companionOnly、陪伴模式取 companionDescription、按名排序。
+  - `getToolDefinitions(mode?)`：生成 LLM 用定义数组；过滤 modeOnly（值 = session type）、命中模式取 modeDescription、按名排序。
   - `registerConfigTools(configCenter)`：注册 4 个配置工具。
   - `registerRuntimeControlTools(agentLoop, providerRouter, skillRegistry, agentRegistry, configCenter, cwd, heartbeatScheduler?, mcpSystem?, modelRouter?)`：集中注册 30+ 运行时工具（分组见 §1.5.1），依赖项按存在性条件注册。
 - 向后兼容别名 `enableTool/disableTool`（deprecated）。
@@ -1551,7 +1555,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 ### 2.8 与模块外的依赖方向（channels/）
 - 向外（被使用）：`gateway/tui.ts`、`gateway/server.ts` 是主要调用方（注册/启动渠道、注册 send_channel_message 工具、注入 TuiChannel 回调、创建 UiProtocolSession 本地模式）。
-- 向内（引用）：`logging/logger`（manager）、`setup/config`（auto-detect）、`env/index`（ChannelsInfo）、`tools/interface` 类型（dispatcher）、`provider/interface`、`memory/session`（sessionId/sessionManager）、`orchestrator/loop`（OutputHandler）、`gateway/factory`（createAgent/AgentComponents）、`runtime/config-center`、`runtime/defaults`、`provider/model-channel-registry`、`provider/config`、`local-model`、`context/profiles`（switchRouter）、`prompts/loader`、`memory/events`、`companion/*`、`memory/stats`、`hot-reload/manifest-watcher`、`tools/ask-user`、`logging/logger`、`ui-protocol/*`（server/adapter/transport/domains/types）、`ui/command-registry`。
+- 向内（引用）：`logging/logger`（manager）、`setup/config`（auto-detect）、`env/index`（ChannelsInfo）、`tools/interface` 类型（dispatcher）、`provider/interface`、`memory/session`（sessionId/sessionManager）、`orchestrator/loop`（OutputHandler）、`gateway/factory`（createAgent/AgentComponents）、`runtime/config-center`、`runtime/defaults`、`provider/model-channel-registry`、`provider/config`、`local-model`、`context/profiles`（getRouterByName）、`prompts/loader`、`memory/events`、`companion/*`、`memory/stats`、`hot-reload/manifest-watcher`、`tools/ask-user`、`logging/logger`、`ui-protocol/*`（server/adapter/transport/domains/types）、`ui/command-registry`。
 
 ### 2.9 sessionId 前缀 → 渠道 契约（`src/session-channel.ts`，根级中立契约）
 
@@ -1706,7 +1710,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | bundle | list/create/delete/activate/deactivate/addTools/removeTools | ToolBundleRegistry（持久化 json） |
 | mcp | list/enable/disable/add/remove/reconnect（以配置文件为准） | MCPSystem |
 | plugin | list（内核插件挂载状态，B-4） | loop.pluginHost.list() |
-| companion | get/activate/deactivate/voices/voiceBind/voiceRegister/…. 切换流程与 companion_mode 工具逐行对齐 | ContextProfile(switchRouter) + CompanionSessionManager + VoiceLibrary/VoiceGenStore/SayHistoryStore/SceneReader（全部注入，协议层零业务依赖） |
+| companion | get/activate/deactivate/voices/voiceBind/voiceRegister/…. 切换流程与 companion_mode 工具对齐（委托 loop.syncRouter(mode)，模式真源 = session type） | RouterSwitcherLike(getRouter/syncRouter) + CompanionSessionManager + VoiceLibrary/VoiceGenStore/SayHistoryStore/SceneReader（全部注入，协议层零业务依赖） |
 | schedule | list/（写操作可选） | HeartbeatScheduler（loop.getScheduler） |
 | meta（内建） | get（版本/能力协商） | 协议服务器自身 |
 
@@ -2352,7 +2356,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 - 入口：`initSim(sim, customKinds)`（内置->自定义->默认量）、`evolveSim(sim, ambient, worldHours, customKinds)`（返回是否保留）、`listSimKinds()`。
 
 ### 4.3 `src/world-engine/store.ts` —— WorldStore 读写层
-纯数据、零 LLM、可独立测试。**并发模型：读并发、写串行**（写先改内存、再进队列顺序持久化，用临时文件+rename 保证磁盘始终完整）。数据落 `~/.agent/companion/<角色名>/world.json`，一个角色 = 一个世界（构造拒绝保留名 `default`）。
+纯数据、零 LLM、可独立测试。**并发模型：读并发、写串行**（写先改内存、再进队列顺序持久化，用临时文件+rename 保证磁盘始终完整）。数据落 `<sessionDir>/world/world.json`（v0.9.9+：陪伴 session 目录即角色目录，世界数据收进统一 world/ 子目录；构造可传 dataDir 覆盖 base，拒绝保留名 `default`）。一个角色 = 一个世界。
 - 读 API：`loadOrCreate`（加载或建空世界，返回是否新建）、`getWorld`、`readEnvironment(mainCharacters[])`（组装当前地点快照；邻近 visible 只带一层 desc；关系只取双方都在当前场景——避免关系网变大性能开销；simObjects 过滤当前地点取）；`hasContent`、`npcsAt(location)`、`listWorlds`。读数据时做旧文件兼容迁移（relationships/simObjects/customKinds/companionLocation/characters 兜底）。
 - 写 mutate 方法（全部 `mutate` 先改内存再 `persist`）：`setAmbient`（Ticker）、`placeNpc`（Ticker）、`upsertLocation`/`upsertNpc`（世界从对话增长，upsertNpc 后续字段丰富合并，aliases 并集去重）、`defineKind`/`spawnSimObject`（initSim 初始化）/`removeSimObject`、`placeObject`/`moveObject`/`removeObject`（静物与 simObject 通吃，清掉原布局边）、`harvestSim`（多茬生归零重长/一茬生删除）、`setRelationship`（**对称关系自动归一化**——同对任一方位已存在则原地更新，保证一对人只留一条；自指跳过）、`removeCharacter`/`setCharacter`（动态身份只增补不覆盖）+ `removeRelationship`/`removeNpc`、`moveUser`/`moveCompanion`/`moveBoth`、`setSceneOverride`、`addEvent`（截断 MAX_EVENTS=30）。
 - `batch(fn)`：批量修改合并一次持久化，**仅供受信任内部模块（Ticker 每次心跳）调用，绕过按方法所有权约束**。
@@ -2402,7 +2406,7 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 纯函数、确定性变换、不走 LLM。`MAX_TTS_TEXT_LEN=500`。`normalizeForTts(input, maxLen)` 依次剥离：代码块/行内代码、URL/链接（保留 markdown 文本）、markdown 结构符号（标题/列表/引用/强调）、`（动作）`/`(停顿)` 舞台指示、emoji 与装饰符号（Unicode 范围）、表格分隔线、收敛空白；超长截断加省略号。语义级改写（书面语->口语）不在这里做，由 companion_say 工具描述引导主 Agent 直接用口语写台词。
 
 ### 5.2 `src/companion/say-history.ts` —— SayHistoryStore 台词历史
-补齐「companion_say 表达实时推 UI 但不落盘」导致的文字台词无历史数据源缺口。数据：`~/.agent/companion/say-history.sqlite`，表 `say_history`，say_id 与 COMPANION_VOICE 事件 sayId 对齐。`SayHistoryEntry`（sayId/character/mode(speak|think)/text/tone?/think?/action?/at）。`append`（**幂等**：同 sayId 已存在跳过，防兜底路径与工具路径双写；每角色按 `DEFAULT_SAY_HISTORY_KEEP=500` 裁剪）、`listByCharacter`（角色维度时间倒序，before 分页游标）、`clearByCharacter`。`getSayHistoryStore()` 全局单例。写入口有二：companion_say 工具 execute 与 loop 兜底路径（模型未调工具时）。
+补齐「companion_say 表达实时推 UI 但不落盘」导致的文字台词无历史数据源缺口。数据：`~/.agent/companion/say-history.sqlite`，表 `say_history`，say_id 与 COMPANION_VOICE 事件 sayId 对齐。`SayHistoryEntry`（sayId/character/mode(speak|think)/text/tone?/think?/action?/at）。`append`（**幂等**：同 sayId 已存在跳过，防兜底路径与工具路径双写；每角色按 `DEFAULT_SAY_HISTORY_KEEP=500` 裁剪）、`listByCharacter`（角色维度时间倒序，before 分页游标）、`clearByCharacter`。`getSayHistoryStore()` 全局单例。写入口有二：companion_say 工具 execute 与 CompanionOutputProtocol 兜底路径（模型未调工具时）。
 
 ### 5.3 `src/companion/voice-library.ts` —— VoiceLibrary 音色库（TTS 输入侧）
 「资产目录」级别的参考声音：数量少、低频变更、人工可编辑 + JSON 索引，不用 sqlite。结构：`~/.agent/companion/voices/`（参考音频 3~10s 干净人声 wav/mp3）+ `voices.json` 索引（id/file/desc/bind/createdAt）；索引在新位置（voices/ 内部），读取兼容旧位置（父级 voices.json）并自动迁移。`VoiceEntry`。API：`list/get`/`fileOf`/`sizeOf`、`register`（复制音频进库，校验大小与扩展名、id 缺省=去扩展名、重复 id 抛错）、`bind`（绑定角色默认音色，同角色旧绑定自动解除）、`delete`（索引+文件）、`resolveForCharacter(character)`（角色 bind 解析）、`resolveRef(ref)`（条目 id/文件名/绝对路径均可）。解析链：voice 参数 -> 角色 bind -> config 兜底。**管理入口只在协议层**（companion.voices/voiceRegister/voiceDelete/voiceBind 设置页）——模型只能「选用」音色，不能增删改。`getVoiceLibrary()` 全局单例。
@@ -2422,8 +2426,8 @@ systemPrompt 来自 `loadPrompt('agents/<name>')`；`config?` 可按 name 覆写
 
 ### 5.6 与 world-engine 的关系（重点）
 - **两者均属陪伴模式但职责正交、无代码级相互依赖**：world-engine 维护「世界是什么」（bypass 侧 preTurn 注入环境旁白 / postTurn observe 更新世界）；companion 维护「台词怎么说/说出来」（companion_say 表达 -> say-history 落盘 + TTS 合成语音 -> UI 事件）。它们通过共享主循环（loop.ts）与配置（~/.agent/companion/）协同，不互相 import 类型。
-- 数据落点不同但是**同根目录布局**：world-engine 用 `.agent/companion/<角色>/world.json`、saves/、world-engine.json；companion 用 `.agent/companion/say-history.sqlite`、voices/、generated/。
-- 实际接线点：loop.ts 在旁路 postTurn 后处理「陪伴表达契约」——`companionExpressions`（companion_say speak）作为真正「表达」，普通 text 是内心独白、不驱动世界、不自动 TTS；模型未按契约调用 companion_say 时走**兜底路径**：把普通文本当作台词呈现（emit COMPANION_SAY + SayHistoryStore.append + CompanionVoiceService.onTurnEnd）。
+- 数据落点不同但是**同根目录布局**：world-engine 用 `.agent/companion/<角色>/world/`（world.json、saves/）、world-engine.json；companion 用 `.agent/companion/say-history.sqlite`、voices/、generated/。
+- 实际接线点：`CompanionRouter.outputProtocol`（`src/companion/output-protocol.ts`，挂在 IContextRouter 的**输出协议槽位**）——companion_say 的 speak 是真正「表达」，普通 text 是内心独白、不驱动世界、不自动 TTS；模型未按契约调用 companion_say 时走**兜底路径**：把普通文本当作台词呈现（emit COMPANION_SAY + SayHistoryStore.append + modeVoice.onTurnEnd）。loop 侧只认 `outputProtocol.onTurnEnd` 通用槽位，无陪伴分支。
 - 配置/路由层把二者并置：`gateway/bypass-wiring.ts`（挂 world-engine 插件 + activateForMode('companion')）与 `tools/companion-say.ts`/`tools/runtime-control/companion.ts`（companion 表达）都由同一 loop 装配链驱动；`context/router.ts` 的 companion Router 同时可访问 WorldEngine（narrate）与表达链。
 
 ---
