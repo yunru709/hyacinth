@@ -62,32 +62,84 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
 }
 
 /**
- * list_providers — list all registered providers with their types and models.
+ * list_providers — 两个视角合一（声明层 + 实例层）。
+ *
+ * 背景：旧实现只列 providerRouter（**运行时已实例化**的），于是
+ *   - 声明了但没 key 的厂商 → 不显示
+ *   - 声明了但还没被用过的 → 不显示
+ *   - 而描述写的是"所有已注册" ⇒ 极易被误读成"配置没生效"（2026-10-01 实际踩到）。
+ *
+ * 现在回答三个问题：
+ *   ① 我配了哪些 —— DECLARED（配置声明的全部）
+ *   ② 哪些现在能用、差什么 —— 每个标 ready / no key（附缺失的环境变量名）
+ *   ③ 手上真的有哪个 —— LOADED（router 注册表）+ active 标记
+ *
+ * 输出契约：首行 `Route mode: <mode>`；含 `DECLARED (n)` 与 `LOADED (n)` 两节。
  */
 export function createListProvidersTool(providerRouter: ProviderRouter): Tool {
   return {
     name: 'list_providers',
-    description: '列出所有已注册的 LLM 提供商，包含名称、类型和当前使用的模型。当前活跃的提供商前标有 *。',
+    description:
+      '列出提供商：① DECLARED＝配置里声明的全部（标明是否可用、缺哪个环境变量，回答"我配了哪些"）'
+      + '② LOADED＝运行时已实例化的实例。当前活跃者标 *。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
-        const names = providerRouter.list();
-        if (names.length === 0) {
-          return 'No providers registered.';
+        const routingInfo = providerRouter.getRoutingInfo();
+        const loaded = providerRouter.list();
+        // ⚠️ router 里注册的是**通道名**（main / compression …），不是厂商 id ——
+        // 两个命名空间。active 标记必须按**实例类型**对齐回声明层，否则声明层永远标不上。
+        const activeName = routingInfo.providerName;
+        const activeType = providerRouter.get(activeName)?.getProviderType() ?? activeName;
+
+        // ---- ① 声明层：配置里有哪些、哪些现在能用 ----
+        // 可用性判定与 ProviderManager.getAvailableProviders 同源（同一套 envKeys/checkAvailability 约定），
+        // 避免这里另造一套判定而与实际能否创建分叉。
+        const declaredRows: string[] = [];
+        try {
+          const { getProviderConfigLoader } = await import('../../provider/config.js');
+          const { listProviderFactories } = await import('../../provider/factory-registry.js');
+          const factories = new Map(listProviderFactories());
+
+          for (const meta of getProviderConfigLoader().getAll()) {
+            const factory = factories.get(meta.id);
+            const expectedKeys = factory?.envKeys ?? (factory?.meta ? [factory.meta.envKey] : [meta.envKey]);
+            const check = factory?.checkAvailability
+              ?? (() => expectedKeys.some((k) => k && process.env[k]));
+            const ready = !!factory && check();
+            const missing = expectedKeys.filter((k) => k && !process.env[k]);
+
+            const state = !factory ? 'NO-FACTORY' : ready ? 'ready' : 'no-key';
+            const detail = !factory
+              ? '无法创建（检查 baseUrl / protocol 声明）'
+              : ready
+                ? `default=${meta.defaultModel ?? '?'}`
+                : `needs ${missing.join(' or ') || 'API key'}`;
+            declaredRows.push(`${meta.id === activeType ? '*' : ' '} ${meta.id.padEnd(12)} ${state.padEnd(10)} ${detail}`);
+          }
+        } catch (err) {
+          // loader 未初始化（启动早期）等 —— 降级到只报实例层，不整段失败
+          declaredRows.push(`(声明层不可用: ${err instanceof Error ? err.message : String(err)})`);
         }
 
-        const routingInfo = providerRouter.getRoutingInfo();
+        // ---- ② 实例层：运行时真的有哪个（通道名 → 厂商/模型）----
+        const loadedRows = loaded.length
+          ? loaded.map((name) => {
+              const p = providerRouter.get(name);
+              const detail = p ? ` -> ${p.getProviderType()}/${p.getModel()}` : '';
+              return `${name === activeName ? '* ' : '  '}${name}${detail}`;
+            })
+          : ['(none)'];
 
-        const lines = names.map((name) => {
-          const provider = providerRouter.get(name);
-          if (!provider) return `- ${name}: [not found]`;
-          const isActive = name === routingInfo.providerName;
-        const displayModel = name === 'local' ? '(local backend)' : `${provider.getProviderType()} / ${provider.getModel()}`;
-        return `${isActive ? '* ' : '  '}${name}: ${displayModel}${isActive ? ' (active)' : ''}`;
-        });
-
-        lines.unshift(`Route mode: ${routingInfo.mode}`);
-        return lines.join('\n');
+        return [
+          `Route mode: ${routingInfo.mode}`,
+          '',
+          `DECLARED (${declaredRows.length}) — 配置声明的全部`,
+          ...declaredRows,
+          '',
+          `LOADED (${loaded.length}) — 运行时已实例化`,
+          ...loadedRows,
+        ].join('\n');
       } catch (err) {
         return `Error listing providers: ${err instanceof Error ? err.message : String(err)}`;
       }
