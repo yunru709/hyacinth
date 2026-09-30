@@ -7,7 +7,7 @@
  * knowledge/xref/generation 三个 host.mount 挂载点迁入贡献声明：先后关系由
  * needs/provides 声明 + 拓扑校验承载（缺依赖/环在解析期 fail-fast，而非注释）；
  * 生命周期仍走 PluginHost.mount（卸载回滚零损失）。TTS 句柄写回
- * loop.companionVoice（类 3 共享引用）在此批内完成。
+ * loop.modeVoice（类 3 共享引用）在此批内完成。
  */
 
 import { AssemblyRunner } from './assembly-runner.js';
@@ -84,7 +84,7 @@ export async function runPluginContributions(
       needs: ['pluginManager', 'cwd', 'configCenter', 'loop'],
       mount: async ({ pluginManager, cwd, configCenter, loop }) => {
         // GenerationRegistry/Service/CompanionVoiceService 装配在插件 activate 内（P3）；
-        // 仅 TTS 启用时插件才装配（其余 idle）。回填 loop.companionVoice 供陪伴模式使用。
+        // 仅 TTS 启用时插件才装配（其余 idle）。回填 loop.modeVoice 供陪伴模式使用。
         const pm = pluginManager as PluginManager;
         try {
           await pm.getHost().mount(createGenerationPlugin({
@@ -92,7 +92,7 @@ export async function runPluginContributions(
             configCenter: configCenter as RuntimeConfigCenter,
           }));
           const genApi = (pm.getHost().get(GENERATION_API_KEY) ?? null) as GenerationApi | null;
-          if (genApi?.tts) (loop as AgentLoop).companionVoice = genApi.tts;
+          if (genApi?.tts) (loop as AgentLoop).modeVoice = genApi.tts;
         } catch (err) {
           deps.logger.error('generation plugin mount failed', err instanceof Error ? err : new Error(String(err)));
         }

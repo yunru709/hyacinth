@@ -71,13 +71,6 @@ export interface AsyncAgentResult {
   error?: string;
 }
 
-/** 陪伴表达（companion_say 捕获，finalize 阶段 postTurn 消费） */
-export interface CompanionExpression {
-  text: string;
-  as: 'speak' | 'think';
-  tone?: string;
-}
-
 /** 工具执行结果摘要（afterToolExecute / finalize 用） */
 export interface ToolExecSummary {
   name: string;
@@ -103,8 +96,8 @@ export interface TurnState {
   hasPendingToolCalls: boolean;
   /** 陪伴模式旁路瞬态输入（本轮一次性，input 消费后置 null） */
   ephemeralInput: string | null;
-  /** 本轮是否陪伴模式（input 阶段决定文本化路径，runTurn 预填） */
-  companionMode: boolean;
+  /** 本轮模式名（= Router 名 = session type；runTurn 预填） */
+  modeName: string;
   /** 剥离最后一条 user 文本后的历史（compose 的输入，M4 context 阶段消费） */
   historyWithoutLastUser: Message[];
   /** 最后一条 user 文本消息（压缩重 compose 时剥离依据，input 产出） */
@@ -179,7 +172,6 @@ export interface TurnState {
   recentToolNames: string[];
 
   // ── finalize 阶段 ─────────────────────────────────────────
-  companionExpressions: CompanionExpression[];
   activePlan: Plan | undefined;
   /** Flow 状态机是否仍在运行（runTurn 预填；true 时 finalize 不写 stop 事件） */
   flowStillActive: boolean;
@@ -223,7 +215,7 @@ export function createTurnState(init: {
     userInput: init.userInput,
     hasPendingToolCalls: false,
     ephemeralInput: null,
-    companionMode: false,
+    modeName: 'normal',
     historyWithoutLastUser: [],
     lastUserTextMsg: null,
     uncompressedMsgs: [],
@@ -261,7 +253,6 @@ export function createTurnState(init: {
     toolResults: [],
     pendingAsyncResults: [],
     recentToolNames: init.session.recentToolNames,
-    companionExpressions: [],
     activePlan: init.session.activePlan,
     flowStillActive: false,
   };

@@ -78,7 +78,7 @@ function describeBytes(head: Buffer): string[] {
 export class ProbeTool implements Tool {
   readonly name = 'probe';
   readonly sideEffect = 'read' as const;
-  readonly companionDescription = '往文件里扎一针，看看周围啥样。';
+  readonly modeDescription = '往文件里扎一针，看看周围啥样。';
   readonly description =
     '在二进制 / 超大 / 编码混杂的文件里，按关键字提取「上下文窗口」。' +
     '同时按 utf-8 / utf-16le / utf-16be 三种编码搜索（UTF-16 文件里 UTF-8 关键字永远搜不到，且不报错——本工具会指明命中的编码）。' +

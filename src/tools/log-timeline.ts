@@ -33,7 +33,7 @@ export class LogTimelineTool implements Tool {
     '把日志（jsonl 或纯文本，可混排）压成**时间轴与聚合**：按 level / 事件计数、时间直方图、时间空档（gaps）、首次出现。' +
     '流式处理、聚合有界，适合几 MB 到几十 MB 的日志；只回聚合不回原文（可用 samples 少量取样）。' +
     '时间/级别/事件字段可从常见键名自动探测（ts / timestamp / lvl / level / type / msg …），也可显式指定。';
-  readonly companionDescription = '这堆日志里都发生了啥？';
+  readonly modeDescription = '这堆日志里都发生了啥？';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

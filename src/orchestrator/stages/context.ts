@@ -50,7 +50,6 @@ import type { ToolBundleRegistry } from '../../tools/bundle-registry.js';
 import type { ZoneBreakdown } from '../../context/composer.js';
 import type { CompressorOrchestrator, CompressionResult } from '../../context/compressor.js';
 import type { Injection } from '../../bypass/types.js';
-import { getActiveProfile } from '../../context/profiles.js';
 import { compressorUserId } from '../../provider/user-id.js';
 import { basename } from 'node:path';
 import { zone5TailBudgetRatio, poolMinHistory } from '../../context/context-config.js';
@@ -117,8 +116,7 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
 
       // ── 1. 工具过滤（Router 白名单 / bundle 展开 / 黑名单） ──
       const router = getRouter();
-      const profile = getActiveProfile(); // 保留向后兼容
-      let toolDefinitions = toolRegistry.getToolDefinitions(router.name === 'companion');
+      let toolDefinitions = toolRegistry.getToolDefinitions(router.name);
 
       if (router.toolAllowlist.length > 0) {
         const allowed = new Set(router.toolAllowlist);
@@ -228,7 +226,7 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
         fullHistory,
         personaDir: effectivePersonaDir,
         gitManager,
-        profile,
+        router,
         bypassInjections: state.bypassInjections,
         historyTransform,
       });
@@ -311,7 +309,7 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
             fullHistory,
             personaDir,
             gitManager,
-            profile,
+            router,
             bypassInjections: state.bypassInjections,
             historyTransform,
           });
@@ -430,7 +428,7 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
                   fullHistory,
                   personaDir,
                   gitManager,
-                  profile,
+                  router,
                   bypassInjections: state.bypassInjections,
                 });
 

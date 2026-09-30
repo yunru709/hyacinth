@@ -55,7 +55,7 @@ export function createCompanionSayTool(agentLoop: AgentLoop): Tool {
     name: 'companion_say',
     description: '把你此刻的表达（话语/动作/心声）传递给对方。',
     /** 陪伴专属：普通模式硬隔离（不可见也不可用） */
-    companionOnly: true,
+    modeOnly: 'companion',
     inputSchema: {
       type: 'object',
       properties: {
@@ -84,7 +84,7 @@ export function createCompanionSayTool(agentLoop: AgentLoop): Tool {
       required: ['text'],
     },
     async execute(args: Record<string, unknown>): Promise<string> {
-      // 运行时守卫：非陪伴模式拒绝执行（双保险，配合 companionOnly 可见性隔离）
+      // 运行时守卫：非陪伴模式拒绝执行（双保险，配合 modeOnly 可见性隔离）
       const routerName = (agentLoop.activeRouter as { name?: string } | undefined)?.name;
       if (routerName !== 'companion') {
         return 'error: companion_say 仅在陪伴模式可用。';
@@ -154,7 +154,7 @@ export function createCompanionSayTool(agentLoop: AgentLoop): Tool {
               }
             }
           }
-          agentLoop.companionVoice?.onTurnEnd(
+          agentLoop.modeVoice?.onTurnEnd(
             spoken,
             character,
             (type, payload) => agentLoop.emitUiEvent?.(type, payload),

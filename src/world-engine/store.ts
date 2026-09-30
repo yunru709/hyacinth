@@ -9,9 +9,11 @@
 //   - 写（所有 mutate 方法）先改内存，再进队列顺序持久化。
 //   - 持久化用"写临时文件 + rename"，保证磁盘上永远是完整文件。
 //
-// 目录布局（v0.9.6+：以角色名组织，一个角色一个世界）：
-//   .agent/companion/<name>/world.json     世界状态
-//   .agent/companion/<name>/saves/*.json   存档快照
+// 目录布局（v0.9.9+：世界数据收进统一 world/ 子目录）：
+//   <sessionDir>/world/world.json          世界状态（陪伴 session 目录即角色目录）
+//   <sessionDir>/world/saves/*.json        存档快照
+// dataDir 覆盖未传时 base = ~/.agent/companion/<name>（与旧布局同根，仅多一层 world/）。
+// 旧布局 world.json 不自动迁移：首次运行后世界按空世界重建（或手动搬移旧文件）。
 // ============================================================
 
 import * as fs from 'fs/promises';
@@ -43,6 +45,8 @@ function clearLayoutFor(loc: WorldLocation, object: string): void {
 export class WorldStore {
   private readonly worldsDir: string;
   private readonly characterName: string;
+  /** 数据目录覆盖（模式数据随会话走时由调用方传入 session 目录） */
+  private readonly dataDirOverride: string | undefined;
   /** 内存中的当前世界快照（读的唯一来源） */
   private world: World | null = null;
   /** 写队列：保证持久化顺序执行 */
@@ -50,19 +54,22 @@ export class WorldStore {
 
   /**
    * @param characterName 陪伴角色名（如"柔柔"）——一个角色 = 一个世界。
-   *   world.json 落在 ~/.agent/companion/<name>/world.json
+   * @param opts.dataDir 数据目录 base 覆盖（缺省 ~/.agent/companion/<name>；
+   *   世界数据固定落 <base>/world/，与角色 id 无关）。
    */
-  constructor(characterName: string) {
+  constructor(characterName: string, opts?: { dataDir?: string }) {
     if (!characterName || characterName === 'default') {
       throw new Error(`WorldStore: 拒绝保留名 "${characterName}"，请使用正确的角色名`);
     }
     this.worldsDir = path.join(os.homedir(), '.agent', 'companion');
     this.characterName = characterName;
+    this.dataDirOverride = opts?.dataDir;
   }
 
   // ── 路径（一个角色 = 一个世界，角色名即 worldId）──────
-  private worldDir(id: string): string {
-    return path.join(this.worldsDir, id);
+  private worldDir(_id: string): string {
+    // 世界数据固定落 <base>/world/（base = dataDir 覆盖 ?? 角色目录），与 id 无关
+    return path.join(this.dataDirOverride ?? path.join(this.worldsDir, this.characterName), 'world');
   }
   private worldFilePath(id: string): string {
     return path.join(this.worldDir(id), 'world.json');

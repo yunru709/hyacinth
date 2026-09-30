@@ -35,7 +35,6 @@ import type { MachineRegistry } from '../machine/index.js';
 import type { BypassManager } from '../bypass/manager.js';
 import type { ModelsConfig, LocalModelConfig } from '../provider/model-router.js';
 import { getModelContextWindow } from '../setup/model-defaults.js';
-import { getRouterNameForChannel } from '../context/profiles.js';
 import { createLogger } from '../logging/logger.js';
 import { getChannelSessionRegistry, registerChannelSession, createOwnedSessionGetter } from '../session-channel.js';
 
@@ -191,19 +190,29 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
   heartbeatScheduler.setHandler(async (task) => {
     logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type, channel: task.channel });
 
-    // 模式隔离：按**该任务所属渠道**的模式判断。
-    // ⚠ 不能用进程级聚合的 isCompanionModeActive()（"任一渠道在陪伴 ⇒ true"）——
-    //   那会让某个渠道进入陪伴模式后，**其它渠道的 normal 任务被静默跳过**。
-    // 判据与 loop 自身同源（getRouterNameForChannel 的回退语义 = getRouterForChannel），
-    // 保证"任务过滤"与"该渠道实际处于什么模式"永远一致。
-    // 无 channel 的任务（历史数据 / 手工登记）由该函数内部回退到全局默认名。
+    // 模式隔离：任务标签 = session type（开放域），过滤判据 = 「标签 === 目标 loop 的
+    // 当前 session type」（模式真源）。⚠ 不能用进程级聚合的「任一渠道在陪伴」判断——
+    // 那会让某个渠道进入陪伴模式后，其它渠道的任务被静默跳过。
+    // 陪伴任务跑主本地 loop（广播到持久渠道的调度策略保留）；其余标签按渠道解析判。
     if (task.mode) {
-      const channelMode = getRouterNameForChannel(task.channel) === 'companion' ? 'companion' : 'normal';
-      if (task.mode !== channelMode) {
-        logger.info(
-          `Task "${task.name}" skipped: mode "${task.mode}" ≠ channel "${channelMode}" (${task.channel ?? 'no-channel'})`,
-        );
-        return;
+      if (task.mode === 'companion') {
+        const mainSessionType = (loop as { sessionType?: string }).sessionType;
+        if (mainSessionType !== 'companion') {
+          logger.info(
+            `Task "${task.name}" skipped: mode "companion" ≠ main loop session type "${mainSessionType ?? 'normal'}"`,
+          );
+          return;
+        }
+      } else {
+        const targetLoop = resolveChannelLoop(task)?.loop as { sessionType?: string } | undefined;
+        // 渠道条目缺 sessionType（极简包装）→ 视为 normal：仅 normal 标签任务放行
+        const channelMode = targetLoop?.sessionType ?? 'normal';
+        if (channelMode !== task.mode) {
+          logger.info(
+            `Task "${task.name}" skipped: mode "${task.mode}" ≠ channel "${channelMode}" (${task.channel ?? 'no-channel'})`,
+          );
+          return;
+        }
       }
     }
 

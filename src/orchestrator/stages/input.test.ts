@@ -8,6 +8,7 @@ import { createInputStage, INPUT_STAGE_ID } from './input.js';
 import { checkContract, type SlotSpec, type StageContext } from '../../kernel/pipeline.js';
 import { createTurnState, type TurnState } from '../turn-state.js';
 import { extractTextContent } from '../../utils/misc.js';
+import { materializeExpressions } from '../../context/companion-filter.js';
 import type { Message } from '../../types.js';
 
 function makeCtx(services: Record<string, unknown>): StageContext<any> {
@@ -142,9 +143,13 @@ describe('input 阶段（builtin:input-normalize）', () => {
     const ctx = makeCtx({
       conversationStore: { readAll: vi.fn().mockResolvedValue(history) },
       sessionDir: '/tmp/test-session',
+      // 模式真源 = Router 钩子：companion Router 声明 materializeHistory
+      getRouter: () => ({
+        name: 'companion',
+        materializeHistory: (raw: Message[]) => materializeExpressions(raw),
+      }),
     });
     const state = baseState();
-    state.companionMode = true;
 
     const st = await stage.run(state, ctx);
 

@@ -104,7 +104,7 @@ function makeFakeLoop() {
     emitUiEvent(type: string, payload?: unknown) {
       events.push({ type, payload });
     },
-    companionVoice: {
+    modeVoice: {
       onTurnEnd(text: string, character: string, _notify: unknown, overrides?: { voice?: string; tone?: string }) {
         voiceCalls.push({ text, character, overrides });
       },

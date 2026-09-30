@@ -9,12 +9,12 @@ export interface Tool {
   name: string;
   /** 工具描述，供 LLM 理解工具用途 */
   description: string;
-  /** 陪伴模式下的工具描述（可选）。未提供时沿用 description。
-   *  用于将工具调用包装为自然行为（如「向朋友道别」而非「退出陪伴模式」）。 */
-  companionDescription?: string;
-  /** 陪伴模式专属（可选）。true 时普通模式的工具定义列表里完全不出现，
-   *  是硬隔离而不仅是描述替换。 */
-  companionOnly?: boolean;
+  /** 模式专属描述（可选）。仅在 modeOnly 声明的模式下生效，未提供时沿用 description。
+   *  用于将工具调用包装为该模式的自然行为（如陪伴模式「向朋友道别」而非「退出陪伴模式」）。 */
+  modeDescription?: string;
+  /** 模式专属（可选）。声明后，其他模式的工具定义列表里完全不出现，
+   *  是硬隔离而不仅是描述替换。值 = session type（如 'companion'）。 */
+  modeOnly?: string;
   /** 输入参数的 JSON Schema 定义 */
   inputSchema: Record<string, unknown>;
   /** 执行工具，返回结果文本。signal 可用于中断长时间运行的工具 */

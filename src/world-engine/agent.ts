@@ -415,8 +415,8 @@ export class WorldEngine extends BypassAgentBase {
   private observeQueue: Promise<void> = Promise.resolve();
   private pendingNarration = '';
 
-  constructor(characterName: string) {
-    const store = new WorldStore(characterName);
+  constructor(characterName: string, opts?: { worldDir?: string }) {
+    const store = new WorldStore(characterName, { dataDir: opts?.worldDir });
     super({
       name: 'world-engine',
       modes: ['companion'],

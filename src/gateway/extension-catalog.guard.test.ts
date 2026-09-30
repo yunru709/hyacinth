@@ -28,7 +28,7 @@ const SERVICE_KEYS = [
 // 注册原语 → 原语宿主（home）+ 已知调用方。新调用点出现 = 悄悄新开注册入口，必须登记目录后加入此表。
 const REGISTRAR_ALLOWLIST: Record<string, string[]> = {
   registerProviderFactory: ['provider/factory-registry.ts'],
-  registerRouter: ['context/profiles.ts', 'context/router.ts', 'gateway/arch-assembly.ts'],
+  registerRouter: ['context/profiles.ts', 'context/router.ts', 'context/mode-profile-loader.ts', 'gateway/arch-assembly.ts'],
   registerAdapter: ['generation/registry.ts'],
 };
 

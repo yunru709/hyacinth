@@ -29,7 +29,7 @@
  *     loop.kbState，components.kbState 共享同一引用（§5.2 收敛）
  *   - pendingAsyncResults：factory 建 → delegateTool 与 loop 共享（回填批）
  *   - bypassManager：bypass 插件 activate 注入 loop，mountBypassPlugins 取回
- *   - loop.companionVoice：generation 贡献 mount 内回填
+ *   - loop.modeVoice：generation 贡献 mount 内回填
  *   - loop.pendingImageInjections / loop.imageStore：wireReadToolImageHandler
  *   - channelLoops / channelSessions：setupChannelRegistries（globalThis 单例）
  *   - inject*ConfigCenter ×5：wireConfigCenter（config-wiring.ts）
@@ -118,7 +118,7 @@ export const ASSEMBLY_GRAPH: AssemblyEntry[] = [
   { id: 'permissionChain', kind: 'plugin', anchor: 'mountPlugin(createPermissionChainPlugin', needs: 'loop, denyTools', provides: '安全治理层', phase: 'P-D', note: 'fail-fast：失败抛错（bypass-wiring.ts）' },
   { id: 'bypassPlugin', kind: 'plugin', anchor: 'mountPlugin(createBypassPlugin', needs: 'loop, modelRouter, memoryFilePath', provides: 'bypassManager(注入 loop)', phase: 'P-D', note: 'fail-fast（bypass-wiring.ts）' },
   { id: 'worldEngineService', kind: 'plugin', anchor: "register('world-engine.createAgent'", needs: 'worldEngine 实现类', provides: '世界引擎工厂服务', phase: 'P-D', note: '内核只供能力服务（轻量引用）；世界引擎 agent 由 companion 目录插件创建驱动（agent-assembly.ts）' },
-  { id: 'generationPlugin', kind: 'plugin', anchor: 'getHost().mount(createGenerationPlugin', needs: 'cwd, configCenter', provides: 'generation.api/TTS', phase: 'P-D', note: 'TTS 回填 loop.companionVoice @shared' },
+  { id: 'generationPlugin', kind: 'plugin', anchor: 'getHost().mount(createGenerationPlugin', needs: 'cwd, configCenter', provides: 'generation.api/TTS', phase: 'P-D', note: 'TTS 回填 loop.modeVoice @shared' },
   { id: 'pluginContribBatch', kind: 'phase', anchor: 'runPluginContributions(', needs: 'pluginManager, configCenter, contextComposer, cwd, loop', provides: 'kbApi', phase: 'P-D', note: 'P6-1 装配贡献批（已外移 plugin-contributions.ts）：knowledge/xref/generation 挂载点，顺序由 needs/provides 承载' },
   { id: 'runtimeTools', kind: 'phase', anchor: 'toolRegistry.registerRuntimeControlTools', needs: 'loop, providerRouter, skillRegistry, agentRegistry, configCenter, scheduler, mcpSystem, modelRouter', provides: '30+ 运行时工具', phase: 'P-D', note: '接线抽离 tool-registration.ts（时序锚随迁）' },
   { id: 'toolBatch2', kind: 'phase', anchor: 'createTriggerCompressionTool({', needs: 'loop/flowRegistry/turnStore/agentRegistry/companionSessionManager', provides: 'compression/rollback/flow/askUser/companion 工具', phase: 'P-D', note: '接线抽离 tool-registration.ts' },

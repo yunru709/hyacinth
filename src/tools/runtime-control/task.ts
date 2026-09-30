@@ -14,7 +14,7 @@ export function createAddTaskTool(
   /** 可选：自动检测当前 sessionId 的函数 */
   getSessionId?: () => string | undefined,
   /** 可选：自动检测当前模式的函数（normal / companion） */
-  getMode?: () => 'normal' | 'companion' | undefined,
+  getMode?: () => string | undefined,
 ): Tool {
   return {
     name: 'add_task',
@@ -25,7 +25,7 @@ export function createAddTaskTool(
       '- "daily": 每日定点触发，如 { time: "09:30" }\n' +
       '- "fixed-time": 在指定 ISO 时间单次触发\n' +
       '- "random": 每周期 N 次随机触发，支持时间窗口、可变次数范围和概率权重。如每日 0-5 次、仅 9-18 点、午间权重 3 倍（periodMs: 86400000, countRange: { min: 0, max: 5, distribution: "extremes" }, timeWindow: { start: "09:00", end: "18:00" }, timeWeights: [{ time: "12:00", weight: 3.0 }]）',
-    companionDescription: '得记住他刚才说的东西，到时候叫他。',
+    modeDescription: '得记住他刚才说的东西，到时候叫他。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -128,12 +128,12 @@ export function createAddTaskTool(
  */
 export function createRemoveTaskTool(
   scheduler: HeartbeatScheduler,
-  getMode?: () => 'normal' | 'companion' | undefined,
+  getMode?: () => string | undefined,
 ): Tool {
   return {
     name: 'remove_task',
     description: '删除定时任务。优先按 id 精确删除，找不到时按 name 匹配。先用 list_tasks 确认要删除的任务 ID。',
-    companionDescription: '他之前说的那个东西不用管了，不叫了。',
+    modeDescription: '他之前说的那个东西不用管了，不叫了。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -178,12 +178,12 @@ export function createRemoveTaskTool(
  */
 export function createListTasksTool(
   scheduler: HeartbeatScheduler,
-  getMode?: () => 'normal' | 'companion' | undefined,
+  getMode?: () => string | undefined,
 ): Tool {
   return {
     name: 'list_tasks',
     description: '列出所有当前已注册的定时任务及其状态。',
-    companionDescription: '得回想一下，有哪些需要提醒他的东西。现况如何？',
+    modeDescription: '得回想一下，有哪些需要提醒他的东西。现况如何？',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
@@ -227,12 +227,12 @@ export function createListTasksTool(
  */
 export function createToggleTaskTool(
   scheduler: HeartbeatScheduler,
-  getMode?: () => 'normal' | 'companion' | undefined,
+  getMode?: () => string | undefined,
 ): Tool {
   return {
     name: 'toggle_task',
     description: '启用或禁用指定定时任务。禁用后任务保留但不触发。',
-    companionDescription: '关于提醒这个事儿，他有别的想法。',
+    modeDescription: '关于提醒这个事儿，他有别的想法。',
     inputSchema: {
       type: 'object',
       properties: {

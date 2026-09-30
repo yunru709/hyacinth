@@ -59,9 +59,9 @@ interface LoopState {
 
 /**
  * companion 域的 fake 状态（makeLoop 与 makeBackend 共享同一份，构成闭环）：
- *   - globalName：switchRouter 的副作用（对应全局 _activeRouterName）
- *   - activeName：loop.activeRouter.name（syncRouter 前二者可能不同步）
- *   - 复刻真实 syncRouter：名字相同直接 return，否则 onDeactivate → 切换 → onActivate
+ *   - activeName：loop.activeRouter.name（模式真源 = session type）
+ *   - 复刻真实 syncRouter(target)：显式目标名 → 同名幂等 return，
+ *     否则 onDeactivate → 切换 activeRouter → onActivate
  */
 interface CompanionFake {
   characters: string[];
@@ -71,7 +71,6 @@ interface CompanionFake {
   deactivateCalls: number;
   clearCacheCalls: number;
   setCharacterCalls: string[];
-  globalName: string;
   activeName: string;
   characterName: string;
 }
@@ -131,12 +130,14 @@ function makeLoop(state: LoopState, companion: CompanionFake): LoopLike {
         },
       };
     },
-    async syncRouter(): Promise<void> {
+    async syncRouter(target?: string): Promise<void> {
       companion.syncCalls += 1;
-      if (companion.activeName === companion.globalName) return;
+      const resolved = target ?? 'normal';
+      companion.switchCalls.push(resolved); // 显式切换目标（原 switchRouter 副作用）
+      if (companion.activeName === resolved) return;
       if (companion.activeName === 'companion') companion.deactivateCalls += 1;
-      companion.activeName = companion.globalName;
-      if (companion.activeName === 'companion') await runActivate({ switchSession });
+      companion.activeName = resolved;
+      if (resolved === 'companion') await runActivate({ switchSession });
     },
     // model.sources 用：各角色模型来源
     getModelSources: () => ({ assessment: 'main', planning: 'local' }),
@@ -296,30 +297,30 @@ function makeBackend(extras: BackendExtras): UiProtocolSessionBackend {
       listCharacters: () => extras.companion.characters,
     }),
     getRouterSwitcher: () => ({
-      switchRouter: (name: string) => {
+      // 按名取 CompanionRouter 单例（activeCompanionName 可变，映射到共享状态）
+      getRouter: (_name: string) => ({
+        get activeCompanionName() {
+          return extras.companion.characterName;
+        },
+        set activeCompanionName(v: string) {
+          extras.companion.characterName = v;
+        },
+        // companion 域「换角色」分支直接调用返回对象的 onActivate（绕过 syncRouter）
+        onActivate: async (l: unknown) => {
+          extras.companion.activateCalls += 1;
+          await (l as { switchSession(d: string): Promise<void> }).switchSession(
+            `/tmp/companion/${extras.companion.characterName}`,
+          );
+        },
+        onDeactivate: async () => {
+          extras.companion.deactivateCalls += 1;
+        },
+      }),
+      getActiveRouterName: () => extras.companion.activeName,
+      // 桥接背后即 loop.syncRouter(name)；本契约测试的 loop mock 已含同款闭环
+      syncRouter: async (name: string) => {
         extras.companion.switchCalls.push(name);
-        extras.companion.globalName = name;
-        // 返回 CompanionRouter 单例（activeCompanionName 可变，映射到共享状态）
-        return {
-          get activeCompanionName() {
-            return extras.companion.characterName;
-          },
-          set activeCompanionName(v: string) {
-            extras.companion.characterName = v;
-          },
-          // companion 域「换角色」分支直接调用返回对象的 onActivate（绕过 syncRouter）
-          onActivate: async (l: unknown) => {
-            extras.companion.activateCalls += 1;
-            await (l as { switchSession(d: string): Promise<void> }).switchSession(
-              `/tmp/companion/${extras.companion.characterName}`,
-            );
-          },
-          onDeactivate: async () => {
-            extras.companion.deactivateCalls += 1;
-          },
-        };
       },
-      getActiveRouterName: () => extras.companion.globalName,
       clearPromptCache: () => {
         extras.companion.clearCacheCalls += 1;
       },
@@ -355,7 +356,6 @@ async function makeServer(
       deactivateCalls: 0,
       clearCacheCalls: 0,
       setCharacterCalls: [],
-      globalName: 'normal',
       activeName: 'normal',
       characterName: '',
     },

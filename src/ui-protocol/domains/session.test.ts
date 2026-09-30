@@ -118,7 +118,7 @@ describe('会话域', () => {
     // 创建两个会话
     client.send({ kind: 'request', id: 'c1', method: 'session.create', params: { type: 'normal', channel: 'tui' } });
     await waitForResponse('c1');
-    client.send({ kind: 'request', id: 'c2', method: 'session.create', params: { type: 'precise', channel: 'webui' } });
+    client.send({ kind: 'request', id: 'c2', method: 'session.create', params: { type: 'companion', channel: 'webui' } });
     await waitForResponse('c2');
     const second = (await waitForResponse('c2')).result as any;
     const first = (await waitForResponse('c1')).result as any;

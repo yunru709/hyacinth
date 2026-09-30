@@ -13,7 +13,7 @@
  * ## 接口观察点记录（门槛 2 产出物之一，喂给 P6-2 服务拆分）
  * - [O1] compose 双签名重载（Layered / legacy 扁平）：实现侧靠 `'systemPrompt' in options`
  *   判别，可行；但接口未声明判别依据，第二个实现必须自行发明 —— 轻微缝。
- * - [O2] activeConditions 是可变字段但无「实现必须消费」的语义契约：内置读它（zone4/precise
+ * - [O2] activeConditions 是可变字段但无「实现必须消费」的语义契约：内置读它（zone4
  *   开关），knowledge 插件写它（add 'zone4_enabled'）；本实现无 zone4 概念，若静默忽略会导致
  *   插件写入的 zone4 语义静默失效 —— 接口缺少「字段读方」契约的实证。
  * - [O3] LayeredContext.zoneBreakdown 类型 `Record<string, number> & { total }` 允许任意键，

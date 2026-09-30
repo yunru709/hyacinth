@@ -64,7 +64,7 @@ export default {
 
     // ── 陪伴模式激活：切 Router + 回填角色 + 激活旁路模式 ──
     if (contextMode) {
-      contextMode.activateCompanion(characterName);
+      await contextMode.activateCompanion(characterName);
     }
     if (autoActivate && bypassManager) {
       await bypassManager.activateForMode('companion').catch(() => {});
@@ -90,7 +90,7 @@ export default {
       await bypassManager.deactivateAll().catch(() => {});
     }
     if (contextMode) {
-      contextMode.deactivateCompanion();
+      await contextMode.deactivateCompanion();
     }
     api.logger.info('companion mode deactivated');
   },

@@ -12,7 +12,7 @@ import {
   applyServiceReplacements,
   STAGE_SERVICE_KEYS,
 } from './arch-assembly.js';
-import { switchRouter, getActiveRouterName } from '../context/profiles.js';
+import { getRouterByName } from '../context/profiles.js';
 import type { Provider } from '../provider/interface.js';
 
 // P-Config 收敛后 manifestPaths 只读全局 ~/.agent/extension-registry.json：
@@ -222,7 +222,7 @@ describe('多 kind 分发表（source/agent/router/slot/service）', () => {
     expect(extensionRegistry.get('agent:helper')?.effective).toBe(true);
   });
 
-  it('router: → profiles.registerRouter 同名覆盖出厂路由，可 switchRouter 命中', async () => {
+  it('router: → profiles.registerRouter 同名注册，getRouterByName 可按名解析', async () => {
     const ROUTER_NAME = `ext-router-${Date.now()}`;
     manifestWith('router:normal', writeUserModule('router.js', `
       export default { name: ${JSON.stringify(ROUTER_NAME)}, toolAllowlist: [], toolBlacklist: [], skipSections: [], skipRuntimeSources: [], sourceOverrides: {} };
@@ -231,8 +231,8 @@ describe('多 kind 分发表（source/agent/router/slot/service）', () => {
     await applyRouterReplacements({ cwd: tmpDir, extensionRegistry });
 
     expect(extensionRegistry.get('router:normal')?.effective).toBe(true);
-    switchRouter(ROUTER_NAME);
-    expect(getActiveRouterName()).toBe(ROUTER_NAME);
+    // 模式真源 = session type：注册后按名可解析（loop.syncRouter(type) 即命中）
+    expect(getRouterByName(ROUTER_NAME)).toBeDefined();
   });
 
   it('slot: → pipeline.registerStageModule 同名替换，记录生效 + replacedFrom 出厂 impl', async () => {

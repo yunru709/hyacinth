@@ -340,7 +340,7 @@ export interface SessionMeta {
   id: string;
   createdAt: string;
   updatedAt: string;
-  /** 开放类型：内置 normal/precise/companion，插件渠道可扩展（如 hub） */
+  /** 开放类型：内置 normal/companion，插件渠道可扩展（如 hub） */
   type?: string;
   channel?: string;
 }

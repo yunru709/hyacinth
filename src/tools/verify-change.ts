@@ -35,7 +35,7 @@ export class VerifyChangeTool implements Tool {
     '改完代码后一次跑完该跑的验证：类型检查（tsc --noEmit）+ 定向测试（按共址命名推导关联测试文件）+ 可选分层守卫。' +
     '默认对 git 未提交改动生效，也可用 paths 指定。只执行固定命令，不接受任意 shell 字符串。' +
     '用于替代"手工 build + 跑测试 + 比对 git status"的重复劳动。';
-  readonly companionDescription = '我改完了，验一下。';
+  readonly modeDescription = '我改完了，验一下。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

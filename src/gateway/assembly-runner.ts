@@ -15,7 +15,7 @@
  * 设计边界（X1 最小面，P6-1）：
  * - deps 值来自 factory 顺序代码 provide() 的真实对象（闭包注入语义保留，
  *   见 assembly-graph.ts 头部「类 1 懒求值」说明）或贡献 mount 的返回值；
- * - 共享可变引用（loopRef/companionVoice 等「建完写回」）不属于本原语表达
+ * - 共享可变引用（loopRef/modeVoice 等「建完写回」）不属于本原语表达
  *   范围，仍由 factory 顺序回填（assembly-graph.ts 头部「类 3」），P6-2 再议。
  *
  * P6-2/P6-3 服务拆分时，同一原语承载更多装配条目（assembly-graph.ts 为施工图）。

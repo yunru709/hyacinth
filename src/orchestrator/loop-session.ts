@@ -1,8 +1,8 @@
 /**
  * 会话 JSONL 清理（B2 拆出）——陪伴模式的对话文件痕迹处理。
  *
- * 原为 loop.ts 的三个私有方法：removeLastRoundFromJsonl / cleanCompanionJsonl /
- * removeTriggerFromJsonl（~185 行）。纯文件操作，唯一依赖是 sessionDir，
+ * 原为 loop.ts 的三个私有方法：removeLastRoundFromJsonl / eraseLastToolRoundJsonl /
+ * removeTaskTriggerJsonl（~185 行）。纯文件操作，唯一依赖是 sessionDir，
  * 故拆为模块级函数；AgentLoop 保留同名薄壳方法（router.ts 经 loop 调用）。
  * 行为零变更：纯搬移，仅 `this.sessionDir` 参数化为 `sessionDir`。
  */
@@ -67,7 +67,7 @@ export async function removeLastRoundFromJsonl(sessionDir: string): Promise<void
  * - 其他工具 → 整轮砍掉（原有行为）
  * - 找不到触发消息（跨 session） → 处理整个文件
  */
-export async function cleanCompanionJsonl(sessionDir: string): Promise<void> {
+export async function eraseLastToolRoundJsonl(sessionDir: string): Promise<void> {
   try {
     const jsonlPath = path.join(sessionDir, 'conversation.jsonl');
     const fsSync = await import('node:fs');
@@ -150,7 +150,7 @@ export async function cleanCompanionJsonl(sessionDir: string): Promise<void> {
  * 陪伴模式定时任务专用：只移除触发提示词和工具链，保留模型自然回复。
  * 效果：模型看起来像是"主动"搭话，而非响应系统指令。
  */
-export async function removeTriggerFromJsonl(sessionDir: string): Promise<void> {
+export async function removeTaskTriggerJsonl(sessionDir: string): Promise<void> {
   try {
     const jsonlPath = path.join(sessionDir, 'conversation.jsonl');
     const fsSync = await import('node:fs');

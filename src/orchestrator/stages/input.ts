@@ -27,7 +27,7 @@ export function createInputStage(): StageModule<TurnState, StageServiceMap> {
     name: 'input-normalize',
     version: '1.0.0',
     // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明
-    reads: ['history', 'userInput', 'ephemeralInput', 'companionMode'],
+    reads: ['history', 'userInput', 'ephemeralInput', 'modeName'],
     writes: ['history', 'userInput', 'hasPendingToolCalls', 'historyWithoutLastUser', 'lastUserTextMsg', 'uncompressedMsgs', 'ephemeralInput'],
     async run(state: TurnState, ctx: KernelStageContext): Promise<TurnState> {
       // 历史读入（本轮从会话存储拉取原始历史）
@@ -58,9 +58,10 @@ export function createInputStage(): StageModule<TurnState, StageServiceMap> {
         (m) => m.role === 'assistant' && hasToolUseContent(m.content),
       );
 
-      // 陪伴模式：表达先文本化再进压缩（压缩器/摘要看到自然文本，
-      // 台词不因「工具输出」被摘要丢弃导致失忆；普通模式维持原样）
-      const uncompressedMsgs = state.companionMode ? materializeExpressions(raw) : raw;
+      // 模式历史物化：表达先文本化再进压缩（压缩器/摘要看到自然文本，
+      // 台词不因「工具输出」被摘要丢弃导致失忆；无该钩子的模式维持原样）
+      const router = ctx.get('getRouter')?.();
+      const uncompressedMsgs = router?.materializeHistory ? router.materializeHistory(raw) : raw;
 
       // 从 history 中排除最后一条 user 文本消息（compose 会把 userInput 重新添加为
       // 独立消息）。判据必须与下方清空 userInputText 的判据**同源**：曾用

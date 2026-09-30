@@ -18,7 +18,7 @@
  *   static     — 直接加载 prompt 文件，每次 compose 注入
  *   runtime    — 由 section-resolver.ts 的 resolveRuntime() 动态生成
  *   retrieval  — 检索型（如知识库、项目上下文），按需拉取
- *   conditional — 满足 condition 时才注入（如 precise_mode）
+ *   conditional — 满足 condition 时才注入（condition 对应 composer.activeConditions 的 key）
  *   template   — 含 {{变量}}，由 resolveTemplate() 渲染
  *
  * ── 各 Section 的注册位置索引 ───────────────────────────
@@ -71,7 +71,6 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       role: 'system',
       sections: [
         // ── 核心身份 ──
-        { name: 'persona_precise',         source: 'prompts/precise/persona',       priority: 0,  type: 'conditional', condition: 'precise_mode', description: '精确模式约束（替代 persona）' },
         { name: 'persona_soul',            source: 'prompts/persona',               priority: 1,  type: 'static',     description: '用户 persona（SOUL/IDENTITY/USER）' },
         // { name: 'environment',             source: 'runtime:env',                   priority: 10, type: 'runtime',    description: '运行环境信息 → 已迁移为 system_info / channel_info 工具' },
         // framework_capabilities 已移除（2026-07-10）：工具描述已通过 API tools 字段提供，

@@ -10,7 +10,13 @@
  */
 import { WorldEngine } from '../world-engine/agent.js';
 
-/** 世界引擎工厂：角色名 → WorldEngine 实例（供目录插件/CompanionRouter 创建世界） */
-export function createWorldEngineFactory(): (name: string) => WorldEngine {
-  return (name: string) => new WorldEngine(name);
+/** 世界引擎创建选项 */
+export interface WorldEngineCreateOpts {
+  /** 数据目录覆盖：世界状态随会话走时传陪伴 session 目录（world 数据落 <dir>/world/） */
+  worldDir?: string;
+}
+
+/** 世界引擎工厂：(角色名, 选项) → WorldEngine 实例（供目录插件/CompanionRouter 创建世界） */
+export function createWorldEngineFactory(): (name: string, opts?: WorldEngineCreateOpts) => WorldEngine {
+  return (name: string, opts?: WorldEngineCreateOpts) => new WorldEngine(name, opts);
 }

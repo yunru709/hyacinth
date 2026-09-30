@@ -206,7 +206,7 @@ export async function createAgentAssembly(
   const flowRegistry = baseResults.get('flowRegistry') as MachineRegistry;
 
   // ── persona 引导 + Prompt 同步 + Flow 持久化恢复（行数收尾第十七批：bootstrap-wiring.ts）──
-  const effectivePersonaDir = await bootstrapPersona(personaDir);
+  const effectivePersonaDir = await bootstrapPersona(personaDir, cwd);
   await restoreFlowState(flowRegistry, sessionDir);
 
   // ── Provider Config Loader（时序锚：必须在 getDefaultConfig 之前，确保 providerDefault 读到 JSON）──
@@ -482,6 +482,10 @@ export async function createAgentAssembly(
     pluginHost: pluginManager.getHost(),
   });
 
+  // ── 模式真源注入：boot 的 sessionType（恢复自 meta.json；新建为 startup.defaultMode）
+  // 决定首次 syncRouter() 激活哪个 Router（陪伴默认启动等）。
+  loop.setSessionType(sessionType);
+
   // ── 分发表（阶段 4.2）：service/slot 面需 loop 就绪（stageServices / kernel.pipeline） ──
   // service:<key> → loop.setStageService；slot:* → pluginHost.get('kernel.pipeline').registerStageModule
   await applyServiceReplacements({
@@ -507,7 +511,7 @@ export async function createAgentAssembly(
   //  world-engine.createAgent —— 世界引擎工厂（实现类留在内核库，装配/激活由
   //  companion 目录插件驱动 —— 世界引擎不再是内核插件，不被无条件 mount）。
   // 目录插件经 api.getService 取用。
-  pluginManager.getHost().register('context.mode', createContextModeService());
+  pluginManager.getHost().register('context.mode', createContextModeService(loop));
   pluginManager.getHost().register('world-engine.createAgent', createWorldEngineFactory());
 
   await pluginManager.loadAll();
@@ -671,6 +675,7 @@ export async function createAgentAssembly(
     extensionRegistry,
     pipeline: pipelineSlots,
     sources: contextComposer.listSourceNames(),
+    routerName: loop.activeRouter?.name,
   });
 
   // ── Hot Reload Manager（装配已迁入 runtime-contributions.ts）──

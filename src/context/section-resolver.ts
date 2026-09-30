@@ -8,7 +8,7 @@
 //      根据 mode（replace/append）注入内容。
 //   2. activeConditions — 条件开关。
 //      通过 ResolverContext.activeConditions 控制 conditional section
-//      是否启用（如 precise_mode 触发时注入精确模式相关 prompt）。
+//      是否启用（condition 命中开关名才注入，如 zone4_enabled）。
 //
 // 调用链：composer → resolveSection → 根据 sec.type 分发到不同处理逻辑。
 // 旁路注入优先级高于正常解析，inject mode='replace' 完全替代原内容。
@@ -19,7 +19,6 @@ import type { SectionEntry } from './manifest-types.js';
 import type { TokenCounter } from './tokenizer.js';
 import type { ContextSource } from './interface.js';
 import type { GitManager } from '../evolution/git-manager.js';
-import type { ContextProfile } from './profiles.js';
 import type { IContextRouter } from './router.js';
 import type { Injection } from '../bypass/types.js';
 import { loadPrompt, renderPrompt } from '../prompts/loader.js';
@@ -50,10 +49,8 @@ export interface ResolverContext {
   gitManager?: GitManager;
   tokenCounter: TokenCounter;
   activeConditions?: Set<string>;
-  /** 当前模式 profile——保留向后兼容，新代码使用 router */
-  profile: ContextProfile;
-  /** 当前模式 router——统一上下文路由入口 */
-  router: IContextRouter;
+  /** 当前模式 router——统一上下文路由入口（模式真源 = session type；子 Agent 等简装组装方可缺省） */
+  router?: IContextRouter;
   /** 旁路Agent注入列表（由 BypassManager.preTurn 产出） */
   bypassInjections?: Injection[];
 }
@@ -72,7 +69,7 @@ export async function resolveSection(
   ctx: ResolverContext,
 ): Promise<string | undefined> {
   // Router 的 beforeSection 钩子：在正常解析前介入
-  if (ctx.router.beforeSection) {
+  if (ctx.router?.beforeSection) {
     const preempted = await ctx.router.beforeSection(sec, ctx);
     if (preempted !== undefined) {
       return preempted || undefined; // null → undefined（跳过此 section）
@@ -110,8 +107,6 @@ function resolveStatic(sec: SectionEntry, ctx?: ResolverContext): string | undef
   const router = ctx?.router;
 
   if (sec.name === 'persona_soul') {
-    // precise_mode 保持原有 activeConditions 逻辑
-    if (ctx?.activeConditions?.has('precise_mode')) return undefined;
     // Router 定义了替代 persona 来源 → 加载替代内容，跳过默认 SOUL
     // 注：resolve 字段用于 runtime section（异步），static section 只用 source + append。
     // 如需完全异步接管 persona，应使用 beforeSection 钩子。
@@ -223,9 +218,9 @@ async function resolveRuntime(
     return undefined;
   }
 
-  // Router（或 profile）指定跳过的 runtime source
+  // Router 指定跳过的 runtime source
   const runtimeKey = src.startsWith('runtime:') ? src.slice('runtime:'.length) : '';
-  const skipSources = ctx.router?.skipRuntimeSources ?? ctx.profile.skipRuntimeSources;
+  const skipSources = ctx.router?.skipRuntimeSources ?? [];
   if (skipSources.includes(runtimeKey)) {
     return undefined;
   }
@@ -269,10 +264,10 @@ async function resolveRuntime(
     return undefined;
   }
 
-  // Router（或 profile）指定了替代 memory 来源 → 路由到对应 ContextSource
+  // Router 指定了替代 memory 来源 → 路由到对应 ContextSource
   if (src === 'runtime:memory') {
     const memoryOverride = ctx.router?.sourceOverrides['memory'];
-    const altSourceName = memoryOverride?.source ?? ctx.profile.memorySource;
+    const altSourceName = memoryOverride?.source;
     if (altSourceName) {
       const altSource = ctx.sources?.get(altSourceName);
       if (altSource?.getContent) {
@@ -301,7 +296,7 @@ async function resolveRetrieval(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): Promise<string | undefined> {
-  const routerSkipSections = ctx.router?.skipSections ?? ctx.profile.skipSections;
+  const routerSkipSections = ctx.router?.skipSections ?? [];
   if (routerSkipSections.includes(sec.name)) {
     return undefined;
   }
@@ -362,12 +357,9 @@ function resolveConditional(
   sec: SectionEntry,
   ctx: ResolverContext,
 ): string | undefined {
-  if (sec.condition === 'precise_mode') {
-    if (!ctx.activeConditions?.has('precise_mode')) return undefined;
-    return resolveStatic(sec, ctx);
-  }
-
-  return undefined;
+  // 通用条件 section：condition 命中 composer.activeConditions 才注入
+  if (sec.condition && !ctx.activeConditions?.has(sec.condition)) return undefined;
+  return resolveStatic(sec, ctx);
 }
 
 // --- Helpers ---

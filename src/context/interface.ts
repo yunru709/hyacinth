@@ -25,7 +25,7 @@ export interface ContextComposerLike {
   compose(options: LayeredComposeOptions): Promise<LayeredContext>;
   /** 平面组装（旧 ComposeOptions 路径） */
   compose(options: ComposeOptions): Promise<Message[]>;
-  /** 条件开关（如 zone4_enabled / precise_mode） */
+  /** 条件开关（如 zone4_enabled） */
   activeConditions: Set<string>;
 }
 

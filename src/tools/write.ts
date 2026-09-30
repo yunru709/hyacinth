@@ -22,7 +22,7 @@ export class WriteTool implements Tool {
   readonly sideEffect = 'write' as const;
   readonly description =
     '创建或覆盖文件。自动创建不存在的父目录。写入后返回文件路径和行数。';
-  readonly companionDescription = '写东西喽。';
+  readonly modeDescription = '写东西喽。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

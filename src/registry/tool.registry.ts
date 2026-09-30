@@ -2,7 +2,6 @@ import { GenericRegistry, type RegistryItem } from './base.js';
 import type { Tool } from '../tools/interface.js';
 import type { ToolDefinition } from '../types.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
-import { getRouterNameForChannel } from '../context/profiles.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
@@ -106,18 +105,17 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
    * 用于发送给 LLM API，告知可用工具及其参数格式
    * 禁用的工具不会被包含。
    *
-   * 陪伴模式下优先使用 companionDescription（拟人化描述），
+   * 模式（= session type）下优先使用 modeDescription（模式化描述），
    * 避免「退出陪伴模式」等人设冲突措辞。
    */
-  getToolDefinitions(companionMode?: boolean): ToolDefinition[] {
-    const isCompanion = companionMode ?? false;
+  getToolDefinitions(mode?: string): ToolDefinition[] {
     return this.getAll()
-      // 陪伴专属工具在普通模式硬隔离（不可见 → 不可调用）
-      .filter((tool) => isCompanion || !tool.companionOnly)
+      // 模式专属工具在其他模式硬隔离（不可见 → 不可调用）
+      .filter((tool) => !tool.modeOnly || tool.modeOnly === mode)
       .map((tool) => ({
         name: tool.name,
-        description: isCompanion && tool.companionDescription
-          ? tool.companionDescription
+        description: tool.modeOnly === mode && tool.modeDescription
+          ? tool.modeDescription
           : tool.description,
         input_schema: tool.inputSchema,
       }))
@@ -256,15 +254,9 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
         } catch { /* 读取失败不阻塞 */ }
         return undefined;
       };
-      // 自动检测当前模式（正常/陪伴），用于任务隔离。
-      // ⚠ 必须**按本 loop 所属渠道**取（getChannel() 读的正是本会话 meta.json）：
-      //   用全局 getActiveRouterName() 的话，TUI 处于陪伴模式时，
-      //   在别的渠道（如微信）建的任务会被**错标成陪伴任务**从而被隔离。
-      // 判据与调度侧的过滤、以及 loop 自身的模式判定三者同源。
-      const getMode = (): 'normal' | 'companion' | undefined => {
-        const routerName = getRouterNameForChannel(getChannel());
-        return routerName === 'companion' ? 'companion' : 'normal';
-      };
+      // 自动检测当前模式用于任务隔离：任务标签 = session type 原值（开放域，
+      // normal/companion/coding…），调度侧按「标签 === 目标 loop 的 sessionType」过滤。
+      const getMode = (): string | undefined => agentLoop?.sessionType;
       this.register(createAddTaskTool(heartbeatScheduler, getChannel, getSessionId, getMode));
       this.register(createRemoveTaskTool(heartbeatScheduler, getMode));
       this.register(createListTasksTool(heartbeatScheduler, getMode));

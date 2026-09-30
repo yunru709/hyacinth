@@ -31,7 +31,7 @@ import {
 } from '../supervisor/extension-registry.js';
 import type { ManifestAccessLike } from '../hot-reload/extension-registry-watcher.js';
 import { ASSEMBLY_GRAPH } from './assembly-graph.js';
-import { getActiveRouter, registerRouter } from '../context/profiles.js';
+import { registerRouter } from '../context/profiles.js';
 import type { IContextRouter } from '../context/router.js';
 import type { ContextSource } from '../context/interface.js';
 import type { LayeredContextComposer } from '../context/composer.js';
@@ -115,6 +115,8 @@ export function recordBuiltinBaselines(deps: {
   extensionRegistry: ExtensionRegistry;
   pipeline: PipelineSlotDecl[];
   sources: string[];
+  /** 当前激活 Router 名（模式真源 = session type；装配完成后传入 loop.activeRouter.name） */
+  routerName?: string;
 }): void {
   const reg = deps.extensionRegistry;
   if (!reg.get('provider:main')) {
@@ -127,12 +129,8 @@ export function recordBuiltinBaselines(deps: {
     }
   }
   if (!reg.get('router:active')) {
-    let name = 'normal';
-    try {
-      name = getActiveRouter().name;
-    } catch {
-      // 路由未初始化（极端装配序），按出厂 normal 记录
-    }
+    // 模式真源 = session type：装配完成后由调用方回填 loop.activeRouter 名（缺省 normal）
+    const name = deps.routerName ?? 'normal';
     reg.record({ point: 'router:active', source: 'builtin', impl: `router:${name}`, enabled: true, effective: true });
   }
   for (const name of deps.sources) {

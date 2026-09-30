@@ -21,7 +21,6 @@ import { PluginManager } from './manager.js';
 import { createBypassPlugin } from './bypass-plugin.js';
 import { createContextModeService } from '../gateway/context-mode-service.js';
 import { WorldEngine } from '../world-engine/agent.js';
-import { switchRouter, getActiveRouterName } from '../context/profiles.js';
 import type { BypassManager } from '../bypass/manager.js';
 
 // P-Config 收敛后插件统一走全局 ~/.agent/plugins/ + ~/.agent/plugins.config.json：
@@ -74,8 +73,17 @@ function wireKernelHost(host: ReturnType<PluginManager['getHost']>, loop: { bypa
   }));
   // 内核能力服务（轻量引用）：世界引擎工厂 + 模式切换 —— 不 mount 任何世界引擎插件
   hostAny.register('world-engine.createAgent', (name: string) => new WorldEngine(name));
-  hostAny.register('context.mode', createContextModeService());
+  // 模式服务绑定 fake loop（模式真源 = session type；syncRouter 按名改写 activeRouter）
+  const fakeLoop: any = { bypassManager: undefined, activeRouter: { name: 'normal' } };
+  fakeLoop.syncRouter = async (target?: string) => {
+    fakeLoop.activeRouter = { name: target ?? 'normal' };
+  };
+  hostAny.register('context.mode', createContextModeService(fakeLoop));
+  wireKernelHostLoop = fakeLoop;
 }
+
+/** 最近一次 wireKernelHost 注册的 fake loop（供测试断言 activeRouter 名） */
+let wireKernelHostLoop: { activeRouter: { name: string } } | null = null;
 
 describe('companion 目录插件（自带插件 · 内核只供能力服务）', () => {
   let tmp = '';
@@ -87,7 +95,7 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
   });
 
   afterEach(() => {
-    try { switchRouter('normal'); } catch { /* 未注册忽略 */ }
+    wireKernelHostLoop = null;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -116,7 +124,7 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
 
     // 陪伴模式已激活：Router 切换 + bypass 模式活跃
     const mode = host.get('context.mode') as { isCompanionActive(): boolean };
-    expect(getActiveRouterName()).toBe('companion');
+    expect(wireKernelHostLoop?.activeRouter.name).toBe('companion');
     expect(mode.isCompanionActive()).toBe(true);
     expect(loop.bypassManager?.isActive('world-engine')).toBe(true);
 
@@ -148,10 +156,10 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
     expect(loop.bypassManager?.getAgent('world-engine')).toBeUndefined();
     expect(host.get('world-engine.agent')).toBeUndefined();
     // 模式仍激活（陪伴会话可无世界引擎运行）
-    expect(getActiveRouterName()).toBe('companion');
+    expect(wireKernelHostLoop?.activeRouter.name).toBe('companion');
 
     await mgr.deactivate('companion');
-    expect(getActiveRouterName()).toBe('normal');
+    expect(wireKernelHostLoop?.activeRouter.name).toBe('normal');
 
     await host.dispose();
   });

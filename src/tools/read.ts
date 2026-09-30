@@ -226,7 +226,7 @@ async function readPdf(filePath: string, stat: Stats): Promise<string> {
 export class ReadTool implements Tool {
   readonly name = 'read';
   readonly description = '读取磁盘上的文件。支持 offset/limit 分块读取。图片文件返回尺寸信息，PDF 返回页数。每次最多读取 2000 行，大文件请用 offset+limit 分段读取。另支持结构模式：outline=true 列出该文件的符号大纲（函数/类/方法+行号），symbol="名字" 只读该声明的区间 —— 二者都不依赖 xref 索引，永不"过期"。';
-  readonly companionDescription = '需要看点别的东西了。';
+  readonly modeDescription = '需要看点别的东西了。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {

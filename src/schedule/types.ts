@@ -105,12 +105,12 @@ export interface ScheduledTask {
   enabled: boolean;
   /**
    * 任务所属模式（可选）。
-   * - undefined: 无模式限制，正常/陪伴模式下均触发（向后兼容）
-   * - 'normal': 仅在正常模式下触发
-   * - 'companion': 仅在陪伴模式下触发
-   * add_task 工具会自动根据当前模式设置此字段。
+   * - undefined: 无模式限制，任意模式下均触发（向后兼容）
+   * - 值 = session type（模式真源）：'normal' / 'companion' / 'coding'…开放域。
+   *   过滤判据 = 「标签 === 目标 loop 的当前 sessionType」。
+   * add_task 工具会自动根据当前会话类型设置此字段。
    */
-  mode?: 'normal' | 'companion';
+  mode?: string;
   /** 创建时间（ISO 8601） */
   createdAt: string;
   /** 上次执行时间 */

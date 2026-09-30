@@ -2,13 +2,13 @@
  * Generation 插件（P3 第二个功能插件）—— 把陪伴台词 TTS 装配从 factory 迁为插件。
  *
  * 原为 gateway/factory.ts 的 ~32 行内联装配（781-812）：GenerationRegistry.load +
- * GenerationService + CompanionVoiceService 包装成 loop.companionVoice（仅
+ * GenerationService + CompanionVoiceService 包装成 loop.modeVoice（仅
  * companion.tts.enabled 时创建）。
  *
  * 插件化后：
  * - 模块留在 src/generation/ + src/companion/voice.ts（引擎不动），本文件提供 HyPlugin
  * - activate 时装配 GenerationRegistry/Service/CompanionVoiceService，注册
- *   'generation.api' 服务句柄（含 tts 工厂回调），factory 取回后写回 loop.companionVoice
+ *   'generation.api' 服务句柄（含 tts 工厂回调），factory 取回后写回 loop.modeVoice
  * - 与工厂内联装配行为等价：仅 TTS 启用时创建；overrides 每回合现读 config
  * - 场景渲染（SCENE_RENDER_TOOL/executeSceneRender/getSceneDir）是纯函数，
  *   被 media-routes/companion agent 直接 import，天然独立，不属于本插件范围
@@ -27,7 +27,7 @@ export interface GenerationPluginServices {
 }
 
 /**
- * TTS 装配结果：factory 取回后直接赋给 loop.companionVoice（签名完全对齐）。
+ * TTS 装配结果：factory 取回后直接赋给 loop.modeVoice（签名完全对齐）。
  * 第 4 参 overrides 只承载 sayId 等事件贯通字段；语音/供应商/容量等配置
  * 由插件闭包在每回合现读 configCenter（与工厂原包装层一致）。
  */

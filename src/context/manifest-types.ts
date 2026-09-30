@@ -16,8 +16,6 @@ export type SectionType = 'static' | 'template' | 'runtime' | 'retrieval' | 'con
 
 export type ContextSourceStrategy = 'always_inline' | 'index_only' | 'lazy_expand' | 'phase_bound';
 
-export type ConditionName = 'precise_mode';
-
 export interface SectionEntry {
   name: string;
   source: string;
@@ -25,7 +23,8 @@ export interface SectionEntry {
   type: SectionType;
   templateVars?: string[];
   strategy?: ContextSourceStrategy;
-  condition?: ConditionName;
+  /** 条件 section 的开关名（对应 composer.activeConditions 里的 key，如 zone4_enabled） */
+  condition?: string;
   description?: string;
   role?: 'system' | 'user' | 'assistant';
 }
