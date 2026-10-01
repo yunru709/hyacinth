@@ -61,6 +61,11 @@ const DEFAULT_ROLES: Record<string, string> = {
   planning: 'main',
   compression: 'main',
   'sub-agent': 'main',
+  // 主对话也是一个调用点（2026-10-01 统一，见 docs/design/model-channel-unification.md）。
+  // 此前主对话不走通道（走 loop.provider），导致"切通道对主对话无效"。
+  // 缺省指向 main 通道 —— 该通道的实例与主 provider 同源，故本项加入后行为不变；
+  // S2 起主对话改为经本映射解析，切换才真正生效。
+  chat: 'main',
 };
 
 /** 全局配置文件路径（~/.agent/model-channels.json；项目级已取消，P-Config 收敛）
