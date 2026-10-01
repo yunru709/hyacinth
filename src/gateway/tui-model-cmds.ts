@@ -132,27 +132,35 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
       }
 
       // ── model/thinking 与 8 档子命令 ──
+      // ── 思考已归通道（2026-10-01）──
+      // 原来这里改的是「主对话当前那条线」的思考开关/档位。思考现在是**通道级**参数
+      // （通道决定模型，模型决定可用的思考强度），统一走 /channel config。
       case 'model/settings/thinking':
-      case 'model/thinking': {
-        await applyThinking(restArgs);
+      case 'model/thinking':
+      case 'model/settings/thinking/on':
+      case 'model/thinking/on':
+      case 'model/settings/thinking/off':
+      case 'model/thinking/off':
+      case 'model/settings/thinking/high':
+      case 'model/thinking/high':
+      case 'model/settings/thinking/max':
+      case 'model/thinking/max':
+      case 'model/settings/thinking/4k':
+      case 'model/thinking/4k':
+      case 'model/settings/thinking/8k':
+      case 'model/thinking/8k':
+      case 'model/settings/thinking/16k':
+      case 'model/thinking/16k':
+      case 'model/settings/thinking/32k':
+      case 'model/thinking/32k': {
+        chatLog.addSystem(
+          theme.warning('思考设置已移到通道。 ') +
+          theme.dim('用法：') + theme.accent('/channel config <通道名> thinking <on|off|high|max|4k|8k|16k|32k>') +
+          theme.dim('　看有哪些通道：') + theme.accent('/channel'),
+        );
+        tui.requestRender();
         return;
       }
-      case 'model/settings/thinking/on':
-      case 'model/thinking/on':     await applyThinking('on'); return;
-      case 'model/settings/thinking/off':
-      case 'model/thinking/off':    await applyThinking('off'); return;
-      case 'model/settings/thinking/high':
-      case 'model/thinking/high':   await applyThinking('high'); return;
-      case 'model/settings/thinking/max':
-      case 'model/thinking/max':    await applyThinking('max'); return;
-      case 'model/settings/thinking/4k':
-      case 'model/thinking/4k':     await applyThinking('4k'); return;
-      case 'model/settings/thinking/8k':
-      case 'model/thinking/8k':     await applyThinking('8k'); return;
-      case 'model/settings/thinking/16k':
-      case 'model/thinking/16k':    await applyThinking('16k'); return;
-      case 'model/settings/thinking/32k':
-      case 'model/thinking/32k':    await applyThinking('32k'); return;
 
       // ── model/show-thinking：切换 thinking 内容显示 ──
       case 'model/settings/show-thinking':

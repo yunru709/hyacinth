@@ -69,10 +69,11 @@ describe('tui-model-cmds model 命令', () => {
     expect(calls.join('\n')).toContain('Role must be');
   });
 
-  it('model/thinking/on → 转发到 applyThinking', async () => {
-    const { ctl, applyThinking } = setup();
+  // 思考已归通道（2026-10-01）：/model thinking 系列退役，统一走 /channel config。
+  it('model/thinking 已退役 → 提示迁移到 /channel config', async () => {
+    const { ctl, calls } = setup();
     await ctl.handle('model/thinking/on', '');
-    expect(applyThinking).toHaveBeenCalledWith('on');
+    expect(calls.join('\n')).toContain('思考设置已移到通道');
   });
 
   it('model/show-thinking → 切换 showThinking 状态并刷新 token 估算', async () => {
