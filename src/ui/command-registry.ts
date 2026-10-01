@@ -437,14 +437,7 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
         const channels = registry.listChannels();
 
         const children: SlashCommandDef[] = [
-          {
-            name: 'use',
-            description: '设置某使用点所用的通道',
-            icon: '🔗',
-            category: 'model',
-            args: '<使用点> <通道名>',
-            executeLocal: true,
-          },
+          // 按首字母排序（用户 2026-10-02 定）
           {
             name: 'add',
             description: '新增模型通道',
@@ -454,11 +447,26 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
             executeLocal: true,
           },
           {
+            name: 'list',
+            description: '总览：使用点 → 通道 → 模型',
+            icon: '📋',
+            category: 'model',
+            executeLocal: true,
+          },
+          {
             name: 'remove',
             description: '删除模型通道',
             icon: '➖',
             category: 'model',
             args: '<name>',
+            executeLocal: true,
+          },
+          {
+            name: 'use',
+            description: '设置某使用点所用的通道',
+            icon: '🔗',
+            category: 'model',
+            args: '<使用点> <通道名>',
             executeLocal: true,
           },
         ];
@@ -472,7 +480,8 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
             children: [],
           } as SlashCommandDef);
 
-          for (const ch of channels) {
+          // 通道列表按名字排序
+          for (const ch of [...channels].sort((a, b) => a.name.localeCompare(b.name))) {
             children.push({
               name: ch.name,
               description: `${ch.provider}${ch.model ? '/' + ch.model : ''}${ch.description ? ' — ' + ch.description : ''}`,
@@ -516,11 +525,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
           }
         }
 
-        children.push(
-          { name: '── 全部 ──', description: '查看所有通道', icon: ' ', category: 'model', children: [] } as SlashCommandDef,
-          { name: 'list', description: '列出所有通道及角色映射', icon: '📋', category: 'model', executeLocal: true },
-        );
-
         return children;
       } catch {
         return [];
@@ -560,6 +564,10 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
  * 合并内置命令 + 外部配置命令，支持热重载。
  * 模型可以通过 write/edit 工具修改 commands.json 来增删命令。
  */
+// 顶层命令按首字母排序（用户 2026-10-02 定）—— 面板的渲染在外部包里，
+// 排不到，只能在数据源排。此处原地排序一次即可。
+BUILTIN_COMMANDS.sort((a, b) => a.name.localeCompare(b.name));
+
 export class CommandRegistry extends EventEmitter {
   private static _instance: CommandRegistry;
 
