@@ -251,7 +251,16 @@ export async function createSubAgentLoop(
   }
 
   // 3. 创建独立的 LayeredContextComposer，注入子 Agent 的 systemPrompt
-  const subComposer = new LayeredContextComposer(parentContext.maxContextTokens);
+  // 子 Agent 的独立 Provider（唯一 userId，与主 Agent 和其他子 Agent 缓存隔离）。
+  // 提前到这里：它决定下面 composer / compressor 的**窗口预算**（原先这两处直接用父值）。
+  const subProvider = parentContext.createSubProvider(subAgentUserId(agentDef.name, instanceId));
+
+  // 窗口跟**子 Agent 自己所用通道的模型**走（2026-10-01 用户定）。
+  // 此前一律继承主对话的窗口 —— 若子 Agent 绑的是小窗口模型的通道（如本地 8K），会直接超限。
+  // 取不到能力值时回落父值，保证行为不比改造前更差。
+  const subMaxContext = subProvider.getCapabilities?.().maxContextTokens ?? parentContext.maxContextTokens;
+
+  const subComposer = new LayeredContextComposer(subMaxContext);
   // 使用 registerPromptSection 注册子 Agent 的 system prompt 作为持久化 section
   // 这样每次 compose() 调用时都会自动注册，不会被 builder 重置清除
   // system prompt 已在上方按「首次落定、复用冻结」解析（{{task}} → 固定指引，任务走 user 消息）
@@ -283,14 +292,11 @@ export async function createSubAgentLoop(
   // 5. 创建 ToolExecutor
   const toolExecutor = new ToolExecutor(filteredRegistry);
 
-  // 6. 创建子 Agent 的独立 Provider（唯一 userId，与主Agent 和其他子Agent 缓存隔离）
-  const subProvider = parentContext.createSubProvider(subAgentUserId(agentDef.name, instanceId));
-
   // 7. 创建 Compressor（复用主 Agent 的 ModelRouter 做压缩路由）
   const tokenCounter = new TokenCounter();
   const subModelRouter = new ModelRouter(subProvider);
   const summarizer = new StructuredSummarizer(subModelRouter);
-  const compressor = new CompressorOrchestrator(tokenCounter, summarizer, parentContext.maxContextTokens);
+  const compressor = new CompressorOrchestrator(tokenCounter, summarizer, subMaxContext);
 
   // 8. 创建 LLMOrchestrator
   const planStore = new PlanStore();
