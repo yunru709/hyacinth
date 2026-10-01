@@ -115,10 +115,19 @@ export function buildStateSnapshot(
   const routing = loop.getProviderRoutingInfo();
   const active = loop.getActiveProvider();
 
+  // 主对话所用的通道名（2026-10-01 通道统一）。真源是 registry 的「角色→通道」映射，
+  // 而不是 provider 名字 —— 主对话现在也是一个调用点（role=chat）。
+  // 用可选链 + 断言：协议层不硬依赖具体 registry 形状（测试 mock / 非 AgentLoop 后端均可能没有）。
+  const chatChannel = (loop as unknown as {
+    modelRouter?: { getRegistry?: () => { listRoles?: () => Record<string, string> } };
+  }).modelRouter?.getRegistry?.()?.listRoles?.()?.chat;
+
   return {
     sessionId: info.sessionId,
     // sessionId → sessionDir 由后端 sessionStore 解析（TUI 不直读 SessionManager）
     ...(sessionDirProvider ? { sessionDir: sessionDirProvider(info.sessionId) } : {}),
+    // 主对话所用的通道名（TUI 状态栏在厂商前显示它）
+    ...(chatChannel ? { channel: chatChannel } : {}),
     model: active.getModel(),
     provider: active.getProviderType(),
     // providerLabel 语义应为「provider 类型展示名」（如 deepseek / anthropic），

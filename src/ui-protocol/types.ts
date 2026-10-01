@@ -301,6 +301,8 @@ export interface StateSnapshot {
   model: string;
   /** 当前提供商类型（如 anthropic / deepseek） */
   provider: string;
+  /** 主对话所用的通道名（2026-10-01 通道统一：主对话也是一个调用点，role=chat） */
+  channel?: string;
   /** 提供商标签（展示用，如 Anthropic） */
   providerLabel?: string;
   /** 是否本地模型（ollama/llamacpp） */

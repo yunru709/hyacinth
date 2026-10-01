@@ -141,6 +141,8 @@ export async function runTui(
     }
   }
 
+  // 主对话所用的通道名（协议层 state.get 送来；状态栏显示在最前）
+  let channelName = 'chat';
   let providerTypeStart = activeProvider.getProviderType();
   let modelName = activeProvider.getModel();
 
@@ -713,6 +715,7 @@ export async function runTui(
     // 同步更新 provider/model 本地缓存（provider 切换后状态栏与面板一致）
     if (snap.provider) providerTypeStart = snap.provider as typeof providerTypeStart;
     if (snap.model) modelName = snap.model;
+    if (snap.channel) channelName = snap.channel as string;
     void refreshBgCountFromProtocol();
     void refreshPendingTaskFromProtocol();
     // **整体透传**快照，而不是逐字段白名单 —— 后者每加一个字段都要手工补一处，
@@ -1246,7 +1249,7 @@ export async function runTui(
       footer += theme.accent(` | \u2699 ${bgRunningCount} bg process(es)`);
     }
 
-    footer += theme.dim(`\n${providerTypeStart} \u00b7 ${modelName} \u00b7 ~${estimated} tokens`);
+    footer += theme.dim(`\n${channelName} \u00b7 ${providerTypeStart} \u00b7 ${modelName} \u00b7 ~${estimated} tokens`);
 
     if (messageQueue.size > 0) {
       footer += theme.fg(` | Queue: ${messageQueue.size}`);
