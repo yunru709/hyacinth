@@ -119,6 +119,8 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
 
   /** 执行一个 channel 子命令（cmdPath 形如 'channel/list' / 'channel/<name>/model'） */
   async function handle(cmdPath: string, restArgs: string): Promise<void> {
+    // 裸 /channel = 总览（与 /channel list 同义）——它是命令的发现入口
+    if (cmdPath === 'channel') cmdPath = 'channel/list';
     const registry = getChannelRegistry();
 
     const warnNoRegistry = () => {

@@ -1720,7 +1720,8 @@ export async function runTui(
           }
 
           // ── channel/* 通道管理（tui-channel-cmds.ts，tui.ts 深拆第八批）──
-          if (cmdPath.startsWith('channel/')) {
+          // 裸 /channel 也是入口：= 总览（等价 /channel list），由 channelCmds 内部归一
+          if (cmdPath === 'channel' || cmdPath.startsWith('channel/')) {
             await channelCmds.handle(cmdPath, restArgs);
             return;
           }
