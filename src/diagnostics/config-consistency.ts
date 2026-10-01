@@ -81,11 +81,44 @@ function readJson<T>(file: string, issues: ConfigIssue[]): T | null {
   }
 }
 
+/**
+ * 读 `~/.agent/.env`（KEY=VALUE，支持引号与注释）。
+ *
+ * 为什么需要：裸 node 调用本模块时 `process.env` 里**没有** .env 的内容
+ * ⇒ 会误报"apiKey 未设置"。误报比不报更糟 —— 它会让人怀疑整套自检。
+ * 运行时（agent 进程 / `hyacinth doctor`）已加载 .env，这里只是把它补齐并统一行为。
+ */
+function loadEnvFile(agentDir: string): Record<string, string> {
+  try {
+    const file = path.join(agentDir, '.env');
+    if (!fs.existsSync(file)) return {};
+    const out: Record<string, string> = {};
+    for (const line of fs.readFileSync(file, 'utf-8').split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+      if (!m) continue;
+      let value = m[2]!.trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      out[m[1]!] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** 跑一次配置一致性自检（纯读，不修改任何文件） */
 export function checkConfigConsistency(opts: ConfigConsistencyOptions = {}): ConfigConsistencyReport {
   const home = opts.homeDir ?? os.homedir();
-  const env = opts.env ?? process.env;
   const agentDir = path.join(home, '.agent');
+  // env 三层合并：.env 文件提供缺失项，显式传入的 env / process.env 优先。
+  const env = { ...loadEnvFile(agentDir), ...(opts.env ?? process.env) };
   const issues: ConfigIssue[] = [];
 
   const providersFile = readJson<ProvidersFile>(path.join(agentDir, 'providers.json'), issues) ?? {};
