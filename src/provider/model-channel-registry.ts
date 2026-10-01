@@ -161,6 +161,18 @@ export class ModelChannelRegistry {
   private legacyLocalConfig?: LocalModelConfig;
   /** 主 Provider 类型（向后兼容构建时使用） */
   private legacyProviderActive?: string;
+  /**
+   * 运行时发现的调用点（role → 实际生效的通道名）。
+   *
+   * 只记录**没有显式映射**的 role：它们此前取 provider 时静默走兜底
+   * （default 通道，或 scoped 版的同名通道），而列表只列配置里写过的映射
+   * ⇒ 插件带来的新调用点「挂得上、但看不见」。
+   * 这里让第一次来取连接的调用点自动现身，界面才能列全、并显示它实际吃哪条通道。
+   *
+   * **只进内存、不落盘** —— 配置只由用户显式改（与 setChannelModel 同一原则）；
+   * 重启后重新发现即可，因此不会污染 model-channels.json。
+   */
+  private runtimeRoles: Map<string, string> = new Map();
 
   constructor(cwd?: string) {
     // P-Config 收敛：项目级配置已取消，统一只读全局 ~/.agent/model-channels.json。
@@ -319,6 +331,7 @@ export class ModelChannelRegistry {
    */
   getProvider(role: string): Provider | null {
     const channelName = this.config.roles[role] ?? DEFAULT_CHANNEL;
+    this.noteDiscoveredRole(role, channelName);
     const provider = this.channelProviders.get(channelName);
 
     if (!provider) {
@@ -372,9 +385,31 @@ export class ModelChannelRegistry {
     }));
   }
 
-  /** 列出所有角色映射 */
+  /**
+   * 列出所有角色映射 —— 含**运行时自动发现**的调用点（显式配置优先）。
+   *
+   * 这样界面能自然列全：插件新带来的调用点，只要取过一次连接就会出现在这里。
+   */
   listRoles(): Record<string, string> {
-    return { ...this.config.roles };
+    return { ...Object.fromEntries(this.runtimeRoles), ...this.config.roles };
+  }
+
+  /**
+   * 仅「运行时发现」的调用点（显式映射不在其中）。
+   * 供界面区分显示：哪些是用户配的，哪些是自动冒出来的。
+   */
+  listDiscoveredRoles(): Record<string, string> {
+    return Object.fromEntries(this.runtimeRoles);
+  }
+
+  /**
+   * 记下一个没有显式映射的调用点（内存态，不落盘）。
+   * 重复取用会刷新它实际走的通道，所以配置热更后显示不会陈旧。
+   */
+  private noteDiscoveredRole(role: string, effectiveChannel: string): void {
+    if (typeof role !== 'string' || role.length === 0) return;
+    if (this.config.roles[role]) return; // 显式映射本就可见，不必记
+    this.runtimeRoles.set(role, effectiveChannel);
   }
 
   // ── Mutate ───────────────────────────────────────────────────────
@@ -562,6 +597,8 @@ export class ModelChannelRegistry {
       logger.warn(`createScopedProvider: no channel config for role "${role}"`);
       return null;
     }
+    // 登记「实际生效」的通道：同名通道不存在时会落到 default
+    this.noteDiscoveredRole(role, this.config.channels[channelName] ? channelName : DEFAULT_CHANNEL);
     const instance = this.createChannelProviderFromConfig(`scoped:${role}`, { ...cfg, userId });
     if (!instance) return null;
     // 与常规通道一致：非 main 通道包弹性层（重试+熔断）
