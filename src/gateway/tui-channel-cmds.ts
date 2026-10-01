@@ -38,7 +38,7 @@ export interface ChannelRegistryLike {
   getChannelInfo(name: string): ChannelInfo | undefined;
   removeChannel(name: string): unknown;
   setRoleMapping(role: string, channel: string): unknown;
-  setChannelModel(name: string, provider?: string, model?: string): unknown;
+  setChannelModel(name: string, provider?: string, model?: string, opts?: { persist?: boolean }): unknown;
   resetChannelModel(name: string): unknown;
 }
 
@@ -429,31 +429,33 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
 
       if (action === 'model') {
         const parts = (restArgs || '').split(/\s+/).filter(Boolean);
+        // --temp：只改运行时、不写配置文件（逃生门；**默认是持久化**）
+        const tempIdx = parts.indexOf('--temp');
+        const persist = tempIdx === -1;
+        if (tempIdx !== -1) parts.splice(tempIdx, 1);
         if (parts.length < 1) {
-          chatLog.addSystem(theme.warning(`Usage: /channel/${chName}/model <provider> [model-name]`));
+          chatLog.addSystem(theme.warning(`Usage: /channel/${chName}/model <provider> [model-name] [--temp]`));
           tui.requestRender();
           return;
         }
         const provider = parts[0];
         const model = parts[1] || undefined;
-        const via = await execViaProtocol(getProtocolSend, 'model.setChannelModel', { name: chName, provider, model });
+        const suffix = persist ? 'persisted' : 'runtime only — reset on restart';
+        const via = await execViaProtocol(getProtocolSend, 'model.setChannelModel', { name: chName, provider, model, persist });
         if (via) {
-          const updated = registry?.getChannelInfo(chName);
-          const shownProvider = updated?.provider ?? provider;
-          const shownModel = updated?.model ?? model;
-          chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${shownProvider}/${shownModel} (runtime only, not persisted)`));
+          chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${provider}${model ? '/' + model : ''} (${suffix})`));
           tui.requestRender();
           return;
         }
-        // ── 降级：原直连路径（行为零变更）──
+        // ── 降级：原直连路径 ──
         if (!registry) {
           warnNoRegistry();
           return;
         }
         try {
-          registry.setChannelModel(chName, provider, model);
+          registry.setChannelModel(chName, provider, model, { persist });
           const updated = registry.getChannelInfo(chName);
-          chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${updated?.provider}/${updated?.model} (runtime only, not persisted)`));
+          chatLog.addSystem(theme.success(`Channel "${chName}" model set → ${updated?.provider}/${updated?.model} (${suffix})`));
         } catch (e) {
           chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
         }

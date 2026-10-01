@@ -997,7 +997,7 @@
     };
 
     // ── 改模型：行内表单（provider + model）──
-    const editBtn = mkBtn('改模型', '临时切换该通道的提供商/模型（仅本进程有效，重启复原）');
+    const editBtn = mkBtn('改模型', '修改该通道的提供商/模型（写入配置文件，重启后仍生效）');
     editBtn.onclick = () => {
       ops.innerHTML = '';
       const pIn = document.createElement('input');
@@ -1027,7 +1027,7 @@
     ops.appendChild(editBtn);
 
     // ── 复位：丢弃临时改动，回到持久化配置 ✓
-    const rsBtn = mkBtn('复位', '撤销临时改动，恢复为配置文件里的设置');
+    const rsBtn = mkBtn('复位', '从配置文件重读该通道设置（丢弃未落盘的临时改动）');
     rsBtn.onclick = () => {
       if (!connected) return;
       rsBtn.disabled = true;

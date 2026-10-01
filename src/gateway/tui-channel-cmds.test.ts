@@ -108,15 +108,28 @@ describe('tui-channel-cmds channel/* 命令（协议未就绪 → registry 降�
     expect(out).toContain('Roles:');
   });
 
-  it('channel/<name>/model 成功 → setChannelModel', async () => {
+  it('channel/<name>/model 成功 → setChannelModel（默认落盘 persist:true）', async () => {
     const registry = makeRegistry({
       setChannelModel: vi.fn(),
       getChannelInfo: () => ({ name: 'feishu', provider: 'minimax', model: 'm2', providerType: 'minimax', roles: [] }),
     });
     const { ctl, calls } = setup(registry);
     await ctl.handle('channel/feishu/model', 'minimax m2');
-    expect(registry.setChannelModel).toHaveBeenCalledWith('feishu', 'minimax', 'm2');
-    expect(calls.join('\n')).toContain('Channel "feishu" model set');
+    expect(registry.setChannelModel).toHaveBeenCalledWith('feishu', 'minimax', 'm2', { persist: true });
+    const out = calls.join('\n');
+    expect(out).toContain('Channel "feishu" model set');
+    expect(out).toContain('persisted');
+  });
+
+  it('channel/<name>/model --temp → persist:false（仅运行时，不落盘）', async () => {
+    const registry = makeRegistry({
+      setChannelModel: vi.fn(),
+      getChannelInfo: () => ({ name: 'feishu', provider: 'minimax', model: 'm2', providerType: 'minimax', roles: [] }),
+    });
+    const { ctl, calls } = setup(registry);
+    await ctl.handle('channel/feishu/model', 'minimax m2 --temp');
+    expect(registry.setChannelModel).toHaveBeenCalledWith('feishu', 'minimax', 'm2', { persist: false });
+    expect(calls.join('\n')).toContain('runtime only');
   });
 
   it('channel/<name>/reset 成功 → resetChannelModel', async () => {

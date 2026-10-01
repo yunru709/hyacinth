@@ -169,7 +169,8 @@ export class ModelChannelRegistry {
    * ⇒ 插件带来的新调用点「挂得上、但看不见」。
    * 这里让第一次来取连接的调用点自动现身，界面才能列全、并显示它实际吃哪条通道。
    *
-   * **只进内存、不落盘** —— 配置只由用户显式改（与 setChannelModel 同一原则）；
+   * **只进内存、不落盘** —— 自动发现不是用户意图，不该污染配置文件
+   *（语义与 `setChannelModel` 相反：后者是用户显式改，默认落盘 ✓）；
    * 重启后重新发现即可，因此不会污染 model-channels.json。
    */
   private runtimeRoles: Map<string, string> = new Map();
@@ -414,14 +415,23 @@ export class ModelChannelRegistry {
 
   // ── Mutate ───────────────────────────────────────────────────────
 
-  /** 添加或更新通道。provider 可选，不填则继承 main 通道的 provider。 */
+  /** 添加或更新通道。**浅合并**既有配置 —— 未指定的字段一律保留。 */
   upsertChannel(name: string, config: ChannelConfig): void {
+    // ⚠️ 2026-10-02 修：此前是**整体替换**（`channels[name] = config`）⇒ 只改一个字段
+    // 会把其余字段一起抹掉。实测后果：TUI 里改 thinking 开关（只传 { thinking }）
+    // 把 chat 通道的 model 冲没了 —— 配置文件里至今留着 `chat: { provider, thinking }`
+    // 这条无 model 的残迹。改为浅合并；显式传 undefined 视为"未指定"，不参与覆盖。
+    const existing = this.config.channels[name] ?? {};
+    const patch = Object.fromEntries(
+      Object.entries(config).filter(([, v]) => v !== undefined),
+    ) as ChannelConfig;
+    const merged: ChannelConfig = { ...existing, ...patch };
     // provider 未指定时继承 main 通道的 provider
-    if (!config.provider && name !== DEFAULT_CHANNEL) {
+    if (!merged.provider && name !== DEFAULT_CHANNEL) {
       const mainCfg = this.config.channels[DEFAULT_CHANNEL];
-      config = { ...config, provider: mainCfg?.provider ?? 'deepseek' };
+      merged.provider = mainCfg?.provider ?? 'deepseek';
     }
-    this.config.channels[name] = config;
+    this.config.channels[name] = merged;
     // 立即创建 Provider 实例
     const provider = this.createChannelProvider(name);
     if (provider) {
@@ -471,14 +481,30 @@ export class ModelChannelRegistry {
   }
 
   /**
-   * 运行时切换通道模型（仅内存，不持久化到磁盘）。
-   * 重启/新建 session 后恢复为 model-channels.json 中的持久化配置。
+   * 切换通道的提供商/模型，**默认写入配置文件并持久化**。
+   *
+   * ⚠️ 2026-10-02 语义反转（旧行为＝仅内存、不落盘）：旧实现有三个恶果 ——
+   *   ① 切换重启即丢（"切了记不住"，用户实际踩到）；
+   *   ② 配置副本与实例分叉 ⇒ `listChannels()` 显示旧值、`list_providers` 显示新值，
+   *      两个工具对同一次切换给出矛盾答案，是主要困惑源；
+   *   ③ 跨 UI/进程互不可见（每个进程各持一份内存副本，谁也没写盘 ⇒ 谁也不知道）。
+   * 现在默认 persist：写回 `config.channels[name]` + `save()`，文件变化再由
+   * channel-watcher 广播给其它 registry 实例（装配期实例与协议层实例因此收敛）。
+   * 需要"纯临时试验"时显式传 `{ persist: false }` —— 此时仍是旧语义，
+   * 不写回 config，`resetChannelModel()` 可恢复持久化值。
    *
    * @param name 通道名
    * @param provider Provider 类型
    * @param model 模型名（可选，不填则用 provider 默认）
+   * @param opts.persist 是否落盘（默认 true）
    */
-  setChannelModel(name: string, provider: string, model?: string): void {
+  setChannelModel(
+    name: string,
+    provider: string,
+    model?: string,
+    opts?: { persist?: boolean },
+  ): void {
+    const persist = opts?.persist !== false;
     const existing = this.config.channels[name];
     const merged = { ...existing, provider, ...(model ? { model } : {}) };
     const instance = this.createChannelProviderFromConfig(name, merged);
@@ -491,10 +517,22 @@ export class ModelChannelRegistry {
     if (name === DEFAULT_CHANNEL) {
       this.mainProvider = wrapped;
     }
+    if (persist) {
+      // 写回配置副本（消除"配置视角 vs 实例视角"分叉）后再落盘
+      this.config.channels[name] = merged;
+      this.save();
+      logger.info(
+        `Channel model persisted: ${name} (${provider}/${model ?? merged.model ?? '(provider default)'})`,
+      );
+    }
   }
 
   /**
-   * 重置通道为持久化配置（取消 setChannelModel 的运行时覆盖）。
+   * 从持久化配置重建通道实例。
+   *
+   * 用途已收窄：只对 `setChannelModel(..., { persist: false })` 留下的**临时覆盖**
+   * 有意义（那类覆盖不写回 config，故重建即可回到持久化值）。
+   * 默认落盘的切换会同步改 config ⇒ 此处重建结果与当前值一致，等价于空操作。
    */
   resetChannelModel(name: string): void {
     const cfg = this.config.channels[name];

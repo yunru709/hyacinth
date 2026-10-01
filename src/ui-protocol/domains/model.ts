@@ -65,7 +65,7 @@ export interface ModelRegistryLike {
   listChannels(): Array<ChannelConfigLike & { name: string }>;
   upsertChannel(name: string, config: ChannelConfigLike): void;
   removeChannel(name: string): void;
-  setChannelModel(name: string, provider: string, model?: string): void;
+  setChannelModel(name: string, provider: string, model?: string, opts?: { persist?: boolean }): void;
   resetChannelModel(name: string): void;
   getChannelInfo(name: string): ChannelInfoLike | null;
   getMainProvider(): ProviderView | null;
@@ -252,7 +252,10 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
         manager.switchProvider({ type: provider, model, apiKey, baseUrl });
       }
 
-      // 同步更新 main 通道（保持 registry 与 loop/manager 一致）
+      // 同步更新主对话专属通道 chat（保持 registry 与 loop/manager 一致）。
+      // ⚠️ 2026-10-02 起此调用**默认落盘** ⇒ 切主对话会同时把 chat 通道写进
+      // model-channels.json，与下面的 provider.active 持久化保持一致
+      //（此前只改内存 ⇒ 文件里 chat 长期停留在旧厂商，重启即分叉）。
       try {
         registry.setChannelModel('chat', provider, model);
       } catch {
@@ -338,18 +341,21 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
     },
 
     // ── model.setChannelModel ──────────────────────────────
+    // persist 默认 true（落盘）。协议层是 UI 唯一的写入口，故"记不住"类问题
+    // 在此收敛：TUI /channel/<名>/model、WebUI 改模型按钮均默认持久化 ✓
     async setChannelModel(params: unknown): Promise<unknown> {
-      const { name, provider, model } = (params ?? {}) as {
+      const { name, provider, model, persist } = (params ?? {}) as {
         name: string;
         provider: string;
         model?: string;
+        persist?: boolean;
       };
       if (!name || !provider) {
         throw new Error('model.setChannelModel requires "name" and "provider"');
       }
-      registry.setChannelModel(name, provider, model);
-      emit?.(UI_EVENT.MODEL_CHANGE, { action: 'setChannelModel', name, provider, model });
-      return { ok: true, name, provider, model };
+      registry.setChannelModel(name, provider, model, { persist: persist !== false });
+      emit?.(UI_EVENT.MODEL_CHANGE, { action: 'setChannelModel', name, provider, model, persist: persist !== false });
+      return { ok: true, name, provider, model, persist: persist !== false };
     },
 
     // ── model.resetChannelModel ────────────────────────────

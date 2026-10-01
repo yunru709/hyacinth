@@ -116,26 +116,32 @@ export function createRemoveModelChannelTool(modelRouter: ModelRouter): Tool {
 export function createSetChannelModelTool(modelRouter: ModelRouter): Tool {
   return {
     name: 'set_channel_model',
-    description: '临时切换通道的提供商/模型（仅当前会话有效，不持久化）。重启后恢复原配置。',
+    description: '切换通道的提供商/模型。**默认写入配置文件并持久化**（重启后仍生效）；需要只做临时试验时传 persist=false。',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: '通道名称' },
         provider: { type: 'string', description: 'Provider 类型' },
         model: { type: 'string', description: '模型名（可选，不填则用 provider 默认）' },
+        persist: { type: 'boolean', description: '是否写入配置文件（默认 true）。false = 仅运行时有效，重启复原。' },
       },
       required: ['name', 'provider'],
     },
     async execute(args: Record<string, unknown>): Promise<string> {
       try {
         const registry = modelRouter.getRegistry();
+        const persist = args.persist !== false;
         registry.setChannelModel(
           args.name as string,
           args.provider as string,
           args.model as string | undefined,
+          { persist },
         );
         const info = registry.getChannelInfo(args.name as string);
-        return `Channel "${args.name}" runtime model set to ${info?.provider}/${info?.model}. (Not persisted — reset on restart)`;
+        const suffix = persist
+          ? '(persisted to model-channels.json)'
+          : '(runtime only — reset on restart)';
+        return `Channel "${args.name}" model set to ${info?.provider}/${info?.model}. ${suffix}`;
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : String(err)}`;
       }

@@ -363,6 +363,27 @@ describe('模型域', () => {
     expect(info).toMatchObject({ provider: 'deepseek', model: 'deepseek-v4-pro' });
   });
 
+  it('model.setChannelModel persist 透传（默认 true；false = 仅运行时）', async () => {
+    const { client, responses, flush } = setup();
+    // 默认：落盘
+    client.send({
+      kind: 'request',
+      id: 'r1',
+      method: 'model.setChannelModel',
+      params: { name: 'compression', provider: 'deepseek', model: 'a' },
+    });
+    // 显式临时：不落盘
+    client.send({
+      kind: 'request',
+      id: 'r2',
+      method: 'model.setChannelModel',
+      params: { name: 'compression', provider: 'deepseek', model: 'b', persist: false },
+    });
+    await flush();
+    expect(responses.find((r) => r.id === 'r1')!.result).toMatchObject({ persist: true });
+    expect(responses.find((r) => r.id === 'r2')!.result).toMatchObject({ persist: false });
+  });
+
   it('model.removeChannel main 不可删除；普通通道可删', async () => {
     const { registry, client, responses, flush } = setup();
 

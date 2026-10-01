@@ -44,8 +44,8 @@
 - `add_model_channel` — 新增通道（name 必填，provider 必填，model 可选）。一个通道 = 一个 Provider + 模型组合
 - `remove_model_channel` — 删除通道（main 不可删除）
 - `set_channel_role` — 将角色（assessment/planning/compression/sub-agent）映射到指定通道
-- `set_channel_model` — **运行时**切换某通道当前使用的 Provider/模型（不持久化，重启恢复）
-- `reset_channel_model` — 取消运行时覆盖，恢复为 `model-channels.json` 配置
+- `set_channel_model` — 切换某通道的 Provider/模型，**默认写入配置文件持久化**（重启仍生效）；只有传 `persist:false` 才是仅运行时的临时切换
+- `reset_channel_model` — 丢弃**未落盘**的临时改动（`persist:false` 留下的），回到 `model-channels.json` 的配置
 - `channel_info` — 查看指定通道详情（provider、模型、角色映射）
 
 **TUI 管理：** 用户可通过 `/channel` 面板操作（add/remove/role/list，选中通道后 info/model/reset）。
