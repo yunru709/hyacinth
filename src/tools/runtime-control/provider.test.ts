@@ -116,45 +116,83 @@ describe('list_providers 工具', () => {
     expect(out).toContain('DECLARED (1)');
   });
 
-  it('④ LOADED 只列已实例化的，active 标 *（声明层与实例层互不冒充）', async () => {
+  /** 造一个最小通道注册表（listChannels / listRoles / getChannelInfo），供通道节用例使用 */
+  function fakeChannelRegistry(
+    channels: Array<{ name: string; provider: string; model: string }>,
+    roles: Record<string, string>,
+  ) {
+    return {
+      getRegistry: () => ({
+        listChannels: () => channels,
+        listRoles: () => roles,
+        getChannelInfo: (n: string) => {
+          const c = channels.find((x) => x.name === n);
+          if (!c) return null;
+          return {
+            provider: c.provider,
+            model: c.model,
+            roles: Object.entries(roles).filter(([, ch]) => ch === n).map(([r]) => r),
+          };
+        },
+      }),
+    };
+  }
+
+  it('④ CHANNELS 列出通道并标出服务哪些调用点；主对话所用通道排最前且标 *', async () => {
     await useLoader(writeProviders({ 'hx-a': declaredVendor('hx-a', KEY_A) }));
-    const router = makeRouter(['hx-a', 'hx-extra'], 'hx-extra');
+    const modelRouter = fakeChannelRegistry(
+      [
+        { name: 'compression', provider: 'deepseek', model: 'deepseek-v4-flash' },
+        { name: 'chat', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' },
+      ],
+      { chat: 'chat', compression: 'compression', planning: 'compression' },
+    );
 
-    const out = await createListProvidersTool(router).execute({});
+    const out = await createListProvidersTool(makeRouter(['hx-a'], 'hx-a'), modelRouter).execute({});
 
-    expect(out).toContain('LOADED (2)');
-    expect(out).toContain('* hx-extra');   // active = setDefault 指定的那个
-    // hx-extra 未声明 ⇒ 只在 LOADED 出现，不污染 DECLARED
+    expect(out).toContain('CHANNELS (2)');
+    // 主对话所用通道标 *，且排在最前（最常关心）
+    const chatIdx = out.indexOf('* chat');
+    const compIdx = out.indexOf('compression');
+    expect(chatIdx).toBeGreaterThan(-1);
+    expect(chatIdx).toBeLessThan(compIdx);
+    // 标出服务哪些调用点
+    expect(out).toContain('主对话');
+    expect(out).toContain('compression, planning');
     expect(out).toContain('DECLARED (1)');
     expect(out).toContain('Route mode: manual');
   });
 
-  it('⑤ loader 未初始化时降级：实例层照常输出，不整段失败', async () => {
-    __setProviderConfigLoaderForTest(undefined);
+  it('⑤ 缺通道注册表时通道节降级提示，不影响厂商层', async () => {
+    await useLoader(writeProviders({ 'hx-a': declaredVendor('hx-a', KEY_A) }));
 
-    const out = await createListProvidersTool(makeRouter(['solo'])).execute({});
+    const out = await createListProvidersTool(makeRouter(['hx-a'])).execute({});
 
-    expect(out).toContain('LOADED (1)');
-    expect(out).toContain('solo');
-    expect(out).toContain('声明层不可用');
+    expect(out).toContain('CHANNELS (1)');
+    expect(out).toContain('通道注册表不可用');
+    expect(out).toContain('DECLARED (1)');
   });
 
-  it('⑥ active 标记须落到声明层（router 存的是通道名，按实例类型对齐）', async () => {
-    await useLoader(writeProviders({ 'hx-live': declaredVendor('hx-live', KEY_A) }));
-    process.env[KEY_A] = 'present';
-
-    // 复现真实形态：router 注册名是"通道名"，其厂商类型才是 hx-live
+  it('⑥ loader 未初始化时降级：厂商层给提示，通道节照常输出', async () => {
+    __setProviderConfigLoaderForTest(undefined);
+    const modelRouter = fakeChannelRegistry(
+      [{ name: 'chat', provider: 'deepseek', model: 'deepseek-v4-flash' }],
+      { chat: 'chat' },
+    );
+    // 保留一个真实 router（厂商层 active 对齐仍走它）
     const router = new ProviderRouter();
     router.register('main', {
-      getProviderType: () => 'hx-live',
-      getModel: () => 'hx-live-model',
+      getProviderType: () => 'deepseek',
+      getModel: () => 'deepseek-v4-flash',
       getCapabilities: () => ({ isLocal: false }),
     } as never);
     router.setDefault('main');
 
-    const out = await createListProvidersTool(router).execute({});
+    const out = await createListProvidersTool(router, modelRouter).execute({});
 
-    expect(out).toMatch(/\* hx-live\s+ready/);                  // 声明层拿到了 *
-    expect(out).toContain('* main -> hx-live/hx-live-model');   // 实例层标出"通道名 → 厂商/模型"
+    expect(out).toContain('声明层不可用');
+    expect(out).toContain('CHANNELS (1)');
+    expect(out).toContain('* chat');
+    expect(out).toContain('主对话');
   });
 });

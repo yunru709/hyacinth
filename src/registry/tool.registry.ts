@@ -172,7 +172,7 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
   ): void {
     // ── Provider tools (4) ──────────────────────────────────────────
     this.register(createSwitchProviderTool(agentLoop));
-    this.register(createListProvidersTool(providerRouter));
+    this.register(createListProvidersTool(providerRouter, modelRouter));
     this.register(createProviderInfoTool(agentLoop));
     this.register(createSwitchToAutoRouteTool(agentLoop));
 

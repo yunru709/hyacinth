@@ -72,21 +72,34 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
  * 现在回答三个问题：
  *   ① 我配了哪些 —— DECLARED（配置声明的全部）
  *   ② 哪些现在能用、差什么 —— 每个标 ready / no key（附缺失的环境变量名）
- *   ③ 手上真的有哪个 —— LOADED（router 注册表）+ active 标记
+ *   ③ 谁在用哪条通道 —— CHANNELS（通道注册表）+ 每条通道服务哪些调用点
  *
- * 输出契约：首行 `Route mode: <mode>`；含 `DECLARED (n)` 与 `LOADED (n)` 两节。
+ * 输出契约：首行 `Route mode: <mode>`；含 `DECLARED (n)` 与 `CHANNELS (n)` 两节。
+ *
+ * ⚠️ 2026-10-01 通道统一：原第三节是 LOADED（ProviderRouter 的注册表），那用的是**老机制的
+ * 命名空间** —— 里面那个 `main` 与通道的 `main` 同名却是两个独立对象，是"两套并存"最直观的
+ * 误导源。改为直接列通道：它才是"谁在用哪个厂商/模型"的真源。
  */
-export function createListProvidersTool(providerRouter: ProviderRouter): Tool {
+export function createListProvidersTool(
+  providerRouter: ProviderRouter,
+  /** 通道注册表（经 ModelRouter 取）。缺省时该节降级为提示，不影响厂商层。 */
+  modelRouter?: {
+    getRegistry(): {
+      listChannels(): Array<{ name: string; provider?: string; model?: string }>;
+      getChannelInfo?(name: string): { provider: string; model: string; roles: string[] } | null;
+      listRoles(): Record<string, string>;
+    };
+  },
+): Tool {
   return {
     name: 'list_providers',
     description:
-      '列出提供商：① DECLARED＝配置里声明的全部（标明是否可用、缺哪个环境变量，回答"我配了哪些"）'
-      + '② LOADED＝运行时已实例化的实例。当前活跃者标 *。',
+      '列出厂商与通道：① DECLARED＝配置里声明的全部厂商（标明是否可用、缺哪个环境变量，回答"我配了哪些"）'
+      + '② CHANNELS＝已有的通道（各自用什么厂商/模型）并标出服务哪些调用点（回答"谁在用哪个模型"）。主对话所用通道标 *。',
     inputSchema: { type: 'object', properties: {} },
     async execute(_args: Record<string, unknown>): Promise<string> {
       try {
         const routingInfo = providerRouter.getRoutingInfo();
-        const loaded = providerRouter.list();
         // ⚠️ router 里注册的是**通道名**（main / compression …），不是厂商 id ——
         // 两个命名空间。active 标记必须按**实例类型**对齐回声明层，否则声明层永远标不上。
         const activeName = routingInfo.providerName;
@@ -122,23 +135,46 @@ export function createListProvidersTool(providerRouter: ProviderRouter): Tool {
           declaredRows.push(`(声明层不可用: ${err instanceof Error ? err.message : String(err)})`);
         }
 
-        // ---- ② 实例层：运行时真的有哪个（通道名 → 厂商/模型）----
-        const loadedRows = loaded.length
-          ? loaded.map((name) => {
-              const p = providerRouter.get(name);
-              const detail = p ? ` -> ${p.getProviderType()}/${p.getModel()}` : '';
-              return `${name === activeName ? '* ' : '  '}${name}${detail}`;
-            })
-          : ['(none)'];
+        // ---- ② 通道层：谁在用哪条通道（通道名 → 厂商/模型 → 服务哪些调用点）----
+        const channelRows: string[] = [];
+        let chatChannel = '';
+        try {
+          const reg = modelRouter?.getRegistry();
+          const roles = reg?.listRoles() ?? {};
+          chatChannel = roles['chat'] ?? '';
+          const channels = reg?.listChannels() ?? [];
+          if (!reg || channels.length === 0) {
+            channelRows.push('(通道注册表不可用)');
+          } else {
+            // 主对话所用通道排最前（最常关心），其余按名字排序
+            const sorted = [...channels].sort((a, b) => (
+              a.name === chatChannel ? -1 : b.name === chatChannel ? 1 : a.name.localeCompare(b.name)
+            ));
+            for (const c of sorted) {
+              const info = reg.getChannelInfo?.(c.name) ?? null;
+              const provider = info?.provider ?? c.provider ?? '?';
+              const model = info?.model ?? c.model ?? '?';
+              const served = info?.roles ?? [];
+              const hasChat = served.includes('chat');
+              const who = [hasChat ? '主对话' : '', ...served.filter((r) => r !== 'chat')]
+                .filter(Boolean).join(', ');
+              channelRows.push(
+                `${c.name === chatChannel ? '* ' : '  '}${c.name.padEnd(13)}${`${provider}/${model}`.padEnd(31)}${who ? ` ← ${who}` : ''}`,
+              );
+            }
+          }
+        } catch (err) {
+          channelRows.push(`(通道层不可用: ${err instanceof Error ? err.message : String(err)})`);
+        }
 
         return [
           `Route mode: ${routingInfo.mode}`,
           '',
-          `DECLARED (${declaredRows.length}) — 配置声明的全部`,
+          `DECLARED (${declaredRows.length}) — 厂商（配置里声明的全部）`,
           ...declaredRows,
           '',
-          `LOADED (${loaded.length}) — 运行时已实例化`,
-          ...loadedRows,
+          `CHANNELS (${channelRows.length}) — 通道（谁在用哪个厂商/模型）`,
+          ...channelRows,
         ].join('\n');
       } catch (err) {
         return `Error listing providers: ${err instanceof Error ? err.message : String(err)}`;
