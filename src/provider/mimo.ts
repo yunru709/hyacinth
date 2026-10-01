@@ -30,7 +30,7 @@ export function createMiMoProvider(config?: {
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.MIMO_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.xiaomimimo.com/anthropic',
-    model: config?.model ?? provCfg?.defaultModel ?? 'mimo-v2.5',
+    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     maxOutputTokens: config?.maxOutputTokens,
     providerType: 'mimo',
     fields: config?.fields,

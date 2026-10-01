@@ -49,6 +49,7 @@ import {
   createSetChannelModelTool,
   createResetChannelModelTool,
   createChannelInfoTool,
+  createCheckConfigTool,
 } from '../tools/runtime-control/index.js';
 
 /** Tool 扩展 RegistryItem，增加可选的 source 字段 */
@@ -186,6 +187,8 @@ export class ToolRegistry extends GenericRegistry<RegisteredTool> {
       this.register(createResetChannelModelTool(modelRouter));
       this.register(createChannelInfoTool(modelRouter));
     }
+    // 配置一致性自检：只读、不依赖 modelRouter ⇒ 放在块外，任何装配形态下都可用
+    this.register(createCheckConfigTool());
 
     // ── Registry control tools (8) ──────────────────────────────────
     this.register(createToggleToolTool(this, configCenter));

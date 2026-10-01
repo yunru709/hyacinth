@@ -30,7 +30,7 @@ export function createZhipuProvider(config?: {
     apiKey: config?.apiKey,
     envKey: 'ZHIPU_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4',
-    model: config?.model ?? provCfg?.defaultModel ?? 'glm-5.2',
+    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'zhipu',
     maxOutputTokens: config?.maxOutputTokens,
     userId: config?.userId,

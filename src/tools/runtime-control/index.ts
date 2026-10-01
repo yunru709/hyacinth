@@ -72,6 +72,7 @@ export {
   createResetChannelModelTool,
   createChannelInfoTool,
   createSetChannelRoleTool,
+  createCheckConfigTool,
 } from './model-channel.js';
 
 export {

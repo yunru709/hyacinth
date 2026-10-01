@@ -33,7 +33,7 @@ export function createMiniMaxProvider(config?: {
   return new AnthropicProvider({
     apiKey: config?.apiKey ?? process.env.MINIMAX_API_KEY,
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.minimaxi.com/anthropic',
-    model: config?.model ?? provCfg?.defaultModel ?? 'MiniMax-M3',
+    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     maxOutputTokens: config?.maxOutputTokens,
     providerType: 'minimax',
     fields: config?.fields,

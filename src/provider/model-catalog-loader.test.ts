@@ -88,7 +88,7 @@ describe('ModelCatalogLoader 行为契约', () => {
     }
   });
 
-  it('providers.json 声明 models → 使用声明；未声明 provider → 回退内置', () => {
+  it('providers.json 声明 models → **按 id 合并**进内置；未声明 provider → 回退内置', () => {
     writeProviders({
       deepseek: {
         id: 'deepseek',
@@ -100,12 +100,36 @@ describe('ModelCatalogLoader 行为契约', () => {
       },
     });
     const loader = new ModelCatalogLoader(process.cwd(), PROV_PATH);
-    // deepseek 用声明（仅 1 个）
+    // 2026-10-02 语义变更：声明不再是"整家替换"——内置条目保留，只覆盖同 id
     const ds = loader.getByProvider('deepseek');
-    expect(ds).toHaveLength(1);
-    expect(ds[0].id).toBe('deepseek-v4-flash');
+    expect(ds.length).toBeGreaterThan(1);
+    expect(ds.some((m) => m.id === 'deepseek-flash')).toBe(true);
+    expect(ds.some((m) => m.id === 'deepseek-v4-flash')).toBe(true);
     // anthropic 未声明 → 回退内置
     expect(loader.getByProvider('anthropic').length).toBeGreaterThan(0);
+  });
+
+  it('用户条目与内置同 id → 逐字段覆盖（只写要改的字段），其余内置条目保留', () => {
+    writeProviders({
+      deepseek: {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        baseUrl: 'x',
+        defaultModel: 'deepseek-v4-pro',
+        envKey: 'DEEPSEEK_API_KEY',
+        models: [
+          // 只改定价，不重复声明窗口/能力
+          { id: 'deepseek-v4-pro', provider: 'deepseek', cost: { input: 9, output: 9 } },
+        ],
+      },
+    });
+    const loader = new ModelCatalogLoader(process.cwd(), PROV_PATH);
+    const ds = loader.getByProvider('deepseek');
+    const pro = ds.find((m) => m.id === 'deepseek-v4-pro');
+    expect(pro?.cost).toEqual({ input: 9, output: 9 });   // 覆盖用户写的字段
+    expect(pro?.contextWindow).toBe(1048576);              // 未写字段继承内置
+    expect(ds.some((m) => m.id === 'deepseek-flash')).toBe(true);   // 内置独有条目保留
+    expect(ds.some((m) => m.id === 'deepseek-v4-flash')).toBe(true);
   });
 
   it('getModel 按 (provider,id) 精确查找，跨 provider 不串', () => {
@@ -144,7 +168,10 @@ describe('ModelCatalogLoader 行为契约', () => {
       },
     });
     loader.reload();
-    expect(loader.getByProvider('deepseek')).toHaveLength(1);
+    // 2026-10-02：声明与内置**按 id 合并**（不再整家替换）⇒ 内置其余条目保留
+    const after = loader.getByProvider('deepseek');
+    expect(after.some((m) => m.id === 'deepseek-v4-flash')).toBe(true);
+    expect(after.length).toBeGreaterThan(1);
   });
 
   it('兼容旧键名 maxTokens → maxOutputTokens', () => {

@@ -21,6 +21,7 @@ import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import Database from '../tools/sqlite.js';
 import { isForbiddenAnchor } from '../tools/xref/anchor.js';
+import { checkConfigConsistency } from './config-consistency.js';
 
 // 本文件编译为 ESM，作用域内没有 require。
 // doctor 由 dist/index.js 运行，createRequire 以 dist/diagnostics/ 本文件为基准解析，
@@ -418,6 +419,24 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     checkNativeModule(),
     checkPersona(),
     checkConfig(),
+    // 配置一致性（2026-10-02 新增，见 docs/design/config-code-separation.md）：
+    // 三个配置文件互校 —— 厂商是否存在 / 模型是否属于该厂商 / apiKey 是否就绪 /
+    // 角色映射是否悬空 / provider.active 是否与主对话通道一致。只读不改。
+    (() => {
+      const r = checkConfigConsistency();
+      const worst = r.issues.find((i) => i.severity === 'error') ?? r.issues.find((i) => i.severity === 'warn');
+      const bits = r.issues
+        .filter((i) => i.severity !== 'info')
+        .map((i) => `[${i.where}] ${i.message}`);
+      return {
+        label: '配置一致性',
+        ok: r.ok,
+        detail: r.ok
+          ? `通过（${r.summary.warnings} 条警告）`
+          : `${r.summary.errors} 个错误 / ${r.summary.warnings} 个警告 —— ${worst?.message ?? ''}`,
+        fix: r.ok ? undefined : `检查明细：\n    ${bits.join('\n    ')}`,
+      };
+    })(),
     checkKnowledgeBase(),
     checkApiKeys(),
     checkXrefCache(!!opts.fix),

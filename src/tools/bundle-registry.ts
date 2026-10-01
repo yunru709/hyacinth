@@ -122,6 +122,9 @@ const BUILTIN_ADMIN: ToolBundle = {
     'list_model_channels', 'add_model_channel', 'remove_model_channel',
     'set_channel_role', 'set_channel_model', 'reset_channel_model',
     'model_channel_info',  // 同族 7 个在包内、它漏了（守卫测试抓出）
+    // 配置一致性自检（2026-10-02 新增）：与「配置管理」同族 —— 它回答的正是
+    // "我这份配置对不对"，漏进包会让默认模式下这个能力根本不可见。
+    'check_config',
   ],
 };
 

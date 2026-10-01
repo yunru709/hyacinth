@@ -68,7 +68,9 @@ export class OpenAIProvider implements Provider {
       baseURL: opts.baseUrl ?? process.env.OPENAI_BASE_URL,
     });
 
-    this.model = opts.model ?? 'gpt-5.5';
+    // 2026-10-02：移除第三层硬编码模型名（'gpt-5.5'）—— 与 anthropic.ts 同因，
+    // 配置的权威只在 providers.json / config.json，代码不复制具体模型名。
+    this.model = opts.model ?? 'unknown';
     this.maxTokens = opts.maxOutputTokens                          // ① 临时覆盖
       ?? opts.maxTokens                                            // 向后兼容
       ?? getModelInfo('openai', this.model)?.maxOutputTokens       // ② 本机模型目录

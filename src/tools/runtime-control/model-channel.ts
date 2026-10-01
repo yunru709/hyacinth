@@ -1,6 +1,7 @@
 import type { Tool } from '../interface.js';
 import type { MCPSystem } from '../../mcp/system.js';
 import type { ModelRouter } from '../../provider/model-router.js';
+import { checkConfigConsistency, formatConsistencyReport } from '../../diagnostics/config-consistency.js';
 
 // Model channel tools (8) — MCP 状态 + 模型通道管理
 
@@ -196,6 +197,25 @@ export function createChannelInfoTool(modelRouter: ModelRouter): Tool {
         info.description ? `  Desc:     ${info.description}` : '',
         info.roles.length > 0 ? `  Roles:    ${info.roles.join(', ')}` : '  Roles:    (none)',
       ].filter(Boolean).join('\n');
+    },
+  };
+}
+
+/**
+ * check_config — 配置一致性自检（**只读**，不修改任何文件）。
+ *
+ * 起因：配置的事实分散在三个文件里且互不校验，2026-10-02 当天因此被咬两次 ——
+ *   ① `provider=deepseek` + `model=stealth/pixel-canary`（后者属 commandcode）⇒ 调用必失败；
+ *   ② 四条旁路通道指向余额为 0 的厂商 ⇒ 压缩**静默降级**为机械裁剪，肉眼不可见。
+ * 判据与边界见 docs/design/config-code-separation.md。
+ */
+export function createCheckConfigTool(): Tool {
+  return {
+    name: 'check_config',
+    description: '配置一致性自检（只读）：把 providers.json / config.json / model-channels.json 放一起对账 —— 厂商是否存在、模型是否属于该厂商、apiKey 是否就绪、角色映射是否悬空、provider.active 与主对话通道是否一致。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute(): Promise<string> {
+      return formatConsistencyReport(checkConfigConsistency());
     },
   };
 }

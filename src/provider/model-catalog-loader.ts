@@ -42,26 +42,34 @@ export class ModelCatalogLoader {
         const raw = fs.readFileSync(this.configPath, 'utf-8');
         const parsed = JSON.parse(raw) as { providers?: Record<string, { models?: ModelCatalogEntry[] }> };
         const providers = parsed.providers ?? {};
-        const usedProvider = new Set<string>();
+        const declared = new Set<string>();
         for (const [pid, meta] of Object.entries(providers)) {
           const list = meta?.models;
-          if (list && Array.isArray(list) && list.length > 0) {
-            for (const m of list) {
-              // 所属厂商由父键决定：models 条目缺省省略 provider 字段（改动一处声明即用）
-              if (!m.provider) m.provider = pid;
-              // 兼容旧键名 maxTokens → maxOutputTokens
-              const legacy = m as ModelCatalogEntry & { maxTokens?: number };
-              if (m.maxOutputTokens === undefined && typeof legacy.maxTokens === 'number') {
-                m.maxOutputTokens = legacy.maxTokens;
-              }
+          if (!list || !Array.isArray(list) || list.length === 0) continue;
+          declared.add(pid);
+          // ⚠️ 2026-10-02 改：此前是**整家替换** —— 用户只要声明一个模型，该厂商的内置
+          // 模型条目会整家消失（实测后果：只想补一条定价，其余模型从列表里没了）。
+          // 现改为**按 id 合并**：同 id 逐字段覆盖（只写要改的字段即可），内置独有条目保留。
+          // 风格与 provider-meta 的「逐字段回落」一致。
+          const merged = new Map<string, ModelCatalogEntry>();
+          for (const m of MODEL_CATALOG[pid] ?? []) merged.set(m.id, m);
+          for (const raw of list) {
+            const m: ModelCatalogEntry = { ...raw };
+            // 所属厂商由父键决定：models 条目缺省省略 provider 字段（改动一处声明即用）
+            if (!m.provider) m.provider = pid;
+            // 兼容旧键名 maxTokens → maxOutputTokens
+            const legacy = m as ModelCatalogEntry & { maxTokens?: number };
+            if (m.maxOutputTokens === undefined && typeof legacy.maxTokens === 'number') {
+              m.maxOutputTokens = legacy.maxTokens;
             }
-            models.push(...list);
-            usedProvider.add(pid);
+            const prev = merged.get(m.id);
+            merged.set(m.id, prev ? { ...prev, ...m } : m);
           }
+          models.push(...merged.values());
         }
         // 未显式声明 models 的 provider → 回退内置默认
         for (const [pid, list] of Object.entries(MODEL_CATALOG)) {
-          if (!usedProvider.has(pid)) {
+          if (!declared.has(pid)) {
             models.push(...list);
           }
         }

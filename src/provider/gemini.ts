@@ -79,7 +79,8 @@ export class GeminiProvider implements Provider {
       apiKey,
       ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
     });
-    this.model = opts.model ?? 'gemini-3.6-flash';
+    // 2026-10-02：移除第三层硬编码模型名（'gemini-3.6-flash'）—— 同 anthropic/openai。
+    this.model = opts.model ?? 'unknown';
     this.maxOutputTokens = getModelInfo('gemini', this.model)?.maxOutputTokens ?? 8192;
     this.sampling = opts.sampling;
   }
