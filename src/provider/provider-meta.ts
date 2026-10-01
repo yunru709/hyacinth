@@ -78,7 +78,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'claude-sonnet-5',
     envKey: 'ANTHROPIC_API_KEY',
     protocol: 'anthropic',
-    models: MODEL_CATALOG.anthropic,
   },
   openai: {
     id: 'openai',
@@ -86,7 +85,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-5.5',
     envKey: 'OPENAI_API_KEY',
-    models: MODEL_CATALOG.openai,
   },
   deepseek: {
     id: 'deepseek',
@@ -94,7 +92,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.deepseek.com/v1',
     defaultModel: 'deepseek-v4-flash',
     envKey: 'DEEPSEEK_API_KEY',
-    models: MODEL_CATALOG.deepseek,
   },
   groq: {
     id: 'groq',
@@ -102,7 +99,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'llama-4-maverick',
     envKey: 'GROQ_API_KEY',
-    models: MODEL_CATALOG.groq,
   },
   xai: {
     id: 'xai',
@@ -110,7 +106,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.x.ai/v1',
     defaultModel: 'grok-4.5',
     envKey: 'XAI_API_KEY',
-    models: MODEL_CATALOG.xai,
   },
   mistral: {
     id: 'mistral',
@@ -118,7 +113,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.mistral.ai/v1',
     defaultModel: 'mistral-large-2512',
     envKey: 'MISTRAL_API_KEY',
-    models: MODEL_CATALOG.mistral,
   },
   gemini: {
     id: 'gemini',
@@ -126,7 +120,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://generativelanguage.googleapis.com',
     defaultModel: 'gemini-3.6-flash',
     envKey: 'GEMINI_API_KEY',
-    models: MODEL_CATALOG.gemini,
   },
   openrouter: {
     id: 'openrouter',
@@ -134,7 +127,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://openrouter.ai/api/v1',
     defaultModel: 'openrouter/auto',
     envKey: 'OPENROUTER_API_KEY',
-    models: MODEL_CATALOG.openrouter,
     /** OpenRouter 官方接受标准 user（而非 DeepSeek 的 user_id）——厂商级默认覆盖，可在 providers.json 改 */
     fieldMap: { userId: 'user' },
   },
@@ -144,7 +136,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.moonshot.cn/v1',
     defaultModel: 'kimi-k3',
     envKey: 'MOONSHOT_API_KEY',
-    models: MODEL_CATALOG.moonshot,
   },
   qwen: {
     id: 'qwen',
@@ -153,7 +144,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'qwen3.7-plus',
     envKey: 'DASHSCOPE_API_KEY',
     protocol: 'anthropic',
-    models: MODEL_CATALOG.qwen,
   },
   zhipu: {
     id: 'zhipu',
@@ -161,7 +151,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     defaultModel: 'glm-5.2',
     envKey: 'ZHIPU_API_KEY',
-    models: MODEL_CATALOG.zhipu,
   },
   minimax: {
     id: 'minimax',
@@ -170,7 +159,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'MiniMax-M3',
     envKey: 'MINIMAX_API_KEY',
     protocol: 'anthropic',
-    models: MODEL_CATALOG.minimax,
   },
   mimo: {
     id: 'mimo',
@@ -179,7 +167,6 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'mimo-v2.5',
     envKey: 'MIMO_API_KEY',
     protocol: 'anthropic',
-    models: MODEL_CATALOG.mimo,
   },
   volcengine: {
     id: 'volcengine',
@@ -190,6 +177,20 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
     defaultModel: 'deepseek-v4-flash',
     envKey: 'ARK_API_KEY',
-    models: MODEL_CATALOG.volcengine,
   },
 };
+
+/**
+ * 模型列表自动挂载（2026-10-02）。
+ *
+ * 此前每家厂商都要在本文件里手写一行 `models: MODEL_CATALOG.<id>` —— 新增厂商得动两处，
+ * 而"忘挂"的后果是**静默的**：那家厂商不报错，只是模型列表为空。
+ *
+ * 现改为按厂商名自动挂载：MODEL_CATALOG 仍是模型数据的唯一来源，这里只负责"接上线"，
+ * 所以它与 DEFAULT_PROVIDERS 的 models 依然**是同一个数组对象**（守卫测试的 toBe 继续成立）。
+ *
+ * 手写优先：若某家已显式声明 models（将来若要给个别厂商裁剪子集），不覆盖。
+ */
+for (const [id, meta] of Object.entries(PROVIDER_META)) {
+  if (!meta.models && MODEL_CATALOG[id]) meta.models = MODEL_CATALOG[id];
+}
