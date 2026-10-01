@@ -178,12 +178,12 @@ S1、S2 分别通过，均退出码 0。restart 前另跑 `pnpm smoke`（装配�
 另：`~/.agent/model-channels.json` **有运行时写入方**，进程运行期间手改会被 `save()` 覆盖 ——
 改完必须立刻重启，或改走运行时 API。
 
-### S4 —— 命令与显示（⏳ 部分完成）
+### S4 —— 命令与显示 ✅ **已完成**
 
-1. ⏳ `list_providers` 拆两张表（厂商 / 通道，后者含"服务哪些调用点"）—— **未做**
+1. ✅ `list_providers` 拆两张表：`DECLARED`＝厂商（配置声明的全部，标 ready/no-key）＋ `CHANNELS`＝通道（各自厂商/模型 ＋ 服务哪些调用点）；主对话所用通道排最前并标 `*`。原第三节 `LOADED` 读的是 ProviderRouter 的**老命名空间**（那个同名 `main`），已移除 —— `6aed790`
 2. ✅ **状态栏前置显示主对话所用通道**：协议层 `StateSnapshot` 增加 `channel` 字段（取自 registry 的角色映射，role=chat），TUI 显示形如 `chat · deepseek · deepseek-v4-flash · ~0 tokens` —— `399649a`
-3. ⏳ 新增 `/channel bind <调用点> <通道名>` —— **未做**
-4. ⏳ 报错文案区分"厂商名"与"通道名" —— **未做**
+3. ✅ 绑定能力**本已存在**：`/channel role <调用点> <通道名>`（`tui-channel-cmds.ts`，走 `model.setChannelRole`），无需新增 —— 命名沿用 `role`
+4. ✅ 报错文案区分两者：`Available in router: main` → 明确说明"此处注册的是【通道名】不是【厂商名】"、列出已注册项、给出正确路径 —— `7f44d0b`
 5. ✅ **移除 `/model` 的换模型分支**（`switch` / `provider`，共 101 行），换模型统一走 `/channel`；与换模型无关的设置项（`source` / `thinking` / `show-thinking` / `info` / `context`）**保留** —— `019e62d`
 
 ### S5 —— 退役与清理
