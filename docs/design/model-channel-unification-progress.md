@@ -4,7 +4,7 @@
 > 做到哪一步 · 改了哪些文件 · 当前是否处于**不可中断的中间态** · 如何回滚 · 下一步做什么。
 >
 > **设计依据**：`docs/design/model-channel-unification.md`（含现状调查与完整方案）
-> **最后更新**：2026-10-01 13:48
+> **最后更新**：2026-10-01 13:55
 > **执行者**：风信子（Agent）
 
 ---
@@ -13,12 +13,13 @@
 
 | 项 | 值 |
 |---|---|
-| **当前阶段** | **S1、S2 完成并已验证**；下一步 S3（未开始） |
-| **已提交** | `0e02a05` 设计文档＋本记录 · `f0e88e7` S1 · `bffa5e3` S2 · `f7e9e95` 记录更新 |
+| **当前阶段** | **S1、S2 完成并已验证**；下一步 **S3a**（修通道配置） |
+| **已提交** | `0e02a05` 设计文档＋本记录 · `f0e88e7` S1 · `bffa5e3` S2 · `f7e9e95`/`20cd318` 记录更新 |
 | **源码改动（未提交）** | 无 |
 | **可否安全中断** | ✅ 可以（无半成品代码） |
 | **门禁状态** | ✅ S1、S2 各自跑过 build / test / verify:layers（**均退出码 0**）；restart 前另跑 `pnpm smoke` ✅ |
 | **S2 活体验证** | ✅ **已通过**（证据见 §7.2） |
+| **用户已定调** | ① 主对话有独立通道 ② `main` 改名 ③ `provider.active` 彻底退役（见 §7.1 / §10） |
 
 ---
 
@@ -50,17 +51,18 @@
 
 ---
 
-## 3. 阶段划分（详见设计文档 §5）
+## 3. 阶段划分
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| **S1** | 主对话登记为调用点（role `chat`，缺省→main 通道）。行为零变化 | ✅ 已提交 `f0e88e7` |
-| **S2** | 主对话 provider 改为**经通道解析**（失败回落既有路径）⇒ 切通道对主对话真的生效 | ✅ 已提交 `bffa5e3`，**已活体验证** |
-| **S3** | 清理配置：修正通道里的错默认值、移除 `config.json` 的重复厂商段（先备份） | ⏳ 未开始 |
-| **S4** | 统一命令与显示（`/channel` 一族；`list_providers` 拆两张表） | ⏳ 未开始 |
-| **S5** | 移除老机制残留 + 补守卫测试 | ⏳ 未开始 |
+| **S1** | 主对话登记为调用点（role `chat`，缺省→main 通道）。行为零变化 | ✅ `f0e88e7` |
+| **S2** | 主对话 provider 改为**经通道解析**（失败回落既有路径）⇒ 切通道对主对话真的生效 | ✅ `bffa5e3`，**已活体验证** |
+| **S3a** | 修通道配置里的错默认值（**不动代码**） | ⏳ 未开始 |
+| **S3b** | 命名与结构：`main` → `default`（含旧配置兼容读取）+ 新建主对话专属通道 `chat` | ⏳ 未开始 |
+| **S4** | 统一命令与显示（`/channel` 一族；`list_providers` 拆两张表；状态栏标注通道） | ⏳ 未开始 |
+| **S5** | `provider.active` 彻底退役 + 清理重复配置 + 补守卫测试 | ⏳ 未开始 |
 
-> **硬性要求**：S1、S2 **分两次提交**（已遵守）。
+> **硬性要求**：S1、S2 **分两次提交**（已遵守）；S3b/S5 涉及旧配置，**必须配兼容读取、分步提交**。
 
 ---
 
@@ -70,8 +72,8 @@
 |---|---|---|---|
 | `src/provider/model-channel-registry.ts` | `DEFAULT_ROLES` 增加 `chat: 'main'` | S1 | `f0e88e7` |
 | `src/orchestrator/loop.ts` | 每轮 provider 决策处加入通道解析（+16 行，含回落） | S2 | `bffa5e3` |
-| `docs/design/model-channel-unification.md` | 设计提案 | — | `0e02a05` |
-| `docs/design/model-channel-unification-progress.md` | 本文件 | — | `0e02a05` / `f7e9e95` |
+| `docs/design/model-channel-unification.md` | 设计提案（含 §7.1 用户定调） | — | `0e02a05` / 待提交 |
+| `docs/design/model-channel-unification-progress.md` | 本文件 | — | `0e02a05` / `20cd318` / 待提交 |
 
 ---
 
@@ -79,11 +81,11 @@
 
 **当前没有半成品代码** —— S1、S2 均已提交并验证，可随时中断。
 
-**但请注意运行时的"临时状态"**：验证期间曾把 main 通道**运行时**切到 commandcode，
-随后**已切回** deepseek。这类切换**不落盘**（`model-channels.json` 未被修改），重启即恢复持久配置。
+**但请注意运行时的"临时状态"**：验证期间曾把 main 通道**运行时**切到 commandcode，随后**已切回** deepseek。
+这类切换**不落盘**，重启即恢复持久配置。
 
-**持久配置目前仍是坏的**（S3 待办）：`model-channels.json` 四条通道全写 `openai`（main 还是已废弃的 `gpt-4o`），
-而本机无 OpenAI key ⇒ 每次启动它们全部创建失败、静默回落 deepseek。**S3 才修这个。**
+**持久配置目前仍是坏的**（S3a 待办）：`model-channels.json` 四条通道全写 `openai`（main 还是已废弃的 `gpt-4o`），
+而本机无 OpenAI key ⇒ 每次启动它们全部创建失败、静默回落 deepseek。
 
 ---
 
@@ -93,8 +95,8 @@
 |---|---|
 | S1 | `git revert f0e88e7` |
 | S2 | `git revert bffa5e3`（回到"切通道不影响主对话"的旧行为） |
-| 文档 | `git revert 0e02a05` / `f7e9e95` |
-| 用户配置（S3 会改） | 每步先备份 `.bak-<日期>-<原因>`，还原即回滚 |
+| 文档 | `git revert 0e02a05` / `f7e9e95` / `20cd318` |
+| 用户配置（S3a/S3b 会改） | 每步先备份 `.bak-<日期>-<原因>`，还原即回滚 |
 
 ---
 
@@ -113,9 +115,9 @@ S1、S2 分别通过，均退出码 0。restart 前另跑 `pnpm smoke`（装配�
 | c | **下一轮** `provider_info` | ✅ **`{"type":"commandcode","model":"deepseek/deepseek-v4.1-flash"}`** |
 | d | 切回 `set_channel_model('main', 'deepseek', 'deepseek-v4-flash')` | ✅ 下一轮确认回到 deepseek |
 
-**结论**：主对话**确实随通道改变**（改造前不会）。这是本次任务的关键验证。
+**结论**：主对话**确实随通道改变**（改造前不会）。
 
-**附带结论（意外收获）**：步骤 c 的那一轮回复本身即由 GOAT 生成 ⇒ **GOAT 通道端到端可用**（不只是连通与权限，真实的对话请求也成功）。
+**附带结论**：步骤 c 那一轮的回复本身即由 GOAT 生成 ⇒ **GOAT 通道端到端可用**（不只是连通与权限）。
 
 **注意**：`list_providers` 的 LOADED 层**仍显示 deepseek** —— 那是老机制那张表（`ProviderRouter`），
 不受通道影响。这不是 bug，是 S4 要解决的显示问题（两张表混排）。
@@ -127,21 +129,52 @@ S1、S2 分别通过，均退出码 0。restart 前另跑 `pnpm smoke`（装配�
 | # | 决策 | 理由 |
 |---|---|---|
 | 1 | 主对话调用点命名 **`chat`** | 与 `compression`/`sub-agent` 同层级，语义直白 |
-| 2 | `main` 通道名**保留** | 它是"默认通道"。改名牵动已落地的用户配置与多处代码；改为**在显示层标注**它服务哪些调用点 |
-| 3 | `provider.active` **暂保留为兜底** | 主对话是命脉。通道解析失败必须能回落，绝不能"配置写错就起不来" |
-| 4 | 改在**每轮 provider 决策处**，不是 `getActiveProvider()` | 后者只用于显示/能力判断；改它**不会**改变实际发出的请求（llm 阶段消费的是 `state.activeProvider`） |
+| 2 | `provider.active` **暂保留**至 S5 | 主对话是命脉，分步退役；S5 才真正删净 |
+| 3 | 改在**每轮 provider 决策处**，不是 `getActiveProvider()` | 后者只用于显示/能力判断；改它**不会**改变实际发出的请求（llm 阶段消费的是 `state.activeProvider`） |
+
+**用户定调（2026-10-01 13:52）**：
+
+| # | 决策 |
+|---|---|
+| 4 | 主对话**有**独立通道（新建 `chat`，不复用其它通道） |
+| 5 | `main` **改名**（建议 `default`），须配旧配置**兼容读取**，不可直接删键 |
+| 6 | `provider.active` **彻底退役**，过渡兜底也移除 |
 
 ---
 
-## 9. 下一步（接手者从这里继续）
+## 9. 下一步
 
-**S3 —— 修配置（推荐优先）**：
+从 **S3a** 开始（见 §10 的详细拆分）。
 
-1. 备份 `~/.agent/model-channels.json`
-2. 把四条通道的 `provider: "openai"` 改成实际在用的厂商；`main` 那条的模型从废弃的 `gpt-4o` 改成有效值
-3. 顺带：`config.json` 的 `provider.active = "openai"`（指向一个没有 key 的厂商）应一并理顺
-4. 验证：**重启日志不再出现** `Failed to create provider for channel …`
+---
 
-**之后**：S4（命令与显示统一）、S5（清理老机制 + 守卫测试）。
+## 10. 阶段详细拆分（S3 起）
 
-**待用户定调**（设计文档 §7）：主对话是否要独立通道名、`main` 是否改名、`provider.active` 是否彻底退役。
+### S3a —— 修配置（不动代码，低风险，先做）
+
+1. 备份 `~/.agent/model-channels.json` → `.bak-<日期>-s3a`
+2. 把四条通道的 `provider: "openai"` 改成**实际在用的厂商**；`main` 那条的模型从废弃的 `gpt-4o` 改成有效值
+3. 验证：重启后日志**不再出现** `Failed to create provider for channel …`
+4. 回滚：还原备份
+
+### S3b —— 命名与结构（动代码，中高风险）
+
+1. 代码里 `'main'` 硬编码收敛为一个常量（值 `default`）
+   - 涉及：`getProvider(role)` 的缺省、`upsertChannel` 的继承源、`removeChannel` 的保护、`setMainProvider`、`createScopedProvider` 的缺省、`mergeDefaults` 的补建、以及"是否包弹性层"的判断
+2. **兼容读取**：读到旧配置里的 `main` 键 / roles 里的 `'main'` 值，自动映射为 `default`（并记一条日志）
+3. 新建主对话专属通道 `chat`（provider/model 取当前实际在用的）
+4. 迁移用户配置：`roles.chat` 由 `main` 指向新通道
+5. 验证：用**旧配置**启动能自动迁移；主对话正常；切通道仍生效
+
+### S4 —— 命令与显示
+
+1. `list_providers` 拆两张表：厂商清单 / 通道清单（后者含"服务哪些调用点"）
+2. 状态栏显示 `调用点 → 通道 → 厂商/模型`
+3. 新增 `/channel bind <调用点> <通道名>`
+4. 报错文案区分"厂商名"与"通道名"
+
+### S5 —— 退役与清理
+
+1. 移除 `provider.active` 的读取路径（`loop.ts` 的 manual 分支、`buildFromLegacy` 的相关入参）
+2. 移除 `config.json` 的 `provider.<厂商>` 重复段（先备份）
+3. 补守卫测试：通道解析失败必回落；旧配置兼容映射；主对话随通道变化
