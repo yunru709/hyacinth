@@ -550,7 +550,10 @@ export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
     envKey: 'ARK_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/plan/v3',
     baseUrlEnv: 'VOLCENGINE_BASE_URL',
-    model: config?.model ?? provCfg?.defaultModel ?? 'deepseek-v4-flash',
+    // 兜底与 providers.json 的 volcengine.defaultModel 对齐。
+    // ⚠️ 注意：此处的模型名是**火山 Plan 端点的短名体系**（doubao-seed-* / deepseek-v4.1-flash …），
+    // 与 DeepSeek 官方的模型 id（deepseek-flash）不是同一套命名，别互相套用。
+    model: config?.model ?? provCfg?.defaultModel ?? 'doubao-seed-evolving',
     providerType: 'volcengine',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,

@@ -9,10 +9,10 @@ import { getProviderConfigLoader } from './config.js';
  * DeepSeek 的 API 使用 OpenAI Chat Completions 兼容格式。
  * Endpoint: https://api.deepseek.com/v1
  *
- * 支持模型：
- *   - deepseek-v4-flash-0731 (V4 Flash 0731，1M上下文，推荐)
- *   - deepseek-v4-pro (V4 Pro，1M上下文)
- *   - deepseek-v4-flash (旧版，已退役，replacedBy deepseek-v4-flash-0731)
+ * 支持模型（官方 GET /models 现只列这两个，2026-10-02 核对）：
+ *   - deepseek-flash    (显示名 DeepSeek-V4.1-Flash，1M上下文，支持图片，推荐)
+ *   - deepseek-v4-pro   (V4 Pro，1M上下文)
+ * 旧名 deepseek-v4-flash / deepseek-v4-flash-0731 已从官方列表消失，仍作兼容保留（请求由 V4.1 承接）。
  */
 export function createDeepSeekProvider(config?: {
   apiKey?: string;

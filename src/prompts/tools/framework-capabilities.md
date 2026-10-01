@@ -25,7 +25,7 @@
 ```json
 {
   "channels": {
-    "default": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+    "default": { "provider": "deepseek", "model": "deepseek-flash" },
     "compression": { "provider": "deepseek", "model": "deepseek-v4-pro" },
     "sub-agent": { "provider": "local", "model": "qwen3.5:9b" }
   },

@@ -90,7 +90,9 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     id: 'deepseek',
     name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-v4-flash',
+    // 2026-10-02：官方模型表已改名为 deepseek-flash（显示名 DeepSeek-V4.1-Flash）/ deepseek-v4-pro。
+    // 旧名 deepseek-v4-flash 已从官方 /models 列表消失。
+    defaultModel: 'deepseek-flash',
     envKey: 'DEEPSEEK_API_KEY',
   },
   groq: {
@@ -175,7 +177,10 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     // 通用 API Key 用户需覆盖 baseUrl 为 https://ark.cn-beijing.volces.com/api/v3，
     // 并改用带日期后缀的 Model ID（如 doubao-seed-2-1-pro-260628）
     baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
-    defaultModel: 'deepseek-v4-flash',
+    // 与 providers.json 的 volcengine.defaultModel 对齐。
+    // ⚠️ 此处的名字属**火山 Plan 端点短名体系**（doubao-seed-* / deepseek-v4.1-flash …），
+    // 与 DeepSeek 官方的 id（deepseek-flash）不是同一套，别互相套用。
+    defaultModel: 'doubao-seed-evolving',
     envKey: 'ARK_API_KEY',
   },
 };
