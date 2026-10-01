@@ -1784,6 +1784,22 @@ export class AgentLoop {
         activeProvider = this.providerRouter.route({ complexity: 'medium' });
       }
     }
+
+    // 主对话也是一个调用点（2026-10-01 统一，见 docs/design/model-channel-unification.md §2）：
+    // 优先经**模型通道**解析（roles.chat → 通道 → provider），失败再回落上面算出的（老机制）。
+    //
+    // 为什么必须放在这里而不是 getActiveProvider()：本轮的 provider 是**每轮开头一次性
+    // 确定**后写进 TurnState 的（llm 阶段消费 state.activeProvider），getActiveProvider()
+    // 只用于显示/能力判断 —— 改那里不会改变实际发出的请求。
+    //
+    // 安全性：通道解析对"通道缺失/实例创建失败"内部已回落 mainProvider（即 this.provider），
+    // 故默认行为与改造前**逐位等价**；差别仅在于——用户切换通道后，主对话会真正随之改变
+    // （此前不会：通道的 main 与 ProviderRouter 的 main 同名却是两个独立对象）。
+    const viaChannel = this.modelRouter?.getProvider('chat');
+    if (viaChannel) {
+      activeProvider = viaChannel;
+    }
+
     this.activeProvider = activeProvider;
 
     // 一次性 fallback 通知（由 onFallback 回调写入，此处消费）
