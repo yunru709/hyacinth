@@ -1702,6 +1702,13 @@ export async function runTui(
         }
 
         default: {
+          // ── local/* —— 本地模型的启停/注册（2026-10-01 从 model/local/* 迁出）──
+          // 它是「管进程」，不是「管用哪条线」，故不并入 /channel。
+          // 旧路径 model/local/* 仍可用（下方 model/ 分支会转发到同一处理器）。
+          if (cmdPath.startsWith('local/')) {
+            await modelLocalCmds.handle('model/' + cmdPath, restArgs);
+            return;
+          }
           // model 在线/L1 + 压缩器控制（tui-model-cmds / tui-compress-cmds，第七批）──
           if (cmdPath.startsWith('model/')) {
             await modelCmds.handle(cmdPath, restArgs);
