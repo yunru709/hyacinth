@@ -113,14 +113,26 @@ export function buildStateSnapshot(
   const realTurn = loop.turnNumber != null ? loop.turnNumber : turnCount;
   const info = loop.getTurnInfo(realTurn, realTokens);
   const routing = loop.getProviderRoutingInfo();
-  const active = loop.getActiveProvider();
 
   // 主对话所用的通道名（2026-10-01 通道统一）。真源是 registry 的「角色→通道」映射，
   // 而不是 provider 名字 —— 主对话现在也是一个调用点（role=chat）。
   // 用可选链 + 断言：协议层不硬依赖具体 registry 形状（测试 mock / 非 AgentLoop 后端均可能没有）。
-  const chatChannel = (loop as unknown as {
-    modelRouter?: { getRegistry?: () => { listRoles?: () => Record<string, string> } };
-  }).modelRouter?.getRegistry?.()?.listRoles?.()?.chat;
+  const registry = (loop as unknown as {
+    modelRouter?: {
+      getRegistry?: () => {
+        listRoles?: () => Record<string, string>;
+        getProvider?: (role: string) => { getModel(): string; getProviderType(): string } | null;
+      };
+    };
+  }).modelRouter?.getRegistry?.();
+  const chatChannel = registry?.listRoles?.()?.chat;
+
+  // ⚠️ 厂商/模型必须按**主对话所在通道**取，不能直接读 loop.getActiveProvider()：
+  // 换通道后 loop.provider 仍是启动时绑定的那个（通道解析发生在每轮调用时，不改写它）
+  // ⇒ 状态栏会永远滞后于实际调用（2026-10-02 用户实测：通道名已变 chat、模型仍显示旧的）。
+  // 取不到则回落，保证行为不比改造前更差。
+  const channelProvider = chatChannel ? registry?.getProvider?.(chatChannel) : null;
+  const active = channelProvider ?? loop.getActiveProvider();
 
   return {
     sessionId: info.sessionId,
