@@ -1709,7 +1709,6 @@ export async function runTui(
             await modelLocalCmds.handle('model/' + cmdPath, restArgs);
             return;
           }
-          // model 在线/L1 + 压缩器控制（tui-model-cmds / tui-compress-cmds，第七批）──
           // ── ui/* —— 界面显示开关（2026-10-01 从 model/show-thinking 独立）──
           // 是否显示思考内容纯粹是界面偏好，与模型/通道怎么跑无关。
           if (cmdPath === 'ui/show-thinking') {
@@ -1719,8 +1718,18 @@ export async function runTui(
             updateTokenEstimate();
             return;
           }
-          if (cmdPath.startsWith('model/')) {
-            await modelCmds.handle(cmdPath, restArgs);
+          // ── model/* 已整体退役（2026-10-01 命令统一）──
+          // 换模型/通道 → /channel；思考档位 → /channel config；显示思考 → /ui；本地模型 → /local。
+          // （model/local/* 已迁出，在上面单独路由。）
+          if (cmdPath === 'model' || cmdPath.startsWith('model/')) {
+            chatLog.addSystem(
+              theme.warning('/model 已退役。 ') +
+              theme.dim('通道与模型：') + theme.accent('/channel') +
+              theme.dim('　思考档位：') + theme.accent('/channel config <通道名> thinking <档位>') +
+              theme.dim('　显示思考：') + theme.accent('/ui') +
+              theme.dim('　本地模型：') + theme.accent('/local'),
+            );
+            tui.requestRender();
             return;
           }
           if (cmdPath.startsWith('compress/')) {
