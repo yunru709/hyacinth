@@ -1,8 +1,9 @@
 /**
  * tui-model-cmds.ts —— model 非 local 子命令模块（tui.ts 深拆第六批）。
  *
- * 从 handleSlashSubCommand 迁出 model 的在线/设置命令族：switch、provider、
- * source、thinking（含 8 档子命令）、show-thinking、info、context。
+ * 从 handleSlashSubCommand 迁出 model 的设置命令族：source、thinking（含 8 档子命令）、
+ * show-thinking、info、context。
+ * ⚠️ 2026-10-01：换模型分支（switch / provider）已移除 —— 统一走 /channel 通道机制。
  * 沿用第五批 tui-model-local 的「命令处理器外移」样板：工厂 + deps 注入，
  * case 只留一行转发。
  *
@@ -54,105 +55,20 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
   async function handle(cmdPath: string, restArgs: string): Promise<void> {
     switch (cmdPath) {
       // ── model/switch：设置当前 provider 的模型名 ──
+      // ── 换模型已收敛到 /channel（2026-10-01）──
+      // 原先 /model switch 与 /model provider 走的是老机制（ProviderRouter），与 /channel 的
+      // 通道机制并存：同一件事两条路、结果不同，是"切了没反应"的源头，故移除。
+      // 主对话现在就是一个普通调用点（通道名 chat）。
       case 'model/settings/switch':
-      case 'model/switch': {
-        if (!restArgs) {
-          chatLog.addSystem(theme.warning('Usage: /model switch <model-name>'));
-          tui.requestRender();
-          return;
-        }
-        const providerType = getProviderType();
-        // 经协议切换：协议层是 provider 选择唯一写入口（含落盘 provider.<p>.model）。
-        // UI 不再自行 setConfig —— 直连 config 会绕过协议层的校验/持久化/通道同步。
-        try {
-          await protocolSend('model.switch', { provider: providerType, model: String(restArgs) });
-          chatLog.addSystem(
-            theme.success('Model name set to ') + theme.fg(String(restArgs)) + theme.dim(` (provider: ${providerType})`),
-          );
-        } catch (err) {
-          chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-        }
-        tui.requestRender();
-        await refreshStatusFromProtocol();
-        return;
-      }
-
-      // ── model/provider：切换 provider ──
+      case 'model/switch':
       case 'model/settings/provider':
       case 'model/provider': {
-        if (!restArgs) {
-          chatLog.addSystem(theme.warning('Usage: /model provider <anthropic|openai|deepseek|gemini|groq|xai|mistral|openrouter|moonshot|qwen|zhipu|minimax|mimo|volcengine|local>'));
-          tui.requestRender();
-          return;
-        }
-
-        if (restArgs === 'local') {
-          const lmList = localModel.list();
-
-          // 无已注册模型 → 检查本地模型配置或直接切
-          if (lmList.length === 0) {
-            const { getLocalProviderConfigLoader } = await import('../provider/local-config.js');
-            const localCfg = getLocalProviderConfigLoader();
-            if (localCfg?.defaultModel) {
-              // 本地模型已配置 → 直接切换（model.switch 委托 loop.switchProvider，含 registry 同步）
-              try {
-                await protocolSend('model.switch', { provider: 'local' });
-                chatLog.addSystem(theme.success(`Switched to local (${localCfg.baseUrl}, ${localCfg.defaultModel})`));
-                chatLog.addSystem(theme.dim('Register models via /model local/register for process management.'));
-                await refreshStatusFromProtocol();
-              } catch (err) {
-                chatLog.addSystem(theme.error(`Switch failed: ${(err as Error).message}`));
-              }
-            } else {
-              chatLog.addSystem(theme.warning('No local models configured.'));
-              chatLog.addSystem(theme.dim('Set a local model in config or register models via /model local/register.'));
-            }
-            tui.requestRender();
-            return;
-          }
-
-          const targetName = localModel.getActive() ?? lmList[0].name;
-
-          localModel.switch(targetName).then(async (info) => {
-            if (info) {
-              await setConfig('provider.local', {
-                type: 'local',
-                model: info.modelFile ?? targetName,
-                baseUrl: info.baseUrl,
-              });
-              await setConfig('provider.local.modelKey', targetName);
-              try {
-                await protocolSend('model.switch', { provider: 'local' });
-                chatLog.addSystem(theme.success(`Switched to local model: ${targetName} (port ${info.port})`));
-                await refreshStatusFromProtocol();
-              } catch (swErr) {
-                chatLog.addSystem(theme.error(`Failed: ${(swErr as Error).message}`));
-              }
-            } else {
-              chatLog.addSystem(theme.error(`Failed to start ${targetName}`));
-            }
-            tui.requestRender();
-          }).catch((e) => {
-            chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-            tui.requestRender();
-          });
-          return;
-        }
-
-        localModel.getBridge().stopAll().catch(() => {});
-        try {
-          // 协议层统一落盘 provider.active（UI 不再自行 setConfig）
-          await protocolSend('model.switch', { provider: restArgs });
-        } catch (e) {
-          chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
-          tui.requestRender();
-          return;
-        }
         chatLog.addSystem(
-          theme.success('Provider switched to ') + theme.fg(String(restArgs)) + theme.dim(' (persisted)'),
+          theme.warning('This command has been removed. ') +
+          theme.dim('换主对话请用 ') + theme.accent('/channel chat model <厂商> [模型]') +
+          theme.dim('，看总览用 ') + theme.accent('/channel'),
         );
         tui.requestRender();
-        await refreshStatusFromProtocol();
         return;
       }
 

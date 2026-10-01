@@ -47,28 +47,14 @@ function setup() {
 }
 
 describe('tui-model-cmds model 命令', () => {
-  it('model/switch：经协议切换当前 provider 的模型（UI 不再直写配置）', async () => {
-    const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
-    await ctl.handle('model/switch', 'gpt-x');
-    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'deepseek', model: 'gpt-x' });
-    // 配置落盘由协议层统一负责（唯一写入口）
-    expect(setConfig).not.toHaveBeenCalledWith('provider.deepseek.model', 'gpt-x');
-    expect(refreshStatusFromProtocol).toHaveBeenCalled();
-  });
-
-  it('model/provider：切换非 local provider（协议层持久化，UI 不写配置）', async () => {
-    const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
-    await ctl.handle('model/provider', 'anthropic');
-    expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'anthropic' });
-    // provider.active 由协议层落盘（唯一写入口），UI 不再直写
-    expect(setConfig).not.toHaveBeenCalledWith('provider.active', 'anthropic');
-    expect(refreshStatusFromProtocol).toHaveBeenCalled();
-  });
-
-  it('model/provider 缺参 → usage', async () => {
+  // 换模型两条分支（model/switch、model/provider）已于 2026-10-01 移除 —— 统一走 /channel 通道机制。
+  it('model/switch 与 model/provider 已移除 → 提示迁移到 /channel', async () => {
     const { ctl, calls } = setup();
-    await ctl.handle('model/provider', '');
-    expect(calls.join('\n')).toContain('Usage: /model provider');
+    await ctl.handle('model/switch', 'gpt-x');
+    await ctl.handle('model/provider', 'anthropic');
+    const out = calls.join('\n');
+    expect(out).toContain('has been removed');
+    expect(out).toContain('/channel');
   });
 
   it('model/source 缺参 → usage（含角色列表）', async () => {
