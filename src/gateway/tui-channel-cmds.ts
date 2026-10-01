@@ -34,7 +34,7 @@ export interface ChannelInfo {
 export interface ChannelRegistryLike {
   listChannels(): Array<{ name: string; provider: string; model?: string }>;
   listRoles(): Record<string, string>;
-  upsertChannel(name: string, opts: { provider?: string; model?: string }): unknown;
+  upsertChannel(name: string, opts: { provider?: string; model?: string; thinking?: boolean }): unknown;
   getChannelInfo(name: string): ChannelInfo | undefined;
   removeChannel(name: string): unknown;
   setRoleMapping(role: string, channel: string): unknown;
@@ -209,15 +209,134 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
       return;
     }
 
-    if (cmdPath === 'channel/role') {
+    // ── ① /channel use <使用点> <通道名> ── 让某个使用点改用这条通道 ──
+    // （role 是它的旧名，保留为别名）
+    if (cmdPath === 'channel/use') {
       if (!restArgs) {
-        chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
+        chatLog.addSystem(theme.warning('Usage: /channel use <使用点> <通道名>')
+          + theme.dim('  使用点如 chat / compression / sub-agent'));
         tui.requestRender();
         return;
       }
       const parts = restArgs.split(/\s+/).filter(Boolean);
       if (parts.length < 2) {
-        chatLog.addSystem(theme.warning('Usage: /channel role <role> <channel>'));
+        chatLog.addSystem(theme.warning('Usage: /channel use <使用点> <通道名>'));
+        tui.requestRender();
+        return;
+      }
+      const [usePoint, target] = parts;
+      const viaUse = await execViaProtocol(getProtocolSend, 'model.setChannelRole', { role: usePoint, channel: target });
+      if (viaUse) {
+        chatLog.addSystem(theme.success(`${usePoint} → 通道 "${target}"`));
+        tui.requestRender();
+        return;
+      }
+      if (!registry) { warnNoRegistry(); return; }
+      try {
+        registry.setRoleMapping(usePoint, target);
+        chatLog.addSystem(theme.success(`${usePoint} → 通道 "${target}"`));
+      } catch (e) {
+        chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+      }
+      tui.requestRender();
+      return;
+    }
+
+    // ── ② /channel model <通道名> <厂商> [模型] ── 这条通道提供哪个模型 ──
+    if (cmdPath === 'channel/model') {
+      const parts = (restArgs || '').split(/\s+/).filter(Boolean);
+      if (parts.length < 2) {
+        chatLog.addSystem(theme.warning('Usage: /channel model <通道名> <厂商> [模型]'));
+        tui.requestRender();
+        return;
+      }
+      const [chName, prov, ...rest] = parts;
+      const modelArg = rest.join(' ');
+      const viaSet = await execViaProtocol(getProtocolSend, 'model.setChannelModel', {
+        name: chName, provider: prov, model: modelArg || undefined,
+      });
+      if (viaSet) {
+        chatLog.addSystem(theme.success(`Channel "${chName}" → ${prov}${modelArg ? '/' + modelArg : ''}`));
+        tui.requestRender();
+        return;
+      }
+      if (!registry) { warnNoRegistry(); return; }
+      try {
+        registry.setChannelModel(chName, prov, modelArg || undefined);
+        chatLog.addSystem(theme.success(`Channel "${chName}" → ${prov}${modelArg ? '/' + modelArg : ''}`));
+      } catch (e) {
+        chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+      }
+      tui.requestRender();
+      return;
+    }
+
+    // ── ③ /channel config <通道名> [键 值] ── 看/改该模型的配置 ──
+    // 只带通道名 = 列出该通道的配置与它服务的使用点；带键值 = 改。
+    if (cmdPath === 'channel/config') {
+      const parts = (restArgs || '').split(/\s+/).filter(Boolean);
+      if (parts.length === 0) {
+        chatLog.addSystem(theme.warning('Usage: /channel config <通道名> [键 值]')
+          + theme.dim('  例：/channel config compression thinking on'));
+        tui.requestRender();
+        return;
+      }
+      const [chName, key, ...rest] = parts;
+      const viaInfo = await execViaProtocol(getProtocolSend, 'model.getChannelInfo', { name: chName });
+      const info = (viaInfo as { info?: ChannelInfo } | null)?.info ?? registry?.getChannelInfo(chName);
+      if (!info) {
+        chatLog.addSystem(theme.warning(`Channel "${chName}" not found`));
+        tui.requestRender();
+        return;
+      }
+      if (!key) {
+        const thinking = (info as unknown as { thinking?: boolean }).thinking;
+        chatLog.addSystem(
+          theme.dim(`通道 "${chName}"  `) + `${info.provider}/${info.model}`
+          + theme.dim(`  thinking=${thinking === undefined ? '(默认)' : String(thinking)}`)
+          + (info.roles?.length ? theme.dim('  服务: ') + info.roles.join(', ') : ''),
+        );
+        tui.requestRender();
+        return;
+      }
+      const value = rest.join(' ');
+      if (key === 'thinking') {
+        if (value !== 'on' && value !== 'off') {
+          chatLog.addSystem(theme.warning('Usage: /channel config <通道名> thinking on|off'));
+          tui.requestRender();
+          return;
+        }
+        const on = value === 'on';
+        const viaCfg = await execViaProtocol(getProtocolSend, 'model.upsertChannel', { name: chName, thinking: on });
+        if (viaCfg) {
+          chatLog.addSystem(theme.success(`通道 "${chName}" 的 thinking = ${value}`));
+          tui.requestRender();
+          return;
+        }
+        if (!registry) { warnNoRegistry(); return; }
+        try {
+          registry.upsertChannel(chName, { thinking: on });
+          chatLog.addSystem(theme.success(`通道 "${chName}" 的 thinking = ${value}`));
+        } catch (e) {
+          chatLog.addSystem(theme.error(`Failed: ${(e as Error).message}`));
+        }
+        tui.requestRender();
+        return;
+      }
+      chatLog.addSystem(theme.warning(`未知配置项 "${key}"`) + theme.dim('  目前支持：thinking'));
+      tui.requestRender();
+      return;
+    }
+
+    if (cmdPath === 'channel/role') {
+      if (!restArgs) {
+        chatLog.addSystem(theme.warning('Usage: /channel use <使用点> <通道名>（role 为旧名）'));
+        tui.requestRender();
+        return;
+      }
+      const parts = restArgs.split(/\s+/).filter(Boolean);
+      if (parts.length < 2) {
+        chatLog.addSystem(theme.warning('Usage: /channel use <使用点> <通道名>（role 为旧名）'));
         tui.requestRender();
         return;
       }
