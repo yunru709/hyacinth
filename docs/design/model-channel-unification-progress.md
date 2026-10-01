@@ -178,12 +178,13 @@ S1、S2 分别通过，均退出码 0。restart 前另跑 `pnpm smoke`（装配�
 另：`~/.agent/model-channels.json` **有运行时写入方**，进程运行期间手改会被 `save()` 覆盖 ——
 改完必须立刻重启，或改走运行时 API。
 
-### S4 —— 命令与显示
+### S4 —— 命令与显示（⏳ 部分完成）
 
-1. `list_providers` 拆两张表：厂商清单 / 通道清单（后者含"服务哪些调用点"）
-2. 状态栏显示 `调用点 → 通道 → 厂商/模型`
-3. 新增 `/channel bind <调用点> <通道名>`
-4. 报错文案区分"厂商名"与"通道名"
+1. ⏳ `list_providers` 拆两张表（厂商 / 通道，后者含"服务哪些调用点"）—— **未做**
+2. ✅ **状态栏前置显示主对话所用通道**：协议层 `StateSnapshot` 增加 `channel` 字段（取自 registry 的角色映射，role=chat），TUI 显示形如 `chat · deepseek · deepseek-v4-flash · ~0 tokens` —— `399649a`
+3. ⏳ 新增 `/channel bind <调用点> <通道名>` —— **未做**
+4. ⏳ 报错文案区分"厂商名"与"通道名" —— **未做**
+5. ✅ **移除 `/model` 的换模型分支**（`switch` / `provider`，共 101 行），换模型统一走 `/channel`；与换模型无关的设置项（`source` / `thinking` / `show-thinking` / `info` / `context`）**保留** —— `019e62d`
 
 ### S5 —— 退役与清理
 
