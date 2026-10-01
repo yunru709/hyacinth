@@ -51,6 +51,11 @@ export interface OpenAICompatibleOptions {
   sampling?: ProviderSampling;
   /** 通用字段 → wire 字段名覆盖（JSON 声明厂商 meta.fieldMap 传入） */
   fieldMap?: Partial<Record<keyof ProviderFields, string>>;
+  /**
+   * 是否接受 DeepSeek 私有的 `thinking` / `reasoning_effort` 请求字段。
+   * 缺省：仅 `providerType === 'deepseek'`（其它厂商不再收到未知字段）。
+   */
+  deepseekThinking?: boolean;
 }
 
 /**
@@ -79,6 +84,8 @@ export class OpenAICompatibleProvider implements Provider {
   private userId?: string;
   private sampling?: ProviderSampling;
   private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
+  /** 是否发送 DeepSeek 私有的 thinking / reasoning_effort 字段（缺省仅 deepseek 官方） */
+  private readonly deepseekThinking: boolean;
 
   constructor(opts: OpenAICompatibleOptions) {
     const apiKey = opts.apiKey ?? (opts.envKey ? process.env[opts.envKey] : undefined);
@@ -108,6 +115,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.userId = opts.fields?.userId ?? opts.userId; // 缺省兜底在 translateFields（openai 协议）
     this.sampling = opts.sampling ?? modelInfo?.sampling; // 三级兜底：激活配置 → 模型目录默认
     this.fieldMap = opts.fieldMap;
+    this.deepseekThinking = opts.deepseekThinking ?? (opts.providerType === 'deepseek');
   }
 
   getProviderType(): ProviderType {
@@ -169,12 +177,17 @@ export class OpenAICompatibleProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    // DeepSeek thinking：默认 enabled，必须显式发送 disabled 才能关闭
-    (params as any).extra_body = {
-      thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
-    };
-    if (this.thinkingEnabled) {
-      (params as unknown as Record<string, unknown>).reasoning_effort = this.reasoningEffort;
+    // DeepSeek 私有扩展（thinking / reasoning_effort）——**只对声明支持的厂商发送**。
+    // `thinking` 的语义是"必须显式发 disabled 才能关"，且 reasoning_effort 同为
+    // DeepSeek 家族专有。此前无条件发给所有 OpenAI 兼容厂商：宽松网关忽略、
+    // 严格网关直接 400（跨厂商请求体污染）。缺省判定见 constructor。
+    if (this.deepseekThinking) {
+      (params as any).extra_body = {
+        thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
+      };
+      if (this.thinkingEnabled) {
+        (params as unknown as Record<string, unknown>).reasoning_effort = this.reasoningEffort;
+      }
     }
 
     const toolCallAccumulators = new Map<
@@ -422,6 +435,14 @@ export class OpenAICompatibleProvider implements Provider {
 export interface CompatibleFactoryConfig {
   apiKey?: string;
   model?: string;
+  /**
+   * 自定义端点 —— 覆盖厂商默认 baseUrl。
+   *
+   * 缺修复：此前各工厂只读 `providers.json` 的 baseUrl，**通道配置里的 baseUrl
+   * 被静默丢弃**（走代理 / 反代 / 区域端点时配了不生效）。
+   * 优先级：本参数 > providers.json > 硬编码默认。
+   */
+  baseUrl?: string;
   userId?: string;
   maxOutputTokens?: number;
   fields?: ProviderFields;
@@ -435,7 +456,7 @@ export function createGroqProvider(config?: CompatibleFactoryConfig) {
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'GROQ_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://api.groq.com/openai/v1',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.groq.com/openai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'groq',
     userId: config?.userId,
@@ -452,7 +473,7 @@ export function createXAIProvider(config?: CompatibleFactoryConfig) {
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'XAI_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://api.x.ai/v1',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.x.ai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'xai',
     userId: config?.userId,
@@ -469,7 +490,7 @@ export function createMistralProvider(config?: CompatibleFactoryConfig) {
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'MISTRAL_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://api.mistral.ai/v1',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.mistral.ai/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'mistral',
     userId: config?.userId,
@@ -486,7 +507,7 @@ export function createOpenRouterProvider(config?: CompatibleFactoryConfig) {
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'OPENROUTER_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://openrouter.ai/api/v1',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://openrouter.ai/api/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'openrouter',
     userId: config?.userId,
@@ -507,7 +528,7 @@ export function createMoonshotProvider(config?: CompatibleFactoryConfig) {
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'MOONSHOT_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://api.moonshot.cn/v1',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.moonshot.cn/v1',
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'moonshot',
     userId: config?.userId,
@@ -520,14 +541,14 @@ export function createMoonshotProvider(config?: CompatibleFactoryConfig) {
 
 /** 火山引擎（火山方舟 Ark）— 豆包 / Doubao Seed 系列（OpenAI 兼容协议）。
  *  默认走 Agent/Coding Plan 专属端点 + Plan 专属 Key + Plan 短名模型；
- *  通用 API Key 用户需覆盖 baseUrl（VOLCENGINE_BASE_URL 或 providers.json）
+ *  通用 API Key 用户需覆盖 baseUrl（本参数 / VOLCENGINE_BASE_URL / providers.json）
  *  为 https://ark.cn-beijing.volces.com/api/v3 并使用带日期后缀的 Model ID */
 export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('volcengine');
   return new OpenAICompatibleProvider({
     apiKey: config?.apiKey,
     envKey: 'ARK_API_KEY',
-    baseUrl: provCfg?.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/plan/v3',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/plan/v3',
     baseUrlEnv: 'VOLCENGINE_BASE_URL',
     model: config?.model ?? provCfg?.defaultModel ?? 'deepseek-v4-flash',
     providerType: 'volcengine',

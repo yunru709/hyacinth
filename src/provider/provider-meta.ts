@@ -40,10 +40,27 @@ export interface ProviderFactoryMeta {
   /** 该厂商支持的模型列表（数据源：MODEL_CATALOG） */
   models?: ModelCatalogEntry[];
   /**
-   * 兼容协议（仅 JSON 声明厂商使用；内置厂商由各自实现文件决定）。
-   * openai = OpenAI Chat Completions（默认），anthropic = Anthropic Messages API。
+   * 兼容协议声明 —— "该厂商走哪套协议"的**单一真源**。
+   *
+   * - JSON 声明厂商：由本字段决定 factory-registry 用哪套实现（缺省 openai）。
+   * - 内置厂商：**同样在此声明**。可用性探测器（`probe.ts`）据此拼端点，
+   *   不必再维护一份"哪些厂商是 anthropic 协议"的硬编码名单
+   *   —— 那份名单漏加一次，新增厂商就会被按 OpenAI 路径探测 ⇒ 误判为不可用（静默）。
+   * - `gemini` 为 Google 专有协议，不在此二元取值内（probe 按 type 特判）。
+   *
+   * 注：当前多数厂商**同时提供两种协议的端点**（如 qwen 走 anthropic 兼容、
+   * zhipu 走 openai 兼容），故本字段取值是"接入选型"而非"厂商能力上限"。
    */
   protocol?: 'openai' | 'anthropic';
+  /**
+   * 该厂商接受 DeepSeek 私有的 `thinking` / `reasoning_effort` 请求字段。
+   *
+   * 缺省策略：**仅 `deepseek` 官方发送**（见 `compatible.ts`），其余厂商不再被塞入
+   * 未知字段 —— 历史上这类"照着 DeepSeek 抄"的私有字段会外溢给所有 OpenAI 兼容厂商
+   * （宽松网关忽略、严格网关直接 400）。
+   * 跑 DeepSeek 模型的中转站（如 opencode / commandcode）若也接受，可显式置 `true`。
+   */
+  deepseekThinking?: boolean;
   /** 厂商级默认采样参数（JSON 声明厂商用；激活配置未覆盖时生效） */
   sampling?: ProviderSampling;
   /** 通用字段 → wire 字段名覆盖（如 OpenAI 兼容端点用标准 user：{ "userId": "user" }） */
@@ -60,6 +77,7 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.anthropic.com',
     defaultModel: 'claude-sonnet-5',
     envKey: 'ANTHROPIC_API_KEY',
+    protocol: 'anthropic',
     models: MODEL_CATALOG.anthropic,
   },
   openai: {
@@ -134,6 +152,7 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://dashscope.aliyuncs.com/apps/anthropic',
     defaultModel: 'qwen3.7-plus',
     envKey: 'DASHSCOPE_API_KEY',
+    protocol: 'anthropic',
     models: MODEL_CATALOG.qwen,
   },
   zhipu: {
@@ -150,6 +169,7 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.minimaxi.com/anthropic',
     defaultModel: 'MiniMax-M3',
     envKey: 'MINIMAX_API_KEY',
+    protocol: 'anthropic',
     models: MODEL_CATALOG.minimax,
   },
   mimo: {
@@ -158,6 +178,7 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     baseUrl: 'https://api.xiaomimimo.com/anthropic',
     defaultModel: 'mimo-v2.5',
     envKey: 'MIMO_API_KEY',
+    protocol: 'anthropic',
     models: MODEL_CATALOG.mimo,
   },
   volcengine: {

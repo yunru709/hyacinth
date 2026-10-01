@@ -11,9 +11,47 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import type { ProviderSampling } from './fields.js';
+
 export interface GeminiProviderOptions {
   apiKey?: string;
   model?: string;
+  /** 自定义端点（代理 / 反代 / 区域端点）—— 覆盖 SDK 默认（内部映射为 SDK 的 baseURL） */
+  baseUrl?: string;
+  /** 采样参数（temperature / topP → generationConfig） */
+  sampling?: ProviderSampling;
+}
+
+/** 远程媒体下载上限：inlineData 要整体进请求体，过大不划算 */
+const MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024;
+/** 远程媒体下载超时 */
+const REMOTE_MEDIA_TIMEOUT_MS = 15_000;
+
+/**
+ * 下载远程媒体并转为 Gemini 的 inlineData。
+ *
+ * 修复背景：URL 分支此前直接把**网址字符串**塞进 `inlineData.data`
+ * （该字段语义是 base64 二进制），等于把垃圾放进请求体 —— 用 URL 传图/视频给
+ * Gemini 必然异常。Gemini 的 `fileData` 只接受 Files API 上传后的 URI（或 gs://），
+ * 故 URL 只能先下载再内联。
+ *
+ * 失败 / 空 / 超限 → 返回 null，由调用方降级为文本占位
+ * （宁可丢掉这张图，也不要发出一个坏请求）。
+ */
+async function fetchRemoteMedia(
+  url: string,
+  fallbackMime: string,
+): Promise<{ mimeType: string; data: string } | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(REMOTE_MEDIA_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    const declared = res.headers.get('content-type')?.split(';')[0]?.trim();
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > MAX_REMOTE_MEDIA_BYTES) return null;
+    return { mimeType: declared || fallbackMime, data: buf.toString('base64') };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -23,6 +61,7 @@ export class GeminiProvider implements Provider {
   private client: GoogleGenAI;
   private model: string;
   private maxOutputTokens: number;
+  private sampling?: ProviderSampling;
 
   constructor(opts: GeminiProviderOptions = {}) {
     const apiKey =
@@ -35,9 +74,14 @@ export class GeminiProvider implements Provider {
       );
     }
 
-    this.client = new GoogleGenAI({ apiKey });
+    // SDK 的选项名是 baseURL（大写 URL）；对外统一叫 baseUrl，与其余 Provider 保持一致。
+    this.client = new GoogleGenAI({
+      apiKey,
+      ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
+    });
     this.model = opts.model ?? 'gemini-3.6-flash';
     this.maxOutputTokens = getModelInfo('gemini', this.model)?.maxOutputTokens ?? 8192;
+    this.sampling = opts.sampling;
   }
 
   getProviderType(): ProviderType {
@@ -66,7 +110,7 @@ export class GeminiProvider implements Provider {
     tools?: ToolDefinition[],
     signal?: AbortSignal,
   ): AsyncIterable<StreamEvent> {
-    const { systemInstruction, history, userMessage, userParts } = this.splitMessages(messages);
+    const { systemInstruction, history, userMessage, userParts } = await this.splitMessages(messages);
 
     const chat = this.client.chats.create({
       model: this.model,
@@ -76,6 +120,8 @@ export class GeminiProvider implements Provider {
           : undefined,
         tools: tools && tools.length > 0 ? this.convertTools(tools) : undefined,
         maxOutputTokens: this.maxOutputTokens,
+        ...(this.sampling?.temperature !== undefined ? { temperature: this.sampling.temperature } : {}),
+        ...(this.sampling?.topP !== undefined ? { topP: this.sampling.topP } : {}),
       },
       history: history.length > 0 ? history : undefined,
     });
@@ -135,12 +181,12 @@ export class GeminiProvider implements Provider {
     }
   }
 
-  private splitMessages(messages: Message[]): {
+  private async splitMessages(messages: Message[]): Promise<{
     systemInstruction?: string;
     history: Content[];
     userMessage: string;
-    userParts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; functionResponse?: { name: string; response: Record<string, unknown> } }>;
-  } {
+    userParts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string }; fileData?: { fileUri: string }; functionResponse?: { name: string; response: Record<string, unknown> } }>;
+  }> {
     // 发送边界统一清洗：递归清洗全部将进 API 请求体的字符串（含 tool_use 参数 /
     // thinking 等单点漏网字段），与各 block 内部 sanitizeText 幂等。
     messages = sanitizeStrings(messages);
@@ -204,8 +250,13 @@ export class GeminiProvider implements Provider {
           } else if (b.type === 'image' && b.source.type === 'base64') {
             imageParts.push({ inlineData: { mimeType: b.source.media_type, data: b.source.data } });
           } else if (b.type === 'image' && b.source.type === 'url') {
-            // Gemini 也支持 fileData 引用远程图片
-            imageParts.push({ inlineData: { mimeType: 'image/unknown', data: b.source.url } });
+            // 必须下载后内联：inlineData.data 是 base64 二进制，塞网址会让请求体变成垃圾
+            const fetched = await fetchRemoteMedia(b.source.url, 'image/png');
+            if (fetched) {
+              imageParts.push({ inlineData: fetched });
+            } else {
+              textParts.push(`[Image URL (fetch failed): ${b.source.url}]`);
+            }
           } else if (b.type === 'video') {
             const supportsVideo = this.getCapabilities().inputTypes?.includes('video') ?? false;
             if (!supportsVideo) {
@@ -213,7 +264,12 @@ export class GeminiProvider implements Provider {
             } else if (b.source.type === 'base64') {
               mediaParts.push({ inlineData: { mimeType: b.media_type, data: b.source.data } });
             } else if (b.source.type === 'url') {
-              mediaParts.push({ inlineData: { mimeType: b.media_type, data: b.source.url } });
+              const fetched = await fetchRemoteMedia(b.source.url, b.media_type);
+              if (fetched) {
+                mediaParts.push({ inlineData: fetched });
+              } else {
+                textParts.push(`[Video URL (fetch failed): ${b.source.url}]`);
+              }
             } else {
               mediaParts.push({ fileData: { fileUri: `file://${b.source.path}` } });
             }
@@ -275,6 +331,6 @@ export class GeminiProvider implements Provider {
 }
 
 /** 便捷工厂 */
-export function createGeminiProvider(config?: { apiKey?: string; model?: string }): GeminiProvider {
+export function createGeminiProvider(config?: GeminiProviderOptions): GeminiProvider {
   return new GeminiProvider(config);
 }

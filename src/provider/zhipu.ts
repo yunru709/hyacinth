@@ -9,7 +9,7 @@
 
 import { OpenAICompatibleProvider } from './compatible.js';
 import type { ProviderConfig } from '../types.js';
-import type { ProviderFields } from './fields.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 import { getProviderConfigLoader } from './config.js';
 
 export function createZhipuProvider(config?: {
@@ -18,6 +18,10 @@ export function createZhipuProvider(config?: {
   baseUrl?: string;
   maxOutputTokens?: number;
   userId?: string;
+  /** 通用字段（userId 归一入口） */
+  fields?: ProviderFields;
+  /** 采样参数（temperature/topP；此前未透传 ⇒ 配了不生效） */
+  sampling?: ProviderSampling;
   /** 通用字段 → wire 字段名覆盖（映射数据化：providers.json 可配置） */
   fieldMap?: Partial<Record<keyof ProviderFields, string>>;
 }): OpenAICompatibleProvider {
@@ -30,6 +34,8 @@ export function createZhipuProvider(config?: {
     providerType: 'zhipu',
     maxOutputTokens: config?.maxOutputTokens,
     userId: config?.userId,
+    fields: config?.fields,
+    sampling: config?.sampling,
     fieldMap: config?.fieldMap,
   });
 }
@@ -44,6 +50,8 @@ export function createZhipuFromConfig(
     baseUrl: config.baseUrl,
     maxOutputTokens: config.maxOutputTokens,
     userId: config.userId,
+    fields: config.fields,
+    sampling: config.sampling,
     fieldMap,
   });
 }

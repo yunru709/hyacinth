@@ -46,10 +46,16 @@ export const DEFAULT_PROBE_CONFIG: ProbeConfig = {
 type ProbeProtocol = 'openai' | 'anthropic' | 'gemini';
 
 /**
- * 内置厂商的 meta.protocol 字段缺省（仅 JSON 声明厂商携带），协议由实现文件决定：
- *  - anthropic 系（baseUrl 为裸域名或 /anthropic 形态，拼 /v1/messages）：anthropic/qwen/minimax/mimo
+ * 协议判定 —— **以 meta.protocol 为准**。
+ *
+ * `PROVIDER_META`（内置厂商）与 `providers.json`（JSON 声明厂商）都会声明该字段；
+ * 且 `ProviderConfigLoader.getProvider` 做逐字段回落 ⇒ 用户文件里缺字段时会自动
+ * 补上源码声明。故新增厂商的**唯一声明点**是 PROVIDER_META，不必再改这里。
+ *
+ * 下面的兜底集合仅为"元数据缺失"（如 loader 尚未初始化）保底：
+ *  - anthropic 系（baseUrl 为裸域名或 /anthropic 形态，拼 /v1/messages）
  *  - gemini 无 /chat/completions，走 generateContent REST
- *  - 其余内置 + JSON 声明（缺省 openai）→ openai 系
+ *  - 其余 → openai 系
  */
 const ANTHROPIC_PROTOCOL_TYPES = new Set(['anthropic', 'qwen', 'minimax', 'mimo']);
 

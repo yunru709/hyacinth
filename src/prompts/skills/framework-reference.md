@@ -23,9 +23,12 @@
 
 ### 模型目录（本机持久配置）
 
-**路径**: `~/.agent/models-catalog.json`  
+**路径**: `~/.agent/providers.json` 里各厂商的 `models` 字段  
 **作用**: 本机级模型参数，所有项目共享。用 `edit` 工具直接修改，下次启动生效。  
-**条目按 `(provider, id)` 索引**，`__default__` 为该 provider 下所有未匹配模型的兜底。
+**条目按 `(provider, id)` 索引**；厂商未声明 `models` 时 → 回退源码内置目录（`src/provider/model-types.ts`）。
+
+> ⚠️ **历史遗留**：`~/.agent/models-catalog.json` 已并入 `providers.json`，
+> 加载器**不再读取它** —— 改那个文件不会生效（留着只是垃圾）。
 
 | 字段 | 含义 | 示例 |
 |------|------|------|
@@ -35,13 +38,16 @@
 
 ```json
 {
-  "models": [{
-    "id": "deepseek-v4-pro",
-    "provider": "deepseek",
-    "contextWindow": 1000000,
-    "maxOutputTokens": 393216,
-    "reasoningEffort": "max"
-  }]
+  "providers": {
+    "deepseek": {
+      "models": [{
+        "id": "deepseek-v4-pro",
+        "contextWindow": 1000000,
+        "maxOutputTokens": 393216,
+        "reasoningEffort": "max"
+      }]
+    }
+  }
 }
 ```
 
@@ -128,7 +134,7 @@ User Input → [preTurn] → Composer组装上下文 → LLM调用 → [postTurn
 2. 修改配置前先告知当前值和将要改成的值
 3. 用户设异常小的值时，先确认意图再操作
 4. 修改配置后即时生效并自动持久化，重启后保持
-�编辑 |
+�编辑 |
 | `commands.json` | 自定义斜杠命令 | 直接编辑 |
 
 ## 使用原则

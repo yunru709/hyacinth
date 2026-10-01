@@ -127,10 +127,9 @@ export class OpenAIProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    // thinking 默认 enabled，必须显式发送 disabled 才能关闭
-    (params as any).extra_body = {
-      thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
-    };
+    // 注：`thinking: {type}` 是 **DeepSeek 私有**扩展，OpenAI 官方并不接受 ——
+    // 此前这里无条件发送，等于把别家的私有字段塞给 OpenAI（严格校验会 400）。
+    // 该字段的发送职责已收敛到 compatible.ts，且仅对声明支持的厂商生效。
     // 通用字段翻译：user（OpenAI 原生标准字段，滥用检测/按用户限流）+ 采样参数
     const { topLevel } = translateFields(
       'openaiUser',

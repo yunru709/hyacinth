@@ -199,7 +199,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   groq: {
     create: (config: ProviderConfigLike) =>
       createGroqProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('groq'),
       }),
@@ -209,7 +209,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   xai: {
     create: (config: ProviderConfigLike) =>
       createXAIProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('xai'),
       }),
@@ -219,7 +219,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   mistral: {
     create: (config: ProviderConfigLike) =>
       createMistralProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('mistral'),
       }),
@@ -228,7 +228,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   },
   gemini: {
     create: (config: ProviderConfigLike) =>
-      new GeminiProvider({ apiKey: config.apiKey, model: config.model }),
+      new GeminiProvider({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl }),
     createFromEnv: () =>
       process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? new GeminiProvider() : null,
     envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
@@ -237,7 +237,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   openrouter: {
     create: (config: ProviderConfigLike) =>
       createOpenRouterProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('openrouter'),
       }),
@@ -247,7 +247,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   moonshot: {
     create: (config: ProviderConfigLike) =>
       createMoonshotProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('moonshot'),
       }),
@@ -277,7 +277,7 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
   volcengine: {
     create: (config: ProviderConfigLike) =>
       createVolcengineProvider({
-        apiKey: config.apiKey, model: config.model, userId: config.userId,
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
         maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
         fieldMap: config.fieldMap ?? resolveFieldMap('volcengine'),
       }),
@@ -345,22 +345,27 @@ function createJsonDeclaredFactory(type: string): ProviderFactory | undefined {
     protocol === 'anthropic'
       ? new AnthropicProvider({
           apiKey: config.apiKey,
-          baseUrl: meta!.baseUrl,
+          baseUrl: config.baseUrl ?? meta!.baseUrl,
           model: config.model ?? meta!.defaultModel,
           providerType: type as ProviderType,
           maxOutputTokens: config.maxOutputTokens,
           fields: withFields(config),
           sampling: config.sampling ?? meta!.sampling,
+          // 缺修复：anthropic 分支此前漏传 fieldMap（openai 分支有）⇒
+          // providers.json 给 Anthropic 协议厂商配的字段映射静默失效。
+          fieldMap: meta!.fieldMap,
         })
       : new OpenAICompatibleProvider({
           apiKey: config.apiKey,
-          baseUrl: meta!.baseUrl,
+          baseUrl: config.baseUrl ?? meta!.baseUrl,
           model: config.model ?? meta!.defaultModel,
           providerType: type as ProviderType,
           maxOutputTokens: config.maxOutputTokens,
           fields: withFields(config),
           sampling: config.sampling ?? meta!.sampling,
           fieldMap: meta!.fieldMap,
+          // 声明式开关：跑 DeepSeek 模型的中转站可置 true 以继续收/发 thinking 字段
+          deepseekThinking: meta!.deepseekThinking,
         });
 
   return {

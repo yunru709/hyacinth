@@ -45,12 +45,35 @@ export class ProviderConfigLoader {
     }
   }
 
+  /**
+   * 读取厂商元数据 —— **逐字段回落**（设计 §3）：
+   * 源码出厂快照（PROVIDER_META）为底，用户 providers.json 覆盖同名字段。
+   *
+   * 历史行为是"整份替换"（`cache[id] ?? default[id]`）⇒ 用户文件里没写的字段
+   * 拿不到源码默认值。后果：源码新加的字段（protocol / fieldMap / capabilities /
+   * sampling）对已有用户**静默不生效** —— 表现为"代码改了、行为没变"，极难排查。
+   */
   getProvider(id: string): ProviderMeta | undefined {
-    return this.cache.providers[id] ?? DEFAULT_PROVIDERS.providers[id];
+    const user = this.cache.providers[id];
+    const base = DEFAULT_PROVIDERS.providers[id];
+    if (!user) return base;
+    if (!base) return user;
+    return { ...base, ...user };
   }
 
+  /**
+   * **用户配置里声明的**厂商（不含仅存在于内置快照的）。
+   *
+   * 语义边界：本方法回答"用户声明了什么"—— `list_providers` 的 DECLARED 视角、
+   * JSON 声明厂商的枚举都依赖它，因此**不能**并入内置全集（那会把 14 家内置厂商
+   * 也算成"已声明"，且断言被 provider.test.ts 锁死）。
+   * 需要"内置 ∪ 用户"时请直接用 `PROVIDER_META`。
+   * 每条仍经 `getProvider` 逐字段回落，故返回的是字段补全后的元数据。
+   */
   getAll(): ProviderMeta[] {
-    return Object.values(this.cache.providers);
+    return Object.keys(this.cache.providers)
+      .map((id) => this.getProvider(id))
+      .filter((m): m is ProviderMeta => m !== undefined);
   }
 
   async reload(): Promise<ProvidersConfig> {

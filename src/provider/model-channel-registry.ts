@@ -10,6 +10,7 @@ import { getProviderConfigLoader } from './config.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
 import { createLogger } from '../logging/logger.js';
 import type { ModelsConfig, LocalModelConfig } from './model-router.js';
+import type { ProviderFields, ProviderSampling } from './fields.js';
 
 const logger = createLogger('model-channel-registry');
 
@@ -30,6 +31,15 @@ export interface ChannelConfig {
   userId?: string;
   /** 是否禁用 thinking（压缩器/旁路等辅助角色置 false） */
   thinking?: boolean;
+  /**
+   * 采样参数（temperature / topP / penalties）。
+   * 新增：此前通道配置**根本没有这一项**，且装配时也没往下传 ⇒ 通道级采样静默失效。
+   */
+  sampling?: ProviderSampling;
+  /** 单次请求最大输出 token 数（覆盖模型目录默认） */
+  maxOutputTokens?: number;
+  /** 通用字段（userId 归一入口；与 userId 同时存在时以 fields 为准） */
+  fields?: ProviderFields;
   /** 通道描述 */
   description?: string;
 }
@@ -448,6 +458,12 @@ export class ModelChannelRegistry {
         model: cfg.model ?? meta?.defaultModel ?? 'unknown',
         baseUrl: cfg.baseUrl ?? meta?.baseUrl,
         userId: cfg.userId,
+        // 透传通道级采样 / 输出上限 / 通用字段。
+        // 此前只传 key/model/baseUrl/userId ⇒ 通道配置里的采样参数静默失效
+        //（且 ChannelConfig 本身也没有这些字段，两层同时缺）。
+        ...(cfg.maxOutputTokens !== undefined ? { maxOutputTokens: cfg.maxOutputTokens } : {}),
+        ...(cfg.fields ? { fields: cfg.fields } : {}),
+        ...(cfg.sampling ? { sampling: cfg.sampling } : {}),
       };
 
       const provider = ProviderManager.createProviderFromConfig(providerConfig);

@@ -79,14 +79,19 @@ export class AnthropicProvider implements Provider {
     });
 
     this.model = opts.model ?? 'claude-sonnet-5';
+    // 模型目录一律按**实例自身厂商类型**查询。
+    // AnthropicProvider 同时承载 anthropic / qwen / minimax / mimo 等 Anthropic 协议厂商，
+    // 此前这里写死 'anthropic' ⇒ 那些厂商的模型元数据永远查不到，表现为三重静默偏差：
+    //   输出上限回落 8192（qwen 实际 131072、MiniMax-M3 是 512000，长回答被腰斩）、
+    //   上下文窗口恒报 200000（qwen/MiMo 实际 1M ⇒ 压缩过早）、视觉能力恒为真。
     this.maxTokens = opts.maxOutputTokens                         // ① 临时覆盖
       ?? opts.maxTokens                                           // 向后兼容
-      ?? getModelInfo('anthropic', this.model)?.maxOutputTokens   // ② 本机模型目录
+      ?? getModelInfo(this._providerType, this.model)?.maxOutputTokens   // ② 本机模型目录
       ?? 8192;                                                     // ③ 兜底
     this.thinkingEnabled = opts.thinkingEnabled ?? false;
     this.thinkingBudget = opts.thinkingBudget ?? 10000;
     this.userId = opts.fields?.userId ?? opts.userId;
-    this.sampling = opts.sampling ?? getModelInfo('anthropic', this.model)?.sampling; // 三级兜底：激活配置 → 模型目录默认
+    this.sampling = opts.sampling ?? getModelInfo(this._providerType, this.model)?.sampling; // 三级兜底：激活配置 → 模型目录默认
     this.fieldMap = opts.fieldMap;
   }
 
@@ -99,7 +104,7 @@ export class AnthropicProvider implements Provider {
   }
 
   getCapabilities(): ProviderCapabilities {
-    const info = getModelInfo('anthropic', this.model);
+    const info = getModelInfo(this._providerType, this.model);
     return {
       toolCalling: true,
       streaming: true,
