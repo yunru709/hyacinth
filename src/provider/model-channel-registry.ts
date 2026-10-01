@@ -29,8 +29,15 @@ export interface ChannelConfig {
   baseUrl?: string;
   /** DeepSeek KVCache 隔离 ID（通道级默认；scoped 调用可按次覆盖） */
   userId?: string;
-  /** 是否禁用 thinking（压缩器/旁路等辅助角色置 false） */
-  thinking?: boolean;
+  /**
+     * 思考配置（2026-10-01 起归通道所有 —— 思考是「模型怎么被调用」的参数）。
+     *   - false / 'off'             → 关闭
+     *   - true  / 'on' / 未配置      → 开启（用 provider 默认强度）
+     *   - 'high' | 'max'            → DeepSeek 系 reasoning effort
+     *   - '4k' | '8k' | '16k' | '32k' → Anthropic 系 thinking 预算（token）
+     * 档位天然属于通道：通道决定模型，档位的可用集合也就由该模型所属厂商决定。
+     */
+  thinking?: boolean | string;
   /**
    * 采样参数（temperature / topP / penalties）。
    * 新增：此前通道配置**根本没有这一项**，且装配时也没往下传 ⇒ 通道级采样静默失效。
@@ -110,6 +117,37 @@ function getGlobalConfigPath(): string {
 }
 
 // ── Registry ───────────────────────────────────────────────────────
+
+/**
+ * 把通道的 thinking 配置翻译成 provider 的 (enabled, effort?)，并施加。
+ *
+ * 为什么放在通道层：思考是「这个模型怎么被调用」的参数，不是会话/界面的偏好。
+ * 档位集合由**该通道的厂商**决定（DeepSeek 系认 strength 名，Anthropic 系认 token 预算），
+ * 但翻译时不做厂商校验 —— 传错档位由 provider 自己忽略（多传的参数无害），
+ * 这样切换通道厂商时已设的档位不会突然变成错误。
+ *
+ * 未配置 ⇒ 不动（保留 provider 默认）；无法识别的值 ⇒ 按「开」处理并告警，
+ * 宁可开着也不静默关掉思考。
+ */
+export function applyChannelThinking(
+  provider: { setThinking?: (enabled: boolean, effort?: string | number) => void },
+  thinking: boolean | string | undefined,
+): void {
+  if (thinking === undefined || thinking === null) return;
+  if (thinking === false || thinking === 'off') { provider.setThinking?.(false); return; }
+  if (thinking === true || thinking === 'on') { provider.setThinking?.(true); return; }
+  const budgets: Record<string, number> = { '4k': 4000, '8k': 8000, '16k': 16000, '32k': 32000 };
+  if (Object.prototype.hasOwnProperty.call(budgets, thinking)) {
+    provider.setThinking?.(true, budgets[thinking]);
+    return;
+  }
+  if (thinking === 'high' || thinking === 'max') {
+    provider.setThinking?.(true, thinking);
+    return;
+  }
+  logger.warn(`Unknown channel thinking value "${thinking}" — treating as enabled`);
+  provider.setThinking?.(true);
+}
 
 export class ModelChannelRegistry {
   private globalConfigPath: string;
@@ -494,7 +532,7 @@ export class ModelChannelRegistry {
       };
 
       const provider = ProviderManager.createProviderFromConfig(providerConfig);
-      if (cfg.thinking === false) provider.setThinking?.(false);
+      applyChannelThinking(provider, cfg.thinking);
       logger.info(`Channel provider created: ${name} (${cfg.provider}/${provider.getModel()})`);
       return provider;
     } catch (err) {

@@ -34,7 +34,7 @@ export interface ChannelInfo {
 export interface ChannelRegistryLike {
   listChannels(): Array<{ name: string; provider: string; model?: string }>;
   listRoles(): Record<string, string>;
-  upsertChannel(name: string, opts: { provider?: string; model?: string; thinking?: boolean }): unknown;
+  upsertChannel(name: string, opts: { provider?: string; model?: string; thinking?: boolean | string }): unknown;
   getChannelInfo(name: string): ChannelInfo | undefined;
   removeChannel(name: string): unknown;
   setRoleMapping(role: string, channel: string): unknown;
@@ -303,12 +303,17 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
       }
       const value = rest.join(' ');
       if (key === 'thinking') {
-        if (value !== 'on' && value !== 'off') {
-          chatLog.addSystem(theme.warning('Usage: /channel config <通道名> thinking on|off'));
+        const LEVELS = ['on', 'off', 'high', 'max', '4k', '8k', '16k', '32k'];
+        if (!LEVELS.includes(value)) {
+          chatLog.addSystem(
+            theme.warning('Usage: /channel config <通道名> thinking <on|off|high|max|4k|8k|16k|32k>')
+            + theme.dim('  on/off＝开关；high/max＝DeepSeek 系强度；4k~32k＝Anthropic 系思考预算'),
+          );
           tui.requestRender();
           return;
         }
-        const on = value === 'on';
+        // on/off 收敛成布尔，其余原样存为档位（由通道所属厂商解释）
+        const on: boolean | string = value === 'on' ? true : value === 'off' ? false : value;
         const viaCfg = await execViaProtocol(getProtocolSend, 'model.upsertChannel', { name: chName, thinking: on });
         if (viaCfg) {
           chatLog.addSystem(theme.success(`通道 "${chName}" 的 thinking = ${value}`));
