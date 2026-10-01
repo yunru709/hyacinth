@@ -61,7 +61,11 @@ export async function runChannelContributions(
         channelRegistry.load(d.provider as import('../provider/interface.js').Provider, providerActive);
         // 将 ProviderManager 构建的带弹性层（重试+熔断+降级链）的主 Provider 注入 registry，
         // 替换 initializeChannels 中创建的裸 Provider
-        channelRegistry.setMainProvider(d.provider as import('../provider/interface.js').Provider, providerActive);
+        // 厂商同样取**主对话实际在用的**，不用 config.provider.active（意图值，可能与实际不符）——
+        // 否则每次启动都会把默认通道的 provider 覆盖成那个意图值（实测：本机 default 反复退回 openai，
+        // 每次启动刷 3 条创建失败告警）。
+        const mainProviderType = (d.provider as import('../provider/interface.js').Provider).getProviderType();
+        channelRegistry.setMainProvider(d.provider as import('../provider/interface.js').Provider, mainProviderType);
         return { channelRegistry };
       },
     },
