@@ -222,10 +222,15 @@ export async function switchProvider(
   }
 
   if (!newProvider) {
-    const available = providerRouter.list().join(', ');
+    // ⚠️ 报错文案必须区分「厂商名」与「通道名」（2026-10-01 用户定）。
+    // 这里注册的是**通道名**（chat / default / compression …），不是厂商名（deepseek / anthropic …）。
+    // 旧文案写成「Available in router: main」会让人以为 main 是个厂商 —— 正是"两套并存"的困惑来源。
+    const registered = providerRouter.list();
     throw new Error(
-      `Provider "${providerName}" not found. Available in router: ${available}. ` +
-      `Use list_providers to see all options.`,
+      `Provider "${providerName}" not found. `
+      + `注意：此处注册的是【通道名】（如 chat / default），不是【厂商名】（如 deepseek / anthropic）。`
+      + `已注册：${registered.join(', ') || '(none)'}。`
+      + `用 list_providers 可同时看厂商与通道；换主对话请用 /channel chat model <厂商> [模型]。`,
     );
   }
 
