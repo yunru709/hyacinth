@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { createChannelCmds, createChannelDispatch } from './tui-channel-cmds.js';
+import { createChannelCmds, createChannelDispatch, normalizePanelPath } from './tui-channel-cmds.js';
 import type { ChannelRegistryLike, ProtocolSendLike } from './tui-channel-cmds.js';
 import type { ChatLog } from '../ui/chat-log.js';
 import type { TUI } from '@earendil-works/pi-tui';
@@ -228,5 +228,50 @@ describe('tui-channel-cmds 通用渠道分发（createChannelDispatch）', () =>
     const consumed = await ctl.handle('nope/login', '');
     expect(consumed).toBe(false);
     expect(calls.length).toBe(0);
+  });
+});
+
+describe('面板路径归一化（面板选完直接执行的那条路）', () => {
+  /** 按 channel/model 分支的口径切分，验证「厂商」「模型」各就各位 */
+  function splitLikeModelBranch(restArgs: string) {
+    const parts = restArgs.split(/\s+/).filter(Boolean);
+    const [chName, prov, ...rest] = parts;
+    return { chName, prov, model: rest.join(' ') };
+  }
+
+  it('面板真实形态：通道名在第二段', () => {
+    const r = normalizePanelPath('channel/chat/model/deepseek/deepseek-v4-flash', '');
+    expect(r.cmdPath).toBe('channel/model');
+    expect(r.restArgs).toBe('chat deepseek deepseek-v4-flash');
+  });
+
+  it('模型 ID 自带斜杠时不被切碎（commandcode 真实形态）', () => {
+    const r = normalizePanelPath('channel/chat/model/commandcode/deepseek/deepseek-v4.1-flash', '');
+    expect(r.cmdPath).toBe('channel/model');
+    expect(r.restArgs).toBe('chat commandcode deepseek/deepseek-v4.1-flash');
+    // 端到端：切分后厂商与模型各就各位（就是用户 10-02 踩到的那次）
+    expect(splitLikeModelBranch(r.restArgs)).toEqual({
+      chName: 'chat',
+      prov: 'commandcode',
+      model: 'deepseek/deepseek-v4.1-flash',
+    });
+  });
+
+  it('config 形态（思考档位）', () => {
+    const r = normalizePanelPath('channel/chat/config/thinking/high', '');
+    expect(r.cmdPath).toBe('channel/config');
+    expect(r.restArgs).toBe('chat thinking high');
+  });
+
+  it('非面板路径原样返回 —— 手打用法不受影响', () => {
+    const r = normalizePanelPath('channel/model', 'chat deepseek deepseek-v4-flash');
+    expect(r.cmdPath).toBe('channel/model');
+    expect(r.restArgs).toBe('chat deepseek deepseek-v4-flash');
+  });
+
+  it('其余 channel 子命令不受影响', () => {
+    const r = normalizePanelPath('channel/list', '');
+    expect(r.cmdPath).toBe('channel/list');
+    expect(r.restArgs).toBe('');
   });
 });

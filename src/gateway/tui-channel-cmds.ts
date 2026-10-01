@@ -113,6 +113,37 @@ export function createChannelDispatch(deps: TuiChannelDispatchDeps) {
   return { handle };
 }
 
+/**
+ * 面板选出来的路径归一化。
+ *
+ * 面板里的层级是「/channel → 某条通道 → model → 厂商 → 模型」，
+ * 拼出来即 channel/<通道名>/model/<厂商>/<模型>（config 同形）。
+ * 这里把它折成与手打一致的 channel/model <通道名> <厂商> <模型>。
+ *
+ * ⚠️ 通道名在**第二段**（第一段是 "channel"）—— 早期版本按 channel/model/<通道名>/…
+ * 处理，前缀对不上，面板选完毫无反应（2026-10-02 实测踩到）。
+ *
+ * ⚠️ 只切**一刀**（厂商 与 模型 之间）：第三方厂商的模型 ID 可能自带斜杠
+ * （commandcode 是 deepseek/deepseek-v4.1-flash），多切会把 ID 切碎。
+ */
+export function normalizePanelPath(
+  cmdPath: string,
+  restArgs: string,
+): { cmdPath: string; restArgs: string } {
+  const m = cmdPath.match(/^channel\/([^/]+)\/(model|config)\/(.+)$/);
+  if (!m) return { cmdPath, restArgs };
+  const chName = m[1];
+  const verb = m[2];
+  const rest = m[3];
+  const at = rest.indexOf('/');
+  const head = at >= 0 ? rest.slice(0, at) : rest;
+  const tail = at >= 0 ? rest.slice(at + 1) : '';
+  return {
+    cmdPath: 'channel/' + verb,
+    restArgs: [chName, head, tail, restArgs].filter(Boolean).join(' '),
+  };
+}
+
 /** 创建 channel/* 命令处理器 */
 export function createChannelCmds(deps: TuiChannelCmdDeps) {
   const { tui, chatLog, getChannelRegistry, getProtocolSend } = deps;
@@ -121,21 +152,8 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
   async function handle(cmdPath: string, restArgs: string): Promise<void> {
     // 裸 /channel = 总览（与 /channel list 同义）——它是命令的发现入口
     if (cmdPath === 'channel') cmdPath = 'channel/list';
-    // 面板选出来的层级用斜杠串起来（channel/model/chat/deepseek/xxx、channel/config/chat/thinking/on），
-    // 归一成空格分隔的参数形式，与手打用法共用同一条实现。
-    for (const verb of ['model', 'config']) {
-      const prefix = 'channel/' + verb + '/';
-      if (cmdPath.startsWith(prefix)) {
-        // 只把「通道名」「厂商」两段用空格分隔，其余原样保留 ——
-        // 第三方模型 ID 可能自带斜杠（如 commandcode 的 deepseek/deepseek-v4.1-flash），
-        // 斜杠全量替换会把 ID 切碎。
-        const seg = cmdPath.slice(prefix.length).split('/');
-        const head = seg.slice(0, 2).join(' ');
-        const tail = seg.slice(2).join('/');
-        restArgs = [head, tail, restArgs].filter(Boolean).join(' ');
-        cmdPath = 'channel/' + verb;
-      }
-    }
+    // 面板选出来的路径折成参数形式，与手打用法共用同一条实现
+    ({ cmdPath, restArgs } = normalizePanelPath(cmdPath, restArgs));
     const registry = getChannelRegistry();
 
     const warnNoRegistry = () => {
