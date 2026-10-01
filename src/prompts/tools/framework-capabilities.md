@@ -25,13 +25,13 @@
 ```json
 {
   "channels": {
-    "main": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+    "default": { "provider": "deepseek", "model": "deepseek-v4-flash" },
     "compression": { "provider": "deepseek", "model": "deepseek-v4-pro" },
     "sub-agent": { "provider": "local", "model": "qwen3.5:9b" }
   },
   "roles": {
-    "assessment": "main",
-    "planning": "main",
+    "assessment": "default",
+    "planning": "default",
     "compression": "compression",
     "sub-agent": "sub-agent"
   }

@@ -254,7 +254,7 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
 
       // 同步更新 main 通道（保持 registry 与 loop/manager 一致）
       try {
-        registry.setChannelModel('main', provider, model);
+        registry.setChannelModel('chat', provider, model);
       } catch {
         // registry 同步失败不阻断切换（loop/manager 已生效）
       }

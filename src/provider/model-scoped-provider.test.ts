@@ -21,8 +21,8 @@ function makeRegistry(): ModelChannelRegistry {
     'deepseek',
   );
   registry.initializeChannels();
-  // main 通道补 key（未知角色回退 main 现建用）
-  registry.upsertChannel('main', { provider: 'deepseek', model: 'main-model', apiKey: 'test-key' });
+  // 默认通道补 key（未知角色回退 default 通道现建用）
+  registry.upsertChannel('default', { provider: 'deepseek', model: 'main-model', apiKey: 'test-key' });
   registry.upsertChannel('compression', {
     provider: 'deepseek',
     model: 'test-model',

@@ -56,16 +56,38 @@ export interface ModelChannelsConfig {
  * 用户在 model-channels.json 中可以不写任何 roles，
  * 系统始终使用这些默认值作为兜底。
  */
+/**
+ * 默认通道名（**原为 `main`**，2026-10-01 用户定调改名）。
+ *
+ * 为什么必须改：`main` 在本仓库里有**两个互不相干的含义** ——
+ *   ① 本文件里的一条**通道**；② `ProviderRouter` 里的一个**注册项**（主对话老机制用）。
+ * 两者同名却是两个独立对象，是"切通道对主对话无效"这类困惑的根源。
+ * 改名为 `default` 后语义明确：它是**默认通道**（未绑定调用点时的兜底），不是"主对话通道"。
+ *
+ * ⚠️ 读取旧配置时走 {@link migrateLegacyChannelNames}，不要直接删旧键。
+ */
+const DEFAULT_CHANNEL = 'default';
+
+/**
+ * 主对话专属通道名（2026-10-01 用户定调：主对话有**自己的**通道，不复用其它通道）。
+ * 与调用点名同名（role `chat`），语义直白。
+ */
+const CHAT_CHANNEL = 'chat';
+
+/** 旧配置里的通道名 → 新名（兼容读取用，勿删） */
+const LEGACY_CHANNEL_ALIASES: Record<string, string> = {
+  main: DEFAULT_CHANNEL,
+};
+
 const DEFAULT_ROLES: Record<string, string> = {
-  assessment: 'main',
-  planning: 'main',
-  compression: 'main',
-  'sub-agent': 'main',
+  assessment: DEFAULT_CHANNEL,
+  planning: DEFAULT_CHANNEL,
+  compression: DEFAULT_CHANNEL,
+  'sub-agent': DEFAULT_CHANNEL,
   // 主对话也是一个调用点（2026-10-01 统一，见 docs/design/model-channel-unification.md）。
   // 此前主对话不走通道（走 loop.provider），导致"切通道对主对话无效"。
-  // 缺省指向 main 通道 —— 该通道的实例与主 provider 同源，故本项加入后行为不变；
-  // S2 起主对话改为经本映射解析，切换才真正生效。
-  chat: 'main',
+  // 指向**专属通道** chat —— 该通道在 mergeDefaults 中自动补建（配置同 default）。
+  chat: CHAT_CHANNEL,
 };
 
 /** 全局配置文件路径（~/.agent/model-channels.json；项目级已取消，P-Config 收敛）
@@ -176,7 +198,7 @@ export class ModelChannelRegistry {
     const activeMeta = providerLoader.getProvider(activeType);
 
     // main 通道：主 Provider
-    this.config.channels['main'] = {
+    this.config.channels[DEFAULT_CHANNEL] = {
       provider: activeType,
       model: activeMeta?.defaultModel,
       description: '主对话通道（自动构建）',
@@ -184,7 +206,7 @@ export class ModelChannelRegistry {
 
     // roles：从 legacy modelsConfig 推断
     // source='local' 的角色 → 创建以角色命名的通道（如 compression → compression 通道用 local provider）
-    // source='main' 的角色 → 直接映射到 main
+    // source=DEFAULT_CHANNEL 的角色 → 直接映射到 main
     this.config.roles = { ...DEFAULT_ROLES };
     if (this.legacyModelsConfig) {
       let localCfg: LocalModelConfig | null = null;
@@ -210,7 +232,7 @@ export class ModelChannelRegistry {
           };
           this.config.roles[role] = role;
         } else {
-          this.config.roles[role] = 'main';
+          this.config.roles[role] = DEFAULT_CHANNEL;
         }
       }
     }
@@ -258,7 +280,7 @@ export class ModelChannelRegistry {
    * 降级链：role → channelName → channelProvider → mainProvider
    */
   getProvider(role: string): Provider | null {
-    const channelName = this.config.roles[role] ?? 'main';
+    const channelName = this.config.roles[role] ?? DEFAULT_CHANNEL;
     const provider = this.channelProviders.get(channelName);
 
     if (!provider) {
@@ -267,7 +289,7 @@ export class ModelChannelRegistry {
     }
 
     // 包装降级：运行时失败自动回退到 main
-    if (channelName === 'main') return provider;
+    if (channelName === DEFAULT_CHANNEL) return provider;
 
     const mainP = this.mainProvider;
     if (!mainP) return provider;
@@ -322,8 +344,8 @@ export class ModelChannelRegistry {
   /** 添加或更新通道。provider 可选，不填则继承 main 通道的 provider。 */
   upsertChannel(name: string, config: ChannelConfig): void {
     // provider 未指定时继承 main 通道的 provider
-    if (!config.provider && name !== 'main') {
-      const mainCfg = this.config.channels['main'];
+    if (!config.provider && name !== DEFAULT_CHANNEL) {
+      const mainCfg = this.config.channels[DEFAULT_CHANNEL];
       config = { ...config, provider: mainCfg?.provider ?? 'deepseek' };
     }
     this.config.channels[name] = config;
@@ -338,12 +360,12 @@ export class ModelChannelRegistry {
 
   /** 删除通道（main 不可删除） */
   removeChannel(name: string): void {
-    if (name === 'main') throw new Error('Cannot remove the "main" channel.');
+    if (name === DEFAULT_CHANNEL) throw new Error('Cannot remove the "main" channel.');
     delete this.config.channels[name];
     this.channelProviders.delete(name);
     // 更新 roles 中引用此通道的条目回退到 main
     for (const [role, ch] of Object.entries(this.config.roles)) {
-      if (ch === name) this.config.roles[role] = 'main';
+      if (ch === name) this.config.roles[role] = DEFAULT_CHANNEL;
     }
     this.save();
     logger.info(`Channel removed: ${name}`);
@@ -361,10 +383,10 @@ export class ModelChannelRegistry {
   /** 设置主 Provider（切换主模型时调用） */
   setMainProvider(provider: Provider, providerType?: string): void {
     this.mainProvider = provider;
-    this.channelProviders.set('main', provider);
+    this.channelProviders.set(DEFAULT_CHANNEL, provider);
     if (providerType) {
-      this.config.channels['main'] = {
-        ...this.config.channels['main'],
+      this.config.channels[DEFAULT_CHANNEL] = {
+        ...this.config.channels[DEFAULT_CHANNEL],
         provider: providerType,
       };
     }
@@ -391,9 +413,9 @@ export class ModelChannelRegistry {
       throw new Error(`Cannot create provider for channel "${name}" with provider="${provider}"`);
     }
     // 非 main 通道：包装 ResilientProvider（重试 + 熔断）
-    const wrapped = name !== 'main' ? new ResilientProvider(instance) : instance;
+    const wrapped = name !== DEFAULT_CHANNEL ? new ResilientProvider(instance) : instance;
     this.channelProviders.set(name, wrapped);
-    if (name === 'main') {
+    if (name === DEFAULT_CHANNEL) {
       this.mainProvider = wrapped;
     }
   }
@@ -407,7 +429,7 @@ export class ModelChannelRegistry {
     const instance = this.createChannelProvider(name);
     if (instance) {
       this.channelProviders.set(name, instance);
-      if (name === 'main') {
+      if (name === DEFAULT_CHANNEL) {
         this.mainProvider = instance;
       }
     }
@@ -438,7 +460,7 @@ export class ModelChannelRegistry {
       model: provider.getModel(),
       description: cfg.description,
       roles,
-      isMain: name === 'main',
+      isMain: name === DEFAULT_CHANNEL,
       providerType: provider.getProviderType(),
     };
   }
@@ -497,7 +519,7 @@ export class ModelChannelRegistry {
    */
   createScopedProvider(role: string, userId: string): Provider | null {
     const channelName = this.config.roles[role] ?? role;
-    const cfg = this.config.channels[channelName] ?? this.config.channels['main'];
+    const cfg = this.config.channels[channelName] ?? this.config.channels[DEFAULT_CHANNEL];
     if (!cfg) {
       logger.warn(`createScopedProvider: no channel config for role "${role}"`);
       return null;
@@ -505,7 +527,7 @@ export class ModelChannelRegistry {
     const instance = this.createChannelProviderFromConfig(`scoped:${role}`, { ...cfg, userId });
     if (!instance) return null;
     // 与常规通道一致：非 main 通道包弹性层（重试+熔断）
-    return channelName === 'main' ? instance : new ResilientProvider(instance);
+    return channelName === DEFAULT_CHANNEL ? instance : new ResilientProvider(instance);
   }
 
   // ── Internal ─────────────────────────────────────────────────────
@@ -525,20 +547,56 @@ export class ModelChannelRegistry {
     return null;
   }
 
-  /** 合并硬编码默认值：用户配置的 roles 覆盖默认 roles */
+  /**
+   * 合并硬编码默认值：用户配置的 roles 覆盖默认 roles。
+   *
+   * 同时承担两件事（2026-10-01 通道统一，见 docs/design/model-channel-unification.md）：
+   *  ① **旧通道名迁移**：main → default（含 roles 里指向它的值）。原地改名，不留两份。
+   *  ② **补建主对话专属通道** chat：配置继承 default，使 role chat 有落点。
+   *     —— 至此「主对话也是一个调用点」在数据层完全成立。
+   */
   private mergeDefaults(loaded: ModelChannelsConfig): ModelChannelsConfig {
-    const roles = { ...DEFAULT_ROLES, ...loaded.roles };
-    // 确保 main 通道始终存在
-    if (!loaded.channels['main']) {
+    // ① 旧名迁移（channels 与 roles 都要迁，否则会留下指向不存在通道的悬空映射）
+    const channels: Record<string, ChannelConfig> = {};
+    let migrated = 0;
+    for (const [name, cfg] of Object.entries(loaded.channels ?? {})) {
+      const target = LEGACY_CHANNEL_ALIASES[name] ?? name;
+      if (target !== name) migrated++;
+      channels[target] = cfg;
+    }
+    const roles: Record<string, string> = {};
+    for (const [role, ch] of Object.entries(loaded.roles ?? {})) {
+      const target = LEGACY_CHANNEL_ALIASES[ch] ?? ch;
+      if (target !== ch) migrated++;
+      roles[role] = target;
+    }
+    if (migrated > 0) {
+      logger.info('Model channels: migrated legacy names', { count: migrated });
+    }
+
+    const mergedRoles = { ...DEFAULT_ROLES, ...roles };
+
+    // 确保默认通道存在
+    if (!channels[DEFAULT_CHANNEL]) {
       const providerLoader = getProviderConfigLoader();
-      const activeMeta = providerLoader.getProvider(this.legacyProviderActive ?? 'deepseek');
-      loaded.channels['main'] = {
-        provider: this.legacyProviderActive ?? 'deepseek',
+      const activeName = this.legacyProviderActive ?? 'deepseek';
+      const activeMeta = providerLoader.getProvider(activeName);
+      channels[DEFAULT_CHANNEL] = {
+        provider: activeName,
         model: activeMeta?.defaultModel,
-        description: '主对话通道',
+        description: '默认通道（未绑定调用点时的兜底）',
       };
     }
-    return { channels: loaded.channels, roles };
+
+    // 补建主对话专属通道：无则继承默认通道配置
+    if (!channels[CHAT_CHANNEL]) {
+      channels[CHAT_CHANNEL] = {
+        ...channels[DEFAULT_CHANNEL],
+        description: '主对话专属通道',
+      };
+    }
+
+    return { channels, roles: mergedRoles };
   }
 
   /** 初始化所有通道的 Provider 实例 */
@@ -548,7 +606,7 @@ export class ModelChannelRegistry {
       const provider = this.createChannelProvider(name);
       if (provider) {
         this.channelProviders.set(name, provider);
-        if (name === 'main') {
+        if (name === DEFAULT_CHANNEL) {
           // mainProvider 可能已被外部设置，仅当未设置时使用创建的
           if (!this.mainProvider) this.mainProvider = provider;
         }
@@ -562,7 +620,7 @@ export class ModelChannelRegistry {
     if (!cfg) return null;
 
     // main 通道：如果已有外部传入的 mainProvider（已含完整弹性层），直接使用
-    if (name === 'main' && this.mainProvider) {
+    if (name === DEFAULT_CHANNEL && this.mainProvider) {
       return this.mainProvider;
     }
 
@@ -571,7 +629,7 @@ export class ModelChannelRegistry {
       if (!raw) return null;
 
       // 非 main 通道：包装 ResilientProvider（重试 + 熔断）
-      if (name !== 'main') {
+      if (name !== DEFAULT_CHANNEL) {
         const resilient = new ResilientProvider(raw);
         logger.info(`Channel provider created (with resilience): ${name} (${cfg.provider}/${raw.getModel()})`);
         return resilient;

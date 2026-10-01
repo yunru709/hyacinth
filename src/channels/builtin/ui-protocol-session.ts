@@ -227,13 +227,13 @@ export function createBackendExecutor(
           return loop.switchProvider(provider, model).then(() => {
             // registry 同步是辅助：ProviderConfigLoader 未就绪时失败不阻断（loop 已真实切换）
             try {
-              registry.setChannelModel('main', provider, model);
+              registry.setChannelModel('chat', provider, model);
             } catch { /* 同步失败不阻断 */ }
             return { ok: true, provider, model };
           });
         }
         try {
-          registry.setChannelModel('main', provider, model);
+          registry.setChannelModel('chat', provider, model);
         } catch { /* 同上 */ }
         return { ok: true, provider, model };
       }

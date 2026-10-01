@@ -51,7 +51,8 @@ class MockRegistry implements ModelRegistryLike {
   setChannelModel(name: string, provider: string, model?: string): void {
     const existing = this.channels.get(name) ?? { name };
     this.channels.set(name, { ...existing, name, provider, ...(model ? { model } : {}) });
-    if (name === 'main') {
+    // 主对话专属通道（2026-10-01 通道统一）—— model.switch 的落点是 chat，不再是 main
+    if (name === 'chat') {
       this.mainProviderType = provider;
       this.mainModel = model ?? this.mainModel;
     }

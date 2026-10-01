@@ -283,7 +283,7 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
         const roles = (roleRes && !Array.isArray(roleRes) && typeof roleRes === 'object' && 'roles' in roleRes
           ? (roleRes as { roles: Record<string, string> }).roles
           : (roleRes as Record<string, string> | null | undefined)) ?? {};
-        if (channels.length > 1 || Object.keys(roles).some(r => roles[r] !== 'main')) {
+        if (channels.length > 1 || Object.keys(roles).some(r => roles[r] !== 'default')) {
           lines.push(theme.dim('  ── Channels ──'));
           for (const ch of channels) {
             const chRoles = Object.entries(roles)

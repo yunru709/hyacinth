@@ -639,7 +639,7 @@ export class HttpWebhookChannel implements ChannelHandler {
       try { registry.load(this.provider); } catch { /* 加载失败不阻塞连接 */ }
       const manager = {
         switchProvider: (config: { type: string; apiKey?: string; model?: string; baseUrl?: string; userId?: string }): void => {
-          try { registry.setChannelModel('main', config.type, config.model); } catch { /* noop */ }
+          try { registry.setChannelModel('chat', config.type, config.model); } catch { /* noop */ }
         },
       };
 

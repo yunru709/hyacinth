@@ -846,7 +846,7 @@ export async function runTui(
     try { registry.load(activeProvider); } catch { /* 加载失败不阻塞 */ }
     const manager = {
       switchProvider: (config: { type: string; apiKey?: string; model?: string; baseUrl?: string }): void => {
-        try { registry.setChannelModel('main', config.type, config.model); } catch { /* noop */ }
+        try { registry.setChannelModel('chat', config.type, config.model); } catch { /* noop */ }
       },
     };
     const historyProvider = async (sid: string, limit?: number) => {
