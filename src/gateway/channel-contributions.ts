@@ -92,20 +92,26 @@ export async function runChannelContributions(
     : undefined;
   try {
     if (providerActive) {
+      // ⚠️ 2026-10-01 修正：角色通道的厂商必须取**主对话实际在用的**（provider.getProviderType()），
+      // 不能取 config.provider.active —— 后者是老机制的"意图值"，可能与实际不符（本机就写着一个
+      // 没有 key 的 openai）。用它会导致每次启动把三条角色通道的 provider 覆盖成 openai、创建全失败，
+      // 且 upsertChannel 触发 save() 把用户配置整份写坏（实测：default/compression/orchestrator/
+      // narration 全部退回 openai）。
+      const activeType = provider.getProviderType();
       const model = provider.getModel();
       // 压缩器：独立通道（可能与主 Agent/旁路并发运行），thinking 关闭
       channelRegistry.upsertChannel('compression', {
-        provider: providerActive, model, userId: compressorUserId(), thinking: false,
+        provider: activeType, model, userId: compressorUserId(), thinking: false,
       });
       channelRegistry.setRoleMapping('compression', 'compression');
       // 旁路 Agent：narration 与 orchestrator 各自独立实例（userId 跟随通道，
       // 模式切换经 BypassManager 激活对应 agent，天然用对隔离池，无需运行时 setUserId）
       channelRegistry.upsertChannel('orchestrator', {
-        provider: providerActive, model, userId: orchestratorUserId(), thinking: false,
+        provider: activeType, model, userId: orchestratorUserId(), thinking: false,
       });
       channelRegistry.setRoleMapping('orchestrator', 'orchestrator');
       channelRegistry.upsertChannel('narration', {
-        provider: providerActive, model, userId: narrationUserId(), thinking: false,
+        provider: activeType, model, userId: narrationUserId(), thinking: false,
       });
       channelRegistry.setRoleMapping('narration', 'narration');
     }
