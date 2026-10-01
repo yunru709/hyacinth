@@ -52,8 +52,13 @@ export async function runChannelContributions(
         const providerActive = typeof cfg.provider === 'object'
           ? (cfg.provider as Record<string, unknown>).active as string | undefined
           : undefined;
-        channelRegistry.buildFromLegacy(cfg.models, cfg.local, providerActive);
-        channelRegistry.initializeChannels();
+        // 先尝试从 model-channels.json 加载（磁盘配置是单一真源）；仅当文件不存在时才走 legacy 构建。
+        //
+        // ⚠️ 2026-10-01 修正：此前**无条件** buildFromLegacy —— 那会让本 registry 完全忽略磁盘配置，
+        // 并在随后的 upsertChannel → save() 里把"最小 legacy 配置"整份回写，**覆盖用户配置**
+        // （实测后果：主对话专属通道 chat 被删、default 退回 openai，每次启动都复现）。
+        // load() 内部已含"有文件用文件 / 无文件才 legacy"的分支，并会 initializeChannels()。
+        channelRegistry.load(d.provider as import('../provider/interface.js').Provider, providerActive);
         // 将 ProviderManager 构建的带弹性层（重试+熔断+降级链）的主 Provider 注入 registry，
         // 替换 initializeChannels 中创建的裸 Provider
         channelRegistry.setMainProvider(d.provider as import('../provider/interface.js').Provider, providerActive);
