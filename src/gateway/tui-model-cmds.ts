@@ -162,15 +162,15 @@ export function createModelCmds(deps: TuiModelCmdDeps) {
         return;
       }
 
-      // ── model/show-thinking：切换 thinking 内容显示 ──
+      // ── model/show-thinking 已独立为 /ui show-thinking（2026-10-01）──
+      // 是否显示思考内容纯粹是界面偏好，与模型/通道怎么跑无关。
       case 'model/settings/show-thinking':
       case 'model/show-thinking': {
-        setShowThinking(!getShowThinking());
         chatLog.addSystem(
-          theme.success(getShowThinking() ? 'Thinking content will be shown' : 'Thinking content hidden'),
+          theme.warning('显示思考的开关已独立到界面层。 ') +
+          theme.dim('用法：') + theme.accent('/ui show-thinking'),
         );
         tui.requestRender();
-        updateTokenEstimate();
         return;
       }
 

@@ -182,6 +182,24 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
+    name: 'ui',
+    description: '界面显示开关（只影响怎么显示，不影响模型怎么跑）',
+    icon: '\u{1F5A5}',
+    category: 'system',
+    executeLocal: true,
+    children: [
+      {
+        // 2026-10-01：从 /model show-thinking 独立出来 —— 是否显示思考内容纯粹是界面偏好，
+        // 与「模型/通道怎么被调用」无关（后者归 /channel）。
+        name: 'show-thinking',
+        description: '切换是否显示思考内容',
+        icon: '\u{1F4AD}',
+        category: 'system',
+        executeLocal: true,
+      },
+    ],
+  },
+  {
     name: 'model',
     description: '模型管理（在线/本地/设置/信息）',
     icon: '\u25C6',

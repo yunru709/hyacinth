@@ -1710,6 +1710,15 @@ export async function runTui(
             return;
           }
           // model 在线/L1 + 压缩器控制（tui-model-cmds / tui-compress-cmds，第七批）──
+          // ── ui/* —— 界面显示开关（2026-10-01 从 model/show-thinking 独立）──
+          // 是否显示思考内容纯粹是界面偏好，与模型/通道怎么跑无关。
+          if (cmdPath === 'ui/show-thinking') {
+            showThinking = !showThinking;
+            chatLog.addSystem(theme.success(showThinking ? '显示思考内容' : '隐藏思考内容'));
+            tui.requestRender();
+            updateTokenEstimate();
+            return;
+          }
           if (cmdPath.startsWith('model/')) {
             await modelCmds.handle(cmdPath, restArgs);
             return;

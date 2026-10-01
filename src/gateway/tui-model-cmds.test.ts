@@ -76,11 +76,11 @@ describe('tui-model-cmds model 命令', () => {
     expect(calls.join('\n')).toContain('思考设置已移到通道');
   });
 
-  it('model/show-thinking → 切换 showThinking 状态并刷新 token 估算', async () => {
-    const { ctl, setShowThinking, updateTokenEstimate } = setup();
+  // 显示思考已独立到界面层（2026-10-01）：它只影响怎么显示，与模型怎么跑无关。
+  it('model/show-thinking 已独立 → 提示迁移到 /ui show-thinking', async () => {
+    const { ctl, calls } = setup();
     await ctl.handle('model/show-thinking', '');
-    expect(setShowThinking).toHaveBeenCalledWith(true);
-    expect(updateTokenEstimate).toHaveBeenCalled();
+    expect(calls.join('\n')).toContain('/ui show-thinking');
   });
 
   it('model/info → 渲染模型信息', async () => {
