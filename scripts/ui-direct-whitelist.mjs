@@ -51,7 +51,6 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['gateway/server.ts', new Set(['channels', 'memory', 'provider', 'runtime', 'setup', 'supervisor'])],
   ['gateway/tool-registration.ts', new Set(['rollback', 'tools'])],
   ['gateway/tui-format.ts', new Set(['memory'])], // 只读事件回放渲染（本地展示）
-  ['gateway/tui-model-cmds.ts', new Set(['setup'])], // 上下文窗口本地常量（runtime 直连已随 T11 清理移除）
   // 本地宿主装配豁免（T11 纯协议客户端化）：管理命令全协议化，剩余 import 支撑
   // 宿主角色（channelManager/supervisor/localModel 进程）+ 本地 stats 渲染 + 共享组件源
   ['gateway/tui.ts', new Set(['channels', 'lifecycle', 'local-model', 'memory', 'provider', 'runtime', 'setup', 'supervisor'])],

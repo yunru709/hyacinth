@@ -87,7 +87,6 @@ import { createTuiPermission } from './tui-permission.js';
 import { createTuiAskUser } from './tui-ask-user.js';
 import { showWelcome } from './tui-welcome.js';
 import { createModelLocalCmds } from './tui-model-local.js';
-import { createModelCmds } from './tui-model-cmds.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
@@ -1337,21 +1336,6 @@ export async function runTui(
       refreshStatusFromProtocol,
     });
 
-    // ── model 非 local 命令处理器（tui-model-cmds.ts，tui.ts 深拆第六批）──
-    const modelCmds = createModelCmds({
-      tui,
-      chatLog,
-      localModel,
-      protocolSend,
-      setConfig,
-      refreshStatusFromProtocol,
-      getProviderType: () => providerTypeStart,
-      getModelName: () => modelName,
-      applyThinking,
-      updateTokenEstimate,
-      getShowThinking: () => showThinking,
-      setShowThinking: (v) => { showThinking = v; },
-    });
 
     // ── compress/* 命令处理器（tui-compress-cmds.ts，tui.ts 深拆第七批）──
     const compressCmds = createCompressCmds({
@@ -1535,44 +1519,6 @@ export async function runTui(
     }
 
     /** /model thinking 公共逻辑 */
-    async function applyThinking(action: string): Promise<void> {
-      // provider 类型用本地缓存（providerTypeStart，由事件/命令维护，不读 loop）
-      const providerType = providerTypeStart;
-
-      const effortOptions: Record<string, { label: string; effort: string | number }> = {};
-      if (providerType === 'deepseek') {
-        effortOptions.high = { label: 'high', effort: 'high' };
-        effortOptions.max = { label: 'max', effort: 'max' };
-      } else if (providerType === 'anthropic') {
-        effortOptions['4k'] = { label: '4K', effort: 4000 };
-        effortOptions['8k'] = { label: '8K', effort: 8000 };
-        effortOptions['16k'] = { label: '16K', effort: 16000 };
-        effortOptions['32k'] = { label: '32K', effort: 32000 };
-      }
-
-      if (action === 'on') {
-        await setConfig('provider.enableThinking', true);
-        // 运行时热改经协议层 model.setThinking（与 WebUI 同路径，域委托活跃 Provider）
-        await protocolSend('model.setThinking', { enabled: true });
-        chatLog.addSystem(theme.success('Thinking enabled'));
-      } else if (action === 'off') {
-        await setConfig('provider.enableThinking', false);
-        await protocolSend('model.setThinking', { enabled: false });
-        chatLog.addSystem(theme.success('Thinking disabled'));
-      } else if (effortOptions[action]) {
-        const opt = effortOptions[action];
-        await setConfig('provider.enableThinking', true);
-        await protocolSend('model.setThinking', { enabled: true, effort: opt.effort });
-        chatLog.addSystem(theme.success(`Thinking enabled (${opt.label})`));
-      } else {
-        const optsStr = Object.entries(effortOptions)
-          .map(([k, v]) => `  ${k}  → ${v.label}`)
-          .join('\n');
-        chatLog.addSystem(theme.warning(`Usage: /model thinking <on|off${optsStr ? '|' + Object.keys(effortOptions).join('|') : ''}>` + (optsStr ? '\n' + optsStr : '')));
-      }
-      tui.requestRender();
-      updateTokenEstimate();
-    }
 
     /**
      * 通用 handler 路由：根据 "module.method" 格式的 handler 字符串，
@@ -1655,56 +1601,11 @@ export async function runTui(
       }
 
       switch (cmdPath) {
-        // ── model 非 local 命令（tui-model-cmds.ts，tui.ts 深拆第六批）──
-        case 'model/settings/switch':
-        case 'model/switch':
-        case 'model/settings/provider':
-        case 'model/provider':
-        case 'model/settings/source':
-        case 'model/source':
-        case 'model/settings/thinking':
-        case 'model/thinking':
-        case 'model/settings/thinking/on':
-        case 'model/thinking/on':
-        case 'model/settings/thinking/off':
-        case 'model/thinking/off':
-        case 'model/settings/thinking/high':
-        case 'model/thinking/high':
-        case 'model/settings/thinking/max':
-        case 'model/thinking/max':
-        case 'model/settings/thinking/4k':
-        case 'model/thinking/4k':
-        case 'model/settings/thinking/8k':
-        case 'model/thinking/8k':
-        case 'model/settings/thinking/16k':
-        case 'model/thinking/16k':
-        case 'model/settings/thinking/32k':
-        case 'model/thinking/32k':
-        case 'model/settings/show-thinking':
-        case 'model/show-thinking':
-        case 'model/settings/info':
-        case 'model/info':
-        case 'model/settings/context': {
-          await modelCmds.handle(cmdPath, restArgs);
-          return;
-        }
-
-        // ── 本地模型 L2（tui-model-local.ts，tui.ts 深拆第五批）──
-        case 'model/local/start':
-        case 'model/local/stop':
-        case 'model/local/status':
-        case 'model/local/switch':
-        case 'model/local/register':
-        case 'model/local/unregister':
-        case 'model/local/detect': {
-          await modelLocalCmds.handle(cmdPath, restArgs);
-          return;
-        }
 
         default: {
           // ── local/* —— 本地模型的启停/注册（2026-10-01 从 model/local/* 迁出）──
           // 它是「管进程」，不是「管用哪条线」，故不并入 /channel。
-          // 旧路径 model/local/* 仍可用（下方 model/ 分支会转发到同一处理器）。
+          // 旧路径 model/local/* 已随 /model 一并删除。
           if (cmdPath.startsWith('local/')) {
             await modelLocalCmds.handle('model/' + cmdPath, restArgs);
             return;
@@ -1716,20 +1617,6 @@ export async function runTui(
             chatLog.addSystem(theme.success(showThinking ? '显示思考内容' : '隐藏思考内容'));
             tui.requestRender();
             updateTokenEstimate();
-            return;
-          }
-          // ── model/* 已整体退役（2026-10-01 命令统一）──
-          // 换模型/通道 → /channel；思考档位 → /channel config；显示思考 → /ui；本地模型 → /local。
-          // （model/local/* 已迁出，在上面单独路由。）
-          if (cmdPath === 'model' || cmdPath.startsWith('model/')) {
-            chatLog.addSystem(
-              theme.warning('/model 已退役。 ') +
-              theme.dim('通道与模型：') + theme.accent('/channel') +
-              theme.dim('　思考档位：') + theme.accent('/channel config <通道名> thinking <档位>') +
-              theme.dim('　显示思考：') + theme.accent('/ui') +
-              theme.dim('　本地模型：') + theme.accent('/local'),
-            );
-            tui.requestRender();
             return;
           }
           if (cmdPath.startsWith('compress/')) {

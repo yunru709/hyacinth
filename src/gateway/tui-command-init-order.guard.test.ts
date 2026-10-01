@@ -27,7 +27,6 @@ describe('tui 命令控制器初始化顺序守卫', () => {
 
   const controllers = [
     'modelLocalCmds',
-    'modelCmds',
     'compressCmds',
     'channelCmds',
     'channelDispatch',
