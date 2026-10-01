@@ -121,6 +121,21 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
   async function handle(cmdPath: string, restArgs: string): Promise<void> {
     // 裸 /channel = 总览（与 /channel list 同义）——它是命令的发现入口
     if (cmdPath === 'channel') cmdPath = 'channel/list';
+    // 面板选出来的层级用斜杠串起来（channel/model/chat/deepseek/xxx、channel/config/chat/thinking/on），
+    // 归一成空格分隔的参数形式，与手打用法共用同一条实现。
+    for (const verb of ['model', 'config']) {
+      const prefix = 'channel/' + verb + '/';
+      if (cmdPath.startsWith(prefix)) {
+        // 只把「通道名」「厂商」两段用空格分隔，其余原样保留 ——
+        // 第三方模型 ID 可能自带斜杠（如 commandcode 的 deepseek/deepseek-v4.1-flash），
+        // 斜杠全量替换会把 ID 切碎。
+        const seg = cmdPath.slice(prefix.length).split('/');
+        const head = seg.slice(0, 2).join(' ');
+        const tail = seg.slice(2).join('/');
+        restArgs = [head, tail, restArgs].filter(Boolean).join(' ');
+        cmdPath = 'channel/' + verb;
+      }
+    }
     const registry = getChannelRegistry();
 
     const warnNoRegistry = () => {

@@ -88,6 +88,33 @@ function buildOnlineModelChildren(): SlashCommandDef[] {
   return children;
 }
 
+/** 统一模型目录 → 「厂商 → 模型」子树（供 /channel <通道名> model 选择界面用；不含 config 项） */
+function buildChannelModelChildren(): SlashCommandDef[] {
+  const byProvider = new Map<string, ModelCatalogEntry[]>();
+  for (const entry of getModelCatalogLoader().getAll()) {
+    if (entry.id === '__default__' || entry.status === 'deprecated') continue;
+    const list = byProvider.get(entry.provider);
+    if (list) list.push(entry);
+    else byProvider.set(entry.provider, [entry]);
+  }
+  const children: SlashCommandDef[] = [];
+  for (const [provider, models] of byProvider) {
+    children.push({
+      name: provider,
+      description: PROVIDER_META[provider]?.name ?? provider,
+      icon: '\u25CF',
+      category: 'model',
+      children: models.map((m) => ({
+        name: m.id,
+        description: m.name,
+        icon: '\u25C6',
+        category: 'model' as const,
+      })),
+    });
+  }
+  return children;
+}
+
 const BUILTIN_COMMANDS: SlashCommandDef[] = [
   {
     name: 'help',
@@ -411,6 +438,14 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
 
         const children: SlashCommandDef[] = [
           {
+            name: 'use',
+            description: '设置某使用点所用的通道',
+            icon: '🔗',
+            category: 'model',
+            args: '<使用点> <通道名>',
+            executeLocal: true,
+          },
+          {
             name: 'add',
             description: '新增模型通道',
             icon: '➕',
@@ -424,14 +459,6 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
             icon: '➖',
             category: 'model',
             args: '<name>',
-            executeLocal: true,
-          },
-          {
-            name: 'role',
-            description: '设置角色→通道映射',
-            icon: '🔗',
-            category: 'model',
-            args: '<role> <channel>',
             executeLocal: true,
           },
         ];
@@ -449,30 +476,40 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
             children.push({
               name: ch.name,
               description: `${ch.provider}${ch.model ? '/' + ch.model : ''}${ch.description ? ' — ' + ch.description : ''}`,
-              icon: ch.name === 'main' ? '⭐' : '📡',
+              icon: ch.name === 'default' ? '⭐' : '📡',
               category: 'model',
               children: [
                 {
-                  name: 'info',
-                  description: '通道详情（provider/model/roles）',
-                  icon: 'ℹ️',
-                  category: 'model',
-                  executeLocal: true,
-                },
-                {
+                  // 「选择界面」：厂商 → 模型（取自统一模型目录），选中即换这条通道的模型
                   name: 'model',
-                  description: '切换通道模型（运行时，不持久化）',
+                  description: '这条通道提供哪个模型',
                   icon: '🤖',
                   category: 'model',
-                  args: '<provider> [model]',
-                  executeLocal: true,
+                  children: buildChannelModelChildren(),
                 },
                 {
-                  name: 'reset',
-                  description: '重置为持久化配置',
-                  icon: '🔄',
+                  name: 'config',
+                  description: '改该模型的配置',
+                  icon: '⚙️',
                   category: 'model',
-                  executeLocal: true,
+                  children: [
+                    {
+                      name: 'thinking',
+                      description: '思考开关 / 强度档位',
+                      icon: '🧠',
+                      category: 'model',
+                      children: [
+                        { name: 'on', description: '开启（模型默认强度）', icon: '✅', category: 'model' as const },
+                        { name: 'off', description: '关闭', icon: '❌', category: 'model' as const },
+                        { name: 'high', description: 'high — DeepSeek 系强度', icon: '🔵', category: 'model' as const },
+                        { name: 'max', description: 'max — DeepSeek 系最强', icon: '🔴', category: 'model' as const },
+                        { name: '4k', description: '4K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
+                        { name: '8k', description: '8K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
+                        { name: '16k', description: '16K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
+                        { name: '32k', description: '32K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
+                      ],
+                    },
+                  ],
                 },
               ],
             });
