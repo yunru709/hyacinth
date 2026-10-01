@@ -13,8 +13,8 @@
 
 | 项 | 值 |
 |---|---|
-| **当前阶段** | **S1、S2、S3a、S3b 完成**；下一步 **S3b 活体验证** → S4 |
-| **已提交** | `0e02a05` 设计文档＋记录 · `f0e88e7` S1 · `bffa5e3` S2 · `c5ab51d` S3b · 记录更新 `f7e9e95`/`20cd318`/`fe71b23` |
+| **当前阶段** | **S1、S2、S3a、S3b 全部完成并验证**；下一步 **S4**（命令与显示统一） |
+| **已提交** | `0e02a05` 设计文档＋记录 · `f0e88e7` S1 · `bffa5e3` S2 · `c5ab51d` S3b · 3 个覆盖类修复 `acc30ab`/`a67dca7`/`bba28ac` · 记录 `f7e9e95`/`20cd318`/`fe71b23` |
 | **源码改动（未提交）** | 无 |
 | **可否安全中断** | ✅ 可以（无半成品代码） |
 | **门禁状态** | ✅ S1、S2 各自跑过 build / test / verify:layers（**均退出码 0**）；restart 前另跑 `pnpm smoke` ✅ |
@@ -157,14 +157,26 @@ S1、S2 分别通过，均退出码 0。restart 前另跑 `pnpm smoke`（装配�
 3. 验证：重启后日志**不再出现** `Failed to create provider for channel …`
 4. 回滚：还原备份
 
-### S3b —— 命名与结构（动代码，中高风险）
+### S3b —— 命名与结构（动代码，中高风险）✅ **已完成（c5ab51d + 3 个后续修复）**
 
-1. 代码里 `'main'` 硬编码收敛为一个常量（值 `default`）
-   - 涉及：`getProvider(role)` 的缺省、`upsertChannel` 的继承源、`removeChannel` 的保护、`setMainProvider`、`createScopedProvider` 的缺省、`mergeDefaults` 的补建、以及"是否包弹性层"的判断
-2. **兼容读取**：读到旧配置里的 `main` 键 / roles 里的 `'main'` 值，自动映射为 `default`（并记一条日志）
-3. 新建主对话专属通道 `chat`（provider/model 取当前实际在用的）
-4. 迁移用户配置：`roles.chat` 由 `main` 指向新通道
-5. 验证：用**旧配置**启动能自动迁移；主对话正常；切通道仍生效
+1. ✅ 代码里 `'main'` 硬编码收敛为常量 `DEFAULT_CHANNEL = 'default'`（本文件 23 处）
+2. ✅ **兼容读取**：`LEGACY_CHANNEL_ALIASES` 把旧配置的 `main` 键 / roles 里的 `'main'` 值自动映射为 `default`（`mergeDefaults` 内，原地改名不留两份，并记日志）
+3. ✅ 新建主对话专属通道 `chat`（由 `mergeDefaults` 继承 default 配置补建）；`roles.chat` 指向它
+4. ✅ 四处切换入口（webhook / ui-session / tui / model 域）改写入 `chat` 通道
+5. ✅ 验证：**未覆盖**（5 条通道全 deepseek，重启后不退回）、无创建失败告警、主对话正常、切 `chat` 通道主对话随之改变
+
+#### 🔥 过程中挖出的 3 个"启动装配覆盖用户通道配置" bug（都已修 + 已提交）
+
+| # | 提交 | 根因 | 后果 |
+|---|---|---|---|
+| 1 | `acc30ab` | `channel-contributions` 造 registry 时**无条件** `buildFromLegacy`，完全忽略磁盘配置；随后 `upsertChannel` 触发 `save()` 把"最小 legacy 配置"整份回写 | 用户配置被覆盖：`chat` 通道被删、`default` 退回 openai；手改配置数秒内失效 |
+| 2 | `a67dca7` | 角色通道的厂商取自 `config.provider.active`（老机制的**意图值**，可能与实际不符；本机写着没有 key 的 openai） | 三条角色通道每次启动被覆盖成 openai ⇒ 创建全失败 + 触发 save 写坏配置 |
+| 3 | `bba28ac` | `setMainProvider` 的厂商参数同样取自 `provider.active` | `default` 通道每次启动退回 openai |
+
+**共同教训**：凡是"启动装配写通道配置"的地方，都**不能**用 `config.provider.active` 作厂商来源
+（意图值 ≠ 实际值），必须用 `provider.getProviderType()`（主对话**实际**在用的厂商）。
+另：`~/.agent/model-channels.json` **有运行时写入方**，进程运行期间手改会被 `save()` 覆盖 ——
+改完必须立刻重启，或改走运行时 API。
 
 ### S4 —— 命令与显示
 
