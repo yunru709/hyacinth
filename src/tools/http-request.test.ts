@@ -28,6 +28,15 @@ beforeAll(async () => {
       res.end(JSON.stringify({ ok: true, n: 42 }));
       return;
     }
+    if (req.url === '/shell') {
+      // JS 壳页：体积不小（>4KB），但几乎没有可读正文。
+      // 复刻真实场景：Bing / ecosia 这类搜索页抓回来 51KB 静态 HTML，
+      // 结果全在 JS 里，抽取后只剩几十字符。
+      const filler = `var payload='${'a'.repeat(6000)}';`;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!doctype html><html><head><title>壳</title><script>${filler}</script></head><body><div id="root"></div></body></html>`);
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(FIXTURE);
   });
@@ -118,5 +127,14 @@ describe('http_request 按需深挖', () => {
     expect(r).toContain(`########## ${base}/a`);
     expect(r).toContain('总览内容。');
     expect(r).toContain('Error');
+  });
+
+  it('抽取近乎为空时给出出路提示与原始头，而不是只丢一句 format:raw', async () => {
+    const r = await tool.execute({ url: `${base}/shell` });
+    expect(r).toContain('[extract]');
+    expect(r).toContain('extraction nearly empty');
+    expect(r).toContain('[hint]');
+    expect(r).toContain('format=rss');      // 明确指向"机器口"
+    expect(r).toContain('[raw head]');      // 附一段原始头，便于一眼分辨壳页/反爬墙
   });
 });

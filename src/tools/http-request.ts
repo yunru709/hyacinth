@@ -29,7 +29,8 @@ export class HttpRequestTool implements Tool {
     '发起 HTTP 请求。支持 GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS，自定义 headers、body、超时和 cookies。默认 User-Agent 模拟浏览器。适用于轻量网页抓取、API 调试和数据获取。' +
     'HTML/XML 响应默认做正文提取（剥离 nav/script/style 与不可见文本，附统计），可用 format="raw" 取原始响应体；' +
     'keepLinks=true 把链接渲染成「文本 (url)」；section="小标题" 只取该节；urls=[...] 一次抓多个（最多 5 个）。' +
-    'json=true 时自动设置 Content-Type 为 application/json。';
+    'json=true 时自动设置 Content-Type 为 application/json。' +
+    '若某页抽取近乎为空（会附 [hint]）——多为 JS 渲染的搜索页/壳页，优先改抓该站的 RSS/JSON/API 端点（如搜索引擎的 "&format=rss"），别硬刮 HTML。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
@@ -237,6 +238,25 @@ export class HttpRequestTool implements Tool {
         }
         if (rawTruncated) lines.push(`[WARN] raw body hit the ${Math.round(maxBytes / 1024)}KB cap before extraction`);
         if (r.title) lines.push(`[title] ${r.title}`);
+
+        // 抽取近乎为空、但响应体不小 ⇒ 多半是 JS 渲染页 / 壳页，而不是"这页没有正文"。
+        // 旧行为只留一句 "pass format:raw"，而 raw 常被 50KB 截断、且整页往往只有一整行，
+        // 等于把调用方晾在原地（实测：Bing 搜索页 html 50904 → text 29 chars）。
+        // 这里把真正的出路（换机器口）说清楚，再附 300 字符原始头，
+        // 让调用方一眼分辨：JS 壳 / 反爬墙 / 还是正文被内嵌进了 JSON。
+        if (!section && s.textChars < 200 && totalBytes >= 4096) {
+          lines.push(
+            `[WARN] extraction nearly empty (${s.textChars} chars from ${totalBytes} bytes)`
+            + ' — page is likely JS-rendered or a shell page, not a static-HTML extraction defect',
+          );
+          lines.push(
+            "[hint] prefer the site's machine endpoint over scraping HTML:"
+            + ' search engines often honour "&format=rss", docs/APIs expose JSON endpoints,'
+            + ' repos have raw/"…json" URLs. Only then fall back to format:"raw"'
+            + ' (capped, often one very long line) or a headless browser.',
+          );
+          lines.push(`[raw head] ${decoded.replace(/\s+/g, ' ').slice(0, 300)}`);
+        }
 
         let text = r.text || '(no readable text extracted)';
         if (section) {
