@@ -464,15 +464,21 @@ export class ModelChannelRegistry {
     this.save();
   }
 
-  /** 设置主 Provider（切换主模型时调用） */
+  /**
+   * 设置主 Provider（切换主模型时调用）。
+   *
+   * ⚠️ 2026-10-02 修正：**不再写回 `config.channels[default].provider`**。
+   * 旧实现只改 `provider`、不碰 `model` ⇒ 会把用户配的「甲厂商 + 乙家的模型名」
+   * 就地改成「主对话类型 + 乙家的模型名」⇒ **厂商与模型不匹配**（调用必失败，自检报错）。
+   * 实测：default 被写成 `deepseek` + 一个带 `deepseek/…` 前缀的 commandcode 模型 id。
+   * 原则：**磁盘是权威** —— 运行时只影响内存实例，配置不在这里改写。
+   */
   setMainProvider(provider: Provider, providerType?: string): void {
     this.mainProvider = provider;
     this.channelProviders.set(DEFAULT_CHANNEL, provider);
     if (providerType) {
-      this.config.channels[DEFAULT_CHANNEL] = {
-        ...this.config.channels[DEFAULT_CHANNEL],
-        provider: providerType,
-      };
+      // providerType 仅用于诊断，不再落进配置（它可能只是"协议家族"而非厂商 id）
+      logger.info('Main provider set', { providerType });
     }
   }
 

@@ -91,34 +91,39 @@ export async function runChannelContributions(
   // 通道即配置锚点：实例由 registry 按 config 自建（key 从 env 解析），
   // 无 key 时实例创建失败 → getProvider 自动降级 main，不影响主流程。
   // 按次隔离（session 粒度）由消费方经 createScopedProvider 现建，不经此处。
-  const providerActive = typeof config.provider === 'object'
-    ? (config.provider as Record<string, unknown>).active as string | undefined
-    : undefined;
+  // ── 角色通道：**只补建缺失的**，绝不覆盖已有配置 ───────────────────
+  //
+  // ⚠️ 2026-10-02 修正：旧实现在装配期用「主对话的类型 + 模型」**无条件 upsert** 这三条通道
+  // （浅合并 + save 落盘）⇒ 用户为通道单独配的 provider/model **每次启动都被冲掉**；
+  // 且当主对话类型与其模型名不同源时（如 commandcode 配着带 `deepseek/…` 前缀的模型 id），
+  // 会直接写出「厂商与模型不匹配」的坏配置（实测：default 被写成 deepseek + commandcode 的模型名）。
+  //
+  // 原则：**磁盘是权威**，装配只补缺；已有的通道配置与角色映射一律不动。
+  const activeType = provider.getProviderType();
+  const model = provider.getModel();
   try {
-    if (providerActive) {
-      // ⚠️ 2026-10-01 修正：角色通道的厂商必须取**主对话实际在用的**（provider.getProviderType()），
-      // 不能取 config.provider.active —— 后者是老机制的"意图值"，可能与实际不符（本机就写着一个
-      // 没有 key 的 openai）。用它会导致每次启动把三条角色通道的 provider 覆盖成 openai、创建全失败，
-      // 且 upsertChannel 触发 save() 把用户配置整份写坏（实测：default/compression/orchestrator/
-      // narration 全部退回 openai）。
-      const activeType = provider.getProviderType();
-      const model = provider.getModel();
-      // 压缩器：独立通道（可能与主 Agent/旁路并发运行），thinking 关闭
-      channelRegistry.upsertChannel('compression', {
-        provider: activeType, model, userId: compressorUserId(), thinking: false,
-      });
-      channelRegistry.setRoleMapping('compression', 'compression');
-      // 旁路 Agent：narration 与 orchestrator 各自独立实例（userId 跟随通道，
-      // 模式切换经 BypassManager 激活对应 agent，天然用对隔离池，无需运行时 setUserId）
-      channelRegistry.upsertChannel('orchestrator', {
-        provider: activeType, model, userId: orchestratorUserId(), thinking: false,
-      });
-      channelRegistry.setRoleMapping('orchestrator', 'orchestrator');
-      channelRegistry.upsertChannel('narration', {
-        provider: activeType, model, userId: narrationUserId(), thinking: false,
-      });
-      channelRegistry.setRoleMapping('narration', 'narration');
-    }
+    const channelNames = new Set(channelRegistry.listChannelNames());
+    const roles = channelRegistry.listRoles();
+    /** 通道不存在才补建；已存在则尊重磁盘配置 */
+    const ensureChannel = (name: string, extra: Record<string, unknown>): void => {
+      if (channelNames.has(name)) return;
+      channelRegistry.upsertChannel(name, { provider: activeType, model, ...extra });
+    };
+    /** 角色映射不存在才建立；已存在（含运行时发现的）则不动 */
+    const ensureRole = (role: string, channel: string): void => {
+      if (roles[role]) return;
+      channelRegistry.setRoleMapping(role, channel);
+    };
+
+    // 压缩器：独立通道（可能与主 Agent/旁路并发运行），thinking 关闭
+    ensureChannel('compression', { userId: compressorUserId(), thinking: false });
+    ensureRole('compression', 'compression');
+    // 旁路 Agent：narration 与 orchestrator 各自独立实例（userId 跟随通道，
+    // 模式切换经 BypassManager 激活对应 agent，天然用对隔离池，无需运行时 setUserId）
+    ensureChannel('orchestrator', { userId: orchestratorUserId(), thinking: false });
+    ensureRole('orchestrator', 'orchestrator');
+    ensureChannel('narration', { userId: narrationUserId(), thinking: false });
+    ensureRole('narration', 'narration');
   } catch {
     // 通道注册失败不影响主流程
   }
