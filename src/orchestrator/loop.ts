@@ -1430,9 +1430,12 @@ export class AgentLoop {
         // 此前这条路径**完全静默**：用户只看到"话说到一半就停了"，也没有任何续写。
         //   A：给用户一条状态（并提示可以用 /maxoutput 调大）。
         //   B：注入"从断点继续"的指令并强制续一轮（复用上方 pendingAsyncResults 同款机制），
-        //      上限 MAX_TRUNCATION_CONTINUES 次，防止模型持续顶满造成无限续写。
+        //      上限 repair.truncation.maxContinue 次（默认 3）；设为 0 = 只提示、不续写。
         // 与空转兜底的关系：续写轮**没有**工具调用，若不归零会被 idleTurnCount 误杀。
-        const MAX_TRUNCATION_CONTINUES = 3;
+        const configuredMaxContinue = this.configCenter?.get<number>('repair.truncation.maxContinue');
+        const MAX_TRUNCATION_CONTINUES = typeof configuredMaxContinue === 'number'
+          ? Math.max(0, Math.floor(configuredMaxContinue)) // 负数/小数归一：负数等同关掉
+          : 3; // 兜底值与 defaults.ts 的 repair.truncation.maxContinue 保持一致
         const TRUNCATION_CONTINUE_PROMPT =
           '[System] Your previous message was cut off by the per-request output limit, '
           + 'so it is incomplete. Continue from exactly where it stopped — do NOT repeat what '

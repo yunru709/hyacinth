@@ -262,6 +262,21 @@ describe('AgentLoop 截断处理：length/max_tokens → 提示 + 有限续写',
     ).toBe(false);
     expect(onStatus.mock.calls.map((c) => String(c[0])).some((s) => s.includes('/maxoutput'))).toBe(false);
   });
+
+  it('续写上限可配：repair.truncation.maxContinue=1 ⇒ 只续 1 次就停', async () => {
+    const { provider, createStream } = makeTruncatingProvider();
+    const services = makeServices(provider);
+    (services as unknown as { configCenter: unknown }).configCenter = {
+      get: (path: string) => (path === 'repair.truncation.maxContinue' ? 1 : undefined),
+      watch: () => () => {},
+    };
+
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    await (loop as unknown as { run(input: string): Promise<void> }).run('写一篇长文');
+
+    // 首轮 + 1 次续写 = 2 次请求（对比默认 3 时的 4 次）—— 证明配置真的被读到了
+    expect(createStream).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ── 渠道附图：base64 不落盘（2026-09-19 改造锁定）─────────────────────

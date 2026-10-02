@@ -287,6 +287,13 @@ export interface FullConfig {
     evidenceGate: {
       mode: 'off' | 'soft' | 'hard';
     };
+    /**
+     * 输出被单次上限截断（finish_reason=length / stop_reason=max_tokens）后的自动续写上限（次）。
+     * 0 = 关闭自动续写（只保留可见提示）。总轮次仍受 session.maxTurns 约束。
+     */
+    truncation: {
+      maxContinue: number;
+    };
   };
 
   /** 多模态输入（视频/音频）管线阈值 */

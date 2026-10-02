@@ -171,6 +171,9 @@ export function getDefaultConfig(): FullConfig {
       evidenceGate: {
         mode: 'off',
       },
+      truncation: {
+        maxContinue: 3,
+      },
     },
     multimodal: {
       videoInlineMaxBytes: 10 * 1024 * 1024,
