@@ -635,6 +635,13 @@ export class HttpWebhookChannel implements ChannelHandler {
       const { CommandRegistry } = await import('../../ui/command-registry.js');
       const { getProviderConfigLoader } = await import('../../provider/config.js');
       const { coalesceEvents, readRecentEvents } = await import('../../memory/events.js');
+      // ── 时序锚（2026-10-03 修复）：providers.json 必须先于通道创建就绪 ──
+      // 与 tui.ts 同源缺陷：本函数下文的 `session.initialize(wsAgentFactory)`（→ createAgent
+      // → agent-assembly 加载 providers.json）在建 registry **之后**才跑 ⇒ 若不在此显式加载，
+      // JSON 声明厂商（commandcode 等）的工厂解析不到 ⇒ "Unknown provider type" ⇒ 通道创建
+      // 失败、静默回退主 provider（WebUI 侧同样是"配置写了却没生效"）。
+      // 单例重复 load() 仅重读一次文件，幂等无害。
+      await getProviderConfigLoader(this.cwd).load();
       const registry = new ModelChannelRegistry(this.cwd);
       try { registry.load(this.provider); } catch { /* 加载失败不阻塞连接 */ }
       const manager = {

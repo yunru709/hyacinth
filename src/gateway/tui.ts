@@ -859,6 +859,20 @@ export async function runTui(
     // loop 由 UiProtocolSession.initialize 通过 agentFactory 创建，
     // outputHandler 是 ProtocolOutputHandler（loop 回调 → message.* 协议事件）。
     const [protocolClient, protocolServer] = createInProcPair('tui-client', 'ui-server');
+    // ── 时序锚（2026-10-03 修复）：providers.json 必须先于通道创建就绪 ──
+    // 本行之下会 new ModelChannelRegistry() → load() → initializeChannels()，逐通道
+    // 按 `provider` 名去工厂注册表取实现；而 JSON 声明厂商（如 commandcode，providers.json
+    // 里带 protocol/baseUrl 的那种）的工厂，依赖 getProviderConfigLoader() 已加载才能解析。
+    //
+    // 此前缺本行 ⇒ loader 未初始化 ⇒ createJsonDeclaredFactory 返回 undefined
+    //   ⇒ "Unknown provider type: commandcode" ⇒ 通道创建失败、静默回退主 provider
+    //   ⇒ 实测后果：**主对话实际跑的是 deepseek，而不是配置里写的 commandcode**（且余额 402 时
+    //     请求全挂，表现为"开了 thinking 却什么都不显示" —— 症状离病因极远）。
+    //
+    // 为什么这里会抢跑：agent-assembly.ts:213 也有同样的加载（那条路径时序本是对的），
+    // 但本处位于 `uiSession.initialize()`（→ agentFactory → createAgentAssembly）**之前**，
+    // 跑在了它的前面。单例重复 load() 只是重读一次文件，幂等无害 —— 照抄既有正确模式。
+    await getProviderConfigLoader(process.cwd()).load();
     const registry = new ModelChannelRegistry(process.cwd());
     try { registry.load(activeProvider); } catch { /* 加载失败不阻塞 */ }
     const manager = {
