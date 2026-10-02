@@ -139,102 +139,12 @@ describe('subscribeConfig — routeMode 电平触发（重启后持久化选择�
  * tryCreateProviderFromConfig 返回 undefined → switchProvider 抛
  * `Provider "openai" not found`，而这句话在旧实现里被吞掉，导致只能靠翻源码定位。
  */
-describe('subscribeConfig — 切换失败必须带出真实原因（不再吞 err.message）', () => {
-  it('provider.active 变更触发切换失败 → onStatus 文案包含底层 message', async () => {
-    const router = new ProviderRouter();
-    router.register('main', fakeProvider('volcengine'));
-    // 关键：把 openai 变成**可服务**目标（已在路由器中）——否则会被"可服务性守卫"提前拦下
-    // （那是下一条用例覆盖的路径），根本走不到"切换失败"的文案断言。
-    router.register('openai', fakeProvider('openai'));
-    const cc = fakeConfigCenter({
-      'provider.routeMode': 'auto',
-      'provider.active': 'volcengine',
-      'provider.openai.model': 'gpt-5.5',
-    });
+// ── 2026-10-02 移除 ─────────────────────────────────────────────────
+// 此处原有两组用例：
+//   ① "provider.active 变更触发切换失败 → onStatus 带出真实原因"
+//   ② "provider.active 指向不可服务的名字 → 不切换、只 warn 一次"
+// 它们守的机制**已被删除**：`provider.active` 退役（不再参与任何决策，见
+// docs/design/config-code-separation.md §4⑥）。启动解析改读 model-channels.json 的
+// chat 通道（provider/startup-resolution.ts ＋ 其单测），"改了就生效"由通道热更承接。
+// ⇒ 旧用例连同机制一起删掉，而不是改断言硬凑绿（那只会留下假的保障）。
 
-    const calls: string[] = [];
-    const deps: ProviderDeps = {
-      ...makeDeps(router, cc),
-      outputHandler: {
-        onStatus: (message: string, level?: string) => {
-          calls.push(`${level ?? 'info'}:${message}`);
-        },
-      } as ProviderDeps['outputHandler'],
-    };
-
-    subscribeConfig(deps, {
-      ...hooks,
-      switchProvider: async () => {
-        throw new Error('Provider "openai" not found. Available in router: main.');
-      },
-    });
-
-    // 当前 provider 类型是 volcengine，故 'openai' 不会被同类型守卫挡掉
-    cc._emit('provider.active', 'openai');
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain('error:');
-    expect(calls[0]).toContain('Config changed provider to "openai" but switch failed');
-    // 核心回归：真实原因（缺 key → Provider not found）必须在文案里
-    expect(calls[0]).toContain('Provider "openai" not found');
-  });
-});
-
-describe('subscribeConfig — provider.active 指向"不可服务"名字时忽略并告警（治本）', () => {
-  function depsWithSink(
-    router: ProviderRouter,
-    cc: unknown,
-    sink: Array<[string, string]>,
-  ): ProviderDeps {
-    return {
-      ...makeDeps(router, cc),
-      outputHandler: { onStatus: (m: string, l: string) => sink.push([m, l]) },
-    } as unknown as ProviderDeps;
-  }
-
-  it('不在路由器、也构造不出（无 provider.<name> 段）→ 不切换、只 warn 一次', () => {
-    const router = new ProviderRouter();
-    router.register('main', fakeProvider('deepseek'));
-    const cc = fakeConfigCenter({ 'provider.active': 'deepseek' });
-    const status: Array<[string, string]> = [];
-    const counter = { n: 0 };
-
-    subscribeConfig(depsWithSink(router, cc, status), {
-      ...hooks,
-      switchProvider: async () => {
-        counter.n++;
-      },
-    });
-    counter.n = 0;
-    status.length = 0;
-
-    cc._emit('provider.active', 'openai');
-    cc._emit('provider.active', 'openai'); // 同一无效值不重复告警
-
-    expect(counter.n).toBe(0);
-    const warns = status.filter(([, lvl]) => lvl === 'warn');
-    expect(warns).toHaveLength(1);
-    expect(warns[0][0]).toContain('openai');
-  });
-
-  it('路由器已注册的名字（通道 main）→ 照常切换', () => {
-    const router = new ProviderRouter();
-    router.register('main', fakeProvider('deepseek'));
-    const cc = fakeConfigCenter({ 'provider.active': 'deepseek' });
-    const status: Array<[string, string]> = [];
-    const counter = { n: 0 };
-
-    subscribeConfig(depsWithSink(router, cc, status), {
-      ...hooks,
-      switchProvider: async () => {
-        counter.n++;
-      },
-    });
-    counter.n = 0;
-
-    cc._emit('provider.active', 'main');
-    expect(counter.n).toBe(1);
-    expect(status.filter(([, lvl]) => lvl === 'error')).toHaveLength(0);
-  });
-});

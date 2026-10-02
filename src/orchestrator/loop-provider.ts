@@ -369,58 +369,17 @@ export function subscribeConfig(
   const { providerRouter, configCenter, outputHandler } = deps;
   if (!configCenter) return;
 
-  /**
-   * 把 catch 到的 err 归一成可读后缀。
-   * 只报「switch failed」会丢掉真实原因——最常见的两种是「该厂商 apiKeyEnv 未配置」
-   * （tryCreateProviderFromConfig 返回 undefined → switchProvider 抛
-   * `Provider "X" not found`）与「provider.<name> 配置段缺失」。带出 message
-   * 才能让用户直接看懂该去配 key 还是改 active。
-   */
+  /** 把 catch 到的 err 归一成可读后缀。 */
   const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-  /** 已对"不可服务"的名字告警过（同一值不重复刷屏） */
-  const warnedUnservable = new Set<string>();
-
-  // provider.active 变更 → 自动切换 provider
-  configCenter.watch('provider.active', (event) => {
-    const name = event.newValue as string;
-    if (!name || typeof name !== 'string') return;
-    // 守卫：如果与当前 provider 相同，跳过，避免重复切换
-    const currentType = deps.getActiveProvider().getProviderType();
-    if (name === currentType) return;
-
-    // ── 可服务性守卫（治本）──
-    // provider.active 常被"非用户本意"的值写回：schema 默认段（如 openai）、通道模式下的
-    // 遗留值、其他会话写下的旧值……。这类名字既不在路由器里（路由器只有通道名 + local），
-    // 也构造不出 provider（`provider.<name>` 段缺失或 apiKeyEnv 未配置）→ 切换注定失败。
-    // 历史表现：启动/热重载时刷一条 error（`Provider "openai" not found`），用户无从下手，
-    // 还会盖掉真正需要关注的状态。改为**忽略 + 一次性 warn**。
-    let target = providerRouter?.get?.(name);
-    if (!target) {
-      const created = tryCreateProviderFromConfig(deps, name);
-      if (!created) {
-        if (!warnedUnservable.has(name)) {
-          warnedUnservable.add(name);
-          outputHandler?.onStatus?.(
-            `已忽略 provider.active="${name}"：该名字不在路由器中，且 provider.${name} 段缺失或 apiKeyEnv 未配置；` +
-              `当前 provider 仍由模型通道 / 现有配置提供`,
-            'warn',
-          );
-        }
-        return;
-      }
-      // 先建后换（与下方 model 变更路径一致）：避免路由表出现悬空 defaultName
-      target = created;
-      providerRouter?.register?.(name, created);
-    }
-
-    hooks.switchProvider(name, configCenter.get<string>(`provider.${name}.model`)).catch((err) => {
-      outputHandler?.onStatus?.(
-        `Config changed provider to "${name}" but switch failed: ${errText(err)}`,
-        'error',
-      );
-    });
-  });
+  // provider.active 的 watch 已于 2026-10-02 **移除**（该字段退役，主对话真源＝ chat 通道）。
+  // 移除理由：
+  //   · 它是"意图值"，会被多处写（协议层切换 / CLI 命令 / 其它进程的内存快照覆盖），
+  //     常停在一个**不可服务**的值上（本机长期写着没有 key 的 openai）⇒ 只能靠
+  //     "判可服务性 + 忽略 + 一次性告警"兜着，用户看到的仍是一条无从下手的提示；
+  //   · 真源已是 model-channels.json 的 chat 通道，且通道热更（channel-watcher 的
+  //     watchModelChannels）已承接"改了就生效"。
+  // ⇒ 补丁连同那条告警一起消失；下方 provider.*.model 的 watch 保持不变。
 
   // provider.<name>.model 变更 → 如果当前 active provider 匹配，重新创建 provider 并切换
   configCenter.watch('provider.*.model', (event) => {

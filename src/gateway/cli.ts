@@ -640,7 +640,8 @@ export async function runCli(): Promise<void> {
       const cm = new ConfigManager(process.cwd());
       const cfg = await cm.load() as unknown as Record<string, unknown>;
       const prov = (cfg.provider as Record<string, unknown>) ?? {};
-      prov.active = provider;
+      // provider.active 已退役（2026-10-02）：不再写这个"意图值"字段。
+      // 主对话用哪家由 model-channels.json 的 chat 通道承载（切换默认落盘）。
       const providerNode = (prov[provider] as Record<string, unknown>) ?? {};
       providerNode.model = models[0].id;
       prov[provider] = providerNode;
@@ -670,17 +671,14 @@ export async function runCli(): Promise<void> {
     .command('info')
     .description('Show current provider and model details')
     .action(async () => {
-      // 协议收口（T8 二批）：经 config 域读取 provider.active 与对应默认模型
-      // （schema 真实结构）；模型目录详情仍来自静态表 PROVIDER_MODELS
-      const cm = new ConfigManager(process.cwd());
-      const { cc, domain } = createCliConfigDomain();
-      await loadDiskConfigIntoCenter(cc, cm);
-      const provider = (domain.get({ path: 'provider.active' }) as { value?: string }).value;
-      const model =
-        provider === undefined
-          ? undefined
-          : (domain.get({ path: `provider.${provider}.model` }) as { value?: string }).value;
-      logger.info('Current provider', { provider, model });
+      // 2026-10-02：改读**主对话通道**（model-channels.json 的 chat）——
+      // 与启动解析同源（provider/startup-resolution.ts）。此前读 config 的
+      // provider.active，那是会被人/进程改写的"意图值"，显示的常不是真正在用的。
+      const { resolveStartupProvider } = await import('../provider/startup-resolution.js');
+      const resolved = resolveStartupProvider();
+      const provider = resolved.provider;
+      const model = resolved.model;
+      logger.info('Current provider', { provider, model, source: resolved.source });
 
       const models = PROVIDER_MODELS[provider ?? ''];
       if (models) {
@@ -1385,31 +1383,19 @@ async function executeAction(
     let finalProviderType = providerType;
     let finalModelName = modelName;
 
-    // 如果没有通过 CLI 指定 provider/model，从 config.json 读取上次 /provider 命令保存的值
+    // 未通过 CLI 指定时，从**主对话通道**解析（model-channels.json 的 chat）——
+    // 2026-10-02 起，这是"启动用哪家"的唯一真源（provider/startup-resolution.ts）。
+    // 此前读 config.json 的 provider.active：那个字段会被多处写、常停在不可服务的值上
+    // （本机长期写着没有 key 的 openai），逼得下游加"判可服务性 + 忽略 + 告警"的补丁。
+    // 该字段现已退役：写它、被别的进程覆盖，都不再影响启动行为。
     if (!finalProviderType || !finalModelName) {
-      try {
-        const savedConfig = await configManager.load();
-        const rawProvider = savedConfig.provider as unknown;
-        if (!finalProviderType && rawProvider) {
-          if (typeof rawProvider === 'object' && rawProvider !== null && 'active' in rawProvider) {
-            finalProviderType = (rawProvider as { active: string }).active as ProviderType;
-          } else if (typeof rawProvider === 'string') {
-            finalProviderType = rawProvider as ProviderType;
-          }
-        }
-        if (!finalModelName) {
-          if (typeof rawProvider === 'object' && rawProvider !== null && 'active' in rawProvider) {
-            const activeKey = (rawProvider as { active: string }).active;
-            const providerSection = (rawProvider as Record<string, unknown>)[activeKey];
-            if (providerSection && typeof providerSection === 'object' && 'model' in providerSection) {
-              finalModelName = (providerSection as { model: string }).model;
-            }
-          } else if (typeof savedConfig.model === 'string' && savedConfig.model) {
-            finalModelName = savedConfig.model;
-          }
-        }
-      } catch {
-        // config.json 不存在或格式错误，使用默认值
+      const { resolveStartupProvider } = await import('../provider/startup-resolution.js');
+      const resolved = resolveStartupProvider();
+      if (!finalProviderType && resolved.provider) {
+        finalProviderType = resolved.provider as ProviderType;
+      }
+      if (!finalModelName && resolved.model) {
+        finalModelName = resolved.model;
       }
     }
 

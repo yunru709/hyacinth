@@ -93,17 +93,26 @@ describe('checkConfigConsistency', () => {
     expect(issue?.message).toContain('ghost');
   });
 
-  it('provider.active 与主对话通道不一致 → warn', () => {
+  it('provider.active 只是遗留字段 → info（不参与决策、不计入 warn）', () => {
     write('config.json', { provider: { active: 'openai' } });
     write('model-channels.json', {
       channels: { chat: { provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash' } },
       roles: { chat: 'chat' },
     });
-    write('providers.json', { providers: { commandcode: { envKey: 'COMMANDCODE_API_KEY' } } });
+    write('providers.json', {
+      providers: {
+        commandcode: {
+          envKey: 'COMMANDCODE_API_KEY',
+          models: [{ id: 'deepseek/deepseek-v4.1-flash', provider: 'commandcode' }],
+        },
+      },
+    });
     const r = checkConfigConsistency({ homeDir: home, env: { COMMANDCODE_API_KEY: 'x' } });
-    const issue = r.issues.find((i) => i.code === 'active_channel_mismatch');
+    const issue = r.issues.find((i) => i.code === 'active_field_legacy');
+    expect(issue?.severity).toBe('info'); // 2026-10-02：由 warn 降级（字段已退役）
     expect(issue?.message).toContain('openai');
-    expect(r.ok).toBe(true); // warn 不阻断
+    expect(r.summary.warnings).toBe(0);
+    expect(r.ok).toBe(true);
   });
 
   it('deprecated 模型在使用中 → warn 且给出建议', () => {

@@ -269,7 +269,9 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
       if (configCenter) {
         try {
           if (model) configCenter.set(`provider.${provider}.model`, model);
-          configCenter.set('provider.active', provider);
+          // provider.active 已退役（2026-10-02）：主对话真源＝ chat 通道（上一段的
+          // registry.setChannelModel('chat', …) 已落盘），不再写这个"意图值"字段 ——
+          // 它会被多方覆盖、常停在不可服务的值上，只会诱发下游的"忽略 + 告警"补丁。
           configCenter.set('provider.routeMode', 'manual');
           await configCenter.save?.();
         } catch (err) {

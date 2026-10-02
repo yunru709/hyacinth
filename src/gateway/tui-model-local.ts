@@ -72,7 +72,7 @@ export function createModelLocalCmds(deps: TuiModelLocalDeps) {
                 if (info) {
                   await setConfig('provider.local', { type: 'local', model: info.modelFile ?? regModels[0].name, baseUrl: info.baseUrl });
                   await setConfig('provider.local.modelKey', regModels[0].name);
-                  try { await protocolSend('model.switch', { provider: 'local' }); await setConfig('provider.active', 'local'); chatLog.addSystem(theme.success(`llama.cpp ${regModels[0].name} started`)); await refreshStatusFromProtocol(); }
+                  try { await protocolSend('model.switch', { provider: 'local' }); chatLog.addSystem(theme.success(`llama.cpp ${regModels[0].name} started`)); await refreshStatusFromProtocol(); }
                   catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
                 }
                 tui.requestRender();
@@ -93,7 +93,7 @@ export function createModelLocalCmds(deps: TuiModelLocalDeps) {
               if (info) {
                 await setConfig('provider.local', { type: 'local', model: info.modelFile ?? restArgs, baseUrl: info.baseUrl });
                 await setConfig('provider.local.modelKey', restArgs);
-                try { await protocolSend('model.switch', { provider: 'local' }); await setConfig('provider.active', 'local'); chatLog.addSystem(theme.success(`${restArgs} started on port ${info.port}`)); await refreshStatusFromProtocol(); }
+                try { await protocolSend('model.switch', { provider: 'local' }); chatLog.addSystem(theme.success(`${restArgs} started on port ${info.port}`)); await refreshStatusFromProtocol(); }
                 catch (swErr) { chatLog.addSystem(theme.error(`Switch failed: ${(swErr as Error).message}`)); }
               } else { chatLog.addSystem(theme.error(`Failed to start ${restArgs}`)); }
               tui.requestRender();
@@ -168,8 +168,8 @@ export function createModelLocalCmds(deps: TuiModelLocalDeps) {
       case 'model/local/switch': {
         try {
           await protocolSend('model.switch', { provider: 'local' });
-          // 显式持久化 provider 选择（switchProvider 不再负责持久化）
-          await setConfig('provider.active', 'local');
+          // provider.active 已退役（2026-10-02）：不再写它 —— 主对话真源＝ chat 通道，
+          // 由 model.switch 经 registry.setChannelModel('chat', …) 落盘。
           // provider/model 缓存由 refreshStatusFromProtocol 经 state.get 读回
           // （不再直读 loop.getActiveProvider —— 纯协议客户端化）
           chatLog.addSystem(theme.success('Switched to local'));

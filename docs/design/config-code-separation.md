@@ -76,6 +76,20 @@ DeepSeek 系按 `user_id` 分 KVCache 池，**同 id = 同池 = 互相挤占**�
 - 已知未完成：旁路（`orchestrator` / `narration`）目前是**全局静态 id**，不按会话分
   （`user-id.ts` 里预留了 `sessionTag` 形参，待调用链携带 sessionId 后升级）。
 
+### ⑥ `provider.active` 退役（2026-10-02）
+**症状**：该字段被多处写（协议层切换 / CLI 命令 / **其它进程的内存快照覆盖**），常停在
+**不可服务的值**上（本机长期写着没有 key 的 `openai`），逼得启动链路加"判可服务性 → 忽略 → 告警"
+的补丁，用户看到的仍是一条无从下手的提示。
+
+**根治**：把它从"决策输入"降为"遗留字段"——
+- **唯一真源**：主对话用哪家 = `model-channels.json` 的 `chat` 通道（切换默认落盘）；
+- **启动解析**改走 `provider/startup-resolution.ts`（读 chat 通道，**完全不读 `provider.active`**）；
+- **移除** `provider.active` 的 config watch（"改了就生效"由通道热更 `watchModelChannels` 承接）；
+- **停止写入**：协议层 `model.switch`、CLI `model set`、TUI 本地模型切换；
+- 自检里该项由 `warn` 降级为 **info**（不一致已不影响运行 ⇒ 不该再报一条永远消不掉的警告）。
+
+⇒ 结果：这个字段被谁写、写成什么、被谁覆盖，都不再影响行为。
+
 ## 5. 配置清单（谁读 / 谁写 / 何时生效）
 
 | 文件 | 谁读 | 谁写 | 生效时机 | 坑 |

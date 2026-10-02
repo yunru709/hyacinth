@@ -63,11 +63,13 @@ describe('tui-model-local model/local/* 命令', () => {
     expect(calls.join('\n')).toContain('Unregistered: foo');
   });
 
-  it('switch → 协议切换 + 持久化 + 经 refreshStatusFromProtocol 读回缓存', async () => {
+  it('switch → 协议切换 + 经 refreshStatusFromProtocol 读回缓存', async () => {
     const { ctl, protocolSend, setConfig, refreshStatusFromProtocol } = setup();
     await ctl.handle('model/local/switch', '');
     expect(protocolSend).toHaveBeenCalledWith('model.switch', { provider: 'local' });
-    expect(setConfig).toHaveBeenCalledWith('provider.active', 'local');
+    // 2026-10-02：不再写 provider.active（该字段退役；主对话真源＝ chat 通道，
+    // 由 model.switch 经 registry.setChannelModel('chat', …) 落盘）
+    expect(setConfig).not.toHaveBeenCalledWith('provider.active', expect.anything());
     // 缓存写回职责移交 refreshStatusFromProtocol（state.get 读回），不再直读 loop
     expect(refreshStatusFromProtocol).toHaveBeenCalled();
   });

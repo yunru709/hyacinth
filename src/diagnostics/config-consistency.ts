@@ -230,18 +230,21 @@ export function checkConfigConsistency(opts: ConfigConsistencyOptions = {}): Con
     }
   }
 
-  // ── provider.active 与主对话通道是否一致 ───────────────────────────
+  // ── provider.active 已是遗留字段（2026-10-02 退役）─────────────────
+  // 它不再参与任何决策：启动解析改读 chat 通道（provider/startup-resolution.ts），
+  // 协议层切换也不再写它。故此处降级为 **info** —— 与 chat 通道不一致**不影响运行**。
+  // （此前是 warn：只要别的进程把旧值写回来，用户就会看到一条永远消不掉的告警 ✗）
   const activeRaw = (configFile.provider as { active?: unknown } | undefined)?.active;
   const active = typeof activeRaw === 'string' ? activeRaw : undefined;
   const chatChannel = roles['chat'];
   const chatProvider = chatChannel ? channels[chatChannel]?.provider : undefined;
   if (active && chatProvider && active !== chatProvider) {
     issues.push({
-      severity: 'warn',
-      code: 'active_channel_mismatch',
+      severity: 'info',
+      code: 'active_field_legacy',
       where: 'config.json',
-      message: `provider.active="${active}" 与主对话通道 "${chatChannel}" 的厂商 "${chatProvider}" 不一致`,
-      hint: 'provider.active 决定下次启动用哪家（cli.ts 启动时读取），不一致会导致"启动后与预期不同"',
+      message: `provider.active="${active}" 是遗留字段（主对话实际用 "${chatChannel}" 的 "${chatProvider}"）`,
+      hint: '该字段已退役、不参与决策，可忽略；主对话真源是 model-channels.json 的 chat 通道',
     });
   }
 
