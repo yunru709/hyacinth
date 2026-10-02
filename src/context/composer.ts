@@ -119,9 +119,33 @@ export interface LayeredComposeOptions {
 
 export type ZoneBreakdown = Record<string, number> & { total: number };
 
+/**
+ * 段级指纹（2026-10-02）：每个上下文段的「名字 ＋ token 数 ＋ 内容 hash」。
+ *
+ * 为什么需要：命中率掉下来时，光知道"哪一轮掉了"没用 —— **得知道是哪一段在变**。
+ * 当前 provider 是 auto-prefix（零缓存断点）⇒ 判据只有一条：**最早变化的字节在哪**。
+ * 有了每段的 hash，逐轮一对比就能直接指认，不必再靠推理去猜。
+ *
+ * 分工：本层**只算不落盘**（composer 是纯计算层，不做 IO）；是否记录由 context 阶段决定。
+ */
+export interface SectionTrace {
+  /** section 名（manifest 里的名字，如 tool_bundle_expand / scratchpad / history） */
+  name: string;
+  /** 所属 zone（zone1..zone5） */
+  zone: string;
+  /** 该段的 token 数 */
+  tokens: number;
+  /** 内容 md5 前 12 位（够区分变化，不必全量） */
+  hash: string;
+  /** 该段覆盖的消息条数（history 这类多消息段有意义） */
+  msgCount?: number;
+}
+
 export interface LayeredContext {
   messages: Message[];
   zoneBreakdown: ZoneBreakdown;
+  /** 段级指纹（**始终计算**；是否落盘由调用方决定） */
+  sectionTraces?: SectionTrace[];
 }
 
 export class LayeredContextComposer implements ContextComposer {
@@ -270,6 +294,8 @@ export class LayeredContextComposer implements ContextComposer {
 
     const allMessages: Message[] = [];
     const breakdown: Record<string, number> = {};
+    // 段级指纹汇总（供上层判断"哪一段在变"，进而定位缓存扰动源）
+    const sectionTraces: SectionTrace[] = [];
     // 记录每个 Zone 的消息数，供缓存策略计算断点位置
     const zoneMsgCounts: ZoneInfo[] = [];
 
@@ -279,6 +305,7 @@ export class LayeredContextComposer implements ContextComposer {
       const result = await this.assembleZone(zoneKey, options, ctx);
       allMessages.push(...result.messages);
       breakdown[zoneKey] = result.tokens;
+      sectionTraces.push(...result.traces);
       zoneMsgCounts.push({ key: zoneKey, msgCount: result.messages.length });
 
       if (zoneKey === 'zone3') {
@@ -302,24 +329,25 @@ export class LayeredContextComposer implements ContextComposer {
     const zoneBreakdown: ZoneBreakdown = { ...breakdown, total: totalTokens };
 
     this.clearPromptBuilder();
-    return { messages: allMessages, zoneBreakdown };
+    return { messages: allMessages, zoneBreakdown, sectionTraces };
   }
 
   private async assembleZone(
     zoneKey: string,
     options: LayeredComposeOptions,
     ctx: ResolverContext,
-  ): Promise<{ messages: Message[]; tokens: number }> {
+  ): Promise<{ messages: Message[]; tokens: number; traces: SectionTrace[] }> {
     const manifestLoader = getManifestLoader(this.cwd);
     const zone = manifestLoader.getZone(zoneKey);
     if (!zone || !zone.enabled) {
-      return { messages: [], tokens: 0 };
+      return { messages: [], tokens: 0, traces: [] };
     }
 
     const zoneRole = zone.role ?? 'user';
 
     if (zoneRole === 'system') {
       const sections = manifestLoader.getSections(zoneKey);
+      const traces: SectionTrace[] = [];
       for (const sec of sections) {
         if (this.promptBuilder.getSection(sec.name)) continue;
         // conditional section 也需要解析——由 resolveConditional 根据 activeConditions 决定是否注入
@@ -331,6 +359,7 @@ export class LayeredContextComposer implements ContextComposer {
               priority: sec.priority,
               content,
             });
+            traces.push(this.traceSection(sec.name, zoneKey, content));
           }
           continue;
         }
@@ -341,22 +370,24 @@ export class LayeredContextComposer implements ContextComposer {
             priority: sec.priority,
             content,
           });
+          traces.push(this.traceSection(sec.name, zoneKey, content));
         }
       }
       const systemPrompt = await this.promptBuilder.build();
       if (!systemPrompt.trim()) {
-        return { messages: [], tokens: 0 };
+        return { messages: [], tokens: 0, traces };
       }
       const systemMessage: Message = {
         role: 'system',
         content: { type: 'text', text: systemPrompt },
       };
       const tokens = this.tokenCounter.countMessageTokens(systemMessage);
-      return { messages: [systemMessage], tokens };
+      return { messages: [systemMessage], tokens, traces };
     }
 
     const sections = manifestLoader.getSections(zoneKey);
     const messages: Message[] = [];
+    const traces: SectionTrace[] = [];
     const textParts: string[] = [];
     const systemParts: string[] = [];
 
@@ -381,16 +412,27 @@ export class LayeredContextComposer implements ContextComposer {
         const historyMsgs = options.historyTransform
           ? options.historyTransform(options.history)
           : options.history;
+        const kept: Message[] = [];
         for (const msg of historyMsgs) {
           if (shouldSkipHistoryMessage(msg)) continue;
           // 时间锚点（若有）只在这一刻变成文本块 —— 存储里它是字段，请求体里没有字段
-          messages.push(withTimeAnchor(msg));
+          kept.push(withTimeAnchor(msg));
         }
+        messages.push(...kept);
+        // history 是多消息段 ⇒ 记「条数 ＋ 整体指纹」：用来发现"历史被重写/重排"
+        traces.push({
+          name: sec.name,
+          zone: zoneKey,
+          tokens: this.tokenCounter.countMessagesTokens(kept),
+          hash: this.hashText(kept.map((m) => JSON.stringify(m.content)).join('\n')),
+          msgCount: kept.length,
+        });
         continue;
       }
 
       const content = await resolveSection(sec, ctx);
       if (!content) continue;
+      traces.push(this.traceSection(sec.name, zoneKey, content));
 
       // Router 可按"本轮该 section 的实际来源"覆写 role（如陪伴模式世界旁白 → assistant 内心独白）
       // 旁路Agent 注入也可指定 role
@@ -417,11 +459,32 @@ export class LayeredContextComposer implements ContextComposer {
     flushTextParts();
 
     if (messages.length === 0) {
-      return { messages: [], tokens: 0 };
+      return { messages: [], tokens: 0, traces };
     }
 
     const tokens = this.tokenCounter.countMessagesTokens(messages);
-    return { messages, tokens };
+    return { messages, tokens, traces };
+  }
+
+  /**
+   * 段级指纹：内容 hash ＋ token 数。
+   * token 按「包成一条 system 消息」计（含 +4 消息开销）—— 各段口径一致才可横向比较。
+   */
+  private traceSection(name: string, zone: string, content: string): SectionTrace {
+    return {
+      name,
+      zone,
+      tokens: this.tokenCounter.countMessageTokens({
+        role: 'system',
+        content: { type: 'text', text: content },
+      }),
+      hash: this.hashText(content),
+    };
+  }
+
+  /** 内容 md5 前 12 位（够区分变化，且日志体积可控） */
+  private hashText(text: string): string {
+    return createHash('md5').update(text).digest('hex').slice(0, 12);
   }
 
   // --- Helpers ---

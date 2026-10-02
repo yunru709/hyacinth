@@ -51,7 +51,8 @@ import type { ZoneBreakdown } from '../../context/composer.js';
 import type { CompressorOrchestrator, CompressionResult } from '../../context/compressor.js';
 import type { Injection } from '../../bypass/types.js';
 import { compressorUserId } from '../../provider/user-id.js';
-import { basename } from 'node:path';
+import { basename, join as joinPath } from 'node:path';
+import { appendFile } from 'node:fs/promises';
 import { zone5TailBudgetRatio, poolMinHistory } from '../../context/context-config.js';
 import { formatPlanAsText } from '../plan-store.js';
 import { formatTimestamp, computeProtectCount, isSameTextMessage } from '../../utils/misc.js';
@@ -232,6 +233,27 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
       });
       state.impactInfo = null; // 已使用的影响面信息 → 清除（对应原 pendingImpactInfo = null）
       const messages = layeredResult.messages;
+
+      // ── 段级指纹落盘（2026-10-02）：定位"哪一段在变"的直接证据 ──────────
+      // 命中率掉下来时，光知道"哪一轮掉了"没有用。当前 provider 是 auto-prefix
+      //（零缓存断点）⇒ 判据只有一条：**最早变化的字节在哪**。逐轮记下每段的
+      // hash ＋ token，一对比即可指认（分析：`node scripts/cache-trace.mjs`）。
+      // 受 logging.logCacheHits 控制（与缓存日志同一个开关）；落盘失败不影响对话。
+      if (layeredResult.sectionTraces?.length && configCenter?.get('logging.logCacheHits') === true) {
+        try {
+          await appendFile(
+            joinPath(sessionDir, 'cache-trace.jsonl'),
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              total: layeredResult.zoneBreakdown.total,
+              sections: layeredResult.sectionTraces,
+            }) + '\n',
+            'utf-8',
+          );
+        } catch {
+          // 诊断数据落盘失败不该影响对话
+        }
+      }
 
       // ── 8. 钩子：上下文组装之后 + token 记账 ──
       await loopHooks.emit('afterContextAssemble', {
