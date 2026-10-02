@@ -820,6 +820,11 @@ export class ModelChannelRegistry {
       setThinking(enabled: boolean, effort?: string | number) {
         channelProvider.setThinking?.(enabled, effort);
       },
+
+      /** 必须转发：通道包装层不透传则 max_tokens 热更到不了真实 provider。 */
+      setMaxOutputTokens(maxOutputTokens: number) {
+        channelProvider.setMaxOutputTokens?.(maxOutputTokens);
+      },
     };
   }
 

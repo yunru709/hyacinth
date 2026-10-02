@@ -1909,6 +1909,8 @@
     ['toggle-bypass-agents', 'bypass.orchestratorEnabled', 'bool'],
     ['toggle-long-term-memory', 'context.longTermMemory', 'bool'],
     ['input-max-context', 'session.maxContext', 'num'],
+    // 单次最大输出（wire 的 max_tokens）。0 = 使用当前模型的上限（默认行为）。
+    ['input-max-output', 'provider.maxOutputTokens', 'num'],
     ['input-max-messages', 'session.maxMessages', 'num'],
     ['input-kb-max-total', 'kb.maxTotal', 'num'],
     ['input-kb-max-main', 'kb.maxMain', 'num'],

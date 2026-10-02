@@ -125,6 +125,12 @@ export class AnthropicProvider implements Provider {
     this.thinkingBudget = budget;
   }
 
+  /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
+    this.maxTokens = maxOutputTokens;
+  }
+
   async *createStream(
     messages: Message[],
     tools?: ToolDefinition[],
@@ -240,6 +246,9 @@ export class AnthropicProvider implements Provider {
                 id: currentToolUse.id,
                 name: currentToolUse.name,
                 input: recovered,
+                // 已知不对称：Anthropic 的 stop_reason 要等 message_delta 才到，此处拿不到，
+                // 故只以 JSON 解析失败为准 —— "JSON 合法但被截断"在本路径拦不住。
+                incomplete: !complete,
               };
               currentToolUse = null;
             }

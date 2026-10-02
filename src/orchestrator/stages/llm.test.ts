@@ -150,6 +150,62 @@ describe('llm 阶段（builtin:provider-stream）', () => {
     expect(onText).toHaveBeenCalledWith('让我想想');
   });
 
+  it('参数截断保护（C）：incomplete 的 tool_use 不执行，改为回注合成 tool_result', async () => {
+    const provider = mkProvider([
+      { type: 'TOOL_USE', id: 'trunc1', name: 'write', input: { file_path: 'a.ts', content: 'half' }, incomplete: true },
+      { type: 'TOOL_USE', id: 'ok1', name: 'read', input: { file_path: 'b.ts' } },
+      { type: 'STOP', reason: 'length' },
+    ]);
+    const toolService = { executeSingleInline: vi.fn().mockResolvedValue(undefined) };
+    const onToolResult = vi.fn();
+    const ctx = makeCtx({
+      toolService,
+      outputHandler: { onToolResult, onToolUse: vi.fn(), onText: vi.fn(), onThinking: vi.fn(), onFlush: vi.fn(), onTurnStart: vi.fn() },
+    });
+
+    const st = await stage.run(baseState({ activeProvider: provider as never }), ctx);
+
+    // 只有**未**截断的那个被执行
+    expect(toolService.executeSingleInline).toHaveBeenCalledTimes(1);
+    expect(toolService.executeSingleInline).toHaveBeenCalledWith('ok1', 'read', { file_path: 'b.ts' });
+    // 截断的那个仍留在 toolCalls —— assistant 的 tool_use ↔ tool_result 配对不能断
+    expect(st.toolCalls.map((c) => c.id)).toEqual(['trunc1', 'ok1']);
+    // 合成结果已入表，且标记为错误
+    const stored = st.inlineToolResults.get('trunc1');
+    expect(stored?.isError).toBe(true);
+    expect(stored?.content).toContain('NOT executed');
+    expect(onToolResult).toHaveBeenCalledWith(expect.stringContaining('NOT executed'), true, 'trunc1');
+    // 走的是 inline 路径 ⇒ tools 阶段会 flushInline，而不会退回 executeTools 再执行一遍
+    expect(st.inlineToolExecuted).toBe(true);
+  });
+
+  it('max_tokens 下发：仅当配置里**有**该键才调 setter（未设置时不动，避免冲掉构造期覆盖）', async () => {
+    const mk = (cfgValue: unknown) => {
+      const provider = mkProvider([{ type: 'TEXT', content: 'x' }]);
+      (provider as Record<string, unknown>).setMaxOutputTokens = vi.fn();
+      const ctx = makeCtx({
+        configCenter: { get: vi.fn((k: string) => (k === 'provider.maxOutputTokens' ? cfgValue : undefined)) },
+      });
+      return { provider, ctx };
+    };
+
+    // ① 未设置（undefined）⇒ 不调用。否则会把 switch_provider 带 api_key 时的
+    //    一次性 max_tokens（构造期覆盖、不经 setter）静默冲掉。
+    const a = mk(undefined);
+    await stage.run(baseState({ activeProvider: a.provider as never }), a.ctx);
+    expect((a.provider as never as { setMaxOutputTokens: ReturnType<typeof vi.fn> }).setMaxOutputTokens).not.toHaveBeenCalled();
+
+    // ② 正数 ⇒ 原样下发
+    const b = mk(4096);
+    await stage.run(baseState({ activeProvider: b.provider as never }), b.ctx);
+    expect((b.provider as never as { setMaxOutputTokens: ReturnType<typeof vi.fn> }).setMaxOutputTokens).toHaveBeenCalledWith(4096);
+
+    // ③ 0 ⇒ “复原为模型上限”（具体值取自模型目录，故只断言是数字）
+    const c = mk(0);
+    await stage.run(baseState({ activeProvider: c.provider as never }), c.ctx);
+    expect((c.provider as never as { setMaxOutputTokens: ReturnType<typeof vi.fn> }).setMaxOutputTokens).toHaveBeenCalledWith(expect.any(Number));
+  });
+
   it('契约：模块声明满足配置骨架 llm 槽位的 requires', () => {
     const slot: SlotSpec = {
       id: 'llm',

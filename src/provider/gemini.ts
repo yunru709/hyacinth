@@ -93,6 +93,12 @@ export class GeminiProvider implements Provider {
     return this.model;
   }
 
+  /** 运行时改单次输出上限（wire 的 maxOutputTokens）。见 Provider 接口说明。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
+    this.maxOutputTokens = maxOutputTokens;
+  }
+
   getCapabilities(): ProviderCapabilities {
     const info = getModelInfo('gemini', this.model);
     return {

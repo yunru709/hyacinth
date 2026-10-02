@@ -76,6 +76,16 @@ export class LocalProvider implements Provider {
     this.model = model;
   }
 
+  /**
+   * 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口说明。
+   * NOTE（既有耦合，非本次引入）：本类的 getCapabilities().maxContextTokens 也用 this.maxTokens
+   * （见上方），因此调小输出上限会连带把上报的上下文窗口一起调小。改这里前先看那处。
+   */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
+    this.maxTokens = maxOutputTokens;
+  }
+
   setBaseUrl(url: string): void {
     this.client = new OpenAI({
       apiKey: 'local',
@@ -172,6 +182,8 @@ export class LocalProvider implements Provider {
               id: acc.id,
               name: acc.name,
               input: recovered,
+              // 同 openai/compatible：截断打标，交由消费方否决执行。
+              incomplete: !complete || choice.finish_reason === 'length',
             };
           }
           toolCallAccumulators.clear();

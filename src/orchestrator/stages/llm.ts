@@ -69,6 +69,21 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
         : undefined;
       activeProvider.setThinking?.(thinkingEnabled, thinkingEffort);
 
+      // ── 1b. 单次输出上限（wire 的 max_tokens）—— 每轮下发的可选 setter ──
+      // 语义三态（键在 provider 顶层，与 update_config/reset_config 同源）：
+      //   · 正数   → 用该值（用户显式收窄/放大）
+      //   · 0      → 回落模型目录上限（"拉满"；reset 后也可用它显式复原）
+      //   · 未设置 → **不动**，沿用 provider 构造期解析值（模型目录上限，或 switch_provider
+      //              带 api_key 时传入的一次性 max_tokens 覆盖）
+      // 为什么"未设置就不动"：switch_provider 的 max_tokens 是构造期覆盖、不经 setter，
+      // 此处若无条件回写就会把它冲掉（见 tools/runtime-control/provider.ts）。
+      const maxOutRaw = configCenter?.get('provider.maxOutputTokens') as number | undefined;
+      if (typeof maxOutRaw === 'number') {
+        const modelMax = getModelInfo(activeProvider.getProviderType(), activeProvider.getModel())?.maxOutputTokens ?? 8192;
+        const effectiveMaxOut = maxOutRaw > 0 ? maxOutRaw : modelMax;
+        activeProvider.setMaxOutputTokens?.(effectiveMaxOut);
+      }
+
       // ── 2. 流式请求 LLM ──
       const stream = activeProvider.createStream(messages, toolDefinitions, ctx.signal);
 
@@ -188,10 +203,30 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
           await loopHooks.emit('onStreamEvent', { turn: state.turn, event });
 
           if (event.type === 'TOOL_USE') {
-            const { id, name, input } = event;
+            const { id, name, input, incomplete } = event;
             if (id && name) {
               inlineToolExecuted = true;
-              if (toolService) {
+              if (incomplete) {
+                // ── 参数截断保护（C）───────────────────────────────────────────
+                // provider 判定「流式 JSON 被截断」⇒ **拒绝执行**该工具。
+                // 动机：tool-args-recovery 的 content 规则是"`"content":"` 之后的残文
+                // 全算内容"，于是 write 会把半截文件当真落盘，而模型毫不知情 —— 静默数据损坏。
+                // 替代做法：照常进 assistant 消息（tool_use ↔ tool_result 的配对不能断），
+                // 结果换成一条明确的错误，让模型自己缩小分块重发。
+                // 关键：inlineToolExecuted 已在上方置 true，且结果已写入 inlineToolResults
+                // ⇒ tools 阶段会走 flushInline，而**不会**退回 executeTools 把它再执行一遍。
+                const msg = `Tool "${name}" NOT executed: its arguments were truncated in transit. The model output hit its per-request token limit while emitting the JSON, so the recovered arguments are incomplete. Executing them would write/apply partial data (e.g. a half-written file or a half-specified command). Re-issue this call with a smaller payload — split content into a skeleton plus follow-up edit/insert calls, or break the work into several smaller calls.`;
+                ctx.logger.warn('Tool call skipped: arguments truncated in transit', { tool: name, id });
+                oh?.onToolResult?.(msg, true, id);
+                inlineToolResults.set(id, { content: msg, isError: true });
+                appendEvent(sessionDir, {
+                  type: 'tool_result',
+                  tool_use_id: id,
+                  name,
+                  content: msg,
+                  timestamp: new Date().toISOString(),
+                }).catch(() => {});
+              } else if (toolService) {
                 inlineToolPromises.push(toolService.executeSingleInline(id, name, input));
               }
             }

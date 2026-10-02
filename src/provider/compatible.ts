@@ -148,6 +148,12 @@ export class OpenAICompatibleProvider implements Provider {
     if (effort) this.reasoningEffort = effort;
   }
 
+  /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
+    this.maxTokens = maxOutputTokens;
+  }
+
   setUserId(userId: string): void {
     this.userId = userId;
   }
@@ -261,8 +267,15 @@ export class OpenAICompatibleProvider implements Provider {
             if (!complete) {
               logToolArgsWarning('compatible', acc.name, raw, error);
             }
-            // Even on incomplete recovery, still emit — allows partial execution
-            yield { type: 'TOOL_USE', id: acc.id, name: acc.name, input: recovered };
+            // 仍然 emit（保住与 assistant 消息中 tool_use 的配对，也让模型看见自己截断在哪），
+            // 但带上 incomplete 标记 —— 是否执行交由消费方裁决，不再默认"允许部分执行"。
+            yield {
+              type: 'TOOL_USE',
+              id: acc.id,
+              name: acc.name,
+              input: recovered,
+              incomplete: !complete || choice.finish_reason === 'length',
+            };
           }
           toolCallAccumulators.clear();
           yield { type: 'STOP', reason: choice.finish_reason };

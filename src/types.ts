@@ -117,7 +117,11 @@ export type StreamEventType = 'TEXT' | 'THINKING' | 'TOOL_USE' | 'IMAGE' | 'USAG
 export type StreamEvent =
   | { type: 'TEXT'; content: string }
   | { type: 'THINKING'; content: string }
-  | { type: 'TOOL_USE'; id: string; name: string; input: Record<string, unknown> }
+  // incomplete：参数在流式传输中被截断（JSON 解析失败，或 OpenAI 系 finish_reason='length'）。
+  // 标记由 provider 在 finish_reason 时刻一并算出（此刻它同时握着 complete 与 finish_reason）。
+  // 消费方 stages/llm.ts 据此**跳过执行**，改为回注一条合成 tool_result 告知模型 —— 目的是
+  // 阻断「半截 content 被当成完整内容 write 落盘」这类静默数据损坏。
+  | { type: 'TOOL_USE'; id: string; name: string; input: Record<string, unknown>; incomplete?: boolean }
   | { type: 'IMAGE'; source: ImageSource }
   | { type: 'USAGE'; input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; cache_hit_tokens?: number; cache_miss_tokens?: number }
   | { type: 'STOP'; reason: string };

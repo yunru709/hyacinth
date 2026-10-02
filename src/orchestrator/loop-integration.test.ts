@@ -179,6 +179,91 @@ describe('AgentLoop maxContextTokens 兜底链（490ef42 回归）', () => {
   });
 });
 
+// ── 输出被截断：可见提示（A）+ 自动续写（B）（2026-10-02 新增）────────
+
+describe('AgentLoop 截断处理：length/max_tokens → 提示 + 有限续写', () => {
+  /** provider：每一轮都把输出"截断"在 length（模拟顶满单次输出上限）。
+   *  ⚠️ 事件类型必须**大写**（'TEXT'/'STOP'）：OutputRouter 按大写分发，小写会被
+   *  default 分支静默吞掉 ⇒ stopReason 退化成 end_turn（本测试首版就这么假绿过）。
+   *  文本逐轮变化且足够短：避开 text-loop 检测（否则会注入反射消息、可能提前 break）。 */
+  function makeTruncatingProvider() {
+    let n = 0;
+    const createStream = vi.fn().mockImplementation(() => {
+      const tag = `半截${++n}`;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'TEXT', content: tag };
+          yield { type: 'STOP', reason: 'length' };
+        },
+      };
+    });
+    const provider = {
+      getProviderType: () => 'deepseek',
+      getModel: () => 'deepseek-chat',
+      getCapabilities: () => ({ vision: false }),
+      setThinking: vi.fn(),
+      createStream,
+    } as unknown as Provider;
+    return { provider, createStream };
+  }
+
+  it('截断 ⇒ 注入"从断点继续"并续写；上限 3 次后停住（不无限续）', async () => {
+    const { provider, createStream } = makeTruncatingProvider();
+    const services = makeServices(provider);
+    const onStatus = vi.fn();
+    (services as unknown as { outputHandler: unknown }).outputHandler = { onStatus };
+
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    await (loop as unknown as { run(input: string): Promise<void> }).run('写一篇长文');
+
+
+    // 首轮 + 3 次续写 = 4 次请求；第 4 轮不再注入 ⇒ 恰好停住。
+    // 这条断言同时守住"续写上限真的生效"（否则会一路撞到 maxTurns）。
+    expect(createStream).toHaveBeenCalledTimes(4);
+
+    const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
+    const injected = cs.append.mock.calls
+      .map((c) => JSON.stringify(c[1]))
+      .filter((t) => t.includes('cut off by the per-request output limit'));
+    expect(injected, '应恰好注入 3 条续写指令').toHaveLength(3);
+
+    // A：用户可见提示（带 reason + 可执行指引）
+    const statuses = onStatus.mock.calls.map((c) => String(c[0]));
+    expect(statuses.some((s) => s.includes('length') && s.includes('/maxoutput'))).toBe(true);
+  });
+
+  it('正常结束（end_turn）不受影响：不注入、不提示', async () => {
+    // 用大写事件类型的 provider（见上条注释：小写 stop 会被 router 吞掉，测不出真语义）
+    const createStream = vi.fn().mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'TEXT', content: '你好' };
+        yield { type: 'STOP', reason: 'end_turn' };
+      },
+    }));
+    const provider = {
+      getProviderType: () => 'deepseek',
+      getModel: () => 'deepseek-chat',
+      getCapabilities: () => ({ vision: false }),
+      setThinking: vi.fn(),
+      createStream,
+    } as unknown as Provider;
+    const services = makeServices(provider);
+    const onStatus = vi.fn();
+    (services as unknown as { outputHandler: unknown }).outputHandler = { onStatus };
+
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    await (loop as unknown as { run(input: string): Promise<void> }).run('你好');
+
+    expect(createStream).toHaveBeenCalledTimes(1);
+    const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
+    expect(
+      cs.append.mock.calls.map((c) => JSON.stringify(c[1])).some((t) => t.includes('cut off by the per-request output limit')),
+      '正常结束不该注入续写指令',
+    ).toBe(false);
+    expect(onStatus.mock.calls.map((c) => String(c[0])).some((s) => s.includes('/maxoutput'))).toBe(false);
+  });
+});
+
 // ── 渠道附图：base64 不落盘（2026-09-19 改造锁定）─────────────────────
 
 describe('渠道附图：不落盘 base64（与工具图同构）', () => {

@@ -1348,6 +1348,9 @@ export class AgentLoop {
       // 不再推进时，避免无限空转 —— 由 LoopGuard/空转兜底双保险）
       let idleTurnCount = 0;
       const IDLE_TURN_LIMIT = 3;
+      // 输出被截断（finish_reason='length' / stop_reason='max_tokens'）后的自动续写次数。
+      // 计在 loop 实例的局部变量上（不是模块级），避免多会话共享同一个计数器。
+      let truncationContinues = 0;
       while (true) {
         if (this.interrupted) {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
@@ -1419,6 +1422,46 @@ export class AgentLoop {
             });
           }
           result.stop = false; // 强制继续迭代，让 LLM 看到注入的异步结果
+        }
+
+        // ── 输出被截断：可见提示（A） + 自动续写（B）──────────────────────────
+        // 触发条件：本轮以 length / max_tokens 结束 —— 即模型回复是被「单次输出上限」
+        // 从中间砍断的（finalize 已把该 reason 原样落到 stop 事件，见 stages/finalize.ts）。
+        // 此前这条路径**完全静默**：用户只看到"话说到一半就停了"，也没有任何续写。
+        //   A：给用户一条状态（并提示可以用 /maxoutput 调大）。
+        //   B：注入"从断点继续"的指令并强制续一轮（复用上方 pendingAsyncResults 同款机制），
+        //      上限 MAX_TRUNCATION_CONTINUES 次，防止模型持续顶满造成无限续写。
+        // 与空转兜底的关系：续写轮**没有**工具调用，若不归零会被 idleTurnCount 误杀。
+        const MAX_TRUNCATION_CONTINUES = 3;
+        const TRUNCATION_CONTINUE_PROMPT =
+          '[System] Your previous message was cut off by the per-request output limit, '
+          + 'so it is incomplete. Continue from exactly where it stopped — do NOT repeat what '
+          + 'you already wrote (start mid-sentence if needed). If a tool call was truncated, '
+          + 're-issue it with a smaller payload instead of retrying it as-is.';
+
+        if (result.toolCalled) {
+          truncationContinues = 0; // 有工具调用 = 已恢复正常推进，计数清零
+        }
+        if (result.stop && (result.stopReason === 'length' || result.stopReason === 'max_tokens')) {
+          const canContinue = truncationContinues < MAX_TRUNCATION_CONTINUES;
+          this.outputHandler?.onStatus?.(
+            `Output was cut off by the per-request limit (${result.stopReason}). `
+            + (canContinue
+              ? `Asking the model to continue (${truncationContinues + 1}/${MAX_TRUNCATION_CONTINUES}). `
+              : `Already continued ${truncationContinues} times — stopping here. `)
+            + 'Raise the limit with /maxoutput if this keeps happening.',
+            'warn',
+          );
+          if (canContinue) {
+            truncationContinues++;
+            await this.conversationStore.append(this.sessionDir, {
+              role: 'user',
+              content: [{ type: 'text', text: TRUNCATION_CONTINUE_PROMPT }],
+            });
+            result.stop = false;  // 强制续一轮，让模型从中断处接着说
+            lastResult = result;
+            idleTurnCount = 0;    // 续写不是空转
+          }
         }
 
         // 更新 stats

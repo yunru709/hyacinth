@@ -134,6 +134,13 @@ export class FallbackProviderChain implements Provider {
     }
   }
 
+  /** 必须转发给链上每个成员：否则降级后 max_tokens 热更对成员不生效。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    for (const p of this.providers) {
+      p.setMaxOutputTokens?.(maxOutputTokens);
+    }
+  }
+
   setUserId(userId: string): void {
     for (const p of this.providers) {
       p.setUserId?.(userId);

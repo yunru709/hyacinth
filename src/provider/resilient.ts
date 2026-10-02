@@ -134,6 +134,11 @@ export class ResilientProvider implements Provider {
     this.inner.setThinking?.(enabled, effort);
   }
 
+  /** 必须转发：否则熔断包装下 max_tokens 热更静默失效（见 Provider 接口说明）。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    this.inner.setMaxOutputTokens?.(maxOutputTokens);
+  }
+
   setUserId(userId: string): void {
     this.inner.setUserId?.(userId);
   }

@@ -77,6 +77,15 @@ export interface Provider {
   setThinking?(enabled: boolean, effort?: string | number): void;
 
   /**
+   * 运行时改「单次最大输出 token 数」（wire 上的 max_tokens）。
+   * 不设配置项时沿用模型目录的上限 —— 即"默认拉满"。设小了就是主动收紧。
+   * 与 setThinking 同为「每轮下发」的可选 setter：消费方 stages/llm.ts 每轮读配置后调用，
+   * 因此包装类（ResilientProvider / 通道 provider）必须**转发**，否则静默失效。
+   * @param maxOutputTokens 新的单次输出上限（> 0）
+   */
+  setMaxOutputTokens?(maxOutputTokens: number): void;
+
+  /**
    * 运行时切换 KVCache 隔离 ID。
    * 仅对 DeepSeek/OpenAI 等将 user_id 发送到 API 的 Provider 有效。
    * 用于主Agent 模式切换（普通↔陪伴）等场景。

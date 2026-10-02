@@ -105,6 +105,12 @@ export class OpenAIProvider implements Provider {
     this.thinkingEnabled = enabled;
   }
 
+  /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
+  setMaxOutputTokens(maxOutputTokens: number): void {
+    if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
+    this.maxTokens = maxOutputTokens;
+  }
+
   setUserId(userId: string): void {
     this.userId = userId;
   }
@@ -218,6 +224,10 @@ export class OpenAIProvider implements Provider {
               id: acc.id,
               name: acc.name,
               input: recovered,
+              // 参数截断 ⇒ 打标；消费方（stages/llm.ts）据此跳过执行并回注提示，不落半截内容。
+              // 此刻 complete 与 finish_reason 同时在手，一次判准（finish_reason 兜住
+              // "JSON 恰好合法、但内容其实被截断"这种靠解析看不出来的情况）。
+              incomplete: !complete || choice.finish_reason === 'length',
             };
           }
           toolCallAccumulators.clear();

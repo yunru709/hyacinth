@@ -30,7 +30,7 @@ import type { Provider } from '../provider/interface.js';
 import type { OutputHandler, TurnInfo } from '../orchestrator/loop.js';
 import { StatsManager } from '../memory/stats.js';
 import { ConfigManager } from '../setup/config.js';
-import { getModelContextWindow } from '../setup/model-defaults.js';
+import { getModelContextWindow, getModelMaxTokens } from '../setup/model-defaults.js';
 import { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { ProviderManager } from '../provider/manager.js';
 import { LocalProvider } from '../provider/local.js';
@@ -1794,6 +1794,9 @@ export async function runTui(
         ['Model', s.provider[s.provider.active as keyof typeof s.provider] as { model?: string } | string[] | undefined],
         ['Active Workflow', 'none'],
         ['Max Context', `${s.session.maxContext.toLocaleString()} tokens`],
+        ['Max Output', s.provider.maxOutputTokens && s.provider.maxOutputTokens > 0
+          ? `${s.provider.maxOutputTokens.toLocaleString()} tokens`
+          : 'model default (max)'],
         ['Max Turns', s.session.maxTurns],
         ['Compress Threshold', s.context.compressThreshold.toFixed(2)],
         ['Confirmation', s.safety.requireConfirmation ? 'on' : 'off'],
@@ -1853,6 +1856,34 @@ export async function runTui(
       }
       await setConfig('session.maxContext', tokens);
       chatLog.addSystem(theme.success('Max context set to ') + theme.fg(tokens.toLocaleString() + ' tokens'));
+      await refreshStatusFromProtocol();
+      updateTokenEstimate();
+      return;
+    }
+
+    // ── /maxoutput <tokens> ── 单次最大输出（wire 的 max_tokens）
+    // 与 /context 的分工：maxContext 是「上下文窗口软限制」（输入侧），
+    // 本项是「单次回复的输出上限」（输出侧）—— 后者被顶满时回复会从中间截断。
+    // 传 0 = 复原为当前模型目录的上限（即默认行为"拉满"）。
+    // 生效路径：写 provider.maxOutputTokens → loop 每轮读配置并下发 setter（无需重启）。
+    if (input.startsWith('/maxoutput ')) {
+      const tokens = parseInt(input.slice(11).trim(), 10);
+      const modelMaxOut = getModelMaxTokens(providerTypeStart, modelName);
+      if (isNaN(tokens) || tokens < 0 || tokens > modelMaxOut) {
+        chatLog.addSystem(
+          theme.warning(`Usage: /maxoutput <0-${modelMaxOut.toLocaleString()}>`)
+          + theme.dim(` (0 = 复原模型上限; model: ${modelName})`),
+        );
+        tui.requestRender();
+        updateTokenEstimate();
+        return;
+      }
+      await setConfig('provider.maxOutputTokens', tokens);
+      chatLog.addSystem(
+        tokens === 0
+          ? theme.success('Max output tokens reset to model default ') + theme.fg(`${modelMaxOut.toLocaleString()} tokens`)
+          : theme.success('Max output tokens set to ') + theme.fg(`${tokens.toLocaleString()} tokens`),
+      );
       await refreshStatusFromProtocol();
       updateTokenEstimate();
       return;
