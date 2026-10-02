@@ -61,6 +61,21 @@
 ### ④ 本文档 + 配置清单
 - 见下 §5。附带多进程写入仲裁的**设计草案**（§6，本次不实现）。
 
+### ⑤ user-id 隔离的扩展契约（2026-10-02 补）
+DeepSeek 系按 `user_id` 分 KVCache 池，**同 id = 同池 = 互相挤占**（症状：聊到一半突然变慢变贵）。
+新增使用点时的规则：
+
+- 有专属函数（`user-id.ts` 里的 `mainUserId` / `compressorUserId` / `subAgentUserId` …）⇒ 用它；
+- **没有 ⇒ 自动派生** `{前缀}-{调用点名}`：
+  · 通道没配 `userId` ⇒ 按**通道名**派生（装配期，仅内存不落盘）；
+  · scoped 调用没传值 ⇒ 按 **role** 派生。
+  ⇒ 每个使用点**至少有独立池**，不再静默掉进 `DEFAULT_USER_ID` 的全局池（那是"忘了配"的旧下场）。
+- 要按**会话/实例**细分（压缩器、子 Agent 那样）⇒ 走 `createScopedProvider(role, userId)` 显式传带 tag 的值；
+  长驻实例是按通道固定的，**做不到按会话切换**。
+- **查现状**：`list_model_channels` 末尾的「user-id 隔离」一节列出谁和谁共池。
+- 已知未完成：旁路（`orchestrator` / `narration`）目前是**全局静态 id**，不按会话分
+  （`user-id.ts` 里预留了 `sessionTag` 形参，待调用链携带 sessionId 后升级）。
+
 ## 5. 配置清单（谁读 / 谁写 / 何时生效）
 
 | 文件 | 谁读 | 谁写 | 生效时机 | 坑 |

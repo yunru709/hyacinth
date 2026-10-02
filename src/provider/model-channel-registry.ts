@@ -11,6 +11,7 @@ import { getLocalProviderConfigLoader } from './local-config.js';
 import { createLogger } from '../logging/logger.js';
 import type { ModelsConfig, LocalModelConfig } from './model-router.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
+import { derivedUserId } from './user-id.js';
 
 const logger = createLogger('model-channel-registry');
 
@@ -595,7 +596,11 @@ export class ModelChannelRegistry {
         apiKey,
         model: cfg.model ?? meta?.defaultModel ?? 'unknown',
         baseUrl: cfg.baseUrl ?? meta?.baseUrl,
-        userId: cfg.userId,
+        // 未显式配置 userId ⇒ 按**名字派生**一个独立池（2026-10-02）。
+        // 此前留空的下场：翻译层兜底成 DEFAULT_USER_ID ⇒ 所有"没配 id"的通道共用同一个池，
+        // 互相挤占 KVCache（症状：聊到一半突然变慢变贵，归因极难）。
+        // 派生只用于创建实例，**不写回配置**（不污染 model-channels.json）。
+        userId: cfg.userId || derivedUserId(name),
         // 透传通道级采样 / 输出上限 / 通用字段。
         // 此前只传 key/model/baseUrl/userId ⇒ 通道配置里的采样参数静默失效
         //（且 ChannelConfig 本身也没有这些字段，两层同时缺）。
@@ -637,7 +642,12 @@ export class ModelChannelRegistry {
     }
     // 登记「实际生效」的通道：同名通道不存在时会落到 default
     this.noteDiscoveredRole(role, this.config.channels[channelName] ? channelName : DEFAULT_CHANNEL);
-    const instance = this.createChannelProviderFromConfig(`scoped:${role}`, { ...cfg, userId });
+    // 生效 userId 三级（2026-10-02）：**传入值 > 通道配置 > 按 role 派生**。
+    // 旧实现是 `{ ...cfg, userId }` —— 传空即**抹掉**通道里配好的 id，直接掉进
+    // DEFAULT_USER_ID 全局池（静默共池，最难归因）。现在任何一级都不会退到全局池。
+    const effectiveUserId =
+      userId && userId.trim() ? userId : cfg.userId || derivedUserId(role);
+    const instance = this.createChannelProviderFromConfig(`scoped:${role}`, { ...cfg, userId: effectiveUserId });
     if (!instance) return null;
     // 与常规通道一致：非 main 通道包弹性层（重试+熔断）
     return channelName === DEFAULT_CHANNEL ? instance : new ResilientProvider(instance);

@@ -38,6 +38,36 @@ function make(role: string, tag?: string): string {
   return tag ? `${_prefix}-${role}-${tag}` : `${_prefix}-${role}`;
 }
 
+/**
+ * 角色名 → 安全片段（小写；只留字母数字与 `. _ -`，其余折成 `-`）。
+ * 用途：**没有专属函数的调用点**自动派生 id —— 插件/新功能带来的角色名不受控。
+ */
+function slug(role: string): string {
+  const s = role
+    .toLowerCase()
+    // \p{L}\p{N} = 任意语言的字母/数字：中文角色名（陪伴模式那种）也保留，
+    // 否则几个中文名会被折成同一个 'unknown' ⇒ 撞进同一个缓存池 ✗
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return s || 'unknown';
+}
+
+// ── 通用派生（新使用点的兜底契约） ───────────────────────────
+
+/**
+ * 按调用点名派生隔离 id —— **2026-10-02 新增**。
+ *
+ * 此前新增使用点若忘了配 userId，会静默落进 `DEFAULT_USER_ID` 的**全局共享池**，
+ * 与其它"忘了配"的调用点互相挤占 KVCache —— 症状是"聊到一半突然变慢变贵"，
+ * 几乎无法从现象反推到"某个新调用点没配 id"。现在改为：
+ *   · 没有专属函数（上面那些具名导出）⇒ 用本函数派生；
+ *   · 需要按会话/实例更细地分（像压缩器、子 Agent）⇒ 调用方显式传带 tag 的值。
+ * 两条路径的结果都是"每个使用点至少有自己的池"，不再是共享兜底。
+ */
+export function derivedUserId(role: string): string {
+  return make(slug(role));
+}
+
 // ── 主Agent ──────────────────────────────────────────────────
 
 /** 主Agent 普通模式 */

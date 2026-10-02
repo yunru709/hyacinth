@@ -48,6 +48,25 @@ export function createListModelChannelsTool(modelRouter: ModelRouter): Tool {
         lines.push(`- ${role} → ${channel}`);
       }
 
+      // user-id 隔离视图（2026-10-02）：DeepSeek 系按 user_id 分 KVCache 池，
+      // **同 id = 同池 = 互相挤占**。没有显式配 id 的通道会自动按通道名派生（见 user-id.ts
+      // 的 derivedUserId），不再静默退到全局池 —— 这里把它显式列出来，免得靠猜。
+      lines.push('\n## user-id 隔离（同 id = 同缓存池）');
+      const pool = new Map<string, string[]>();
+      for (const ch of channels) {
+        const id = ch.userId ?? `(自动派生) ${ch.name}`;
+        pool.set(id, [...(pool.get(id) ?? []), ch.name]);
+      }
+      for (const [id, names] of pool) {
+        const users = names.flatMap((n) =>
+          Object.entries(roles).filter(([, c]) => c === n).map(([r]) => r),
+        );
+        const flag = names.length > 1 ? '   ⚠️ 多个通道共池' : '';
+        lines.push(`- ${id}${flag}`);
+        lines.push(`    通道: ${names.join(', ')}${users.length > 0 ? ` ｜ 使用点: ${users.join(', ')}` : ''}`);
+      }
+      lines.push('  （压缩器 / 子 Agent 实际按会话、实例再细分，走 scoped 调用）');
+
       return lines.join('\n');
     },
   };

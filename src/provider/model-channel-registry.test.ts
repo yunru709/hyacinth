@@ -15,11 +15,12 @@
  *    ~/.agent/model-channels.json —— 该文件曾被测试夹具值覆盖成真实事故
  *    （见 registry 源码 100-117 行注释）。
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ModelChannelRegistry } from './model-channel-registry.js';
+import { ProviderManager } from './manager.js';
 import { getProviderConfigLoader } from './config.js';
 
 let tmpFile: string;
@@ -108,5 +109,66 @@ describe('ModelChannelRegistry 持久化语义', () => {
     r2.load(undefined, 'deepseek');
 
     expect(r2.listChannels().find((c) => c.name === 'compression')?.model).toBe('persisted-model');
+  });
+});
+
+/**
+ * user-id 隔离的**三级生效值**（2026-10-02 补）。
+ *
+ * 旧实现是 `{ ...cfg, userId }`：调用方传空 ⇒ **抹掉**通道里配好的 id ⇒
+ * 静默掉进 DEFAULT_USER_ID 全局池（与其它"忘配"的调用点互相挤占缓存）。
+ * 现契约：**传入值 > 通道配置 > 按 role 派生** —— 任何一级都不退到全局池。
+ */
+describe('ModelChannelRegistry user-id 生效值', () => {
+  it('通道未配 userId ⇒ 建实例时按通道名派生（不再落到全局池）', () => {
+    const spy = vi.spyOn(ProviderManager, 'createProviderFromConfig');
+    try {
+      newRegistry(); // default 通道无 userId
+      const derived = spy.mock.calls
+        .map((c) => (c[0] as { userId?: string }).userId)
+        .filter(Boolean);
+      expect(derived).toContain('hyacinth-default');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('scoped 传空 ⇒ 继承**该角色所属通道**配置的 userId（优先于派生）', () => {
+    const registry = newRegistry();
+    // 夹具里 buildFromLegacy 把 compression 角色指向 default（那通道没配 userId）
+    // ⇒ 显式指回带 userId 的通道，才能测"通道值优先于派生"这一级。
+    registry.setRoleMapping('compression', 'compression');
+    const spy = vi.spyOn(ProviderManager, 'createProviderFromConfig');
+    try {
+      registry.createScopedProvider('compression', '');
+      const last = spy.mock.calls.at(-1)?.[0] as { userId?: string };
+      expect(last.userId).toBe('hyacinth-compressor');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('scoped 传空 且 通道无值 ⇒ 按 role 派生（仍不退全局池）', () => {
+    const spy = vi.spyOn(ProviderManager, 'createProviderFromConfig');
+    try {
+      const registry = newRegistry();
+      registry.createScopedProvider('weird-role', '');
+      const last = spy.mock.calls.at(-1)?.[0] as { userId?: string };
+      expect(last.userId).toBe('hyacinth-weird-role');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('scoped 显式传值优先于通道配置', () => {
+    const registry = newRegistry();
+    const spy = vi.spyOn(ProviderManager, 'createProviderFromConfig');
+    try {
+      registry.createScopedProvider('compression', 'hyacinth-compressor-sessA');
+      const last = spy.mock.calls.at(-1)?.[0] as { userId?: string };
+      expect(last.userId).toBe('hyacinth-compressor-sessA');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
