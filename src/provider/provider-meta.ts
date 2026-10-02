@@ -13,6 +13,7 @@
 import { MODEL_CATALOG } from './model-types.js';
 import type { ModelCatalogEntry } from './model-types.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
+import type { ThinkingStyle } from './thinking-style.js';
 
 /** 非 chat 能力类型（chat 由 LLM 体系天然承载，无需声明） */
 export type VendorCapability = 'tts' | 'image' | 'video' | 'embedding' | 'rerank';
@@ -53,14 +54,17 @@ export interface ProviderFactoryMeta {
    */
   protocol?: 'openai' | 'anthropic';
   /**
-   * 该厂商接受 DeepSeek 私有的 `thinking` / `reasoning_effort` 请求字段。
+   * 思考模式的接线方式（wire 语义）—— 厂商差异的**单一声明点**，见 `thinking-style.ts`。
    *
-   * 缺省策略：**仅 `deepseek` 官方发送**（见 `compatible.ts`），其余厂商不再被塞入
-   * 未知字段 —— 历史上这类"照着 DeepSeek 抄"的私有字段会外溢给所有 OpenAI 兼容厂商
-   * （宽松网关忽略、严格网关直接 400）。
-   * 跑 DeepSeek 模型的中转站（如 opencode / commandcode）若也接受，可显式置 `true`。
+   * 缺省 `none`：不发任何思考字段。缺省必须保守 —— 历史上这类"照着 DeepSeek 抄"
+   * 的私有字段会外溢给所有 OpenAI 兼容厂商（宽松网关忽略、严格网关直接 400）。
+   *
+   * - `deepseek`  顶层 `thinking:{type}` + `reasoning_effort`（DeepSeek 官方）
+   * - `effort`    只发 `reasoning_effort`，**关闭 = `'off'`**（如 commandcode）
+   * - `anthropic` 延长思考 `thinking:{type:'enabled',budget_tokens}`（Anthropic 原生）
+   * - `none`      不发（缺省）
    */
-  deepseekThinking?: boolean;
+  thinkingStyle?: ThinkingStyle;
   /** 厂商级默认采样参数（JSON 声明厂商用；激活配置未覆盖时生效） */
   sampling?: ProviderSampling;
   /** 通用字段 → wire 字段名覆盖（如 OpenAI 兼容端点用标准 user：{ "userId": "user" }） */
@@ -78,6 +82,8 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'claude-sonnet-5',
     envKey: 'ANTHROPIC_API_KEY',
     protocol: 'anthropic',
+    // 思考接线：Anthropic 原生延长思考（thinking:{type:'enabled',budget_tokens}）
+    thinkingStyle: 'anthropic',
   },
   openai: {
     id: 'openai',
@@ -94,6 +100,8 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     // 旧名 deepseek-v4-flash 已从官方 /models 列表消失。
     defaultModel: 'deepseek-flash',
     envKey: 'DEEPSEEK_API_KEY',
+    // 思考接线：官方语义 —— 顶层 `thinking:{type}`，开启时另附 `reasoning_effort`
+    thinkingStyle: 'deepseek',
   },
   groq: {
     id: 'groq',

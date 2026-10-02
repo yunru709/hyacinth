@@ -13,6 +13,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { buildAnthropicThinking, normalizeThinkingStyle, type ThinkingStyle } from './thinking-style.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {
   /** 必须提供 apiKey，或通过 ANTHROPIC_API_KEY 环境变量自动读取 */
@@ -29,6 +30,11 @@ export interface AnthropicProviderOptions {
   thinkingEnabled?: boolean;
   /** thinking 预算 token 数，默认 10000（仅在 thinkingEnabled=true 时生效） */
   thinkingBudget?: number;
+  /**
+   * 思考接线方式（见 `thinking-style.ts`）。缺省 `anthropic` = 原生延长思考语法。
+   * 走 anthropic **兼容**端点、但未验证其 thinking 语法的厂商可声明 `none` ⇒ 静默不发。
+   */
+  thinkingStyle?: ThinkingStyle;
   /** 覆盖 ProviderType（MiniMax/Qwen/Zhipu/MiMo 等兼容协议用） */
   providerType?: ProviderType;
   /** 缓存隔离 ID（anthropic 协议 → metadata.user_id；仅显式设置才发） */
@@ -55,6 +61,8 @@ export class AnthropicProvider implements Provider {
   private maxTokens: number;
   private thinkingEnabled: boolean;
   private thinkingBudget: number;
+  /** 思考接线方式（缺省 anthropic = 原生延长思考语法） */
+  private readonly thinkingStyle: ThinkingStyle;
 
   private _providerType: ProviderType;
   private userId?: string;
@@ -93,6 +101,8 @@ export class AnthropicProvider implements Provider {
       ?? 8192;                                                     // ③ 兜底
     this.thinkingEnabled = opts.thinkingEnabled ?? false;
     this.thinkingBudget = opts.thinkingBudget ?? 10000;
+    // 缺省 anthropic：原生延长思考语法。兼容端点未验证语法时可声明 none（静默不发）。
+    this.thinkingStyle = normalizeThinkingStyle(opts.thinkingStyle) ?? 'anthropic';
     this.userId = opts.fields?.userId ?? opts.userId;
     this.sampling = opts.sampling ?? getModelInfo(this._providerType, this.model)?.sampling; // 三级兜底：激活配置 → 模型目录默认
     this.fieldMap = opts.fieldMap;
@@ -156,12 +166,14 @@ export class AnthropicProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    // thinking
-    if (this.thinkingEnabled) {
-      params.thinking = {
-        type: 'enabled' as const,
-        budget_tokens: this.thinkingBudget,
-      };
+    // thinking —— 接线方式由 style 决定（缺省 anthropic 原生语法；关或不支持则不发）
+    const thinkingParams = buildAnthropicThinking(
+      this.thinkingStyle,
+      this.thinkingEnabled,
+      this.thinkingBudget,
+    );
+    if (thinkingParams) {
+      params.thinking = thinkingParams;
     }
 
     // 通用字段翻译：metadata.user_id（仅显式设置才发）+ 采样参数（temperature/topP）

@@ -9,6 +9,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import { buildThinkingParams, normalizeThinkingStyle, type ThinkingStyle } from './thinking-style.js';
 import { getProviderConfigLoader } from './config.js';
 import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
@@ -52,10 +53,10 @@ export interface OpenAICompatibleOptions {
   /** 通用字段 → wire 字段名覆盖（JSON 声明厂商 meta.fieldMap 传入） */
   fieldMap?: Partial<Record<keyof ProviderFields, string>>;
   /**
-   * 是否接受 DeepSeek 私有的 `thinking` / `reasoning_effort` 请求字段。
-   * 缺省：仅 `providerType === 'deepseek'`（其它厂商不再收到未知字段）。
+   * 思考模式的接线方式（wire 语义）。缺省 `none` = 不发任何思考字段。
+   * 不同上游的开关写法不同（见 `thinking-style.ts`），硬编码某一种必然对不上。
    */
-  deepseekThinking?: boolean;
+  thinkingStyle?: ThinkingStyle;
 }
 
 /**
@@ -84,8 +85,8 @@ export class OpenAICompatibleProvider implements Provider {
   private userId?: string;
   private sampling?: ProviderSampling;
   private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
-  /** 是否发送 DeepSeek 私有的 thinking / reasoning_effort 字段（缺省仅 deepseek 官方） */
-  private readonly deepseekThinking: boolean;
+  /** 思考接线方式（缺省 none = 不发任何思考字段），见 thinking-style.ts */
+  private readonly thinkingStyle: ThinkingStyle;
 
   constructor(opts: OpenAICompatibleOptions) {
     const apiKey = opts.apiKey ?? (opts.envKey ? process.env[opts.envKey] : undefined);
@@ -115,7 +116,8 @@ export class OpenAICompatibleProvider implements Provider {
     this.userId = opts.fields?.userId ?? opts.userId; // 缺省兜底在 translateFields（openai 协议）
     this.sampling = opts.sampling ?? modelInfo?.sampling; // 三级兜底：激活配置 → 模型目录默认
     this.fieldMap = opts.fieldMap;
-    this.deepseekThinking = opts.deepseekThinking ?? (opts.providerType === 'deepseek');
+    // 思考接线：缺省 none（不往请求体塞未知字段）。deepseek 等内置厂商经工厂传入。
+    this.thinkingStyle = normalizeThinkingStyle(opts.thinkingStyle) ?? 'none';
   }
 
   getProviderType(): ProviderType {
@@ -183,18 +185,13 @@ export class OpenAICompatibleProvider implements Provider {
       params.tools = this.convertTools(tools);
     }
 
-    // DeepSeek 私有扩展（thinking / reasoning_effort）——**只对声明支持的厂商发送**。
-    // `thinking` 的语义是"必须显式发 disabled 才能关"，且 reasoning_effort 同为
-    // DeepSeek 家族专有。此前无条件发给所有 OpenAI 兼容厂商：宽松网关忽略、
-    // 严格网关直接 400（跨厂商请求体污染）。缺省判定见 constructor。
-    if (this.deepseekThinking) {
-      (params as any).extra_body = {
-        thinking: { type: this.thinkingEnabled ? 'enabled' : 'disabled' },
-      };
-      if (this.thinkingEnabled) {
-        (params as unknown as Record<string, unknown>).reasoning_effort = this.reasoningEffort;
-      }
-    }
+    // 思考字段 —— 位置必须在**顶层**。曾写成 `extra_body:{thinking:…}`，那是 Python SDK
+    // 的参数名：Node SDK 不展开它，wire 上变成未知的嵌套字段，官方读不到（实测确认）。
+    // 开/关的写法按厂商 style 分派（见 thinking-style.ts）；缺省 none ⇒ 不发任何字段。
+    Object.assign(
+      params as unknown as Record<string, unknown>,
+      buildThinkingParams(this.thinkingStyle, this.thinkingEnabled, this.reasoningEffort),
+    );
 
     const toolCallAccumulators = new Map<
       number,

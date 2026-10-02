@@ -354,6 +354,8 @@ function createJsonDeclaredFactory(type: string): ProviderFactory | undefined {
           // 缺修复：anthropic 分支此前漏传 fieldMap（openai 分支有）⇒
           // providers.json 给 Anthropic 协议厂商配的字段映射静默失效。
           fieldMap: meta!.fieldMap,
+          // 声明式思考接线（缺省由 AnthropicProvider 兜底为 'anthropic'）
+          thinkingStyle: meta!.thinkingStyle,
         })
       : new OpenAICompatibleProvider({
           apiKey: config.apiKey,
@@ -364,8 +366,8 @@ function createJsonDeclaredFactory(type: string): ProviderFactory | undefined {
           fields: withFields(config),
           sampling: config.sampling ?? meta!.sampling,
           fieldMap: meta!.fieldMap,
-          // 声明式开关：跑 DeepSeek 模型的中转站可置 true 以继续收/发 thinking 字段
-          deepseekThinking: meta!.deepseekThinking,
+          // 声明式思考接线：中转站按上游实际语法声明（见 thinking-style.ts）
+          thinkingStyle: meta!.thinkingStyle,
         });
 
   return {

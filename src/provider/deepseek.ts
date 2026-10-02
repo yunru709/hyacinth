@@ -35,6 +35,8 @@ export function createDeepSeekProvider(config?: {
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.deepseek.com/v1',
     model: (config?.model && config.model.trim()) ? config.model : (provCfg?.defaultModel ?? 'unknown'),
     providerType: 'deepseek',
+    // 思考接线：DeepSeek 官方语义（顶层 thinking + reasoning_effort），见 thinking-style.ts
+    thinkingStyle: 'deepseek',
     maxOutputTokens: config?.maxOutputTokens,
     userId: config?.userId,
     fields: config?.fields,
