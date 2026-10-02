@@ -162,19 +162,19 @@ export class BashTool implements Tool {
     properties: {
       command: {
         type: 'string',
-        description: 'The command to execute',
+        description: '要执行的命令',
       },
       timeout: {
         type: 'number',
-        description: 'Timeout in seconds. Default is 600. Applies to both sync and async execution.',
+        description: '超时时间（秒）。默认 600。同步和异步执行均适用。',
       },
       env: {
         type: 'object',
-        description: 'Environment variables to set for this command. These persist across subsequent bash calls in this session. Example: {"PYTHONIOENCODING": "utf-8"}',
+        description: '为本次命令设置的环境变量。这些变量在本会话后续的 bash 调用中持续生效。示例：{"PYTHONIOENCODING": "utf-8"}',
       },
       async: {
         type: 'boolean',
-        description: 'If true, run the command as a background process. Returns a handle immediately (e.g. [background:bg_001]). The process continues running and can be managed with process_list/process_output/process_kill. NOTE: background runs are still subject to `timeout` (default 600s) — when it expires the process tree is killed and the entry is retained as stopped(<reason>). Processes cannot outlive this tool call or the session (watchdog + session-scoped cleanup). For long-running monitors, pass an explicit `timeout` covering the whole intended duration.',
+        description: '为 true 时，以后台进程方式运行命令。立即返回句柄（如 [background:bg_001]）。进程继续运行，可用 process_list/process_output/process_kill 管理。注意：后台运行仍受 `timeout` 约束（默认 600 秒）——超时后进程树被终止，条目保留为 stopped(<reason>)。进程不能存活超过本次工具调用或本会话（watchdog + 会话级清理）。长跑监控请显式传入覆盖完整预期时长的 `timeout`。',
       },
     },
     required: ['command'],

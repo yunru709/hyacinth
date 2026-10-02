@@ -17,12 +17,12 @@ export class InsertTool implements Tool {
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      file_path:   { type: 'string', description: 'The absolute path to the file' },
+      file_path:   { type: 'string', description: '文件的绝对路径' },
       line_number: { oneOf: [
-        { type: 'number', description: 'Line number (1-based). 0 or -1 = append to end.' },
-        { type: 'string', enum: ['end'], description: '"end" = append to end' },
+        { type: 'number', description: '行号（1-based）。0 或 -1 = 追加到末尾。' },
+        { type: 'string', enum: ['end'], description: '"end" = 追加到末尾' },
       ]},
-      content:     { type: 'string', description: 'Content to insert (can be multiple lines)' },
+      content:     { type: 'string', description: '要插入的内容（可以多行）' },
     },
     required: ['file_path', 'line_number', 'content'],
   };

@@ -86,31 +86,31 @@ export class MultiEditTool implements Tool {
     properties: {
       glob: {
         type: 'string',
-        description: 'File matching pattern (e.g., "src/**/*.ts")',
+        description: '文件匹配模式（例如 "src/**/*.ts"）',
       },
       path: {
         type: 'string',
-        description: 'The directory to search in. Defaults to the current working directory.',
+        description: '要搜索的目录。默认当前工作目录。',
       },
       old_string: {
         type: 'string',
-        description: 'The text to replace (must match exactly)',
+        description: '要被替换的文本（必须精确匹配）',
       },
       new_string: {
         type: 'string',
-        description: 'The text to replace it with',
+        description: '替换后的文本',
       },
       max_files: {
         type: 'number',
-        description: 'Maximum number of files to match. Defaults to 10.',
+        description: '最多匹配的文件数。默认 10。',
       },
       dry_run: {
         type: 'boolean',
-        description: 'Preview mode — show what would be changed without writing. Defaults to false.',
+        description: '预览模式 —— 只显示将要发生的变更而不写入。默认 false。',
       },
       replace_all: {
         type: 'boolean',
-        description: 'Allow multiple replacements per file. Defaults to false.',
+        description: '允许单个文件内多次替换。默认 false。',
       },
     },
     required: ['glob', 'old_string', 'new_string'],

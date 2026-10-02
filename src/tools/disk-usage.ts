@@ -26,19 +26,19 @@ export class DiskUsageTool implements Tool {
     properties: {
       path: {
         type: 'string',
-        description: 'Target directory. Default: current working directory.',
+        description: '目标目录。默认：当前工作目录。',
       },
       top: {
         type: 'number',
-        description: 'Show top N largest items. Default: 20. Max: 200.',
+        description: '展示最大的前 N 项。默认 20，上限 200。',
       },
       depth: {
         type: 'number',
-        description: 'Recursion depth for directory size calculation. 1 = direct children only, 0 = unlimited. Default: 1.',
+        description: '目录大小统计的递归深度：1 = 仅直接子项，0 = 不限。默认 1。',
       },
       mode: {
         type: 'string',
-        description: '"free" = drive free space, "dirs" = rank subdirectories by size, "files" = rank files by size, "all" = dirs + files + free space. Default: "all".',
+        description: '"free" = 磁盘剩余空间，"dirs" = 按大小排序子目录，"files" = 按大小排序文件，"all" = 目录 + 文件 + 剩余空间。默认 "all"。',
       },
     },
     required: [],

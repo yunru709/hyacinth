@@ -92,8 +92,8 @@ export function createSpawnSubAgentTool(agentRegistry: any): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name of the existing sub-agent to clone (e.g. "code-reviewer")' },
-        customName: { type: 'string', description: 'Optional alias for the new instance (e.g. "code-reviewer-frontend"). If not provided, uses the original name.' },
+        name: { type: 'string', description: '要克隆的已有子 Agent 名（如 "code-reviewer"）' },
+        customName: { type: 'string', description: '可选：新实例的别名（如 "code-reviewer-frontend"）。未提供时沿用原名。' },
       },
       required: ['name'],
     },
@@ -133,22 +133,22 @@ export function createCreateSubAgentTool(agentRegistry: any, cwd: string): Tool 
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Unique name for the new sub-agent (e.g. "doc-reviewer")' },
-        description: { type: 'string', description: 'Role description — helps the orchestrator decide when to use this agent.' },
-        systemPrompt: { type: 'string', description: 'Full system prompt defining the sub-agent\'s behavior, expertise, and constraints. {{task}} is resolved once to a fixed pointer (task is delivered via the delegated user message); the resolved prompt is frozen on first delegation for cache stability.' },
+        name: { type: 'string', description: '新子 Agent 的唯一名称（如 "doc-reviewer"）' },
+        description: { type: 'string', description: '角色描述 —— 帮助编排器判断何时使用该 Agent。' },
+        systemPrompt: { type: 'string', description: '完整的系统提示词，定义该子 Agent 的行为、专长与约束。{{task}} 会一次性解析为固定指引（任务通过委派时的 user 消息传递）；解析后的提示词在首次委派时冻结，以保持缓存稳定。' },
         allowedTools: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Tool whitelist for this agent. Default: ["read", "glob", "grep", "write"]. Use ["self"] for all tools.',
+          description: '该 Agent 的工具白名单。默认：["read", "glob", "grep", "write"]。用 ["self"] 表示全部工具。',
         },
-        maxTurns: { type: 'number', description: 'Maximum execution turns. Default: 10.' },
+        maxTurns: { type: 'number', description: '最大执行轮次。默认 10。' },
         persist: {
           type: 'boolean',
-          description: 'When true, also write prompt file and config to disk so the agent persists after restart. Default: false (memory only).',
+          description: '为 true 时同时把 prompt 文件与配置写入磁盘，使该 Agent 在重启后仍然存在。默认 false（仅内存）。',
         },
         session_ttl_minutes: {
           type: 'number',
-          description: 'Sub-agent session TTL in minutes. Session auto-cleans if unused for this duration. Default: 10.',
+          description: '子 Agent 会话的 TTL（分钟）。闲置超过此时长会话自动清理。默认 10。',
         },
       },
       required: ['name', 'description', 'systemPrompt'],
@@ -211,16 +211,16 @@ export function createUpdateSubAgentTool(agentRegistry: any): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        instance_id: { type: 'string', description: 'Instance ID of the sub-agent to update (required).' },
-        description: { type: 'string', description: 'Updated role description.' },
-        systemPrompt: { type: 'string', description: 'Updated system prompt. {{task}} resolves once to a fixed pointer on first delegation; changing this only affects newly-created sessions.' },
+        instance_id: { type: 'string', description: '要更新的子 Agent 的 instance ID（必填）。' },
+        description: { type: 'string', description: '更新后的角色描述。' },
+        systemPrompt: { type: 'string', description: '更新后的系统提示词。{{task}} 在首次委派时一次性解析为固定指引；修改它只影响新建的会话。' },
         allowedTools: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Updated tool whitelist.',
+          description: '更新后的工具白名单。',
         },
-        maxTurns: { type: 'number', description: 'Updated max execution turns.' },
-        session_ttl_minutes: { type: 'number', description: 'Updated session TTL in minutes.' },
+        maxTurns: { type: 'number', description: '更新后的最大执行轮次。' },
+        session_ttl_minutes: { type: 'number', description: '更新后的会话 TTL（分钟）。' },
       },
       required: ['instance_id'],
     },
@@ -268,7 +268,7 @@ export function createDestroySubAgentTool(
     inputSchema: {
       type: 'object',
       properties: {
-        instance_id: { type: 'string', description: 'Instance ID of the sub-agent to destroy (required).' },
+        instance_id: { type: 'string', description: '要销毁的子 Agent 的 instance ID（必填）。' },
       },
       required: ['instance_id'],
     },

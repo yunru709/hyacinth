@@ -17,19 +17,19 @@ export class DbQueryTool implements Tool {
     properties: {
       database: {
         type: 'string',
-        description: 'Path to the SQLite database file (absolute or relative to cwd)',
+        description: 'SQLite 数据库文件路径（绝对路径，或相对于当前工作目录）',
       },
       query: {
         type: 'string',
-        description: 'SQL query to execute. Use ? placeholders for parameters.',
+        description: '要执行的 SQL。参数用 ? 占位符。',
       },
       params: {
         type: 'string',
-        description: 'JSON array of parameter values to bind to ? placeholders. Example: [1, "hello"]',
+        description: '绑定到 ? 占位符的参数值，JSON 数组。示例：[1, "hello"]',
       },
       readonly: {
         type: 'boolean',
-        description: 'If true, opens database in read-only mode. Default: false for SELECT, true otherwise.',
+        description: '为 true 时以只读模式打开数据库。默认：SELECT 为 false，其余为 true。',
       },
     },
     required: ['database', 'query'],

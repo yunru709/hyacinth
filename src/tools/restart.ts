@@ -17,7 +17,7 @@ export class RestartTool implements Tool {
     properties: {
       message: {
         type: 'string',
-        description: 'Optional. After restart, this message will be automatically sent to continue working (e.g. "继续测试"). Omit to wait for user input.',
+        description: '可选。重启后会自动发送此消息以继续工作（如 "继续测试"）。省略则等待用户输入。',
       },
     },
   };

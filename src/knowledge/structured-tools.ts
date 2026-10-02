@@ -19,11 +19,11 @@ export function createStructuredTool(getStore: () => StructuredStore, enabled: (
   return {
     name: 'kb_structured',
     description:
-      'Manage structured knowledge entries. Supports 4 actions:\n' +
-      '  "add"    — add 1-10 entries at once. Use english_underscore ids, 2-5 tags, content ≤200 chars.\n' +
-      '  "update" — update an entry by id. Only pass the fields you want to change.\n' +
-      '  "delete" — delete an entry by id.\n' +
-      '  "list"   — list all entries, optionally filtered by category.',
+      '管理结构化知识条目。支持 4 种操作：\n' +
+      '  "add"    — 一次性添加 1-10 条。id 用英文下划线命名，2-5 个标签，内容 ≤200 字。\n' +
+      '  "update" — 按 id 更新条目。只传你想修改的字段。\n' +
+      '  "delete" — 按 id 删除条目。\n' +
+      '  "list"   — 列出全部条目，可选按 category 过滤。',
     inputSchema: {
       type: 'object',
       properties: {

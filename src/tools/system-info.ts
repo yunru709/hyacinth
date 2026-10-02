@@ -47,7 +47,7 @@ export function createSystemInfoTool(): Tool {
             type: 'string',
             enum: ['os', 'cpu', 'memory', 'gpu', 'python', 'node', 'shell', 'all'],
           },
-          description: 'Categories to query. Default: all.',
+          description: '要查询的类别。默认：all。',
         },
       },
     },

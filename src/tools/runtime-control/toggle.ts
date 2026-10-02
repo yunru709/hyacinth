@@ -16,8 +16,8 @@ export function createToggleToolTool(toolRegistry: ToolRegistry, configCenter?: 
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name of the tool to toggle' },
-        enabled: { type: 'boolean', description: 'true to enable, false to disable' },
+        name: { type: 'string', description: '要切换的工具名' },
+        enabled: { type: 'boolean', description: 'true 启用，false 禁用' },
       },
       required: ['name', 'enabled'],
     },
@@ -59,7 +59,7 @@ export function createListToolsTool(toolRegistry: ToolRegistry): Tool {
       properties: {
         includeDisabled: {
           type: 'boolean',
-          description: 'When true, include disabled tools in the listing. Defaults to false.',
+          description: '为 true 时在列表中包含已禁用的工具。默认 false。',
         },
       },
     },
@@ -97,8 +97,8 @@ export function createToggleSkillTool(skillRegistry: SkillRegistry, configCenter
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name of the skill to toggle' },
-        enabled: { type: 'boolean', description: 'true to enable, false to disable' },
+        name: { type: 'string', description: '要切换的 Skill 名' },
+        enabled: { type: 'boolean', description: 'true 启用，false 禁用' },
       },
       required: ['name', 'enabled'],
     },
@@ -136,7 +136,7 @@ export function createListSkillsTool(skillRegistry: SkillRegistry): Tool {
       properties: {
         includeDisabled: {
           type: 'boolean',
-          description: 'When true, include disabled skills in the listing. Defaults to false.',
+          description: '为 true 时在列表中包含已禁用的 Skill。默认 false。',
         },
       },
     },
@@ -174,8 +174,8 @@ export function createToggleSubAgentTool(agentRegistry: AgentRegistry, configCen
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name of the sub-agent to toggle' },
-        enabled: { type: 'boolean', description: 'true to enable, false to disable' },
+        name: { type: 'string', description: '要切换的子 Agent 名' },
+        enabled: { type: 'boolean', description: 'true 启用，false 禁用' },
       },
       required: ['name', 'enabled'],
     },

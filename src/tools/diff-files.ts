@@ -19,8 +19,8 @@ export class DiffFilesTool implements Tool {
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      file1: { type: 'string', description: 'Path to the first file (absolute or relative to cwd)' },
-      file2: { type: 'string', description: 'Path to the second file (absolute or relative to cwd)' },
+      file1: { type: 'string', description: '第一个文件路径（绝对路径，或相对于当前工作目录）' },
+      file2: { type: 'string', description: '第二个文件路径（绝对路径，或相对于当前工作目录）' },
     },
     required: ['file1', 'file2'],
   };

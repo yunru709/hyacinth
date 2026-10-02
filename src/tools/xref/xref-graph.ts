@@ -35,31 +35,31 @@ export class XrefGraphTool implements Tool {
       symbol: {
         type: 'string',
         description:
-          'Symbol (function/class) to center the call graph on. ' +
-          'If provided, generates a call graph. ' +
-          'Mutually exclusive with "file". At least one is required.',
+          '以调用图为中心的符号（函数/类）。' +
+          '提供后生成调用图。' +
+          '与 "file" 互斥。至少需提供其中一个。',
       },
       file: {
         type: 'string',
         description:
-          'File path to center the dependency graph on. ' +
-          'If provided, generates a file dependency graph. ' +
-          'Mutually exclusive with "symbol". At least one is required.',
+          '以依赖图为中心的文件路径。' +
+          '提供后生成文件依赖图。' +
+          '与 "symbol" 互斥。至少需提供其中一个。',
       },
       format: {
         type: 'string',
         enum: FORMATS,
-        description: 'Output format. Default: "mermaid" (renderable in Markdown). "text" for terminal trees. "graphviz" for DOT.',
+        description: '输出格式。默认："mermaid"（可在 Markdown 中渲染）。"text" 为终端树。"graphviz" 为 DOT。',
       },
       max_depth: {
         type: 'number',
-        description: 'Max traversal depth for the graph. Default: 3. WARNING: larger depth = more nodes exponentially.',
+        description: '图的最大遍历深度。默认：3。警告：深度越大，节点数呈指数增长。',
       },
       direction: {
         type: 'string',
         enum: ['callers', 'callees', 'both'],
         description:
-          'For symbol call graphs: traverse callers (who calls it), callees (what it calls), or both. Default: "both".',
+          '用于符号调用图：遍历 callers（谁调用它）、callees（它调用了什么）或 both。默认："both"。',
       },
     },
     required: [],

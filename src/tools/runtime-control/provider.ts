@@ -17,10 +17,10 @@ export function createSwitchProviderTool(agentLoop: AgentLoop): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        name:       { type: 'string', description: 'Provider type: anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | volcengine | groq | xai | mistral | openrouter | moonshot | local' },
-        api_key:    { type: 'string', description: 'Optional: API key. If not set, uses environment variable.' },
-        model:      { type: 'string', description: 'Optional: model name. If not set, uses the provider\'s default model.' },
-        max_tokens: { type: 'number', description: 'Optional: max output tokens for this provider. If not set, auto-detected from model catalog or provider config.' },
+        name:       { type: 'string', description: 'Provider 类型：anthropic | openai | deepseek | gemini | qwen | zhipu | minimax | mimo | volcengine | groq | xai | mistral | openrouter | moonshot | local' },
+        api_key:    { type: 'string', description: '可选：API key。未设置时使用环境变量。' },
+        model:      { type: 'string', description: '可选：模型名。未设置时使用该提供商的默认模型。' },
+        max_tokens: { type: 'number', description: '可选：该提供商的最大输出 Token 数。未设置时从模型目录或提供商配置自动推断。' },
       },
       required: ['name'],
     },

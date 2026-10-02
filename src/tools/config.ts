@@ -149,7 +149,7 @@ export function createGetConfigTool(configCenter: RuntimeConfigCenter): Tool {
       properties: {
         path: {
           type: 'string',
-          description: 'Optional dot-path to a specific config key (e.g. "provider.active"). Omit to get full config.',
+          description: '可选的 dot-path，指向单个配置键（如 "provider.active"）。省略则返回完整配置。',
         },
       },
     },
@@ -189,7 +189,7 @@ export function createUpdateConfigTool(configCenter: RuntimeConfigCenter): Tool 
       properties: {
         updates: {
           type: 'object',
-          description: 'Key-value pairs to update. Supports dot-path keys or nested objects.',
+          description: '要更新的键值对。支持 dot-path 键名或嵌套对象。',
         },
       },
       required: ['updates'],
@@ -270,7 +270,7 @@ export function createResetConfigTool(configCenter: RuntimeConfigCenter): Tool {
       properties: {
         path: {
           type: 'string',
-          description: 'Optional dot-path to reset. Omit to reset all runtime overrides.',
+          description: '可选 dot-path，指定要重置的项。省略则重置全部运行时覆盖值。',
         },
       },
     },

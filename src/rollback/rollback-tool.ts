@@ -94,8 +94,8 @@ export function createRollbackTool(
       properties: {
         turns: {
           type: 'number' as const,
-          description: 'Number of turns to roll back (default: 1, range: 1-10). ' +
-            'Rollback(1) reverts the most recent turn.',
+          description: '要回滚的回合数（默认：1，范围：1-10）。' +
+            'Rollback(1) 会撤销最近的那个回合。',
         },
       },
       required: [],

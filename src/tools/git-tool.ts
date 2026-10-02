@@ -22,27 +22,27 @@ export class GitTool implements Tool {
       action: {
         type: 'string',
         enum: ['commit', 'revert', 'branch', 'diff'],
-        description: 'Git action to execute',
+        description: '要执行的 Git 操作',
       },
       message: {
         type: 'string',
-        description: 'Commit message (required for commit action)',
+        description: '提交信息（commit 操作必填）',
       },
       commit: {
         type: 'string',
-        description: 'Commit hash to revert (required for revert action)',
+        description: '要回退到的 commit 哈希（revert 操作必填）',
       },
       name: {
         type: 'string',
-        description: 'Branch name (required for branch action)',
+        description: '分支名（branch 操作必填）',
       },
       stat: {
         type: 'boolean',
-        description: 'Show diff stat instead of full diff (optional, for diff action)',
+        description: '显示 diff 摘要而非完整 diff（可选，用于 diff 操作）',
       },
       turn: {
         type: 'number',
-        description: 'Current turn number, appended to commit message for traceability',
+        description: '当前轮次编号，追加到提交信息末尾以便追溯',
       },
     },
     required: ['action'],

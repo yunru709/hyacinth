@@ -232,27 +232,27 @@ export class ReadTool implements Tool {
     properties: {
       file_path: {
         type: 'string',
-        description: 'The absolute path to the file to read',
+        description: '要读取的文件的绝对路径',
       },
       offset: {
         type: 'number',
-        description: 'Line number to start reading from (1-based). Default 1.',
+        description: '开始读取的行号（1-based）。默认 1。',
       },
       limit: {
         type: 'number',
-        description: 'Maximum number of lines to read (1-2000, default 2000).',
+        description: '最多读取的行数（1-2000，默认 2000）。',
       },
       return_base64: {
         type: 'boolean',
-        description: 'For image files: return full base64-encoded data for use with vision models. For text files: ignored.',
+        description: '对图片文件：返回完整的 base64 编码数据，供视觉模型使用。对文本文件：忽略。',
       },
       outline: {
         type: 'boolean',
-        description: 'List the file\'s symbol outline (functions/classes/methods with line numbers) instead of its content. Pure-text scan, no index needed. Useful before reading a large file.',
+        description: '列出该文件的符号大纲（函数/类/方法 + 行号），而非文件内容。纯文本扫描，无需索引。适合在读取大文件之前使用。',
       },
       symbol: {
         type: 'string',
-        description: 'Read only the given declaration\'s body (function/class/method), by name. C-family bodies are matched by brace balance, Python by indentation. Pair with outline=true to discover names.',
+        description: '按名称只读取指定声明（函数/类/方法）的主体。C 系语言按花括号配平匹配，Python 按缩进。配合 outline=true 可先获知有哪些名字。',
       },
     },
     required: ['file_path'],

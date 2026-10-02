@@ -59,40 +59,40 @@ export class XrefQueryTool implements Tool {
         type: 'string',
         enum: ACTIONS,
         description:
-          'Query action:\n' +
-          'L1: "refs" | "defs" | "callers" | "callees"\n' +
-          'L2: "deps" | "dependents"\n' +
-          'L3: "hierarchy" | "impact" | "trace"',
+          '查询操作：\n' +
+          'L1："refs" | "defs" | "callers" | "callees"\n' +
+          'L2："deps" | "dependents"\n' +
+          'L3："hierarchy" | "impact" | "trace"',
       },
       symbol: {
         type: 'string',
         description:
-          'Symbol name (function, class, variable, etc.). ' +
-          'Required for: refs, defs, callers, callees, hierarchy, trace. ' +
-          'For "impact": optional — annotates which affected files actually reference the symbol ' +
-          '(it does not filter: the impact set is determined by file imports).',
+          '符号名（函数、类、变量等）。' +
+          '以下操作必填：refs、defs、callers、callees、hierarchy、trace。' +
+          '用于 "impact" 时可选 —— 标注哪些受影响的文件实际引用了该符号' +
+          '（它不做过滤：影响集由文件导入关系决定）。',
       },
       file: {
         type: 'string',
         description:
-          'File path (relative to project root or absolute). ' +
-          'Required for: deps, dependents, impact, trace. ' +
-          'Optional for: refs, defs — restricts results to that file. ' +
-          'For callers/callees — pins the symbol definition to that file, which is the only ' +
-          'reliable way to disambiguate overloaded names (e.g. "build" is defined in dozens of files).',
+          '文件路径（相对于项目根，或绝对路径）。' +
+          '以下操作必填：deps、dependents、impact、trace。' +
+          '以下操作可选：refs、defs —— 将结果限制在该文件内。' +
+          '用于 callers/callees —— 将符号定义固定到该文件，这是消解重名符号' +
+          '（如 "build" 在几十个文件中都有定义）唯一可靠的方式。',
       },
       depth: {
         type: 'number',
         description:
-          'Max traversal depth. Default: 1-2 depending on action. ' +
-          'WARNING: larger depth = more results exponentially. ' +
-          'Applies to: callees (callee chain), impact (BFS layers), ' +
-          'callers (how many import hops still count as "confirmed caller", default 2).',
+          '最大遍历深度。默认：视操作而定，为 1-2。' +
+          '警告：深度越大，结果数呈指数增长。' +
+          '适用于：callees（调用链）、impact（BFS 层数）、' +
+          'callers（多少层导入跳数仍算作「已确认调用者」，默认 2）。',
       },
       kind: {
         type: 'string',
         enum: ['function', 'method', 'arrow', 'class', 'interface', 'type', 'enum', 'variable', 'parameter', 'property'],
-        description: 'Filter symbols by kind. Useful with "defs" when a name is overloaded.',
+        description: '按类型过滤符号。当名称重载时，配合 "defs" 使用很有用。',
       },
     },
     required: ['action'],

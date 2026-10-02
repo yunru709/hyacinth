@@ -33,7 +33,7 @@ export function createKbAddTool(
   return {
     name: 'kb_add',
     description:
-      'Import files or directories into the knowledge base for indexing.',
+      '将文件或目录导入知识库以建立索引。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,7 +74,7 @@ export function createKbListTool(kb: KnowledgeBase): Tool {
   return {
     name: 'kb_list',
     description:
-      'List all indexed documents in the knowledge base.',
+      '列出知识库中所有已索引的文档。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -109,7 +109,7 @@ export function createKbDeleteTool(
   return {
     name: 'kb_delete',
     description:
-      'Delete a document from the knowledge base by ID.',
+      '按 ID 从知识库中删除文档。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -162,7 +162,7 @@ export function createKbUpdateTool(
   return {
     name: 'kb_update',
     description:
-      'Re-index the knowledge base. Pass a path to re-index specific files, omit for full sync.',
+      '重建知识库索引。传入 path 时只重新索引指定文件，省略则全量同步。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -222,7 +222,7 @@ export function createKbToggleTool(
   return {
     name: 'kb_toggle',
     description:
-      'Toggle the knowledge base on/off. Turning it on also enables Zone 4.',
+      '开启/关闭知识库。开启时会同时启用 Zone 4。',
     inputSchema: {
       type: 'object',
       properties: {

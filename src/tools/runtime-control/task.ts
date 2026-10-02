@@ -56,7 +56,7 @@ export function createAddTaskTool(
         fallback: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Channel fallback chain when the target channel is offline. E.g. ["webui", "tui"] tries webui first, then tui. If omitted, uses the global default (config.schedule.channelFallback, default: ["feishu"]).',
+          description: '目标渠道离线时的渠道回退链。如 ["webui", "tui"] 先试 webui，再试 tui。省略时使用全局默认（config.schedule.channelFallback，默认 ["feishu"]）。',
         },
       },
       required: ['name', 'scheduleType', 'schedule'],
@@ -137,8 +137,8 @@ export function createRemoveTaskTool(
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Task id (returned by add_task or list_tasks). Preferred.' },
-        name: { type: 'string', description: 'Task name. Falls back to name match if id not provided.' },
+        id: { type: 'string', description: '任务 id（由 add_task 或 list_tasks 返回）。优先使用。' },
+        name: { type: 'string', description: '任务名。未提供 id 时回退到按名称匹配。' },
       },
     },
     async execute(args: Record<string, unknown>): Promise<string> {
@@ -236,8 +236,8 @@ export function createToggleTaskTool(
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Task id to toggle.' },
-        enabled: { type: 'boolean', description: 'True to enable, false to disable.' },
+        id: { type: 'string', description: '要切换的任务 id。' },
+        enabled: { type: 'boolean', description: 'true 启用，false 禁用。' },
       },
       required: ['id', 'enabled'],
     },

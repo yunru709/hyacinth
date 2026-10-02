@@ -51,7 +51,7 @@ export function createFlowStartTool(registry: MachineRegistry): Tool {
       properties: {
         mode: {
           type: 'string',
-          description: `The workflow mode to activate. One of: ${Object.keys(MODE_DESCRIPTIONS).join(', ')}.`,
+          description: `要激活的工作流模式。可选值：${Object.keys(MODE_DESCRIPTIONS).join(', ')}。`,
           enum: Object.keys(MODE_DESCRIPTIONS),
         },
         task: {
@@ -106,7 +106,7 @@ export function createFlowAddTool(registry: MachineRegistry): Tool {
         steps: {
           type: 'array',
           items: { type: 'string' },
-          description: 'ALL step descriptions at once. Each string is one step — a clear, actionable description of what to do and what success looks like. Submit the COMPLETE list in one call.',
+          description: '一次性提交全部步骤描述。每个字符串是一个步骤——清晰、可执行的说明：要做什么、怎样算成功。请在一次调用中提交完整列表。',
         },
       },
       required: ['steps'],

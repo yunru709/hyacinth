@@ -15,52 +15,52 @@ export class GrepTool implements Tool {
     properties: {
       pattern: {
         type: 'string',
-        description: 'The regular expression pattern to search for in file contents.',
+        description: '在文件内容中搜索的正则表达式模式。',
       },
       path: {
         type: 'string',
-        description: 'Directory or file to search in. REQUIRED — always pass the project root directory (where package.json/tsconfig.json/etc. lives). Searches recursively.',
+        description: '要搜索的目录或文件。必填 —— 始终传入项目根目录（package.json/tsconfig.json 等所在处）。递归搜索。',
       },
       glob: {
         type: 'string',
-        description: 'Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}"). Only files matching this pattern will be searched.',
+        description: '用于过滤文件的 glob 模式（例如 "*.js"、"*.{ts,tsx}"）。只搜索匹配该模式的文件。',
       },
       output_mode: {
         type: 'string',
         enum: ['content', 'files_with_matches', 'count'],
-        description: 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".',
+        description: '输出模式："content" 显示匹配行（支持 -A/-B/-C 上下文、-n 行号、head_limit），"files_with_matches" 显示文件路径（支持 head_limit），"count" 显示匹配计数（支持 head_limit）。默认 "files_with_matches"。',
       },
       '-i': {
         type: 'boolean',
-        description: 'Case insensitive search. Default: false.',
+        description: '不区分大小写搜索。默认：false。',
       },
       '-n': {
         type: 'boolean',
-        description: 'Show line numbers in output. Default: true for content mode.',
+        description: '在输出中显示行号。content 模式默认：true。',
       },
       '-A': {
         type: 'number',
-        description: 'Number of lines to show after each match.',
+        description: '每个匹配之后显示的行数。',
       },
       '-B': {
         type: 'number',
-        description: 'Number of lines to show before each match.',
+        description: '每个匹配之前显示的行数。',
       },
       '-C': {
         type: 'number',
-        description: 'Number of lines to show before and after each match. Shorthand for -A N -B N.',
+        description: '每个匹配前后显示的行数。等价于 -A N -B N。',
       },
       head_limit: {
         type: 'number',
-        description: 'Limit output to first N lines/entries.',
+        description: '输出限制为前 N 行/条目。',
       },
       multiline: {
         type: 'boolean',
-        description: 'Enable multiline mode where . matches newlines and patterns can span lines. Default: false.',
+        description: '启用多行模式，此时 . 匹配换行符，模式可以跨行。默认：false。',
       },
       structure: {
         type: 'boolean',
-        description: 'Annotate each content match with its nearest enclosing declaration (function/class/method) using a pure-text backward scan — no index needed, never stale. Only affects output_mode "content". Default: false.',
+        description: '用纯文本回溯为每个内容匹配标注其最近的所属声明（函数/类/方法）—— 无需索引，永不"过期"。仅影响 output_mode 为 "content" 时。默认：false。',
       },
     },
     required: ['pattern', 'path'],

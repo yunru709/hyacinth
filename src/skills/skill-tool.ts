@@ -11,17 +11,17 @@ import type { SkillRegistry } from './registry.js';
  */
 export class SkillTool implements Tool {
   readonly name = 'use_skill';
-  readonly description = 'Activate a skill by name. Returns the skill\'s rendered prompt template for use in the conversation.';
+  readonly description = '按名称激活技能。返回该技能渲染后的提示词模板，供对话中使用。';
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
       skill_name: {
         type: 'string',
-        description: 'Name of the skill to activate',
+        description: '要激活的技能名称',
       },
       variables: {
         type: 'object',
-        description: 'Variables to substitute in the skill\'s prompt template (e.g. {"code": "...", "error": "..."})',
+        description: '在技能提示词模板中替换的变量（示例：{"code": "...", "error": "..."}）',
         additionalProperties: { type: 'string' },
       },
     },

@@ -86,14 +86,14 @@ export class ProbeTool implements Tool {
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      file: { type: 'string', description: 'Path to the file to probe (absolute or relative to cwd)' },
-      keyword: { type: 'string', description: 'Literal string (or regex when regex=true) to locate' },
-      before: { type: 'number', description: 'Bytes of context before each hit. Default: 600' },
-      after: { type: 'number', description: 'Bytes of context after each hit. Default: 1200' },
-      max_hits: { type: 'number', description: 'Maximum number of hits to return. Default: 5' },
-      regex: { type: 'boolean', description: 'Treat keyword as a regular expression (utf-8 scan only). Default: false' },
-      sanitize: { type: 'string', enum: ['utf8', 'ascii'], description: 'utf8 (default) keeps non-ASCII text; ascii replaces everything outside printable ASCII with "."' },
-      max_output_bytes: { type: 'number', description: 'Cap on total returned characters. Default: 200000' },
+      file: { type: 'string', description: '要探测的文件路径（绝对路径或相对于当前工作目录）' },
+      keyword: { type: 'string', description: '要定位的字面字符串（regex=true 时视为正则表达式）' },
+      before: { type: 'number', description: '每个命中点之前保留的上下文字节数。默认：600' },
+      after: { type: 'number', description: '每个命中点之后保留的上下文字节数。默认：1200' },
+      max_hits: { type: 'number', description: '最多返回的命中数。默认：5' },
+      regex: { type: 'boolean', description: '将 keyword 视为正则表达式（仅按 utf-8 扫描）。默认：false' },
+      sanitize: { type: 'string', enum: ['utf8', 'ascii'], description: 'utf8（默认）保留非 ASCII 文本；ascii 把可打印 ASCII 之外的所有字符替换为 "."' },
+      max_output_bytes: { type: 'number', description: '返回字符总数的上限。默认：200000' },
     },
     required: ['file', 'keyword'],
   };

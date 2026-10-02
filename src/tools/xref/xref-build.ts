@@ -29,42 +29,42 @@ export class XrefBuildTool implements Tool {
       directories: {
         type: 'string',
         description:
-          'Optional JSON array of directory paths (relative to project root) to limit the scan. ' +
-          'Example: ["src/tools", "src/gateway"]. If omitted, scans the entire project. ' +
-          'Note: when set, files outside these directories are left untouched (not pruned).',
+          '可选的 JSON 数组，目录路径（相对于项目根），用于限制扫描范围。' +
+          '示例：["src/tools", "src/gateway"]。省略时扫描整个项目。' +
+          '注意：设置后这些目录之外的文件保持不动（不会被摘除）。',
       },
       files: {
         type: 'string',
         description:
-          'Optional JSON array of file paths to incrementally re-index. ' +
-          'If omitted, performs a mtime-based sync build. ' +
-          'Example: ["src/tools/xref.ts", "src/gateway/factory.ts"]',
+          '可选的 JSON 数组，要增量重新索引的文件路径。' +
+          '省略时执行基于 mtime 的同步构建。' +
+          '示例：["src/tools/xref.ts", "src/gateway/factory.ts"]',
       },
       clean: {
         type: 'boolean',
         description:
-          'If true, deletes the current project\'s xref index database entirely. ' +
-          'Use this to reclaim disk space for old projects or force a fresh rebuild. ' +
-          'No other action is performed when clean is true.',
+          '为 true 时，彻底删除当前项目的 xref 索引数据库。' +
+          '可用于回收旧项目的磁盘空间，或强制全新重建。' +
+          'clean 为 true 时不执行其他任何操作。',
       },
       force: {
         type: 'boolean',
         description:
-          'If true, re-parse every scanned file regardless of mtime (full rebuild semantics). ' +
-          'Default false: only changed/new files are parsed, deleted files are pruned.',
+          '为 true 时，忽略 mtime 重新解析每个扫描到的文件（全量重建语义）。' +
+          '默认 false：仅解析变更/新增的文件，并摘除已删除的文件。',
       },
       project: {
         type: 'string',
         description:
-          'Optional project path for "clean" action. ' +
-          'If provided with clean=true, deletes the xref database for the specified project instead of the current one. ' +
-          'Can be an absolute path or a project name/key.',
+          '可选，用于 "clean" 操作的项目路径。' +
+          '与 clean=true 同时提供时，删除指定项目的 xref 数据库，而非当前项目。' +
+          '可以是绝对路径，或项目名/项目键。',
       },
       batch_size: {
         type: 'number',
         description:
-          'Number of files to parse per batch. Lower values use less memory but slower. ' +
-          'Default: 50. Min: 1, Max: 500. Only applies to build mode (not clean).',
+          '每批解析的文件数。数值越小内存占用越低，但速度越慢。' +
+          '默认：50。最小：1，最大：500。仅适用于构建模式（clean 不适用）。',
       },
     },
     required: [],

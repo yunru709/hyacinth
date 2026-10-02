@@ -21,11 +21,11 @@ export class GlobTool implements Tool {
     properties: {
       pattern: {
         type: 'string',
-        description: 'The glob pattern to match files against (e.g., "**/*.ts", "src/**/*.js")',
+        description: '用于匹配文件的 glob 模式（例如 "**/*.ts"、"src/**/*.js"）',
       },
       path: {
         type: 'string',
-        description: 'The directory to search in. REQUIRED — always pass the project root directory (where package.json/tsconfig.json/etc. lives).',
+        description: '要搜索的目录。必填 —— 始终传入项目根目录（package.json/tsconfig.json 等所在处）。',
       },
     },
     required: ['pattern', 'path'],

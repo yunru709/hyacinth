@@ -34,47 +34,47 @@ export class HttpRequestTool implements Tool {
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      url: { type: 'string', description: 'The URL to request (http:// or https://). Provide this or urls.' },
+      url: { type: 'string', description: '要请求的 URL（http:// 或 https://）。提供此项或 urls。' },
       urls: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Fetch several URLs in one call (sequential, max 5, each result labelled with its URL). Provide this or url.',
+        description: '一次调用抓取多个 URL（串行，最多 5 个，每个结果都标注其 URL）。提供此项或 url。',
       },
       method: {
         type: 'string',
-        description: 'HTTP method. Default: GET',
+        description: 'HTTP 方法。默认：GET',
         enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
       },
       headers: {
         type: 'string',
-        description: 'JSON string of custom headers. Overrides defaults.',
+        description: '自定义 headers 的 JSON 字符串。覆盖默认值。',
       },
       body: {
         type: 'string',
-        description: 'Request body as string. For JSON, set Content-Type header or use the json flag.',
+        description: '请求体字符串。若为 JSON，请设置 Content-Type header 或使用 json 标志。',
       },
       timeout: {
         type: 'number',
-        description: 'Timeout in milliseconds. Default: 30000 (30s). Max: 120000 (2 min).',
+        description: '超时时间（毫秒）。默认：30000（30 秒）。上限：120000（2 分钟）。',
       },
       json: {
         type: 'boolean',
-        description: 'If true, body is treated as JSON and Content-Type is set to application/json. Default: false.',
+        description: '为 true 时，body 被视为 JSON，且 Content-Type 设为 application/json。默认：false。',
       },
       format: {
         type: 'string',
         enum: ['auto', 'text', 'raw'],
         description:
-          'Response body handling. "auto" (default) = extract readable text from HTML/XML, leave other types untouched. "text" = force extraction. "raw" = return the untouched body.',
+          '响应体处理方式。"auto"（默认）= 对 HTML/XML 提取可读正文，其他类型保持原样。"text" = 强制提取。"raw" = 返回未经处理的响应体。',
       },
       keepLinks: {
         type: 'boolean',
-        description: 'Render anchors as "text (https://…)" in the extracted text. Default: false.',
+        description: '在提取出的正文中把链接渲染为 "文本 (https://…)"。默认：false。',
       },
       section: {
         type: 'string',
         description:
-          'Return only the section whose heading contains this string (case-insensitive). Requires extraction (format auto/text). Useful to avoid pulling an entire long page.',
+          '只返回标题包含该字符串的章节（大小写不敏感）。需要开启提取（format auto/text）。可用于避免拉取整篇长页面。',
       },
     },
     required: [],

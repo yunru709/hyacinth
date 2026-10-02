@@ -51,7 +51,7 @@ export function createProcessKillTool(registry: BackgroundProcessRegistry): Tool
       properties: {
         handle: {
           type: 'string',
-          description: 'The background process handle (e.g. "bg_001"). Get from process_list.',
+          description: '后台进程句柄（如 "bg_001"）。可通过 process_list 获取。',
         },
       },
       required: ['handle'],
@@ -78,7 +78,7 @@ export function createProcessOutputTool(registry: BackgroundProcessRegistry): To
       properties: {
         handle: {
           type: 'string',
-          description: 'The background process handle (e.g. "bg_001"). Get from process_list.',
+          description: '后台进程句柄（如 "bg_001"）。可通过 process_list 获取。',
         },
       },
       required: ['handle'],

@@ -15,7 +15,7 @@ export function createInterruptTool(agentLoop: AgentLoop): Tool {
       properties: {
         instance_id: {
           type: 'string',
-          description: 'Optional instance ID of a running sub-agent to interrupt. If omitted, interrupts the main agent.',
+          description: '可选：正在运行的子 Agent 的 instance ID。省略时中断主 Agent。',
         },
       },
     },
@@ -177,7 +177,7 @@ export function createNewSessionTool(agentLoop: AgentLoop, cwd: string): Tool {
       properties: {
         channel: {
           type: 'string',
-          description: 'Optional channel name for the session ID prefix. Auto-detected from current session if omitted.',
+          description: '可选：会话 ID 前缀所用的渠道名。省略时从当前会话自动检测。',
         },
         type: {
           type: 'string',
@@ -253,7 +253,7 @@ export function createSwitchSessionTool(agentLoop: AgentLoop, cwd: string): Tool
       properties: {
         session_id: {
           type: 'string',
-          description: 'The session ID to switch to (e.g. "tui-20260627-120000-abcd"). Use list_sessions to find IDs.',
+          description: '要切换到的会话 ID（如 "tui-20260627-120000-abcd"）。用 list_sessions 查找 ID。',
         },
       },
       required: ['session_id'],
@@ -299,11 +299,11 @@ export function createDeleteSessionTool(agentLoop: AgentLoop, cwd: string): Tool
       properties: {
         session_id: {
           type: 'string',
-          description: 'The session ID to delete. Use list_sessions to find IDs. Cannot be the currently active session.',
+          description: '要删除的会话 ID。用 list_sessions 查找 ID。不能是当前活跃会话。',
         },
         confirm: {
           type: 'boolean',
-          description: 'Must be explicitly set to true to confirm deletion.',
+          description: '必须显式设为 true 以确认删除。',
         },
       },
       required: ['session_id'],

@@ -42,26 +42,26 @@ export class VerifyChangeTool implements Tool {
       paths: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Files/dirs to verify (relative to the repo root). Omit to use uncommitted git changes.',
+        description: '要验证的文件/目录（相对于仓库根）。省略则使用 git 未提交的改动。',
       },
       root: {
         type: 'string',
         description:
-          'Project root. Usually unnecessary: it is inferred from `paths` (climbing up to package.json/tsconfig.json), then from cwd, then from git. Pass it when the agent cwd is a workspace dir containing several projects.',
+          '项目根目录。通常无需传入：会先从 `paths` 推断（向上查找 package.json/tsconfig.json），再从当前工作目录，最后从 git 推断。当 Agent 的当前工作目录是包含多个项目的工作区目录时才需要显式传入。',
       },
       run: {
         type: 'string',
         enum: ['both', 'typecheck', 'tests', 'layers'],
-        description: 'What to run. "both" (default) = typecheck + tests. "layers" = project layer guard only.',
+        description: '要运行的内容。"both"（默认）= 类型检查 + 测试。"layers" = 仅项目分层守卫。',
       },
       test_targets: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Explicit test files to run, overriding the automatic derivation from changed sources.',
+        description: '显式指定要运行的测试文件，覆盖按改动源码自动推导的结果。',
       },
       timeout_ms: {
         type: 'number',
-        description: 'Per-step timeout in ms. Default 180000 (3 min).',
+        description: '每步超时时间（毫秒）。默认 180000（3 分钟）。',
       },
     },
     required: [],

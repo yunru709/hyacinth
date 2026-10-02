@@ -17,9 +17,9 @@ export class JsonEditTool implements Tool {
   readonly inputSchema: Record<string, unknown> = {
     type: 'object',
     properties: {
-      file: { type: 'string', description: 'Path to the JSON/YAML/TOML file (absolute or relative to cwd)' },
-      path: { type: 'string', description: 'Dot-separated key path (e.g. "dependencies.express")' },
-      value: { type: 'string', description: 'New value to set. If omitted, returns current value. JSON values allowed.' },
+      file: { type: 'string', description: 'JSON/YAML/TOML 文件路径（绝对路径，或相对于当前工作目录）' },
+      path: { type: 'string', description: '点号分隔的键路径（如 "dependencies.express"）' },
+      value: { type: 'string', description: '要设置的新值。省略时返回当前值。允许 JSON 值。' },
     },
     required: ['file', 'path'],
   };

@@ -28,11 +28,11 @@ export class WriteTool implements Tool {
     properties: {
       file_path: {
         type: 'string',
-        description: 'The absolute path to the file to write',
+        description: '要写入的文件的绝对路径',
       },
       content: {
         type: 'string',
-        description: 'The content to write to the file',
+        description: '要写入文件的内容',
       },
     },
     required: ['file_path', 'content'],

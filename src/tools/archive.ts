@@ -18,16 +18,16 @@ export class ArchiveTool implements Tool {
     properties: {
       action: {
         type: 'string',
-        description: 'extract (unpack an archive) or compress (create an archive)',
+        description: 'extract（解压归档）或 compress（创建归档）',
         enum: ['extract', 'compress'],
       },
       file: {
         type: 'string',
-        description: 'Path to the archive file. For extract: the file to unpack. For compress: the output archive path.',
+        description: '归档文件路径。extract：要解压的文件。compress：输出的归档路径。',
       },
       target: {
         type: 'string',
-        description: 'For extract: directory to extract into (default: same dir as archive). For compress: source file/directory to compress.',
+        description: 'extract：解压到的目录（默认：与归档文件同目录）。compress：要压缩的源文件/目录。',
       },
     },
     required: ['action', 'file'],

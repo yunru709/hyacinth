@@ -25,30 +25,30 @@ export function createAskUserTool(getHandler: () => AskUserFn | null): Tool {
       properties: {
         questions: {
           type: 'array',
-          description: 'Questions to ask the user',
+          description: '要向用户提出的问题列表',
           items: {
             type: 'object',
             properties: {
               question: {
                 type: 'string',
-                description: 'The question text to display',
+                description: '要展示的问题文本',
               },
               header: {
                 type: 'string',
-                description: 'Optional short label for the tab (max 12 chars)',
+                description: '标签页的可选短标签（最多 12 个字符）',
               },
               options: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Available choices (empty = custom text input only)',
+                description: '可选项（为空 = 仅自定义文本输入）',
               },
               multiSelect: {
                 type: 'boolean',
-                description: 'Allow selecting multiple answers (default: false = single choice)',
+                description: '为 true 时允许选择多个答案（默认：false = 单选）',
               },
               customInput: {
                 type: 'boolean',
-                description: 'Show a free-text input below the options',
+                description: '在选项下方显示自由文本输入框',
               },
             },
             required: ['question'],

@@ -13,7 +13,7 @@ export function createAllowToolTool(configCenter: RuntimeConfigCenter): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Tool name to whitelist (e.g. "write", "bash")' },
+        name: { type: 'string', description: '要加入白名单的工具名（如 "write"、"bash"）' },
       },
       required: ['name'],
     },
@@ -47,7 +47,7 @@ export function createDisallowToolTool(configCenter: RuntimeConfigCenter): Tool 
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Tool name to remove from the whitelist' },
+        name: { type: 'string', description: '要从白名单移除的工具名' },
       },
       required: ['name'],
     },

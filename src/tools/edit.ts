@@ -34,27 +34,27 @@ export class EditTool implements Tool {
     properties: {
       file_path: {
         type: 'string',
-        description: 'The absolute path to the file to edit',
+        description: '要编辑的文件的绝对路径',
       },
       old_string: {
         type: 'string',
-        description: 'The text to replace (must match exactly). Mutually exclusive with line_start.',
+        description: '要被替换的文本（必须精确匹配）。与 line_start 互斥。',
       },
       new_string: {
         type: 'string',
-        description: 'The text to replace it with',
+        description: '替换后的文本',
       },
       replace_all: {
         type: 'boolean',
-        description: 'Replace all occurrences of old_string. Defaults to false.',
+        description: '替换 old_string 的所有匹配。默认 false。',
       },
       line_start: {
         type: 'number',
-        description: 'Starting line number for replacement (1-based). Mutually exclusive with old_string.',
+        description: '替换的起始行号（1-based）。与 old_string 互斥。',
       },
       line_count: {
         type: 'number',
-        description: 'Number of lines to replace. Defaults to 1.',
+        description: '要替换的行数。默认 1。',
       },
     },
     required: ['file_path', 'new_string'],
