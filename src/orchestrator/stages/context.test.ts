@@ -255,3 +255,63 @@ describe('context 阶段（builtin:layered-composer）', () => {
     expect(checkContract(slot, stage)).toEqual([]);
   });
 });
+
+/**
+ * pool 总开关（TUI `/pool on|off`）—— **行为级**契约。
+ *
+ * 为什么要有这组用例：`context-config.test.ts` 只能证明"配置读得到"，
+ * 证明不了"门真的关上了"。开关的实际作用是**连全量存档都不读**（省掉每轮一次整档 IO，
+ * 并彻底断掉该段的缓存扰动）—— 这条只能在这一层验。
+ *
+ * ⚠️ 注意注入点：`poolEnabled()` / `poolMinHistory()` 读的是**模块级注入的 configCenter**
+ * （`injectContextConfigCenter`），**不是** `ctx.get('configCenter')`（后者管压缩阈值那几项）。
+ * 故此处用动态 import 注入，避免改动文件顶部 import 区。
+ */
+describe('pool 总开关（/pool on|off）', () => {
+  const manyMsgs = (n: number): Message[] =>
+    Array.from({ length: n }, (_, i) => ({
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: `m${i}` }],
+    }));
+
+  const storeWith = (readFull: ReturnType<typeof vi.fn>) => ({
+    conversationStore: {
+      readAll: vi.fn().mockResolvedValue([]),
+      append: vi.fn().mockResolvedValue(undefined),
+      replace: vi.fn().mockResolvedValue(undefined),
+      readFull,
+    },
+  });
+
+  it('默认关闭：历史已超 poolMinHistory 也不读全量存档', async () => {
+    const { injectContextConfigCenter } = await import('../../context/context-config.js');
+    injectContextConfigCenter(null); // 未注入 ⇒ poolEnabled() 回退默认 false
+    const readFull = vi.fn().mockResolvedValue([]);
+    const history = manyMsgs(250); // ≥ 200 ⇒ 仅凭旧门控会放行
+
+    await stage.run(
+      baseState({ history, historyWithoutLastUser: history }),
+      makeCtx(storeWith(readFull)),
+    );
+
+    expect(readFull, 'pool 关着却读了全量存档 —— 开关没生效').not.toHaveBeenCalled();
+  });
+
+  it('打开：条件满足时读全量存档（开关是必要条件，不是充分条件）', async () => {
+    const { injectContextConfigCenter } = await import('../../context/context-config.js');
+    injectContextConfigCenter({ get: (p: string) => ({ 'context.poolEnabled': true } as Record<string, unknown>)[p] } as never);
+    try {
+      const readFull = vi.fn().mockResolvedValue([]);
+      const history = manyMsgs(250);
+
+      await stage.run(
+        baseState({ history, historyWithoutLastUser: history }),
+        makeCtx(storeWith(readFull)),
+      );
+
+      expect(readFull).toHaveBeenCalledTimes(1);
+    } finally {
+      injectContextConfigCenter(null); // 复位，避免影响同文件其它用例
+    }
+  });
+});

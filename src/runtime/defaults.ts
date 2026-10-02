@@ -88,6 +88,10 @@ export function getDefaultConfig(): FullConfig {
       maxCompressRounds: 3,
       trimWindow: 6,
       poolMinHistory: 200,
+      // 全量存档召回（pool_context）总开关，默认关闭。
+      // 它是检索段：内容按当轮关键词召回、每轮都变 ⇒ 放行会持续产生缓存 miss
+      //（实测 1~3 万 token/轮，命中率掉约 10 个百分点）。切换用 TUI `/pool on|off`。
+      poolEnabled: false,
     },
     schedule: {
       heartbeatMs: 5000,

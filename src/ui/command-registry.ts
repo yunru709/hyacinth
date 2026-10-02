@@ -381,6 +381,20 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
+    name: 'pool on',
+    description: '开启全量存档召回（pool_context）',
+    icon: '\u{1F5C3}',
+    category: 'config',
+    executeLocal: true,
+  },
+  {
+    name: 'pool off',
+    description: '关闭全量存档召回（pool_context，默认）',
+    icon: '\u{1F5C3}',
+    category: 'config',
+    executeLocal: true,
+  },
+  {
     name: 'kb on',
     description: '开启知识库（需 Zone 4 开启）',
     icon: '\u{1F4DA}',

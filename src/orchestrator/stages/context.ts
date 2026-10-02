@@ -53,7 +53,7 @@ import type { Injection } from '../../bypass/types.js';
 import { compressorUserId } from '../../provider/user-id.js';
 import { basename, join as joinPath } from 'node:path';
 import { appendFile } from 'node:fs/promises';
-import { zone5TailBudgetRatio, poolMinHistory } from '../../context/context-config.js';
+import { zone5TailBudgetRatio, poolMinHistory, poolEnabled } from '../../context/context-config.js';
 import { formatPlanAsText } from '../plan-store.js';
 import { formatTimestamp, computeProtectCount, isSameTextMessage } from '../../utils/misc.js';
 import type { StageModule } from '../../kernel/pipeline.js';
@@ -110,8 +110,11 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
       // ── 全量存档召回（pool_context）：长会话/已压缩会话才读存档，避免每轮全量 I/O ──
       // 工作历史达到 poolMinHistory 条，或发生过压缩（存档里有被压掉的细节）时启用。
       // pool 检索从存档召回压缩丢掉的上下文 —— 压缩-存档-召回闭环的最后一根线。
-      const poolEnabled = history.length >= poolMinHistory() || state.compressCount > 0;
-      const fullHistory: Message[] | undefined = poolEnabled
+      // **总开关 context.poolEnabled（默认 false，TUI `/pool on|off`）**：关掉时连存档都不读 ——
+      // 该段按当轮关键词召回、内容每轮都变，放行会持续产生 1~3 万 token 的缓存 miss。
+      const poolActive = poolEnabled()
+        && (history.length >= poolMinHistory() || state.compressCount > 0);
+      const fullHistory: Message[] | undefined = poolActive
         ? await store.readFull(sessionDir)
         : undefined;
 

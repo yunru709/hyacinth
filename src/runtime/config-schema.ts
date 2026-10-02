@@ -109,6 +109,12 @@ export interface FullConfig {
     trimWindow: number;
     /** 全量存档召回（pool_context）启用阈值：工作历史达到该条数才读存档做关键词召回 */
     poolMinHistory: number;
+    /**
+     * 全量存档召回（pool_context）**总开关**，默认 false。
+     * 关闭时既不读全量存档、也不召回 —— 它是检索段、内容每轮都变，
+     * 放行会持续产生缓存 miss（实测 1~3 万 token/轮）。切换：TUI `/pool on|off`。
+     */
+    poolEnabled: boolean;
   };
 
   schedule: {

@@ -78,3 +78,14 @@ export function trimWindow(): number {
 export function poolMinHistory(): number {
   return getContextConfig<number>('poolMinHistory', 200);
 }
+
+/**
+ * 全量存档召回（pool_context）**总开关，默认关闭**。
+ *
+ * 关掉时第一层门控（stages/context.ts）连全量存档都不读 —— 省掉每轮一次整档 IO，
+ * 也彻底断掉该段的缓存扰动（它是检索段、按当轮关键词召回，内容每轮都变）。
+ * 由 TUI `/pool on|off` 写 `context.poolEnabled`，热更、下一轮生效。
+ */
+export function poolEnabled(): boolean {
+  return getContextConfig<boolean>('poolEnabled', false);
+}

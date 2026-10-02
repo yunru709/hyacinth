@@ -9,6 +9,7 @@ import {
   zone4BudgetRatio,
   maxCompressRounds,
   trimWindow,
+  poolEnabled,
 } from './context-config.js';
 
 function stubConfigCenter(values: Record<string, unknown>): RuntimeConfigCenter {
@@ -30,6 +31,9 @@ describe('context 配置出口', () => {
     expect(zone4BudgetRatio()).toBe(0.5);
     expect(maxCompressRounds()).toBe(3);
     expect(trimWindow()).toBe(6);
+    // 全量存档召回（/pool）默认**关闭** —— 契约：它是检索段、内容每轮都变，
+    // 放行会持续产生 1~3 万 token 的缓存 miss（实测命中率掉约 10 个百分点）。
+    expect(poolEnabled()).toBe(false);
   });
 
   it('注入后读取 context.* 配置', () => {
@@ -42,6 +46,7 @@ describe('context 配置出口', () => {
         'context.zone4BudgetRatio': 0.4,
         'context.maxCompressRounds': 5,
         'context.trimWindow': 10,
+        'context.poolEnabled': true,
       }),
     );
     expect(safetyThreshold()).toBe(0.9);
@@ -51,6 +56,7 @@ describe('context 配置出口', () => {
     expect(zone4BudgetRatio()).toBe(0.4);
     expect(maxCompressRounds()).toBe(5);
     expect(trimWindow()).toBe(10);
+    expect(poolEnabled()).toBe(true);
   });
 
   it('部分键未配置时回退默认值', () => {

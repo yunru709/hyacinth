@@ -1738,6 +1738,24 @@ export async function runTui(
       return;
     }
 
+    // ── /pool on|off —— 全量存档召回（pool_context）总开关，默认关闭 ──
+    // 写 context.poolEnabled；门控在 stages/context 每轮现读 ⇒ 热更、下一轮生效，无需重启。
+    // 默认关闭的理由：该段按当轮关键词召回、内容每轮都变，放行会持续产生 1~3 万 token 的缓存 miss。
+    if (input === '/pool on') {
+      await setConfig('context.poolEnabled', true);
+      chatLog.addSystem(theme.success('全量存档召回（pool_context）已开启 — 下一轮生效'));
+      tui.requestRender();
+      updateTokenEstimate();
+      return;
+    }
+    if (input === '/pool off') {
+      await setConfig('context.poolEnabled', false);
+      chatLog.addSystem(theme.dim('全量存档召回（pool_context）已关闭'));
+      tui.requestRender();
+      updateTokenEstimate();
+      return;
+    }
+
     if (input === '/kb on') {
       // 当前 zone4 状态经协议 kb.get 读取（不再持有 knowledgeBase 引用）
       const kbRes = (await protocolSend('kb.get')) as { kb?: { zone4Enabled?: boolean } } | null | undefined;
