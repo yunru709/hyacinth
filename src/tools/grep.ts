@@ -117,7 +117,12 @@ export class GrepTool implements Tool {
     const files = glob ? allFiles.filter((f) => this.globToRegex(glob).test(f)) : allFiles;
 
     if (files.length === 0) {
-      return 'No files matched the search criteria';
+      // 给了 glob 却零命中 ⇒ 几乎总是 glob 写窄/写错，而不是"目录里真的没有"。
+      // 明确回报（含扫描到的文件数），别让它长得像正常空结果 —— 静默假绿是老毛病。
+      return glob
+        ? `No files matched glob "${glob}" under ${searchPath} (scanned ${allFiles.length} file(s)). `
+          + 'Note: a glob without "/" matches at any depth ("*.ts" ≙ "**/*.ts"); "{a,b}" alternation is supported.'
+        : 'No files matched the search criteria';
     }
 
     const results: FileMatchResult[] = [];
@@ -348,17 +353,40 @@ export class GrepTool implements Tool {
     return binaryExts.has(ext);
   }
 
+  /**
+   * glob → 正则。两条规则（2026-10-02 修正，此前会**静默零命中**）：
+   *   1. **不含 '/' 的 glob 按"任意深度"理解**：`*.ts` ≙ `**\/*.ts`。
+   *      旧行为编译成 `^[^\/]*\.ts$`，只认顶层文件 ⇒ 对 `src/`（全是嵌套文件）
+   *      一律回 "No matches"，长得像正常空结果，实为假绿。
+   *   2. **支持 `{a,b}` 花括号展开**（描述里一直宣称支持，实际把 `{`/`}` 当字面量转义了）。
+   */
   private globToRegex(pattern: string): RegExp {
     const normalized = pattern.replace(/\\/g, '/');
+    const scoped = normalized.includes('/') ? normalized : `**/${normalized}`;
+    return new RegExp('^' + this.globBodyToRegex(scoped) + '$');
+  }
+
+  /** glob 片段 → 正则源码；处理 `**` / `*` / `?` / `{a,b}`（花括号不嵌套） */
+  private globBodyToRegex(glob: string): string {
     let regexStr = '';
     let i = 0;
 
-    while (i < normalized.length) {
-      const c = normalized[i];
+    while (i < glob.length) {
+      const c = glob[i];
 
-      if (c === '*') {
-        if (normalized[i + 1] === '*') {
-          if (normalized[i + 2] === '/') {
+      if (c === '{') {
+        const close = glob.indexOf('}', i + 1);
+        if (close === -1) {
+          regexStr += '\\{';
+          i++;
+          continue;
+        }
+        const alts = glob.slice(i + 1, close).split(',');
+        regexStr += '(?:' + alts.map((a) => this.globBodyToRegex(a)).join('|') + ')';
+        i = close + 1;
+      } else if (c === '*') {
+        if (glob[i + 1] === '*') {
+          if (glob[i + 2] === '/') {
             regexStr += '(?:.+/)?';
             i += 3;
           } else {
@@ -384,7 +412,7 @@ export class GrepTool implements Tool {
       }
     }
 
-    return new RegExp('^' + regexStr + '$');
+    return regexStr;
   }
 }
 
