@@ -366,7 +366,36 @@ export async function runTui(
   let currentTextLine = '';
   let pendingThinking = '';
   let toolCounterFallback = 0;
+  /**
+   * 是否显示思考内容（纯界面偏好，与"发不发 thinking 请求"无关 —— 后者归
+   * provider.enableThinking）。用 /ui show-thinking 切换；**进程内变量，重启复位**。
+   */
   let showThinking = false;
+
+  /**
+   * 消费累积的思考内容（唯一的 thinking 显示出口）。
+   *
+   * 修复两处：
+   *  ① 原先 onToolUse / onTurnEnd 各写一遍、逻辑还不一致；
+   *  ② onTurnEnd 的"thinking-only 兜底"**无视 showThinking**：只要本轮没有正文，
+   *     就把思考当正文塞进 currentTextLine。后果是 —— 用户关了显示却仍看到思考，
+   *     或开了显示却因为走了兜底分支而没看到 🧠 标签（本次报障的直接原因）。
+   *     现在：显示与否**只由 showThinking 决定**，兜底仅在"确实没有正文"时生效，
+   *     且同样受开关约束。
+   */
+  function flushPendingThinking(): void {
+    if (!pendingThinking.trim()) return;
+    const text = pendingThinking.trim();
+    pendingThinking = '';
+    if (showThinking) {
+      chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(text));
+      return;
+    }
+    // 未开启显示时：仅当本轮没有任何正文，才用思考兜底（否则用户会看到一片空白）
+    if (!currentTextLine.trim()) {
+      currentTextLine = text;
+    }
+  }
 
 
 
@@ -387,12 +416,7 @@ export async function runTui(
       showThinkingIndicator(theme.accent(label));
     },
     onToolUse(name: string, inputSummary: string, toolId?: string) {
-      if (pendingThinking.trim()) {
-        if (showThinking) {
-          chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(pendingThinking.trim()));
-        }
-        pendingThinking = '';
-      }
+      flushPendingThinking();
       if (currentTextLine.trim()) {
         chatLog.finalizeAssistant(currentTextLine.trim());
         currentTextLine = '';
@@ -553,16 +577,7 @@ export async function runTui(
       })();
 
       updateHeaderText(modelName);
-      if (pendingThinking.trim()) {
-        if (showThinking) {
-          chatLog.addSystem(theme.thinking('\u{1F9E0} Thinking:\n') + theme.thinking(pendingThinking.trim()));
-        }
-        // thinking-only 模型兜底：thinking 有内容但 text 为空时，将 thinking 作为回复显示
-        if (!currentTextLine.trim()) {
-          currentTextLine = pendingThinking.trim();
-        }
-        pendingThinking = '';
-      }
+      flushPendingThinking();
       if (currentTextLine.trim()) {
         chatLog.finalizeAssistant(currentTextLine.trim());
         currentTextLine = '';
@@ -1249,6 +1264,12 @@ export async function runTui(
     }
 
     footer += theme.dim(`\n${channelName} \u00b7 ${providerTypeStart} \u00b7 ${modelName} \u00b7 ~${estimated} tokens`);
+
+    // 思考显示状态常驻可见 —— 它此前是纯内存变量、重启静默复位为 false，
+    // 用户"以为开着"却看不到输出（本次报障的根因之一）。只在开启时提示，避免噪声。
+    if (showThinking) {
+      footer += theme.accent(' | \u{1F9E0} show-thinking');
+    }
 
     if (messageQueue.size > 0) {
       footer += theme.fg(` | Queue: ${messageQueue.size}`);
