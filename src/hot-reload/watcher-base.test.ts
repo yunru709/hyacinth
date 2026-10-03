@@ -207,8 +207,13 @@ describe('poll 模式（fs.watchFile stat 轮询）', () => {
       reload: () => { calls++; },
     });
 
+    // 先等一个轮询周期，确保 fs.watchFile 已完成「文件不存在」的首次 stat（异步）。
+    // 否则首次 stat 若晚于下面的 touch（CI 慢机器上会发生），基线会直接取到「已存在」的
+    // mtime ⇒ 之后 mtime 不再变化 ⇒ reload 永不触发 ⇒ waitFor 超时（CI #72 实测）。
+    // 对照：上面「mtime 变化」用例本就有这个等待，此条是漏了。
+    await new Promise((r) => setTimeout(r, 150));
     touch(file, 'born');
-    await waitFor(() => calls >= 1);
+    await waitFor(() => calls >= 1, 10000);
     handles.forEach((h) => h.close());
   });
 });
