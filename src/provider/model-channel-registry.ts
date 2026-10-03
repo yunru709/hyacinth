@@ -176,6 +176,19 @@ export class ModelChannelRegistry {
    */
   private runtimeRoles: Map<string, string> = new Map();
 
+  /**
+   * 通道创建失败记录（通道名 → 错误消息），本次 initializeChannels 的产物。
+   *
+   * 为什么需要：创建失败此前**只写日志** —— 界面上毫无痕迹，于是"配置里写了
+   * 厂商 A、实际跑的是厂商 B"可长期不被察觉（实测：commandcode 因 providers.json
+   * 加载时序问题全通道创建失败、静默回退主 provider，用户只感到"行为不对"却
+   * 找不到原因，症状离病因极远）。
+   *
+   * 本字段只**收集**，由装配层（gateway）读取后转成 UI 通知 —— provider 层
+   * 不直连 UI（分层规则 4/5）。每次 initializeChannels() 清空重建。
+   */
+  private channelFailures: Map<string, string> = new Map();
+
   constructor(cwd?: string) {
     // P-Config 收敛：项目级配置已取消，统一只读全局 ~/.agent/model-channels.json。
     // 构造参数 cwd 保留仅为调用方兼容，不再用于定位任何项目级文件。
@@ -620,7 +633,9 @@ export class ModelChannelRegistry {
       logger.info(`Channel provider created: ${name} (${cfg.provider}/${provider.getModel()})`);
       return provider;
     } catch (err) {
-      logger.warn(`Failed to create provider for channel "${name}": ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      this.channelFailures.set(name, msg);
+      logger.warn(`Failed to create provider for channel "${name}": ${msg}`);
       return null;
     }
   }
@@ -731,6 +746,7 @@ export class ModelChannelRegistry {
   /** 初始化所有通道的 Provider 实例 */
   initializeChannels(): void {
     this.channelProviders.clear();
+    this.channelFailures.clear();
     for (const name of Object.keys(this.config.channels)) {
       const provider = this.createChannelProvider(name);
       if (provider) {
@@ -741,6 +757,16 @@ export class ModelChannelRegistry {
         }
       }
     }
+  }
+
+  /**
+   * 读取本次初始化中**创建失败**的通道（装配层消费 → UI 一次性通知）。
+   *
+   * 返回数组副本，调用方只读；无失败时返回空数组（调用方据此不发通知，
+   * 不给正常路径加噪音）。每次 initializeChannels() 重建。
+   */
+  getChannelFailures(): Array<{ channel: string; error: string }> {
+    return Array.from(this.channelFailures, ([channel, error]) => ({ channel, error }));
   }
 
   /** 根据通道名创建 Provider 实例（非 main 通道自动包装 ResilientProvider） */
@@ -767,7 +793,9 @@ export class ModelChannelRegistry {
       logger.info(`Channel provider created: ${name} (${cfg.provider}/${raw.getModel()})`);
       return raw;
     } catch (err) {
-      logger.warn(`Failed to create provider for channel "${name}": ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      this.channelFailures.set(name, msg);
+      logger.warn(`Failed to create provider for channel "${name}": ${msg}`);
       return null;
     }
   }

@@ -172,3 +172,59 @@ describe('ModelChannelRegistry user-id 生效值', () => {
     }
   });
 });
+
+/**
+ * 通道创建失败记录（2026-10-03 新增）。
+ *
+ * 动机：创建失败此前**只写日志** ⇒ 界面无痕迹，"配置里写了厂商 A、实际跑的是
+ * 厂商 B"可长期不被察觉（实测：commandcode 因 providers.json 加载时序问题全通道
+ * 创建失败、静默回退 deepseek，症状离病因极远）。registry 现收集失败清单，
+ * 由装配层（agent-assembly）转成 UI 一次性通知。
+ */
+describe('ModelChannelRegistry 通道创建失败记录', () => {
+  // 本仓库测试环境**没有真实 API key**：不注 key 时连 deepseek 通道都会因
+  // "API key is required" 创建失败，会让"成功路径"的断言失去前提。
+  const FAKE_KEY = 'sk-test-fake-key';
+  let prevKey: string | undefined;
+  beforeEach(() => {
+    prevKey = process.env.DEEPSEEK_API_KEY;
+    process.env.DEEPSEEK_API_KEY = FAKE_KEY;
+  });
+  afterEach(() => {
+    if (prevKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = prevKey;
+  });
+
+  it('provider 无法解析 ⇒ getChannelFailures 收录该通道（含错误消息）', () => {
+    getProviderConfigLoader(process.cwd());
+    const registry = new ModelChannelRegistry();
+    registry.buildFromLegacy(undefined, undefined, 'nonexistent-provider-xyz');
+    registry.initializeChannels();
+
+    const failures = registry.getChannelFailures();
+    expect(failures.length).toBeGreaterThan(0);
+    expect(failures.some((f) => f.channel === 'default')).toBe(true);
+    expect(failures[0].error).toMatch(/Unknown provider type|nonexistent/i);
+  });
+
+  it('全部成功 ⇒ 返回空数组（调用方据此不发通知，不给正常路径加噪音）', () => {
+    getProviderConfigLoader(process.cwd());
+    const registry = new ModelChannelRegistry();
+    registry.buildFromLegacy(undefined, undefined, 'deepseek');
+    registry.initializeChannels();
+
+    expect(registry.getChannelFailures()).toEqual([]);
+  });
+
+  it('重新 initializeChannels 会清空上一轮的失败记录', () => {
+    getProviderConfigLoader(process.cwd());
+    const registry = new ModelChannelRegistry();
+    registry.buildFromLegacy(undefined, undefined, 'nonexistent-provider-xyz');
+    registry.initializeChannels();
+    expect(registry.getChannelFailures().length).toBeGreaterThan(0);
+
+    registry.buildFromLegacy(undefined, undefined, 'deepseek');
+    registry.initializeChannels();
+    expect(registry.getChannelFailures()).toEqual([]);
+  });
+});

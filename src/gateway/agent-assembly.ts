@@ -567,6 +567,18 @@ export async function createAgentAssembly(
   }
   loopRefBox.current = loop; // wire fallback notification
 
+  // ── 通道创建失败 → 一次性 UI 通知（2026-10-03）─────────────────────
+  // 此前失败只写日志、界面无痕迹 ⇒ "配置写了 commandcode、实际跑 deepseek"
+  // 可长期不被察觉。此处把失败清单转成 loop 的一次性通知，下一轮 runTurn 经
+  // outputHandler.onStatus 显示为 warn 系统消息（与 fallback 降级通知同机制）。
+  // 只报告**有失败**的情况：全绿时不发任何消息（不给正常路径加噪音）。
+  const channelFailures = channelRegistry.getChannelFailures();
+  if (channelFailures.length > 0) {
+    const detail = channelFailures.map((f) => `${f.channel}(${f.error})`).join('; ');
+    loop.pendingFallbackInfo =
+      `[Channel] ${channelFailures.length} 个通道创建失败，已回退主 provider：${detail}`;
+  }
+
   // 注册后台进程注册表到 LifecycleSupervisor（优雅关闭时自动清理）
   if (supervisor) {
     supervisor.registerBackgroundRegistry(backgroundRegistry);
