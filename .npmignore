@@ -49,6 +49,10 @@ Thumbs.db
 # Debug residue (vitest output redirect files; gitignored but must also be npmignored)
 vt-*.txt
 
+# 临时脚本残留（本地 scratch，绝不进包）—— 同 vt-*.txt 的教训：gitignore ≠ npmignore
+*.tmp.mjs
+*.tmp.cjs
+
 # Test-only setup helpers (vitest bootstrap, compiled into dist) - not for the published package
 dist/test-setup.js
 dist/test-setup.d.ts
