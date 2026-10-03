@@ -615,15 +615,12 @@ export class AgentLoop {
         ...(Array.isArray(persistedDangerousTools) ? persistedDangerousTools : []),
       ]);
 
-      // 用户未显式关闭时才从模型目录自动开启思考
-      const thinkingCfg = this.configCenter?.get('provider.enableThinking');
-      if (thinkingCfg !== false) {
-        const info = getModelInfo(this.provider.getProviderType(), this.provider.getModel());
-        if (info?.reasoningEffort) {
-          this.thinkingEnabled = true;
-          this.provider.setThinking?.(true, info.reasoningEffort);
-        }
-      }
+      // 思考开关（2026-10-03 起）：唯一真源 = 通道级 `thinking`（model-channels.json），
+      // 已在通道创建时经 applyChannelThinking → provider.setThinking 生效。
+      // 全局 `provider.enableThinking` 已删除，此处不再重复设置（原先它会压过通道配置）。
+      // 保留 thinkingEnabled 状态供 getTurnInfo/UI 只读展示。
+      const meta = getModelInfo(this.provider.getProviderType(), this.provider.getModel());
+      this.thinkingEnabled = meta?.reasoningEffort !== undefined;
     }
 
     // ── Load persisted allowlist from session directory ──

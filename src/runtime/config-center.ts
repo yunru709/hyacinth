@@ -199,7 +199,6 @@ function normalizeConfig(persisted: Record<string, unknown>): Record<string, unk
     normalized.provider = {
       active: providerName,
       routeMode: 'auto',
-      enableThinking: false,
       anthropic: { model: modelFor('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: modelFor('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
       deepseek: { model: modelFor('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },

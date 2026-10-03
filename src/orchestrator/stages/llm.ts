@@ -62,12 +62,17 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
       const messages = state.messages;
       const toolDefinitions = state.toolDefinitions;
 
-      // ── 1. thinking 配置（TUI /think 命令可运行时切换） ──
-      const thinkingEnabled = (configCenter?.get('provider.enableThinking') as boolean) ?? false;
-      const thinkingEffort = thinkingEnabled
-        ? getModelInfo(activeProvider.getProviderType(), activeProvider.getModel())?.reasoningEffort
-        : undefined;
-      activeProvider.setThinking?.(thinkingEnabled, thinkingEffort);
+      // ── 1. thinking 配置（**通道级唯一真源**，2026-10-03 定） ──
+      // 思考开关由 `model-channels.json` 的通道级 `thinking` 字段声明，
+      // 已在通道创建时经 applyChannelThinking → provider.setThinking 生效
+      // （见 provider/model-channel-registry.ts）。
+      //
+      // 此前此处每轮用全局 `provider.enableThinking`（config.json，默认 false）
+      // **无条件覆盖** provider 的 thinking 状态 ⇒ 通道里设的 `thinking:true`
+      // 只在创建那一瞬有效、第一轮请求就被压回 false ⇒ 上游收到
+      // `reasoning_effort:'off'` ⇒ 不返回 reasoning_content ⇒ 开了显示也看不到内容。
+      // 全局开关已删除（config-schema / config-center / defaults 三处同步移除）：
+      // 唯一真源 = 通道配置，此处**不再干预**。
 
       // ── 1b. 单次输出上限（wire 的 max_tokens）—— 每轮下发的可选 setter ──
       // 语义三态（键在 provider 顶层，与 update_config/reset_config 同源）：

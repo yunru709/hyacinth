@@ -27,7 +27,6 @@ export function getDefaultConfig(): FullConfig {
       streaming: true,
       jsonMode: false,
       fallbackModel: 'claude-3-haiku',
-      enableThinking: false,
       userId: DEFAULT_USER_ID,
       anthropic: { model: providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },

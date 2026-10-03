@@ -368,7 +368,8 @@ export async function runTui(
   let toolCounterFallback = 0;
   /**
    * 是否显示思考内容（纯界面偏好，与"发不发 thinking 请求"无关 —— 后者归
-   * provider.enableThinking）。用 /ui show-thinking 切换；**进程内变量，重启复位**。
+   * **通道级配置** `model-channels.json` 的 `thinking` 字段）。用 /ui show-thinking
+   * 切换；**进程内变量，重启复位**。
    */
   let showThinking = false;
 

@@ -34,7 +34,6 @@ export interface FullConfig {
     jsonMode: boolean;
     /** 降级模型 */
     fallbackModel: string;
-    enableThinking: boolean; // 启用 thinking/reasoning 模式（启动时自动从 providers.json 读取模型 reasoningEffort）
     /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
     /** 通用字段（provider 顶层兜底；provider.<type>.fields 优先） */
