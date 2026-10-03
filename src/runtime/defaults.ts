@@ -251,6 +251,7 @@ export function getDefaultConfig(): FullConfig {
     },
     ui: {
       theme: 'hyacinth',
+      showThinking: false,
     },
   };
 }

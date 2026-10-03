@@ -436,6 +436,13 @@ export interface FullConfig {
     /** WebUI 主题。hyacinth=夜园(默认·深色) / light=昼园 / dark=深夜 /
      *  glass=琉璃 / ink=墨韵 / rainy=雨夜 */
     theme: 'hyacinth' | 'light' | 'dark' | 'glass' | 'ink' | 'rainy' | 'sunset' | 'mono' | 'cyber' | 'paper' | 'terminal' | 'glacier' | 'celadon';
+    /**
+     * TUI 是否显示思考内容（🧠 块）。默认 false；`/ui show-thinking` 切换后
+     * 经 config.set 持久化到本键 ⇒ **跨重启保持**。
+     * 与「思考请求」无关 —— 后者由 model-channels.json 的通道级 `thinking`
+     * 字段决定（是否让上游思考）；本键只管「收到了思考内容要不要显示」。
+     */
+    showThinking?: boolean;
   };
 }
 

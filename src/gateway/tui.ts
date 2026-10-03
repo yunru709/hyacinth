@@ -1044,6 +1044,19 @@ export async function runTui(
     };
     sessionDir = '';
   }
+
+  // ── 恢复 UI 偏好：显示思考开关跨重启保持（2026-10-03）─────────────
+  // showThinking 是纯界面偏好，此前是内存变量、重启静默复位 false ⇒ 用户
+  // "以为开着"无从察觉。改由 config.json 的 ui.showThinking 承载 ——
+  // 与 ui.theme 同段（UI 偏好统一归属）。此处两种模式的 protocolSend 均已就绪
+  // （本地在前一分支赋值、远程在本分支赋值）；读失败静默，保持默认 false。
+  try {
+    const saved = (await protocolSend('config.get', { path: 'ui.showThinking' })) as
+      | { value?: unknown }
+      | undefined;
+    if (typeof saved?.value === 'boolean') showThinking = saved.value;
+  } catch { /* 未配置 / 协议不可用 → 保持默认 false */ }
+
   // 纯协议客户端化后 TUI 不持有 loop/组件：以下适配层仅承载「本地模式下
   // 与宿主进程内共享组件（components）同源」的只读数据（backgroundRegistry
   // 由斜杠命令读取本地进程表；远程模式为 null）。
@@ -1650,6 +1663,10 @@ export async function runTui(
           // 是否显示思考内容纯粹是界面偏好，与模型/通道怎么跑无关。
           if (cmdPath === 'ui/show-thinking') {
             showThinking = !showThinking;
+            // 持久化（跨重启保持）：经协议层 config.set 落盘到 ui.showThinking。
+            // 先前是纯内存变量 ⇒ 重启复位 false，用户"以为开着"无从察觉。
+            // fire-and-forget：写失败不阻断 UI 反馈（下次启动回落默认）。
+            void setConfig('ui.showThinking', showThinking).catch(() => {});
             chatLog.addSystem(theme.success(showThinking ? '显示思考内容' : '隐藏思考内容'));
             tui.requestRender();
             updateTokenEstimate();
