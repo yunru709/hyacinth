@@ -184,3 +184,27 @@ describe('网络域私网拦截', () => {
 function pathToFileUrl(p: string): string {
   return 'file:///' + p.replace(/\\/g, '/').replace(/^\//, '').replace(/^\w:/, (m) => m + '/').replace(/ /g, '%20');
 }
+
+// ── 回归：守卫必须保留 promisify 语义 ─────────────────────────────
+// 症状（曾在生产击中 env-collector / mcp:orphan-sweeper / probeVideo / GitManager）：
+// 守卫把 child_process.exec/execFile 原地换成包装函数后丢了 util.promisify.custom
+// ⇒ promisify(wrapper) 退化成通用版 ⇒ resolve 出的是回调第一个参数（stdout 字符串）
+// ⇒ 调用方 `const { stdout } = await ...` 恒为 undefined（硬失败或静默拿空）。
+describe('guards preserve promisify semantics', () => {
+  it('exec/execFile 仍带 promisify.custom，且 resolve 出 { stdout, stderr }', async () => {
+    const { promisify } = await import('node:util');
+    const execCustom = (cpGuarded.exec as unknown as Record<symbol, unknown>)[promisify.custom];
+    const execFileCustom = (cpGuarded.execFile as unknown as Record<symbol, unknown>)[promisify.custom];
+    expect(typeof execCustom).toBe('function');
+    expect(typeof execFileCustom).toBe('function');
+
+    // 行为级断言：拿到的必须是对象（含 stdout），不能是 raw 字符串
+    const r = await promisify(cpGuarded.execFile)(process.execPath, [
+      '-e',
+      'process.stdout.write("ok")',
+    ]);
+    expect(typeof r).toBe('object');
+    expect(r).toHaveProperty('stderr');
+    expect(r.stdout.trim()).toBe('ok');
+  });
+});

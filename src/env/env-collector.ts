@@ -1,9 +1,28 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execSync, exec } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execAsync = promisify(exec);
+/**
+ * 手动包一层 Promise —— 不要用 promisify(exec)。
+ *
+ * 安全内核（kernel/security/bootstrap.ts → guards.ts 的 guardChildProcess）会
+ * **原地替换** child_process.exec 为守卫包装函数，而包装函数丢掉了
+ * util.promisify.custom 符号 ⇒ promisify 退化成通用版 ⇒ resolve 出来的是回调第一个
+ * 参数（stdout 字符串）而不是 { stdout, stderr } ⇒ `const { stdout } = await ...`
+ * 恒为 undefined ⇒ 每个异步探测都抛 "Cannot read properties of undefined (reading
+ * 'trim')"，GPU/Python/Shell 全灭，坏值再被缓存到进程结束。
+ *
+ * 走 callback 形态既避开该陷阱，又让探测真正经过内核的策略检查（建前检查 + env 改写）。
+ */
+const execAsync = (
+  cmd: string,
+  options: Record<string, unknown>,
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    exec(cmd, options, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+    });
+  });
 import { createLogger } from '../logging/logger.js';
 import { loadPrompt, clearPromptCache, renderPrompt } from '../prompts/loader.js';
 
@@ -23,11 +42,27 @@ export interface SystemEnvInfo {
 
 let cachedInfo: SystemEnvInfo | null = null;
 
+/**
+ * 单次 shell 探测超时（ms）。
+ * 原先 5000 太紧：冷启动的 nvidia-smi（Optimus 笔记本独显休眠时唤醒）与
+ * PowerShell 首启都可能超过 5s，一旦超时就静默退化成 fallback，且结果被永久缓存。
+ */
+const SHELL_TIMEOUT_MS = 15000;
+
 function safeExec(cmd: string, fallback: string = '(未检测到)'): string {
   try {
-    const result = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
+    // windowsHide: true 不能省 —— 本进程通常没有控制台，不开此标志时 Windows 会尝试
+    // 为子进程新建控制台，execSync 直接失败（catch 吞掉 ⇒ 静默降级）。
+    // 实测同一进程内：带此标志的 async 版能跑通 python/shell 探测，不带此标志的
+    // sync 版全部阵亡（GPU/CPU/Python/Shell 一起变成 fallback）。
+    const result = execSync(cmd, {
+      encoding: 'utf-8',
+      timeout: SHELL_TIMEOUT_MS,
+      windowsHide: true,
+    }).trim();
     return result || fallback;
-  } catch {
+  } catch (err) {
+    logger.warn('shell probe failed', { cmd, err: (err as Error).message });
     return fallback;
   }
 }
@@ -54,8 +89,11 @@ function detectGPU(): string {
     }
 
     // ── 方案2: Get-CimInstance（没 N 卡驱动时回退，如 AMD/Intel 独显）──
-    const psCmd = 'Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name)||$($_.AdapterRAM)" }';
-    const output = safeExec(`powershell -Command "${psCmd}"`, '');
+    // 命令里禁止出现嵌套双引号 / $() / ||：execSync 经 cmd.exe 层，内层引号会被吃掉。
+    // 实测 `ForEach-Object { "$($_.Name)||$($_.AdapterRAM)" }` 在任何 Windows 上都报
+    // TerminatorExpectedAtEndOfString ⇒ 这条兜底路径其实从未生效过。
+    const psCmd = 'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name';
+    const output = safeExec(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, '');
     if (output && output !== '(未检测到)') {
       const lines = output.split('\n').map(l => l.trim()).filter(Boolean);
       const realCards = lines.filter(l =>
@@ -64,19 +102,8 @@ function detectGPU(): string {
         !l.includes('Microsoft Hyper-V') &&
         !l.includes('Remote Display'),
       );
-      for (const line of [...realCards, ...lines]) {
-        const sepIdx = line.indexOf('||');
-        const name = sepIdx >= 0 ? line.substring(0, sepIdx).trim() : line.trim();
-        const vramStr = sepIdx >= 0 ? line.substring(sepIdx + 2).trim() : '';
-        const vramBytes = parseInt(vramStr, 10);
-        if (vramBytes && !isNaN(vramBytes) && vramBytes > 0 && vramBytes < 1_000_000_000_000) {
-          const vramGB = (vramBytes / 1024 / 1024 / 1024).toFixed(1);
-          return `${name} (VRAM ${vramGB} GB)`;
-        }
-        if (name && name !== '(未检测到)') {
-          return name;
-        }
-      }
+      // 只取显卡名：VRAM 交给 nvidia-smi（AdapterRAM 是 uint32，>4GB 会截断，不可信）
+      if (realCards.length > 0) return realCards[0];
     }
   }
 
@@ -166,14 +193,28 @@ export function getSystemInfo(): SystemEnvInfo | null {
   return cachedInfo;
 }
 
+/**
+ * 清空进程级缓存。
+ * 首次探测若赶上瞬时失败（超时/冷启动），旧实现会把坏值缓存到进程死亡为止 ⇒
+ * 这里给出重采入口，避免一次失手永久污染。
+ */
+export function resetSystemInfoCache(): void {
+  cachedInfo = null;
+}
+
 // ── 异步并行采集（启动路径用：不阻塞 UI，首次 compose 时经 getContent await）──
 
 /** 异步执行 shell 命令（并行安全，超时兜底），失败返回 fallback */
 async function safeExecAsync(cmd: string, fallback: string = '(未检测到)'): Promise<string> {
   try {
-    const { stdout } = await execAsync(cmd, { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+    const { stdout } = await execAsync(cmd, {
+      encoding: 'utf-8',
+      timeout: SHELL_TIMEOUT_MS,
+      windowsHide: true,
+    });
     return stdout.trim() || fallback;
-  } catch {
+  } catch (err) {
+    logger.warn('async shell probe failed', { cmd, err: (err as Error).message });
     return fallback;
   }
 }
@@ -194,7 +235,7 @@ function parseNvidiaGpu(nvidiaOutput: string): string | null {
   return firstLine;
 }
 
-/** 解析 PowerShell Win32_VideoController 输出（返回 'Name (VRAM x.x GB)' 或 null） */
+/** 解析 PowerShell Win32_VideoController 输出（每行一个显卡名；返回首个真实显卡或 null） */
 function parsePowerShellGpu(output: string): string | null {
   if (!output || output === '(未检测到)') return null;
   const lines = output.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -205,20 +246,8 @@ function parsePowerShellGpu(output: string): string | null {
       !l.includes('Microsoft Hyper-V') &&
       !l.includes('Remote Display'),
   );
-  for (const line of [...realCards, ...lines]) {
-    const sepIdx = line.indexOf('||');
-    const name = sepIdx >= 0 ? line.substring(0, sepIdx).trim() : line.trim();
-    const vramStr = sepIdx >= 0 ? line.substring(sepIdx + 2).trim() : '';
-    const vramBytes = parseInt(vramStr, 10);
-    if (vramBytes && !isNaN(vramBytes) && vramBytes > 0 && vramBytes < 1_000_000_000_000) {
-      const vramGB = (vramBytes / 1024 / 1024 / 1024).toFixed(1);
-      return name + ' (VRAM ' + vramGB + ' GB)';
-    }
-    if (name && name !== '(未检测到)') {
-      return name;
-    }
-  }
-  return null;
+  // 只取显卡名：VRAM 交给 nvidia-smi（AdapterRAM 是 uint32，>4GB 会截断，不可信）
+  return realCards[0] ?? null;
 }
 
 async function detectGpuAsync(): Promise<string> {
@@ -231,7 +260,7 @@ async function detectGpuAsync(): Promise<string> {
     if (parsed) return parsed;
 
     const psOutput = await safeExecAsync(
-      'powershell -Command "Get-CimInstance Win32_VideoController | ForEach-Object { \"$($_.Name)||$($_.AdapterRAM)\" }"',
+      'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"',
       '',
     );
     return parsePowerShellGpu(psOutput) ?? '(未检测到)';

@@ -1,5 +1,5 @@
 import type { Tool } from './interface.js';
-import { collectSystemInfo, type SystemEnvInfo } from '../env/env-collector.js';
+import { collectSystemInfo, resetSystemInfoCache, type SystemEnvInfo } from '../env/env-collector.js';
 
 let cachedInfo: SystemEnvInfo | null = null;
 
@@ -49,9 +49,18 @@ export function createSystemInfoTool(): Tool {
           },
           description: '要查询的类别。默认：all。',
         },
+        refresh: {
+          type: 'boolean',
+          description: '忽略进程级缓存、重新探测一遍（环境变化或上次探测失败后可用）。默认：false。',
+        },
       },
     },
     async execute(args: Record<string, unknown>): Promise<string> {
+      if (args.refresh) {
+        // 一次瞬时失败（超时/冷启动）曾会被永久缓存到进程结束，这里给出重采入口
+        resetSystemInfoCache();
+        cachedInfo = null;
+      }
       if (!cachedInfo) {
         cachedInfo = collectSystemInfo();
       }

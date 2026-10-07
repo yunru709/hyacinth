@@ -10,6 +10,7 @@
  * 标记：所有守卫函数带 `Symbol.for('hyacinth.security.guarded')`，供 canary 校验。
  */
 
+import { promisify } from 'node:util';
 import { currentAttribution } from './attribution.js';
 import { scrubEnv } from './env-guard.js';
 import { resolveSecurityMode } from './config.js';
@@ -77,19 +78,52 @@ function guardSpawnLike(orig: AnyFn, name: string): AnyFn {
   }, name);
 }
 
+/**
+ * 把 promisify 语义还给守卫包装函数 —— 但必须**经包装函数本身**（即仍走守卫）。
+ *
+ * 背景：Node 给 exec / execFile 挂了 util.promisify.custom；守卫把 child_process 上的
+ * 属性原地换成包装函数后该符号丢失 ⇒ promisify(wrapper) 退化成通用版 ⇒ resolve 出来的
+ * 是回调第一个参数（stdout 字符串）而不是 { stdout, stderr } ⇒ 调用方
+ * `const { stdout } = await ...` 恒为 undefined。
+ * 已在实际运行中击中：env-collector（system_info 全灭）、mcp:orphan-sweeper（孤儿进程
+ * 不再回收）、multimodal probeVideo、evolution GitManager（静默拿空）。
+ *
+ * ⚠️ 绝不能把 orig[promisify.custom] 原样贴回：那个 custom 的闭包里调的是 node 内部的
+ * exec/execFile，会**绕过本内核的进程策略检查**。必须重新构造一个走 wrapper 的版本。
+ */
+function restorePromisify<T extends AnyFn>(wrapper: T, orig: AnyFn): T {
+  const custom = (orig as unknown as Record<symbol, unknown>)[promisify.custom];
+  // 原始函数本就不可 promisify（spawn / spawnSync / execSync / execFileSync）⇒ 原样返回
+  if (typeof custom !== 'function') return wrapper;
+  Object.defineProperty(wrapper, promisify.custom, {
+    value: (...args: unknown[]) =>
+      new Promise((resolve, reject) => {
+        // exec/execFile 的 callback 都是末位参数，追加即可，无需区分签名
+        wrapper.call(undefined, ...args, (err: unknown, stdout: unknown, stderr: unknown) => {
+          if (err) reject(err);
+          else resolve({ stdout, stderr });
+        });
+      }),
+    enumerable: false,
+    configurable: true,
+  });
+  return wrapper;
+}
+
 /** exec(command[, options][, callback]) */
 function guardExec(orig: AnyFn, name: string): AnyFn {
-  return mark(function (this: unknown, command: unknown, a?: unknown, b?: unknown) {
+  const wrapper = mark(function (this: unknown, command: unknown, a?: unknown, b?: unknown) {
     preCheckProcess(command, []);
     const { options, callback } = splitOptsCallback(a, b);
     const merged = withGuardedEnv(options, currentAttribution());
     return callback !== undefined ? orig.call(this, command, merged, callback) : orig.call(this, command, merged);
   }, name);
+  return restorePromisify(wrapper, orig);
 }
 
 /** execFile(file[, args][, options][, callback]) 与 execFileSync（sync=true）同族 */
 function guardExecFileLike(orig: AnyFn, name: string, sync: boolean): AnyFn {
-  return mark(function (this: unknown, file: unknown, a?: unknown, b?: unknown, c?: unknown) {
+  const wrapper = mark(function (this: unknown, file: unknown, a?: unknown, b?: unknown, c?: unknown) {
     const hasArgs = Array.isArray(a);
     preCheckProcess(file, hasArgs ? (a as unknown[]) : []);
     if (hasArgs) {
@@ -107,6 +141,7 @@ function guardExecFileLike(orig: AnyFn, name: string, sync: boolean): AnyFn {
     if (!sync && callback) return orig.call(this, file, merged, callback);
     return orig.call(this, file, merged);
   }, name);
+  return restorePromisify(wrapper, orig);
 }
 
 /** 原地变异 child_process 模块对象的全部进程创建入口 */
