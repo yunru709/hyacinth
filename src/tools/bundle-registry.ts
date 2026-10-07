@@ -48,42 +48,59 @@ const BUILTIN_ALL: ToolBundle = {
   tools: [],  // 空 = 无过滤
 };
 
+/**
+ * 通用工具包 —— **始终加载，不可关闭**。
+ *
+ * 判据（2026-10-08 用户明确）：它存在的意义是「**不让 agent 失去自我管理能力**」——
+ * 无论激活了哪些包，agent 都必须能：动文件、进出模式、切换会话、自我调整
+ * （中断/重启/压缩）、看见自己的状态。凡属"场景专用功能"（定时任务、媒体生成…）
+ * 都不该挤进来：它们留在按需包里，而且**随时能用 activate_bundle 取回**。
+ *
+ * 所以往这里加工具前先问一句：**没有它，agent 会不会被困住？**
+ * 会 → 进 common；不会 → 进按需包。
+ * bundle-consistency.test.ts 的「守则③」把这条最小集固化成了断言。
+ */
 const BUILTIN_COMMON: ToolBundle = {
   name: 'common',
-  description: '通用工具包 — 始终加载，不可关闭',
+  description: '通用工具包 — 始终加载，不可关闭（agent 的自我管理最小集）',
   builtin: true,
   tools: [
+    // ── 基础操作：没有它什么都做不了 ──
     // probe 与 grep 同族（在文件里找东西）：grep 面向文本行，probe 面向二进制/
-    // 超大/编码混杂文件的"上下文窗口"，必须进 common 与 grep 同列，否则默认
-    // coding 包下模型看不到它。
+    // 超大/编码混杂文件的"上下文窗口"，必须进 common 与 grep 同列。
     'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep', 'probe',
+    // ── 包自管理：不被锁死在某一个包里（这就是"自我管理"本身）──
     'list_bundles', 'activate_bundle', 'deactivate_bundle',
     'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
-    'system_info', 'channel_info',
-    'interrupt', 'restart',
-    'add_task', 'list_tasks', 'remove_task', 'toggle_task',
-    'mcp_status', 'session_stats',
-    'diff_files', 'json_edit', 'http_request', 'archive',
-    // switch_mode 是**模式无关**的通用入口：任何模式下都必须能用它进出 ⇒ 必须进
-    // common（始终加载）。漏了它 = 默认 coding 包下"进得去、出不来" ✗
-    // （由 bundle-consistency 守卫测试当场抓出）。
-    'switch_mode',
-    'companion_mode', 'reset_companion_session', 'trigger_compression',
-    'disk_usage', 'view_image', 'view_media',
+    // ── 自身状态可观测 ──
+    'system_info', 'channel_info', 'mcp_status', 'session_stats',
+    // ── 回合／进程自控 ──
+    'interrupt', 'restart', 'trigger_compression',
     'process_list', 'process_kill', 'process_output',
+    // ── 模式进出 ──
+    // switch_mode 是**模式无关**的通用入口：任何模式下都必须能用它进出 ⇒ 漏了它
+    // = 默认 coding 包下"进得去、出不来" ✗（由 bundle-consistency 守卫测试抓出过）。
+    // companion_say 同理必须与 companion_mode 同处：否则进了陪伴模式却开不了口。
+    'switch_mode', 'companion_mode', 'reset_companion_session', 'companion_say',
+    // ── 会话自管理：知道自己在哪、能换、能开新分支 ──
+    'current_session', 'list_sessions', 'new_session', 'switch_session',
+    'delete_session', 'session_fork',
+    // ── 说话与发问（交付结论、向用户求确认）──
+    'say', 'ask_user',
+    // ── 撤销自己做过的事 ──
     'rollback_status', 'rollback',
+    // ── 工作流组织 ──
     'flow_start', 'flow_add', 'flow_complete',
-    'session_fork',
-    'ask_user',
-    // say 与 ask_user 同属核心交互工具：交付结论并结束回合，
-    // 必须进 common（始终加载）否则默认 coding 包下模型看不到它。
-    'say',
+    // ── 通用文件／网络处理（不属于任何专域场景）──
+    'diff_files', 'json_edit', 'http_request', 'archive', 'disk_usage',
+    // ── 感知：能不能"看见"用户给的东西，不该取决于激活了哪个包 ──
+    'view_image', 'view_media',
+    // ── 渠道外发 ──
+    'send_channel_message',
     // ── 2026-09-19 由 bundle-consistency 守卫测试揪出的漂移 ──
     // 现象：**同一族里只进了一半**（session_stats/session_fork/channel_info/
     // companion_mode/view_image 早在此处，其余成员却漏了）→ 默认 coding 模式下
     // 这些工具直接不可见。手维护清单没有守门测试，就会这样。
-    'current_session', 'list_sessions', 'new_session', 'switch_session', 'delete_session',
-    'send_channel_message', 'companion_say', 'generate_media',
   ],
 };
 
@@ -150,10 +167,38 @@ const BUILTIN_DATABASE: ToolBundle = {
   tools: ['db_query'],
 };
 
+/**
+ * 定时任务 —— 按需激活（2026-10-08 从 common 拆出）。
+ *
+ * 为什么不在 common：按判据「没有它 agent 会不会被困住」—— **不会**。定时任务是
+ * 功能，不能定时并不影响 agent 管理自己（而"能不能切包 / 切会话 / 中断自己"才影响）。
+ * 需要时 activate_bundle 一步取回，不会失去能力。
+ */
+const BUILTIN_SCHEDULE: ToolBundle = {
+  name: 'schedule',
+  description: '定时任务 — 让 agent 在未来某刻自动开工（按需激活）',
+  builtin: true,
+  tools: ['add_task', 'list_tasks', 'remove_task', 'toggle_task'],
+};
+
+/**
+ * 媒体生成 —— 按需激活（2026-10-08 从 common 拆出）。
+ *
+ * 注意区分：**"看见"**（view_image / view_media）留在 common —— 感知用户给的
+ * 东西不该取决于激活了哪个包；**"生成"**（图片/视频/音频）是创作场景，拆出去。
+ */
+const BUILTIN_MEDIA: ToolBundle = {
+  name: 'media',
+  description: '媒体生成 — 图片 / 视频 / 音频（按需激活）',
+  builtin: true,
+  tools: ['generate_media'],
+};
+
 /** 全部内置包定义（顺序无关；load() 用它做缺项补齐与工具列表回填） */
 const BUILTIN_BUNDLES: ToolBundle[] = [
   BUILTIN_ALL, BUILTIN_COMMON, BUILTIN_CODING,
   BUILTIN_AGENT, BUILTIN_ADMIN, BUILTIN_OFFICE, BUILTIN_DATABASE, BUILTIN_KNOWLEDGE,
+  BUILTIN_SCHEDULE, BUILTIN_MEDIA,
 ];
 
 /** 内置包名称集合（供测试与 UI 判定） */
@@ -167,7 +212,7 @@ const DEFAULT_CONFIG: ToolBundlesConfig = {
   // 配置结构版本。用于把「已存在的旧配置」迁移到新的默认工具包，
   // 同时不会覆盖用户显式选择过的全量模式。
   configVersion: 2,
-  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN, office: BUILTIN_OFFICE, database: BUILTIN_DATABASE, knowledge: BUILTIN_KNOWLEDGE },
+  bundles: { all: BUILTIN_ALL, common: BUILTIN_COMMON, coding: BUILTIN_CODING, agent: BUILTIN_AGENT, admin: BUILTIN_ADMIN, office: BUILTIN_OFFICE, database: BUILTIN_DATABASE, knowledge: BUILTIN_KNOWLEDGE, schedule: BUILTIN_SCHEDULE, media: BUILTIN_MEDIA },
 };
 
 
@@ -349,7 +394,16 @@ export class ToolBundleRegistry {
         // Existing builtin: merge tool list (ensure builtin tools are always present,
         // preserving any user-added tools)
         const existing = parsed.bundles[b.name];
-        existing.tools = [...new Set([...b.tools, ...existing.tools])];
+        // 内置包的工具**归属以代码为准**：盘上多出来的条目只有两种身份 ——
+        //   ① 用户自己加的自定义工具（不属于任何内置包）→ 保留
+        //   ② 代码已把该工具挪去别的内置包（2026-10-08：定时任务 common → schedule、
+        //      媒体生成 → media）→ 剔除。否则并集会把盘上的旧条目加回来，拆包白拆 ✗
+        const builtinElsewhere = new Set(
+          BUILTIN_BUNDLES.filter((x) => x.name !== b.name).flatMap((x) => x.tools),
+        );
+        existing.tools = [...new Set([...b.tools, ...existing.tools])].filter(
+          (t: string) => b.tools.includes(t) || !builtinElsewhere.has(t),
+        );
         // 元数据以代码为准：description 原先不参与合并 ⇒ 盘上文件里的历史文案会一直
         // 显示在 list_bundles / UI 里（实测 coding 包长期显示旧描述"依赖分析"，
         // 而代码早已改成"交叉引用"）。工具列表会并回，元数据同样得跟上。
