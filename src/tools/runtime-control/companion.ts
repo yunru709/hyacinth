@@ -6,6 +6,7 @@ import { switchToMode } from '../../context/mode-switch.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { RuntimeConfigCenter } from '../../runtime/config-center.js';
 
 // 陪伴模式工具 (2)
 
@@ -81,12 +82,24 @@ export function createCompanionModeTool(
               } catch { return []; }
             })();
 
-            // 确定目标角色名
+            // 确定目标角色名。优先级：显式 name > 配置默认角色 > 上次用过 > 第一个可用。
+            // 「配置默认角色」= 设置页的 companion.defaultCharacter。该键此前是**死的**
+            // （WebUI 能选、无人读），这里接上。它的空值在 UI 上语义是"自动（跟随上次）"，
+            // 故仅非空时参与判定，且必须排在"跟随上次"之前 —— 用户既然显式指定了默认角色，
+            // 就不该被"上次用过"覆盖掉。
             const charName: string | null = (() => {
               if (typeof args.name === 'string' && args.name.trim()) return args.name.trim();
               if (availableChars.length === 1) return availableChars[0];
               if (availableChars.length === 0) return null;
-              // 多个可用 → 优先上次用过的
+              try {
+                const configured = RuntimeConfigCenter.getInstance().get('companion.defaultCharacter');
+                if (typeof configured === 'string' && configured && availableChars.includes(configured)) {
+                  return configured;
+                }
+              } catch {
+                // 配置中心尚未初始化（如单测环境）→ 忽略，继续走下面的兜底
+              }
+              // 自动：优先上次用过的
               try {
                 const last = fs.readFileSync(path.join(companionRoot, '.last-character'), 'utf-8').trim();
                 if (last && availableChars.includes(last)) return last;
