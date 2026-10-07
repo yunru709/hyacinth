@@ -74,10 +74,20 @@ export class GeminiProvider implements Provider {
       );
     }
 
-    // SDK 的选项名是 baseURL（大写 URL）；对外统一叫 baseUrl，与其余 Provider 保持一致。
+    // ⚠️ 字段名必须是 httpOptions.baseUrl —— @google/genai 的 GoogleGenAIOptions
+    // **没有顶层 baseURL**（见 node_modules/@google/genai/dist/genai.d.ts：
+    // `interface GoogleGenAIOptions { ...; httpOptions?: HttpOptions }`，
+    // 而 `interface HttpOptions { baseUrl?: string; ... }`）。
+    // 2026-10-07 实测（假上游对照）：顶层写法被 SDK **静默忽略** —— 自定义端点/代理
+    // 完全不生效，请求照旧打 generativelanguage.googleapis.com（假上游一个请求都收不到，
+    // 直接 fetch failed）；又因这里用了对象展开，绕过了 TS 的**多余属性检查**，tsc 从不报错。
+    // 换成 httpOptions.baseUrl 后，同一假上游能正常收到
+    // POST /v1beta/models/<model>:streamGenerateContent?alt=sse。
+    // 回归保护：src/provider/stream-stop-synthesis.test.ts 的 Gemini 用例走假上游，
+    // 若有人改回顶层写法，该用例会立刻红。
     this.client = new GoogleGenAI({
       apiKey,
-      ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
+      ...(opts.baseUrl ? { httpOptions: { baseUrl: opts.baseUrl } } : {}),
     });
     // 2026-10-02：移除第三层硬编码模型名（'gemini-3.6-flash'）—— 同 anthropic/openai。
     this.model = opts.model ?? 'unknown';

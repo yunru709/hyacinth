@@ -10,32 +10,16 @@
  *   ① 断流 ⇒ 必须合成 STOP reason='incomplete'（且补发被切断的 tool call，标 incomplete）
  *   ② 正常收尾 ⇒ **不得**被误判成 incomplete（否则每次正常回复都会白续写 3 次）
  *
- * 实现方式：用**假 HTTP 上游**驱动真实 provider 代码路径（4 个 provider 都支持
- * baseUrl/endpoint 注入），只有 Gemini 因 SDK 走 vi.mock（见文件末尾说明）。
- * 格式均先经探针确认，不是猜的。
+ * 实现方式：**全部 5 个 provider 都用假 HTTP 上游**驱动真实代码路径（各家都支持
+ * baseUrl / endpoint 注入），没有任何 vi.mock —— 格式均先经探针确认，不是猜的。
+ *
+ * ⚠️ Gemini 能走假上游这件事本身就是一条断言：它依赖 gemini.ts 用
+ * `httpOptions.baseUrl`（而不是被 SDK 静默忽略的顶层 `baseURL`）注入端点。
+ * 若哪天有人把它改回顶层写法，本文件会立刻红 —— 这正是我们想要的回归保护。
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-
-// ── Gemini 的 SDK mock（vi.mock 会被提升，故用 vi.hoisted 传递可控 chunk）──────
-// 注：gemini.ts 用 `...(opts.baseUrl ? { baseURL: opts.baseUrl } : {})`，而 @google/genai
-// 的 GoogleGenAIOptions **没有顶层 baseURL**（正确写法是 httpOptions.baseUrl）⇒ 该字段
-// 被 SDK 静默忽略、假服务器收不到任何请求。这是独立缺陷，另行上报；此处绕开它。
-const hoisted = vi.hoisted(() => ({ geminiChunks: [] as unknown[] }));
-vi.mock('@google/genai', () => ({
-  GoogleGenAI: class {
-    chats = {
-      create: () => ({
-        sendMessageStream: async () => ({
-          async *[Symbol.asyncIterator]() {
-            for (const c of hoisted.geminiChunks) yield c;
-          },
-        }),
-      }),
-    };
-  },
-}));
 
 import { OpenAIProvider } from './openai.js';
 import { LocalProvider } from './local.js';
@@ -49,6 +33,8 @@ const MSG: Message = { role: 'user', content: [{ type: 'text', text: 'hi' }] };
 // ── 假上游：按 URL 分发各协议格式；clean=true 时给完整收尾信号 ──────────────
 type Mode = 'cut' | 'clean';
 let mode: Mode = 'cut';
+/** Gemini 的收尾原因（undefined = 不发，模拟断流） */
+let geminiFinish: string | undefined;
 
 const sse = (o: unknown): string => `data: ${JSON.stringify(o)}\n\n`;
 
@@ -101,6 +87,19 @@ function anthropicStream(clean: boolean): string {
   return out;
 }
 
+/** Gemini（@google/genai SSE）：一段文本 + 可选的 finishReason */
+function geminiStream(): string {
+  return sse({
+    candidates: [
+      {
+        content: { parts: [{ text: '部分内容' }], role: 'model' },
+        ...(geminiFinish ? { finishReason: geminiFinish } : {}),
+      },
+    ],
+    usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 },
+  });
+}
+
 let server: http.Server;
 let base = '';
 
@@ -110,7 +109,9 @@ beforeAll(async () => {
     req.on('end', () => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       const url = req.url ?? '';
-      res.write(url.includes('/messages') ? anthropicStream(mode === 'clean') : openAiStream(mode === 'clean'));
+      if (url.includes(':streamGenerateContent')) res.write(geminiStream());
+      else if (url.includes('/messages')) res.write(anthropicStream(mode === 'clean'));
+      else res.write(openAiStream(mode === 'clean'));
       res.end();
     });
   });
@@ -124,6 +125,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   mode = 'cut';
+  geminiFinish = undefined;
 });
 
 async function collect(p: { createStream(m: Message[]): AsyncIterable<StreamEvent> }): Promise<StreamEvent[]> {
@@ -136,19 +138,25 @@ const stopsOf = (evs: StreamEvent[]) => evs.filter((e) => e.type === 'STOP') as 
 const toolsOf = (evs: StreamEvent[]) =>
   evs.filter((e) => e.type === 'TOOL_USE') as unknown as Array<{ name: string; incomplete?: boolean }>;
 
-// ── 4 个支持 endpoint 注入的 provider ─────────────────────────────────────
+type Maker = () => { createStream(m: Message[]): AsyncIterable<StreamEvent> };
+
+// ── 5 个 provider（全部走假上游的真实代码路径）──────────────────────────
 
 describe('断流合成 STOP：走假上游的真实 provider 路径', () => {
-  const factories: Array<[string, () => { createStream(m: Message[]): AsyncIterable<StreamEvent> }]> = [
+  const factories: Array<[string, Maker]> = [
     ['OpenAIProvider', () => new OpenAIProvider({ apiKey: 'test', baseUrl: base, model: 'gpt-5.5' })],
-    // 本地服务：8080 端口 → llamacpp 后端；这里显式给 /v1 让 openai SDK 打到 /v1/chat/completions
+    // 本地服务：显式给 /v1 让 openai SDK 打到 /v1/chat/completions
     ['LocalProvider', () => new LocalProvider({ baseUrl: `${base}/v1`, model: 'test-model' })],
     ['LlamaCppProvider', () => new LlamaCppProvider({ endpoint: base, model: 'test-model' })],
     ['AnthropicProvider', () => new AnthropicProvider({ apiKey: 'test', baseUrl: base, model: 'claude-sonnet-5' })],
+    // 这条同时守住 gemini.ts 的端点注入必须走 httpOptions.baseUrl（否则假上游收不到请求、
+    // geminiFinish 无从生效，下面的断言会直接红）
+    ['GeminiProvider', () => new GeminiProvider({ apiKey: 'test', baseUrl: base, model: 'gemini-3.6-flash' })],
   ];
 
   it.each(factories)('%s：流结束但无收尾信号 ⇒ 恰好一个 STOP 且 reason=incomplete', async (_name, make) => {
     mode = 'cut';
+    geminiFinish = undefined;
     const evs = await collect(make());
     const stops = stopsOf(evs);
     expect(stops, '必须合成 STOP').toHaveLength(1);
@@ -157,7 +165,7 @@ describe('断流合成 STOP：走假上游的真实 provider 路径', () => {
     expect(evs[evs.length - 1]!.type).toBe('STOP');
   });
 
-  it.each(factories)('%s：正常收尾 ⇒ 不得被误判成 incomplete', async (_name, make) => {
+  it.each(factories.slice(0, 4))('%s：正常收尾 ⇒ 不得被误判成 incomplete', async (_name, make) => {
     mode = 'clean';
     const evs = await collect(make());
     const stops = stopsOf(evs);
@@ -165,8 +173,9 @@ describe('断流合成 STOP：走假上游的真实 provider 路径', () => {
     expect(stops[0]!.reason, '正常收尾不该被改写成 incomplete').not.toBe('incomplete');
   });
 
-  // tool call 补发只对「有累积」的三个实现成立（anthropic 在 content_block_stop 即时 emit）
-  const accumulating: Array<[string, () => { createStream(m: Message[]): AsyncIterable<StreamEvent> }]> = [
+  // tool call 补发只对「有累积」的三个实现成立
+  // （anthropic 在 content_block_stop 即时 emit；gemini 在 part.functionCall 即时 emit）
+  const accumulating: Array<[string, Maker]> = [
     ['OpenAIProvider', () => new OpenAIProvider({ apiKey: 'test', baseUrl: base, model: 'gpt-5.5' })],
     ['LocalProvider', () => new LocalProvider({ baseUrl: `${base}/v1`, model: 'test-model' })],
     ['LlamaCppProvider', () => new LlamaCppProvider({ endpoint: base, model: 'test-model' })],
@@ -182,38 +191,32 @@ describe('断流合成 STOP：走假上游的真实 provider 路径', () => {
   });
 });
 
-// ── Gemini：SDK 走 mock，但断言的是**真实的归一逻辑** ────────────────────
+// ── Gemini：按 finishReason 归一（原实现无条件 end_turn）──────────────────
 
 describe('GeminiProvider：按 finishReason 归一（原实现无条件 end_turn）', () => {
-  const chunk = (finishReason?: string) => ({
-    candidates: [
-      { content: { parts: [{ text: '部分内容' }], role: 'model' }, ...(finishReason ? { finishReason } : {}) },
-    ],
-    usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 },
-  });
-  const make = () => new GeminiProvider({ apiKey: 'test', model: 'gemini-3.6-flash' });
+  const make: Maker = () => new GeminiProvider({ apiKey: 'test', baseUrl: base, model: 'gemini-3.6-flash' });
 
   it('从未拿到 finishReason ⇒ incomplete（断流）', async () => {
-    hoisted.geminiChunks = [chunk()];
+    geminiFinish = undefined;
     const stops = stopsOf(await collect(make()));
     expect(stops).toHaveLength(1);
     expect(stops[0]!.reason).toBe('incomplete');
   });
 
   it('finishReason=MAX_TOKENS ⇒ 归一为 length（交给截断保护提示+续写）', async () => {
-    hoisted.geminiChunks = [chunk('MAX_TOKENS')];
+    geminiFinish = 'MAX_TOKENS';
     const stops = stopsOf(await collect(make()));
     expect(stops[0]!.reason, '被截断必须显形为 length，否则截断保护对 Gemini 永不生效').toBe('length');
   });
 
   it('finishReason=STOP ⇒ end_turn（正常）', async () => {
-    hoisted.geminiChunks = [chunk('STOP')];
+    geminiFinish = 'STOP';
     const stops = stopsOf(await collect(make()));
     expect(stops[0]!.reason).toBe('end_turn');
   });
 
   it('finishReason=SAFETY ⇒ 原样小写（不是长度问题，不该建议调上限）', async () => {
-    hoisted.geminiChunks = [chunk('SAFETY')];
+    geminiFinish = 'SAFETY';
     const stops = stopsOf(await collect(make()));
     expect(stops[0]!.reason).toBe('safety');
   });
