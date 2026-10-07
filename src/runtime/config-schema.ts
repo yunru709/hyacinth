@@ -16,8 +16,6 @@ export interface FullConfig {
   provider: {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
     routeMode: 'auto' | 'manual';
-    /** 自动选择模型（等价于 routeMode='auto'） */
-    autoModel: boolean;
     /** 默认生成模式 */
     defaultMode: 'balanced' | 'creative';
     /** 温度 0.0~2.0 */
@@ -32,8 +30,6 @@ export interface FullConfig {
     streaming: boolean;
     /** JSON 模式 */
     jsonMode: boolean;
-    /** 降级模型 */
-    fallbackModel: string;
     /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
     /** 通用字段（provider 顶层兜底；provider.<type>.fields 优先） */
@@ -70,8 +66,6 @@ export interface FullConfig {
     maxTurns: number; // 100
     maxContext: number; // 200000
     maxMessages: number; // 10000
-    /** 响应超时（秒） */
-    responseTimeoutSec: number;
     /** 每渠道会话策略（SessionService 注入源）：sessionKey: conversation|single|explicit；sharedLoop?: boolean */
     channelPolicies: Record<string, { sessionKey: 'conversation' | 'single' | 'explicit'; sharedLoop?: boolean }>;
   };
@@ -96,12 +90,6 @@ export interface FullConfig {
     /** 临时记事本（Zone 5）注入上限（字符）；超出截断并标注。见 utils/scratchpad.ts */
     scratchpadMaxChars: number;
     zone4BudgetRatio: number;     // 0.5  — Zone4 检索预算占 maxContextTokens 比例
-    /** 意图块模式（intent_block conditional section） */
-    intentBlock: boolean;
-    /** 跨会话长期记忆 */
-    longTermMemory: boolean;
-    /** 对话连续性：strict | relaxed | user-only */
-    continuity: 'strict' | 'relaxed' | 'user-only';
     /** 最大压缩轮数 */
     maxCompressRounds: number;
     /** 工具结果保护窗口（条） */
@@ -184,12 +172,8 @@ export interface FullConfig {
       /** Number of characters to include in preview. Default 500. */
       previewChars: number;
     };
-    /** 默认折叠工具调用与结果卡片 */
-    collapseTools: boolean;
     /** 自动去除 markdown fence 与多余换行 */
     sanitize: boolean;
-    /** 是否启用工具调用 */
-    toolUse: boolean;
 
     /** 内置工具参数默认值（调用参数可覆盖；详见 tools/tool-config.ts） */
     read: {
@@ -257,8 +241,6 @@ export interface FullConfig {
     level: 'debug' | 'info' | 'warn' | 'error' | 'off';
     /** 是否在 stats.json 中记录每轮上下文缓存的命中详情。默认 false（调试用途）。 */
     logCacheHits: boolean;
-    /** 在控制台输出重试与修复事件 */
-    repairLog: boolean;
   };
 
   repair: {

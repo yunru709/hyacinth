@@ -18,7 +18,6 @@ export function getDefaultConfig(): FullConfig {
     provider: {
       active: 'anthropic',
       routeMode: 'auto',
-      autoModel: false,
       defaultMode: 'balanced',
       temperature: 0.7,
       topP: 0.95,
@@ -26,7 +25,6 @@ export function getDefaultConfig(): FullConfig {
       presencePenalty: 0,
       streaming: true,
       jsonMode: false,
-      fallbackModel: 'claude-3-haiku',
       userId: DEFAULT_USER_ID,
       anthropic: { model: providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
@@ -50,7 +48,6 @@ export function getDefaultConfig(): FullConfig {
       maxTurns: 100,
       maxContext: 200000,
       maxMessages: 10000,
-      responseTimeoutSec: 60,
       // 每渠道会话策略（SessionService 注入源）：
       //   - conversation：按对话身份派生（群=chat:<chatId>[:thread]，私聊=user:<userId>）
       //   - single：单会话渠道（微信 ClawBot），恒为 default 键
@@ -81,9 +78,6 @@ export function getDefaultConfig(): FullConfig {
       zone5TailBudgetRatio: 0.15,
       scratchpadMaxChars: 8000,
       zone4BudgetRatio: 0.5,
-      intentBlock: false,
-      longTermMemory: true,
-      continuity: 'strict',
       maxCompressRounds: 3,
       trimWindow: 6,
       poolMinHistory: 200,
@@ -116,9 +110,7 @@ export function getDefaultConfig(): FullConfig {
     agents: { disabled: [] },
     tools: {
       disabled: [],
-      collapseTools: true,
       sanitize: true,
-      toolUse: true,
       resultBuffer: {
         enabled: true,
         threshold: 16384,        // 16 KB
@@ -146,7 +138,7 @@ export function getDefaultConfig(): FullConfig {
       maxOutputTokens: localCfg.maxOutputTokens,
       backend: localCfg.backend,
     },
-    logging: { level: 'info', logCacheHits: false, repairLog: true },
+    logging: { level: 'info', logCacheHits: false },
     repair: {
       scavenge: {
         enabled: true,

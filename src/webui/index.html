@@ -636,22 +636,8 @@
 
 
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">意图块模式（intent_block）</div>
-                      <div class="settings-desc">激活意图块 conditional section，使用聚焦人格与关键词历史过滤</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-intent-block" aria-label="启用意图块模式">
-                  </div>
 
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">启用长期记忆</div>
-                      <div class="settings-desc">跨会话保留关键事实与偏好（Zone 1 memory section）</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-long-term-memory" checked aria-label="启用长期记忆">
-                  </div>
                 </section>
 
                 <section class="settings-card">
@@ -897,21 +883,7 @@
                     </div>
                   </div>
 
-                  <div class="settings-row">
-                    <label for="input-response-timeout" class="settings-label">响应超时</label>
-                    <div class="flex items-center">
-                      <input id="input-response-timeout" type="number" class="settings-input w-20 text-right" data-dom-id="input-response-timeout" value="60" min="5" max="600" step="5">
-                      <span class="settings-unit">秒</span>
-                    </div>
-                  </div>
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">折叠工具调用</div>
-                      <div class="settings-desc">默认收起工具调用与结果卡片</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-collapse-tools" checked aria-label="折叠工具调用">
-                  </div>
 
                   <div class="settings-row">
                     <div>
@@ -921,14 +893,6 @@
                     <input type="checkbox" class="settings-toggle" data-dom-id="toggle-reasoning-tokens" aria-label="显示推理令牌">
                   </div>
 
-                  <div class="settings-row">
-                    <label for="select-continuity" class="settings-label">对话连续性</label>
-                    <select id="select-continuity" class="settings-select w-40" data-dom-id="select-continuity">
-                      <option value="strict" selected>严格</option>
-                      <option value="relaxed">宽松</option>
-                      <option value="user-only">仅用户</option>
-                    </select>
-                  </div>
                 </section>
               </div>
 
@@ -1169,21 +1133,7 @@
                     <input type="checkbox" class="settings-toggle" data-dom-id="toggle-json-mode" aria-label="JSON 模式">
                   </div>
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">工具调用</div>
-                      <div class="settings-desc">允许模型调用已注册工具</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-tool-use" checked aria-label="工具调用">
-                  </div>
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">自动选择模型</div>
-                      <div class="settings-desc">根据提示复杂度切换模型</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-auto-model" aria-label="自动选择模型">
-                  </div>
                 </section>
               </div>
 
@@ -1213,14 +1163,6 @@
                     </div>
                   </div>
 
-                  <div class="settings-row">
-                    <label for="select-fallback-model" class="settings-label">降级模型</label>
-                    <select id="select-fallback-model" class="settings-select w-48" data-dom-id="select-fallback-model">
-                      <option value="claude-3-haiku" selected>claude-3-haiku</option>
-                      <option value="gpt-4o-mini">gpt-4o-mini</option>
-                      <option value="current">当前模型</option>
-                    </select>
-                  </div>
 
                   <div class="settings-row">
                     <div>
@@ -1230,13 +1172,6 @@
                     <input type="checkbox" class="settings-toggle" data-dom-id="toggle-sanitize" checked aria-label="清理输出">
                   </div>
 
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">记录修复日志</div>
-                      <div class="settings-desc">在控制台输出重试与修复事件</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-repair-log" checked aria-label="记录修复日志">
-                  </div>
                 </section>
 
                 <section class="settings-card">

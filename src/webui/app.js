@@ -1905,9 +1905,7 @@
     ['toggle-zone4', 'kb.zone4', 'bool'],
     ['select-default-context-mode', 'startup.defaultMode', 'str'],
     ['select-companion-character', 'companion.defaultCharacter', 'str'],
-    ['toggle-intent-block', 'context.intentBlock', 'bool'],
     ['toggle-bypass-agents', 'bypass.orchestratorEnabled', 'bool'],
-    ['toggle-long-term-memory', 'context.longTermMemory', 'bool'],
     ['input-max-context', 'session.maxContext', 'num'],
     // 单次最大输出（wire 的 max_tokens）。0 = 使用当前模型的上限（默认行为）。
     ['input-max-output', 'provider.maxOutputTokens', 'num'],
@@ -1919,9 +1917,7 @@
     // 轮次 tab
     ['input-max-turns', 'session.maxTurns', 'num'],
     ['input-max-messages-turns', 'session.maxMessages', 'num'],
-    ['input-response-timeout', 'session.responseTimeoutSec', 'num'],    ['toggle-collapse-tools', 'tools.collapseTools', 'bool'],
     ['toggle-reasoning-tokens', 'provider.showThinking', 'bool'],
-    ['select-continuity', 'context.continuity', 'str'],
     // 压缩 tab
     ['input-compress-threshold', 'context.compressThreshold', 'num'],
     ['input-emergency-threshold', 'context.emergencyThreshold', 'num'],
@@ -1936,14 +1932,10 @@
     ['input-presence-penalty', 'provider.presencePenalty', 'num'],
     ['toggle-streaming', 'provider.streaming', 'bool'],
     ['toggle-json-mode', 'provider.jsonMode', 'bool'],
-    ['toggle-tool-use', 'tools.toolUse', 'bool'],
-    ['toggle-auto-model', 'provider.autoModel', 'bool'],
     // 修复 tab
     ['toggle-auto-retry', 'resiliency.retry.enabled', 'bool'],
     ['input-max-retries', 'resiliency.retry.maxRetries', 'num'],
-    ['select-fallback-model', 'provider.fallbackModel', 'str'],
     ['toggle-sanitize', 'tools.sanitize', 'bool'],
-    ['toggle-repair-log', 'logging.repairLog', 'bool'],
   ];
 
   // Zone 开关（zone1/2/3/5）：真源是 .agent/context-manifest.json 的 zone.enabled
