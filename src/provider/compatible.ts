@@ -198,6 +198,43 @@ export class OpenAICompatibleProvider implements Provider {
       { id: string; name: string; arguments: string }
     >();
 
+    // 是否收到过 finish_reason。⚠️ 流"自然结束"（异步迭代器 done）**不等于**上游正常收尾：
+    // 中转站/网关可能提前关闭连接，此时既没有 finish_reason 也没有 usage 块。
+    // 以前这种收尾不留任何痕迹（不 yield STOP ⇒ stopReason 落空 ⇒ finalize 默认成
+    // end_turn），是"话说到一半就没了、还完全没有提示"的根因之一（2026-10-07 实测）。
+    // 流结束时靠它判断要不要合成 STOP —— 见下方循环后的收尾块。
+    let sawFinishReason = false;
+
+    /**
+     * 收集并清空已累积的工具调用。
+     *
+     * 返回数组而非直接 `yield` —— 生成器函数体内，普通闭包不能 yield（语法限制），
+     * 因此由调用点拿到数组后逐个 yield。
+     *
+     * @param cutOff 是否发生在「流被提前掐断」场景（此时参数多半不完整，一律标 incomplete）
+     */
+    const collectToolCallEvents = (cutOff: boolean): StreamEvent[] => {
+      const out: StreamEvent[] = [];
+      for (const [, acc] of toolCallAccumulators) {
+        const raw = acc.arguments || '';
+        const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
+        if (!complete) {
+          logToolArgsWarning('compatible', acc.name, raw, error);
+        }
+        // 仍然 emit（保住与 assistant 消息中 tool_use 的配对，也让模型看见自己截断在哪），
+        // 但带上 incomplete 标记 —— 是否执行交由消费方裁决，不再默认"允许部分执行"。
+        out.push({
+          type: 'TOOL_USE',
+          id: acc.id,
+          name: acc.name,
+          input: recovered,
+          incomplete: !complete || cutOff,
+        });
+      }
+      toolCallAccumulators.clear();
+      return out;
+    };
+
     try {
       const stream = await this.client.chat.completions.create(params, { signal });
 
@@ -258,25 +295,23 @@ export class OpenAICompatibleProvider implements Provider {
 
         // finish_reason
         if (choice.finish_reason) {
-          for (const [, acc] of toolCallAccumulators) {
-            const raw = acc.arguments || '';
-            const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
-            if (!complete) {
-              logToolArgsWarning('compatible', acc.name, raw, error);
-            }
-            // 仍然 emit（保住与 assistant 消息中 tool_use 的配对，也让模型看见自己截断在哪），
-            // 但带上 incomplete 标记 —— 是否执行交由消费方裁决，不再默认"允许部分执行"。
-            yield {
-              type: 'TOOL_USE',
-              id: acc.id,
-              name: acc.name,
-              input: recovered,
-              incomplete: !complete || choice.finish_reason === 'length',
-            };
-          }
-          toolCallAccumulators.clear();
+          sawFinishReason = true;
+          for (const ev of collectToolCallEvents(choice.finish_reason === 'length')) yield ev;
           yield { type: 'STOP', reason: choice.finish_reason };
         }
+      }
+
+      // ── 收尾：流自然结束，但全程没收到 finish_reason ⇒ 上游提前断流 ──────────
+      // 正常的 OpenAI 兼容流，最后一个 chunk 必带 finish_reason（include_usage 下同时还带
+      // usage）。没有它 = 中转站/网关把连接提前关了。此时**必须**合成一个 STOP：
+      // 否则 stopReason 落空 ⇒ finalize 的 `state.stopReason || 'end_turn'` 把它当作
+      // 正常收尾 ⇒ 截断续写保护（只认 length/max_tokens/incomplete）完全不触发
+      // ⇒ 用户侧只看到"话说到一半就没了"，且没有任何提示（2026-10-07 实测事故）。
+      // reason 取 'incomplete' 而非 'length'：上游并没有告诉我们为什么停，
+      // 把它冒充成"长度截断"会误导用户去 /maxoutput 调上限（白费力气）。
+      if (!sawFinishReason) {
+        for (const ev of collectToolCallEvents(true)) yield ev;
+        yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
       if (error instanceof OpenAI.APIError) {

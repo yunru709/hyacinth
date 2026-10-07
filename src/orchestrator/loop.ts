@@ -1434,7 +1434,7 @@ export class AgentLoop {
           ? Math.max(0, Math.floor(configuredMaxContinue)) // 负数/小数归一：负数等同关掉
           : 3; // 兜底值与 defaults.ts 的 repair.truncation.maxContinue 保持一致
         const TRUNCATION_CONTINUE_PROMPT =
-          '[System] Your previous message was cut off by the per-request output limit, '
+          '[System] Your previous message was cut off mid-way, '
           + 'so it is incomplete. Continue from exactly where it stopped — do NOT repeat what '
           + 'you already wrote (start mid-sentence if needed). If a tool call was truncated, '
           + 're-issue it with a smaller payload instead of retrying it as-is.';
@@ -1442,14 +1442,25 @@ export class AgentLoop {
         if (result.toolCalled) {
           truncationContinues = 0; // 有工具调用 = 已恢复正常推进，计数清零
         }
-        if (result.stop && (result.stopReason === 'length' || result.stopReason === 'max_tokens')) {
+        // ⚠️ 2026-10-07 扩充：除「长度截断」外还必须认「流提前结束」。
+        // 上游提前关连接时 compatible 族收不到 finish_reason，过去 stopReason 落空 ⇒
+        // finalize 默认成 end_turn ⇒ 这条路径**完全静默**（实测：思考型模型经聚合中转时
+        // 推理期静默 430s、被 idle 超时反复 abort，最终正文只出 272 字且无任何提示）。
+        // 现在 compatible 会合成 STOP reason='incomplete'，此处必须一并接管 ——
+        // 否则"合成 STOP"只是换了个说法的静默。
+        const isLengthCut = result.stopReason === 'length' || result.stopReason === 'max_tokens';
+        const isStreamCut = result.stopReason === 'incomplete';
+        if (result.stop && (isLengthCut || isStreamCut)) {
           const canContinue = truncationContinues < MAX_TRUNCATION_CONTINUES;
           this.outputHandler?.onStatus?.(
-            `Output was cut off by the per-request limit (${result.stopReason}). `
+            (isLengthCut
+              ? `Output was cut off by the per-request limit (${result.stopReason}). `
+              : `Output was cut off — the stream ended before the model finished (${result.stopReason}). `)
             + (canContinue
               ? `Asking the model to continue (${truncationContinues + 1}/${MAX_TRUNCATION_CONTINUES}). `
               : `Already continued ${truncationContinues} times — stopping here. `)
-            + 'Raise the limit with /maxoutput if this keeps happening.',
+            // 只有长度截断才有"调大上限"这条出路；连接中断调 max_tokens 是白费力气。
+            + (isLengthCut ? 'Raise the limit with /maxoutput if this keeps happening.' : ''),
             'warn',
           );
           if (canContinue) {

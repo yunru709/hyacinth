@@ -17,6 +17,7 @@ import { createLogger } from '../logging/logger.js';
 import type { Logger } from '../logging/logger.js';
 import type { RetryConfig } from './retry.js';
 import { DEFAULT_RETRY_CONFIG } from './retry.js';
+import { getModelInfo } from './catalog.js';
 
 // ─── Config types ──────────────────────────────────────────────────
 
@@ -32,14 +33,61 @@ export interface CircuitBreakerConfig {
    * 没有任何事件产出（网络半开 / 服务端挂起），主动中止底层流并抛错，
    * 走重试/降级链，避免无限等待 SDK 默认超时（OpenAI=10min）。
    * 0 = 禁用（不检查空闲）。
+   *
+   * ⚠️ 缺省值不再写死 90s，改由 resolveIdleTimeoutMs() 按模型思考能力自适应
+   * —— 见下方常量注释里 2026-10-07 的实测事故。
    */
   idleTimeoutMs: number;
+}
+
+/**
+ * 非思考模型的默认流空闲超时（ms）：2 分钟。
+ * 这类模型逐 token 连续吐字，长时间静默几乎必然是连接问题。
+ */
+export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * 思考型模型的默认流空闲超时（ms）：10 分钟。
+ *
+ * 2026-10-07 实测事故（本文件曾被写死 90s，直接把长推理打残）：
+ * DeepSeek-V4.1-Flash（思考模式）经聚合中转（commandcode）时，**推理阶段会
+ * 长时间一个 delta 都不推** —— 会话事件流出现 **430s 连续空洞**，上游把推理
+ * 内容缓冲到推理结束才一次性 flush（随后可见 1499 个 thinking 片段在 40s 内灌完）。
+ * 90s 阈值因此把"正常思考"反复误判为"挂起"：abort + 重试（每次都从头生成，
+ * 推理进度全丢），日志连打 5 次；最终那次流结束时没有 finish_reason，
+ * stopReason 落空 ⇒ 被 finalize 默认成 end_turn ⇒ **静默截断、无任何提示**，
+ * 用户侧只能看到"话说到一半没了"（实测该轮正文仅 272 字）。
+ *
+ * 协议上无法区分"正在思考"与"连接断了"（上游不发心跳），故只能放宽阈值；
+ * 10 分钟 = 覆盖实测 430s 并留足余量。
+ */
+export const THINKING_IDLE_TIMEOUT_MS = 600_000;
+
+/** 覆盖空闲超时的环境变量名（毫秒；0 = 禁用空闲检查）。 */
+export const STREAM_IDLE_TIMEOUT_ENV = 'HYACINTH_STREAM_IDLE_TIMEOUT_MS';
+
+/**
+ * 解析本次生效的流空闲超时（ms）。优先级：
+ *   ① 显式传入 cbConfig.idleTimeoutMs（含 0 = 禁用）
+ *   ② 环境变量 HYACINTH_STREAM_IDLE_TIMEOUT_MS
+ *   ③ 按模型是否声明 thinking 自适应（THINKING / DEFAULT）
+ */
+export function resolveIdleTimeoutMs(provider: Provider, explicit?: number): number {
+  if (typeof explicit === 'number') return explicit;
+  const envRaw = process.env[STREAM_IDLE_TIMEOUT_ENV];
+  if (envRaw !== undefined && envRaw.trim() !== '') {
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  // 模型目录可能查不到（自建/新增厂商）→ 保守用非思考值，不因查不到就放任无限等待。
+  const info = getModelInfo(provider.getProviderType(), provider.getModel());
+  return info?.capabilities.thinking ? THINKING_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
 }
 
 export const DEFAULT_CB: CircuitBreakerConfig = {
   failureThreshold: 5,
   cooldownMs: 30_000,
-  idleTimeoutMs: 90_000, // 90s 无数据 → 视为挂起
+  idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS, // 实际以 resolveIdleTimeoutMs() 为准
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────
@@ -106,9 +154,25 @@ export class ResilientProvider implements Provider {
   ) {
     this.inner = provider;
     this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...retryConfig };
-    this.cbConfig = { ...DEFAULT_CB, ...cbConfig };
+    // idleTimeoutMs 走「显式 > 环境变量 > 模型思考能力自适应」三级解析（见 resolveIdleTimeoutMs）。
+    // ⚠️ 不能只写 `{...DEFAULT_CB, ...cbConfig}`：cbConfig 一旦显式带 idleTimeoutMs: undefined，
+    // 展开会把默认值冲成 undefined（本仓库踩过"配置键存在但值未定义"的同类坑）。
+    this.cbConfig = {
+      ...DEFAULT_CB,
+      ...cbConfig,
+      idleTimeoutMs: resolveIdleTimeoutMs(provider, cbConfig?.idleTimeoutMs),
+    };
     this.name = `${provider.getProviderType()}/${provider.getModel()}`;
     this.logger = createLogger(`provider:resilient:${this.name}`);
+    if (this.cbConfig.idleTimeoutMs > 0) {
+      // 落一条 debug：这个值直接决定长推理会不会被误杀，排查时先看它。
+      this.logger.debug('stream idle timeout resolved', {
+        idleTimeoutMs: this.cbConfig.idleTimeoutMs,
+        source: cbConfig?.idleTimeoutMs !== undefined
+          ? 'explicit'
+          : (process.env[STREAM_IDLE_TIMEOUT_ENV] ? 'env' : 'auto(thinking-aware)'),
+      });
+    }
   }
 
   getProviderType(): ProviderType {

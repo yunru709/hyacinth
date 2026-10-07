@@ -224,7 +224,7 @@ describe('AgentLoop 截断处理：length/max_tokens → 提示 + 有限续写',
     const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
     const injected = cs.append.mock.calls
       .map((c) => JSON.stringify(c[1]))
-      .filter((t) => t.includes('cut off by the per-request output limit'));
+      .filter((t) => t.includes('cut off mid-way'));
     expect(injected, '应恰好注入 3 条续写指令').toHaveLength(3);
 
     // A：用户可见提示（带 reason + 可执行指引）
@@ -257,7 +257,7 @@ describe('AgentLoop 截断处理：length/max_tokens → 提示 + 有限续写',
     expect(createStream).toHaveBeenCalledTimes(1);
     const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
     expect(
-      cs.append.mock.calls.map((c) => JSON.stringify(c[1])).some((t) => t.includes('cut off by the per-request output limit')),
+      cs.append.mock.calls.map((c) => JSON.stringify(c[1])).some((t) => t.includes('cut off mid-way')),
       '正常结束不该注入续写指令',
     ).toBe(false);
     expect(onStatus.mock.calls.map((c) => String(c[0])).some((s) => s.includes('/maxoutput'))).toBe(false);
@@ -316,5 +316,60 @@ describe('渠道附图：不落盘 base64（与工具图同构）', () => {
 
     // 一次性消费
     expect((loop as unknown as { channelImages: unknown }).channelImages).toBeNull();
+  });
+});
+// ── 流提前结束（incomplete）：同样要提示 + 续写（2026-10-07 新增）────
+//
+// 背景：上游提前关连接时 compatible 族收不到 finish_reason。此前 stopReason 落空
+// ⇒ finalize 默认成 end_turn ⇒ 这条路径完全静默（实测该轮正文只出 272 字、
+// 无任何提示、不续写）。现在 compatible 合成 STOP reason='incomplete'，本用例
+// 守住 loop 侧真的接管了它 —— 光有"合成 STOP"而 loop 不认，等于换个说法的静默。
+
+describe('AgentLoop 截断处理：incomplete（上游提前断流）也接管', () => {
+  function makeIncompleteProvider() {
+    let n = 0;
+    const createStream = vi.fn().mockImplementation(() => {
+      const tag = `断了${++n}`;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'TEXT', content: tag };
+          yield { type: 'STOP', reason: 'incomplete' };
+        },
+      };
+    });
+    const provider = {
+      getProviderType: () => 'deepseek',
+      getModel: () => 'deepseek-chat',
+      getCapabilities: () => ({ vision: false }),
+      setThinking: vi.fn(),
+      createStream,
+    } as unknown as Provider;
+    return { provider, createStream };
+  }
+
+  it('incomplete ⇒ 注入续写 + 提示；但**不**建议 /maxoutput（那不是长度问题）', async () => {
+    const { provider, createStream } = makeIncompleteProvider();
+    const services = makeServices(provider);
+    const onStatus = vi.fn();
+    (services as unknown as { outputHandler: unknown }).outputHandler = { onStatus };
+
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    await (loop as unknown as { run(input: string): Promise<void> }).run('跑个超长任务');
+
+    // 首轮 + 3 次续写 = 4 次请求（上限与 length 路径共用）
+    expect(createStream).toHaveBeenCalledTimes(4);
+
+    const cs = (services as unknown as { conversationStore: { append: ReturnType<typeof vi.fn> } }).conversationStore;
+    const injected = cs.append.mock.calls
+      .map((c) => JSON.stringify(c[1]))
+      .filter((t) => t.includes('cut off mid-way'));
+    expect(injected, '应注入续写指令').toHaveLength(3);
+
+    const statuses = onStatus.mock.calls.map((c) => String(c[0]));
+    expect(statuses.some((s) => s.includes('incomplete')), '提示里应带 reason').toBe(true);
+    expect(
+      statuses.some((s) => s.includes('/maxoutput')),
+      'incomplete 不是长度截断，不该让用户去调 max_tokens（白费力气）',
+    ).toBe(false);
   });
 });

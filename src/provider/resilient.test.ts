@@ -366,3 +366,61 @@ describe('FallbackProviderChain', () => {
   });
 
 });
+
+// ── 空闲超时自适应（2026-10-07：写死 90s 把长推理打残）───────────────
+//
+// 事故链：思考型模型（DeepSeek-V4.1-Flash）经聚合中转时，推理阶段上游会长时间
+// 一个 delta 都不推 —— 实测会话事件流出现 **430s 连续空洞**（上游把推理内容缓冲到
+// 推理结束才一次性 flush）。原默认 90s 因此把"正常思考"反复误判成"挂起"：
+// abort + 重试（每次从头生成、进度全丢），最终那次流结束时没有 finish_reason
+// ⇒ stopReason 落空 ⇒ 被 finalize 默认成 end_turn ⇒ 静默截断、毫无提示。
+
+describe('resolveIdleTimeoutMs：思考能力自适应 + 覆盖优先级', () => {
+  // 动态 import：本文件顶部只静态引入了 ResilientProvider，避免为几个常量再改 import 段。
+  let mod: typeof import('./resilient.js');
+  const mk = (type: ProviderType, model: string): Provider =>
+    ({ getProviderType: () => type, getModel: () => model } as unknown as Provider);
+
+  it('思考型模型（目录声明 thinking）⇒ 10 分钟，且必须盖过实测 430s 静默', async () => {
+    mod = await import('./resilient.js');
+    // deepseek-flash 在模型目录里 capabilities.thinking = true
+    expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'deepseek-flash'))).toBe(mod.THINKING_IDLE_TIMEOUT_MS);
+    expect(mod.THINKING_IDLE_TIMEOUT_MS).toBeGreaterThan(430_000);
+    // 反向守卫：老的 90s 绝不能再当默认（否则事故复现）
+    expect(mod.THINKING_IDLE_TIMEOUT_MS).not.toBe(90_000);
+  });
+
+  it('非思考型模型 ⇒ 2 分钟', async () => {
+    mod = await import('./resilient.js');
+    expect(mod.resolveIdleTimeoutMs(mk('openai', 'gpt-4o'))).toBe(mod.DEFAULT_IDLE_TIMEOUT_MS);
+  });
+
+  it('目录查不到的模型 ⇒ 保守走非思考值（不因查不到就放任无限等待）', async () => {
+    mod = await import('./resilient.js');
+    expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'nonexistent-model-xyz'))).toBe(mod.DEFAULT_IDLE_TIMEOUT_MS);
+  });
+
+  it('显式值优先于自适应（含 0 = 禁用）', async () => {
+    mod = await import('./resilient.js');
+    expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'deepseek-flash'), 12_345)).toBe(12_345);
+    expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'deepseek-flash'), 0)).toBe(0);
+  });
+
+  it('环境变量覆盖自适应，但显式值仍优先', async () => {
+    mod = await import('./resilient.js');
+    process.env[mod.STREAM_IDLE_TIMEOUT_ENV] = '7777';
+    try {
+      expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'deepseek-flash'))).toBe(7777);
+      expect(mod.resolveIdleTimeoutMs(mk('deepseek', 'deepseek-flash'), 1)).toBe(1);
+    } finally {
+      delete process.env[mod.STREAM_IDLE_TIMEOUT_ENV];
+    }
+  });
+
+  it('构造期真的接线了：thinking 模型拿到的不是 DEFAULT_CB 里的兜底值', async () => {
+    mod = await import('./resilient.js');
+    const r = new ResilientProvider(mk('deepseek', 'deepseek-flash'));
+    expect((r as unknown as { cbConfig: { idleTimeoutMs: number } }).cbConfig.idleTimeoutMs)
+      .toBe(mod.THINKING_IDLE_TIMEOUT_MS);
+  });
+});
