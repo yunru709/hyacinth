@@ -1931,7 +1931,6 @@
     ['input-frequency-penalty', 'provider.frequencyPenalty', 'num'],
     ['input-presence-penalty', 'provider.presencePenalty', 'num'],
     ['toggle-streaming', 'provider.streaming', 'bool'],
-    ['toggle-json-mode', 'provider.jsonMode', 'bool'],
     // 修复 tab
     ['toggle-auto-retry', 'resiliency.retry.enabled', 'bool'],
     ['input-max-retries', 'resiliency.retry.maxRetries', 'num'],

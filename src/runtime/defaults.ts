@@ -24,7 +24,6 @@ export function getDefaultConfig(): FullConfig {
       frequencyPenalty: 0,
       presencePenalty: 0,
       streaming: true,
-      jsonMode: false,
       userId: DEFAULT_USER_ID,
       anthropic: { model: providerDefault('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: providerDefault('openai'), apiKeyEnv: 'OPENAI_API_KEY' },

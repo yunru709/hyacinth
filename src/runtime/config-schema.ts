@@ -28,8 +28,6 @@ export interface FullConfig {
     presencePenalty: number;
     /** 流式输出 */
     streaming: boolean;
-    /** JSON 模式 */
-    jsonMode: boolean;
     /** DeepSeek 缓存隔离 ID，区分同一 key 下不同产品的缓存池。默认 "hyacinth"。 */
     userId?: string;
     /** 通用字段（provider 顶层兜底；provider.<type>.fields 优先） */
