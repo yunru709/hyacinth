@@ -94,6 +94,13 @@ export class XrefQueryTool implements Tool {
         enum: ['function', 'method', 'arrow', 'class', 'interface', 'type', 'enum', 'variable', 'parameter', 'property'],
         description: '按类型过滤符号。当名称重载时，配合 "defs" 使用很有用。',
       },
+      root: {
+        type: 'string',
+        description:
+          '可选：查询哪个项目的索引（绝对路径；相对路径按当前工作目录解析）。' +
+          '省略时依次回退：上次建索引记住的项目 → agent 的启动目录。' +
+          '多项目并存：每个项目的索引库独立存放，互不覆盖。',
+      },
     },
     required: ['action'],
   };
@@ -105,6 +112,10 @@ export class XrefQueryTool implements Tool {
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
+    // 先按需把 manager 绑到目标项目根（索引库按项目分开存 ⇒ 查询前必须先确定是哪个项目）
+    const bindError = await this.manager.ensureBound(args.root as string | undefined, { create: false });
+    if (bindError) return bindError;
+
     const action = args.action as QueryAction;
     const symbol = args.symbol as string | undefined;
     const file = args.file as string | undefined;

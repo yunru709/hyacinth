@@ -66,6 +66,14 @@ export class XrefBuildTool implements Tool {
           '每批解析的文件数。数值越小内存占用越低，但速度越慢。' +
           '默认：50。最小：1，最大：500。仅适用于构建模式（clean 不适用）。',
       },
+      root: {
+        type: 'string',
+        description:
+          '可选：给哪个项目建索引（绝对路径；相对路径按当前工作目录解析）。' +
+          '**首次为某项目建索引时应传它** —— 否则会拿 agent 的启动目录当根，' +
+          '若那是用户主目录会被安全闸拒绝（防扫 AppData）。' +
+          '建成功后会被记住：之后 xref_query / xref_graph 不传 root 也用同一个项目。',
+      },
     },
     required: [],
   };
@@ -84,6 +92,10 @@ export class XrefBuildTool implements Tool {
     if (clean) {
       return await this.manager.deleteDatabase(project);
     }
+
+    // 先绑根：没有可用的项目根就到此为止（给一句可操作的提示，而不是让它去扫主目录）
+    const bindError = await this.manager.ensureBound(args.root as string | undefined, { remember: true });
+    if (bindError) return bindError;
 
     // ── build 模式 ──
     if (!this.manager.isReady()) {

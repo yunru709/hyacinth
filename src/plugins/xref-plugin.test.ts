@@ -65,7 +65,7 @@ describe('xref 插件', () => {
 
     await host.mount(createXrefPlugin({ cwd: tmp }));
 
-    expect(tools.sort()).toEqual(['xref_build', 'xref_graph', 'xref_query']);
+    expect(tools.sort()).toEqual(['xref_build', 'xref_graph', 'xref_list', 'xref_query']);
 
     await host.unmount('xref');
     expect(tools).toEqual([]);

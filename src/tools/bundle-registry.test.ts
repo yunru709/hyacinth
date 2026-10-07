@@ -106,4 +106,31 @@ describe('ToolBundleRegistry', () => {
     expect(reg.get('temp')).toBeUndefined();
     expect(reg.isAllMode()).toBe(true); // 删掉后激活集被清空 → 回到全量
   });
+
+  it('内置包描述以代码为准（修正盘上历史文案的分叉）', () => {
+    new ToolBundleRegistry(tmpDir, configPath); // 先落盘一份
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    raw.bundles.coding.description = '过时的旧描述'; // 模拟历史遗留
+    fs.writeFileSync(configPath, JSON.stringify(raw, null, 2), 'utf-8');
+
+    const rebooted = new ToolBundleRegistry(tmpDir, configPath);
+    expect(rebooted.get('coding')?.description).not.toBe('过时的旧描述');
+    expect(rebooted.get('coding')?.description).toContain('交叉引用');
+  });
+
+  it('removedTools 自愈：早已不存在的幽灵名字被清除，真实的移出记录保留', () => {
+    new ToolBundleRegistry(tmpDir, configPath); // 先落盘一份
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    // 模拟实测到的盘上残留：multi-edit（拼写错误，真名是 multi_edit）+ 已废弃工具名，
+    // 外加一个**真实**被移出的工具 git
+    raw.bundles.coding.removedTools = ['multi-edit', 'code-graph', 'git'];
+    fs.writeFileSync(configPath, JSON.stringify(raw, null, 2), 'utf-8');
+
+    const rebooted = new ToolBundleRegistry(tmpDir, configPath);
+    const removed = rebooted.get('coding')?.removedTools ?? [];
+    expect(removed).toContain('git');            // 真实移出记录仍在
+    expect(removed).not.toContain('multi-edit'); // 幽灵名被清除
+    expect(removed).not.toContain('code-graph');
+    expect(rebooted.get('coding')?.tools).not.toContain('git'); // 移出依旧生效
+  });
 });

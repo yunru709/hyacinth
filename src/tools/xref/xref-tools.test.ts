@@ -198,9 +198,11 @@ describe('xref_build', () => {
     expect(again).not.toMatch(/Import edges:\s+0\b/);
   });
 
-  it('未初始化的 manager 报错（isReady=false）', async () => {
+  it('未初始化 + 无任何根信息 ⇒ 返回可操作提示（而不是静默去扫主目录）', async () => {
+    // 隔离：先清掉记忆，确保测的是"什么都没有"的路径
+    try { fss.rmSync(path.join(fakeHome, '.agent', 'xref.json'), { force: true }); } catch { /* 不存在即可 */ }
     const fresh = new XrefBuildTool(new XrefManager());
-    expect(await fresh.execute({})).toContain('XrefManager not initialized');
+    expect(await fresh.execute({})).toContain('没有可用的项目根');
   });
 
   it('directories 参数：非法 JSON / 非数组分别报错', async () => {

@@ -25,19 +25,26 @@ export function createXrefPlugin(
     id: XREF_PLUGIN_ID,
 
     async activate(ctx: PluginContext<Record<string, unknown>, LoopHooks>) {
-      const { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool } = await import('../tools/xref/index.js');
+      const { XrefManager, XrefBuildTool, XrefQueryTool, XrefGraphTool, XrefListTool } = await import('../tools/xref/index.js');
       const xrefManager = new XrefManager();
       try {
         await xrefManager.init(services.cwd);
-      } catch {
-        // xref 初始化失败不影响核心功能（如 node:sqlite 不可用等）
-        ctx.logger.warn('xref init failed, plugin idle');
-        return;
+      } catch (err) {
+        // 启动目录不可索引 —— **不致命，工具照常注册**。
+        // 此前这里直接 return（一个工具都不注册）⇒ 模型连"换个项目根重建"的入口都没有：
+        // 2026-10-07 实测，agent 从用户主目录启动 ⇒ 三个工具凭空消失，只能靠人手动排查。
+        // 现在先注册工具，根可由 xref_build 的 root 参数显式指定，并会被记住。
+        // 必须带上索引根与失败原因：原因决定了处置方式（换根 / 修依赖 / 等锁），不能吞。
+        ctx.logger.warn('xref: 启动目录不可索引，工具仍注册（可用 root 参数指定项目）', {
+          root: services.cwd,
+          reason: err instanceof Error ? err.message : String(err),
+        });
       }
 
       ctx.registerTool(new XrefBuildTool(xrefManager));
       ctx.registerTool(new XrefQueryTool(xrefManager));
       ctx.registerTool(new XrefGraphTool(xrefManager));
+      ctx.registerTool(new XrefListTool(xrefManager));
 
       // Phase 6：把「引用分析能力」注册进宿主服务表。
       // ctx.register 的 disposer 会在**卸载时把服务恢复为注册前的值**（热替换可回滚），
@@ -49,8 +56,13 @@ export function createXrefPlugin(
       // 第三圈接入时，这一行（ctx.register）由"声明清单驱动"取代/包一层 ——
       // 关系写进 tool-links.json，handler id 在此注册。
       // 触发条件：第二个真实联动用例出现（见 docs/design/tool-linkage-laws.md）
-      const { createReferenceAnalysisCapability } = await import('../tools/xref/reference-capability.js');
-      ctx.register('referenceAnalysis', createReferenceAnalysisCapability(xrefManager) as never);
+      if (xrefManager.isReady()) {
+        const { createReferenceAnalysisCapability } = await import('../tools/xref/reference-capability.js');
+        ctx.register('referenceAnalysis', createReferenceAnalysisCapability(xrefManager) as never);
+      } else {
+        // 未绑根（索引不可用）时不注册：注册了也只会在每次工具调用后的联动序列里空转
+        ctx.logger.info('xref: 未绑定项目根，referenceAnalysis 暂不注册（首次 xref_build 后重启生效）');
+      }
 
       // 卸载时关闭 SQLite 连接
       ctx.add({

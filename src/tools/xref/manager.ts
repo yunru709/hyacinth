@@ -34,6 +34,7 @@ import { resolveTsLike } from './languages/resolve-helpers.js';
 import type { ResolveContext } from './languages/types.js';
 import Database from '../sqlite.js';
 import type { SqliteDatabase } from '../sqlite.js';
+import { resolveActiveRoot, rememberRoot } from './project-root.js';
 import { statSync } from 'node:fs';
 
 // ── 索引陈旧自检（2026-09-19）───────────────────────────────────────────
@@ -204,6 +205,10 @@ export class XrefManager {
     const stmt = this.db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
     stmt.run('last_used_at', now);
     stmt.run(`lease.${process.pid}`, now);
+    // 同时记下根目录：此前只有 build() 写 root_dir ⇒ **只建库、还没建索引**的库在
+    // xref_list 里会显示"根未知"，管理与回收都无从下手（2026-10-07 实测）。
+    // init() 时根已是确定值，记它没有任何代价。
+    if (this.rootDir) stmt.run('root_dir', this.rootDir);
   }
 
   /** 该库的真实磁盘占用（主库 + WAL + SHM） */
@@ -300,6 +305,73 @@ export class XrefManager {
   /** 是否已初始化 */
   isReady(): boolean {
     return this.db !== null;
+  }
+
+  /** 当前绑定的项目根（未绑定为空串） */
+  getRootDir(): string {
+    return this.rootDir;
+  }
+
+  /**
+   * 把 manager 切到指定项目根（2026-10-07 新增）。
+   *
+   * 此前根只能在激活时由 cwd 一次性决定，且 init 失败即"插件 idle、工具全不注册"
+   * —— 模型没有任何补救入口（连"换个根重建"都做不到）。现在工具可按需把 manager
+   * 指向**任何**项目根。
+   *
+   * 注意：**必须先 close() 再 init()**。原 init() 不关旧连接，重复调用会泄漏上一个
+   * 库的句柄（Windows 上还表现为文件被占用、之后删不掉）。
+   */
+  async useRoot(rootDir: string): Promise<void> {
+    const anchor = resolveAnchor(rootDir);
+    if (this.db && this.rootDir === anchor.root) return; // 已经绑在同一个根上，免折腾
+    this.close();
+    this.dbPath = '';
+    this.rootDir = '';
+    this.anchorInfo = null;
+    await this.init(rootDir);
+  }
+
+  /**
+   * 确保 manager 绑在「本次要用的项目根」上（2026-10-07 新增）。
+   *
+   * 解析优先级见 resolveActiveRoot：显式参数 > 记忆（~/.agent/xref.json）> 当前已绑的根。
+   * 返回 null = 就绪；返回字符串 = 给模型看的、可操作的说明。
+   *
+   * 刻意不抛错：调用方是工具，工具应把"为什么用不了"讲成人话，而不是把异常抛到上层
+   * 变成一段 stack —— 那正是本次事故里"日志只有一句 init failed"的另一种形态。
+   */
+  async ensureBound(explicit?: string, opts?: { remember?: boolean; create?: boolean }): Promise<string | null> {
+    const target = resolveActiveRoot(explicit, this.rootDir);
+    if (!target) {
+      return 'Error: Xref index not built. 当前也没有可用的项目根 —— 请用 root 参数指定项目目录'
+        + '（如 root="C:/Users/me/proj"），或从项目目录启动 agent。';
+    }
+    const anchor = resolveAnchor(target);
+    if (!(this.db && this.rootDir === anchor.root)) {
+      // 查询路径**不得隐式建库**：那会把只读操作变成写操作 —— 正是本模块文件头明令
+      // 避免的耦合（"判断陈旧"与"修复陈旧"必须分开）。只允许打开**已存在**的库，
+      // 否则如实回一句"还没建索引"。
+      if (opts?.create === false) {
+        const dbPath = path.join(os.homedir(), '.agent', 'cache', `xref-${toProjectKey(anchor.root)}.sqlite`);
+        const exists = await fs.access(dbPath).then(() => true).catch(() => false);
+        if (!exists) {
+          return `Error: Xref index not built. 项目 ${anchor.root} 还没有索引`
+            + '（先用 xref_build 建一次；要索引别的项目请传 root 参数）。';
+        }
+      }
+      try {
+        await this.useRoot(target);
+      } catch (err) {
+        return `无法为 ${target} 建/开索引：${(err as Error).message}`;
+      }
+    }
+    // 只有「建索引」这条路才记住，且**必须是显式指定的根**。
+    // 理由：记忆的语义是"用户/模型明确指定过的项目"。若连兜底/已绑的根也记，那任何
+    // 一次构建都会改写"当前项目" —— 多项目交替时互相污染（实测：xref-tools 的测试
+    // 之间就靠这份记忆串味）。query/graph 更不该改"当前项目"。
+    if (opts?.remember && explicit && explicit.trim()) rememberRoot(this.rootDir);
+    return null;
   }
 
   /** 获取索引统计信息 */

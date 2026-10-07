@@ -95,7 +95,7 @@ const BUILTIN_CODING: ToolBundle = {
   // —— 死条目，导致 multi_edit 不在任何包内、默认 coding 模式下直接消失。
   // 由 bundle-consistency 守卫测试抓出（见该测试头部说明）。
   tools: ['git', 'multi_edit', 'use_skill', 'verify_change', 'log_timeline',
-          'xref_build', 'xref_query', 'xref_graph', 'plan_execute'],
+          'xref_build', 'xref_query', 'xref_graph', 'xref_list', 'plan_execute'],
 };
 
 const BUILTIN_AGENT: ToolBundle = {
@@ -350,10 +350,21 @@ export class ToolBundleRegistry {
         // preserving any user-added tools)
         const existing = parsed.bundles[b.name];
         existing.tools = [...new Set([...b.tools, ...existing.tools])];
+        // 元数据以代码为准：description 原先不参与合并 ⇒ 盘上文件里的历史文案会一直
+        // 显示在 list_bundles / UI 里（实测 coding 包长期显示旧描述"依赖分析"，
+        // 而代码早已改成"交叉引用"）。工具列表会并回，元数据同样得跟上。
+        if (b.description) existing.description = b.description;
+        existing.builtin = true;
         // 再剔除用户显式移出的（否则内置包永远删不掉工具）
-        const removed = new Set(existing.removedTools ?? []);
+        const removed = new Set<string>(existing.removedTools ?? []);
         if (removed.size) {
           existing.tools = existing.tools.filter((t: string) => !removed.has(t));
+          // 自愈：removedTools 只对「内置工具」有意义 —— 不在内置工具表里的名字永远
+          // 不会被回填，记录它纯属噪声，还会静默剔除将来可能出现的同名工具。
+          // 实测盘上残留 6 个幽灵名（task_start / multi-edit / code-graph …）。
+          const live = [...removed].filter((t) => b.tools.includes(t));
+          if (live.length) existing.removedTools = live;
+          else delete existing.removedTools;
         }
       }
 
