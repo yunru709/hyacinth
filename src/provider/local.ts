@@ -118,6 +118,11 @@ export class LocalProvider implements Provider {
     try {
       const stream = await this.client.chat.completions.create(params, { signal });
 
+      // 是否收到过 finish_reason。⚠️ 流"自然结束"（迭代器 done）≠ 上游正常收尾：
+      // 本地服务/网关可能提前关连接，此时没有 finish_reason（也没有 usage）。
+      // 不记录它的话 stopReason 会落空 ⇒ finalize 默认成 end_turn ⇒ 静默截断。
+      // 见循环后的合成 STOP（2026-10-07 事故，详见 provider/resilient.ts）。
+      let sawFinishReason = false;
       for await (const chunk of stream) {
         const choice = chunk.choices?.[0];
 
@@ -187,8 +192,32 @@ export class LocalProvider implements Provider {
             };
           }
           toolCallAccumulators.clear();
+          sawFinishReason = true;
           yield { type: 'STOP', reason: choice.finish_reason };
         }
+      }
+
+      // ── 收尾：流自然结束但全程没收到 finish_reason ⇒ 上游提前断流 ──────────
+      // 不合成 STOP 的话 stopReason 落空 ⇒ finalize 默认成 end_turn ⇒ 截断续写保护
+      // （只认 length/max_tokens/incomplete）不触发 ⇒ 用户侧静默截断、零提示。
+      // 未收尾的 tool call 也在这里补发（标 incomplete ⇒ 消费方不会盲执行）。
+      if (!sawFinishReason) {
+        for (const [, acc] of toolCallAccumulators) {
+          const raw = acc.arguments || '';
+          const { recovered, complete, error } = recoverToolArguments(raw, acc.name);
+          if (!complete) {
+            logToolArgsWarning('local', acc.name, raw, error);
+          }
+          yield {
+            type: 'TOOL_USE',
+            id: acc.id,
+            name: acc.name,
+            input: recovered,
+            incomplete: true, // 流被切断 ⇒ 参数必然不可信
+          };
+        }
+        toolCallAccumulators.clear();
+        yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
       if (error instanceof OpenAI.APIError) {

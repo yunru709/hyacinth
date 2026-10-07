@@ -222,6 +222,10 @@ export class LlamaCppProvider implements Provider {
     }
 
     const toolCallAccumulators = new Map<number, ToolCallAccumulator>();
+    // 是否收到过 finish_reason。⚠️ 流"自然结束"（reader done）≠ 上游正常收尾：
+    // llama-server 若提前关连接就没有 finish_reason。不记录它 ⇒ stopReason 落空
+    // ⇒ finalize 默认成 end_turn ⇒ 静默截断（见下方循环后的合成 STOP）。
+    let sawFinishReason = false;
 
     // 发起请求（含重试）
     let response: Response;
@@ -353,9 +357,33 @@ export class LlamaCppProvider implements Provider {
               };
             }
             toolCallAccumulators.clear();
+            sawFinishReason = true;
             yield { type: 'STOP', reason: choice.finish_reason };
           }
         }
+      }
+
+      // ── 收尾：流自然结束但全程没收到 finish_reason ⇒ 服务器提前断流 ──────────
+      // 不合成 STOP 的话 stopReason 落空 ⇒ finalize 默认成 end_turn ⇒ 截断续写保护
+      // 不触发 ⇒ 静默截断。未收尾的 tool call 也补发（标 incomplete）。
+      if (!sawFinishReason) {
+        for (const [, acc] of toolCallAccumulators) {
+          let input: Record<string, unknown> = {};
+          try {
+            input = JSON.parse(acc.arguments || '{}');
+          } catch {
+            // JSON 解析失败时保留空对象（与 finish_reason 分支同策略）
+          }
+          yield {
+            type: 'TOOL_USE',
+            id: acc.id,
+            name: acc.name,
+            input,
+            incomplete: true, // 流被切断 ⇒ 参数必然不可信
+          };
+        }
+        toolCallAccumulators.clear();
+        yield { type: 'STOP', reason: 'incomplete' };
       }
     } finally {
       reader.releaseLock();

@@ -192,6 +192,9 @@ export class AnthropicProvider implements Provider {
 
     // 追踪正在构建的 tool_use
     let currentToolUse: { id: string; name: string; inputJson: string } | null = null;
+    // 是否收到过 stop_reason（Anthropic 在 message_delta 事件里给）。流若被提前切断就
+    // 拿不到它 ⇒ stopReason 落空 ⇒ finalize 默认成 end_turn ⇒ 静默截断（见循环后的合成 STOP）。
+    let sawStopReason = false;
     // 累计 usage
     let inputTokens = 0;
     let outputTokens = 0;
@@ -286,6 +289,7 @@ export class AnthropicProvider implements Provider {
                 usageEvent.cache_creation_input_tokens = cacheCreationInputTokens;
               }
               yield usageEvent;
+              sawStopReason = true;
               yield { type: 'STOP', reason: event.delta.stop_reason };
             }
             break;
@@ -295,6 +299,14 @@ export class AnthropicProvider implements Provider {
           default:
             break;
         }
+      }
+
+      // ── 收尾：流自然结束但全程没收到 stop_reason ⇒ 连接被提前切断 ──────────
+      // Anthropic 的 stop_reason 只在 message_delta 事件里给；拿不到它 ⇒ stopReason
+      // 落空 ⇒ finalize 默认成 end_turn ⇒ 截断续写保护不触发 ⇒ 静默截断。
+      // （tool_use 在 content_block_stop 即时 emit，无累积，故此处无需补发。）
+      if (!sawStopReason) {
+        yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
       if (error instanceof Anthropic.APIError) {

@@ -140,9 +140,17 @@ export class GeminiProvider implements Provider {
         config: { abortSignal: signal },
       });
 
+      // 记录上游给出的收尾原因（Gemini 放在 candidate.finishReason）。
+      // ⚠️ 原实现是循环后**无条件** `yield { type: 'STOP', reason: 'end_turn' }` —— 于是
+      // MAX_TOKENS（真的被截断）被冒充成正常结束，截断续写保护（只认 length/max_tokens/
+      // incomplete）对 Gemini 从来就不生效。这里改为尊重上游信号。
+      let lastFinishReason: string | undefined;
       for await (const chunk of stream) {
         const candidate = chunk.candidates?.[0];
         if (!candidate) continue;
+
+        // 末块才带 finishReason；后到的覆盖先到的（同一次流只会给一个终态）
+        if (candidate.finishReason) lastFinishReason = String(candidate.finishReason);
 
         const parts = candidate.content?.parts ?? [];
 
@@ -179,7 +187,20 @@ export class GeminiProvider implements Provider {
         }
       }
 
-      yield { type: 'STOP', reason: 'end_turn' };
+      // ── 收尾：按上游 finishReason 归一（不再无条件 end_turn）──────────────
+      //   STOP       → end_turn（正常）
+      //   MAX_TOKENS → length（归一成通用语义，交给循环的截断保护提示 + 续写）
+      //   其它        → 原样小写（SAFETY/RECITATION 等：不是长度问题，不该建议调上限）
+      //   从未拿到    → incomplete（流被提前切断，同样交给截断保护）
+      if (lastFinishReason === undefined) {
+        yield { type: 'STOP', reason: 'incomplete' };
+      } else if (lastFinishReason === 'MAX_TOKENS') {
+        yield { type: 'STOP', reason: 'length' };
+      } else if (lastFinishReason === 'STOP') {
+        yield { type: 'STOP', reason: 'end_turn' };
+      } else {
+        yield { type: 'STOP', reason: lastFinishReason.toLowerCase() };
+      }
     } catch (error: unknown) {
       if (error instanceof Error) {
         throw new Error(`Gemini API error: ${error.message}`);
