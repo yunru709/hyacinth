@@ -69,6 +69,9 @@ const KEY_URLS: Record<string, string> = {
   minimax: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
   mimo: 'https://platform.xiaomimimo.com/',
   volcengine: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apikey',
+  // 聚合中转站（2026-10-07 随出厂快照一并加入）：只有官网，无独立的 key 管理页
+  opencode: 'https://opencode.ai/',
+  commandcode: 'https://commandcode.ai/',
 };
 
 /** 从 PROVIDER_MODELS 生成每个 provider 的模型选项 */

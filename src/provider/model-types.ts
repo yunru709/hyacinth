@@ -154,5 +154,23 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry[]> = {
     { id: 'doubao-seed-1-6-250615', name: 'Doubao Seed 1.6', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'deprecated', replacedBy: 'doubao-seed-2-1-pro-260628' },
     { id: 'doubao-seed-1-6-lite-250615', name: 'Doubao Seed 1.6 Lite', provider: 'volcengine', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image', 'video', 'document'] }, status: 'deprecated', replacedBy: 'doubao-seed-2-1-turbo-260628' },
   ],
+  // ── 2026-10-07 由用户级 providers.json 同步入出厂快照（新设备 setup 可见）──
+  // ⚠️ 这两家是**聚合/中转**端点（非模型原厂），模型清单随上游变动 ⇒ 失效属常态，
+  //    用户在 providers.json 里覆盖 models 即可，不必改代码。
+  opencode: [
+    { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', provider: 'opencode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, cost: { input: 0.3, output: 1.2, cacheRead: 0.006 }, status: 'available', reasoning: true },
+    { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'opencode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 1.74, output: 3.84, cacheRead: 0.145 }, status: 'available', reasoning: true },
+    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'opencode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.14, output: 0.28, cacheRead: 0.028 }, status: 'available', reasoning: true },
+  ],
+  commandcode: [
+    { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, cost: { input: 0.3, output: 1.2, cacheRead: 0.006 }, status: 'available', reasoning: true },
+    // 以下 5 个为免费/隐身模型，**上游可用性不稳定**（曾出现 403 下线）：
+    // 保留在目录里供选择，失效时用户自行覆盖 —— 移除它们反而会让人以为"没这功能"。
+    { id: 'stealth/space-bunny-alpha', name: 'Space Bunny Alpha (free)', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+    { id: 'stealth/pixel-canary', name: 'Pixel Canary (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+    { id: 'poolside/laguna-s-2.1-free', name: 'Laguna S 2.1 (free)', provider: 'commandcode', contextWindow: 256000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+    { id: 'inclusionai/ling-3.0-flash-sante:free', name: 'Ling 3.0 Flash Sante (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+    { id: 'inclusionai/ling-3.1-flash:free', name: 'Ling 3.1 Flash (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+  ],
 };
 

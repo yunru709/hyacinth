@@ -38,6 +38,8 @@ import {
   createOpenRouterProvider,
   createMoonshotProvider,
   createVolcengineProvider,
+  createOpenCodeProvider,
+  createCommandCodeProvider,
   OpenAICompatibleProvider,
 } from './compatible.js';
 import { GeminiProvider } from './gemini.js';
@@ -76,6 +78,9 @@ export const PROVIDER_TYPES = [
   'minimax',
   'mimo',
   'volcengine',
+  // ── 聚合中转站（2026-10-07 由用户级 providers.json 同步入出厂快照）──
+  'opencode',
+  'commandcode',
   // ── 本地模型三态 ──
   'local',
   'ollama',
@@ -283,6 +288,28 @@ export const PROVIDER_FACTORIES: Record<ProviderType, ProviderFactory> = {
       }),
     createFromEnv: () => (process.env.ARK_API_KEY ? createVolcengineProvider() : null),
     meta: PROVIDER_META.volcengine,
+  },
+  // ── 聚合中转站（2026-10-07 由用户级 providers.json 同步入出厂快照）──
+  // 二者均为 OpenAI 兼容协议；实现见 compatible.ts 同名工厂
+  opencode: {
+    create: (config: ProviderConfigLike) =>
+      createOpenCodeProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('opencode'),
+      }),
+    createFromEnv: () => (process.env.OPENCODE_API_KEY ? createOpenCodeProvider() : null),
+    meta: PROVIDER_META.opencode,
+  },
+  commandcode: {
+    create: (config: ProviderConfigLike) =>
+      createCommandCodeProvider({
+        apiKey: config.apiKey, model: config.model, userId: config.userId, baseUrl: config.baseUrl,
+        maxOutputTokens: config.maxOutputTokens, fields: config.fields, sampling: config.sampling,
+        fieldMap: config.fieldMap ?? resolveFieldMap('commandcode'),
+      }),
+    createFromEnv: () => (process.env.COMMANDCODE_API_KEY ? createCommandCodeProvider() : null),
+    meta: PROVIDER_META.commandcode,
   },
   // ── 本地模型三态（不进 DEFAULT_PROVIDERS；仅 local 参与主检测兜底） ──
   local: {

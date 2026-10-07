@@ -572,3 +572,54 @@ export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
     fieldMap: config?.fieldMap,
   });
 }
+
+/**
+ * OpenCode Zen (Go) —— **聚合中转站**（OpenAI 兼容协议）。
+ *
+ * ⚠️ 与 groq/xai 等"模型原厂"不同：端点背后是第三方聚合，模型清单随上游变动，
+ * 可用性不由我们保证。此处只负责"接上线"，模型目录见 MODEL_CATALOG
+ * （可被用户 providers.json 的 models 逐 id 覆盖）。
+ */
+export function createOpenCodeProvider(config?: CompatibleFactoryConfig) {
+  const provCfg = getProviderConfigLoader().getProvider('opencode');
+  return new OpenAICompatibleProvider({
+    apiKey: config?.apiKey,
+    envKey: 'OPENCODE_API_KEY',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://opencode.ai/zen/v1',
+    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    providerType: 'opencode',
+    userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
+    // 思考接线从 meta 读（厂商差异的单一声明点，见 thinking-style.ts）：
+    // 未声明 → undefined → 构造期归一回 'none'（不发任何字段，保守缺省）
+    thinkingStyle: provCfg?.thinkingStyle,
+  });
+}
+
+/**
+ * Command Code (GOAT) —— **聚合中转站**（OpenAI 兼容协议）。
+ *
+ * 思考接线为 `effort`：该网关只认 `reasoning_effort` 枚举，且**关闭时必须发 'off'**
+ * —— DeepSeek 那套顶层 `thinking:{type}` 它不认（发了思考照跑，开关等于没有）。
+ * 详见 thinking-style.ts 文件头③，那条实测结论就来自本厂商。
+ */
+export function createCommandCodeProvider(config?: CompatibleFactoryConfig) {
+  const provCfg = getProviderConfigLoader().getProvider('commandcode');
+  return new OpenAICompatibleProvider({
+    apiKey: config?.apiKey,
+    envKey: 'COMMANDCODE_API_KEY',
+    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.commandcode.ai/provider/v1',
+    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    providerType: 'commandcode',
+    userId: config?.userId,
+    maxOutputTokens: config?.maxOutputTokens,
+    fields: config?.fields,
+    sampling: config?.sampling,
+    fieldMap: config?.fieldMap,
+    // 兜底 'effort'：即便 loader 未就绪（meta 读不到），本厂商的思考语义也是已知的
+    thinkingStyle: provCfg?.thinkingStyle ?? 'effort',
+  });
+}

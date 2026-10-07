@@ -9,9 +9,12 @@ import type { ProviderConfig } from '../types.js';
 import type { Provider } from './interface.js';
 
 // ─── 手写基线：与 types.ts 原 16 值联合完全一致（P5-15 后由 PROVIDER_TYPES 派生） ───
+// 2026-10-07：新增 opencode / commandcode（两家聚合端点，由用户级 providers.json 同步入
+// 出厂快照，使新设备 setup 可直接选到）。手写基线必须同步 —— 它正是用来抓"新增厂商漏改"的。
 const EXPECTED_TYPES = [
   'anthropic', 'openai', 'deepseek', 'groq', 'xai', 'mistral', 'gemini',
   'openrouter', 'moonshot', 'qwen', 'zhipu', 'minimax', 'mimo', 'volcengine',
+  'opencode', 'commandcode',
   'local', 'ollama', 'llamacpp',
 ] as const;
 
@@ -23,6 +26,7 @@ const ALL_ENV_KEYS = [
   'XAI_API_KEY', 'MISTRAL_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY',
   'OPENROUTER_API_KEY', 'MOONSHOT_API_KEY', 'DASHSCOPE_API_KEY',
   'ZHIPU_API_KEY', 'MINIMAX_API_KEY', 'MIMO_API_KEY', 'ARK_API_KEY',
+  'OPENCODE_API_KEY', 'COMMANDCODE_API_KEY',
 ];
 
 function makeConfig(type: string): ProviderConfig {
@@ -53,7 +57,7 @@ afterEach(() => {
 // ─── 守卫：注册表自洽 ─────────────────────────────────────────────
 
 describe('PROVIDER_FACTORIES 守卫（注册表自洽，P5-15）', () => {
-  it('守卫 1：PROVIDER_TYPES 与手写基线 16 值完全一致（无遗漏无多余）', () => {
+  it('守卫 1：PROVIDER_TYPES 与手写基线 18 值完全一致（无遗漏无多余）', () => {
     expect([...PROVIDER_TYPES]).toEqual([...EXPECTED_TYPES]);
   });
 
@@ -61,7 +65,7 @@ describe('PROVIDER_FACTORIES 守卫（注册表自洽，P5-15）', () => {
     expect(Object.keys(PROVIDER_FACTORIES).sort()).toEqual([...PROVIDER_TYPES].sort());
   });
 
-  it('守卫 3：DEFAULT_PROVIDERS 仅含 14 在线厂商，local 三态自动排除，且与注册表同源', () => {
+  it('守卫 3：DEFAULT_PROVIDERS 仅含 16 在线厂商，local 三态自动排除，且与注册表同源', () => {
     const onlineKeys = Object.keys(DEFAULT_PROVIDERS.providers);
     expect(onlineKeys.sort()).toEqual(EXPECTED_TYPES.filter((t) => !LOCAL_TYPES.includes(t)).sort());
     // 同一对象引用：DEFAULT_PROVIDERS 的 meta 就是注册表的 meta

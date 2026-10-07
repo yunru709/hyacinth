@@ -191,6 +191,30 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'doubao-seed-evolving',
     envKey: 'ARK_API_KEY',
   },
+  // ── 2026-10-07 由用户级 providers.json 同步入出厂快照 ──
+  // 目的：新设备上编译源码后跑 setup，向导可直接选到这两家（此前只存在于 ~/.agent/providers.json，
+  // 该文件是本地产物、不进发行包 ⇒ 新设备列表里静默少两项）。
+  //
+  // ⚠️ 二者均为**聚合/中转**端点（不是模型原厂），上游模型名随时可能变动或下线。
+  //    因此这里是"出厂默认"，用户在 providers.json 里覆盖同名字段即可（逐字段回落，见 config.ts）。
+  opencode: {
+    id: 'opencode',
+    name: 'OpenCode Zen (Go)',
+    baseUrl: 'https://opencode.ai/zen/v1',
+    defaultModel: 'deepseek-v4.1-flash',
+    envKey: 'OPENCODE_API_KEY',
+    protocol: 'openai',
+  },
+  commandcode: {
+    id: 'commandcode',
+    name: 'Command Code (GOAT)',
+    baseUrl: 'https://api.commandcode.ai/provider/v1',
+    defaultModel: 'deepseek/deepseek-v4.1-flash',
+    envKey: 'COMMANDCODE_API_KEY',
+    protocol: 'openai',
+    // 关闭思考时发 reasoning_effort:'off'（该网关不接受 DeepSeek 那套顶层 thinking 字段）
+    thinkingStyle: 'effort',
+  },
 };
 
 /**
