@@ -285,6 +285,42 @@ const DEFAULT_CONFIG: AgentConfig = {
   memoryFile: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),
 };
 
+// ── 路径可移植化（2026-10-07）────────────────────────────────────
+// 背景：memoryFile 这类字段的"默认值"是 os.homedir() 拼出的**绝对路径**，而 save()
+// 会把配置原样写盘 ⇒ 平台路径被**固化**进 config.json。一旦 .agent 目录被同步到
+// 另一台机器 / 另一平台（典型：Windows → Termux），该路径必然不存在。
+// 实测症状：POSIX 上 `C:\Users\...` 被当成**相对路径**（posix.isAbsolute === false），
+// 直接拼到 cwd 后面 ⇒ 所有文件类工具报 "File not found: C:\..."。
+// 故：持久化时归一为 `~` 形式，读取时展开；并丢异平台残留值（回落动态默认）。
+
+/** 本机绝对路径 → `~` 可移植形式（不在 home 之下的路径原样保留） */
+function toPortablePath(p: string): string {
+  const home = os.homedir();
+  if (!home || !p.startsWith(home)) return p;
+  const rest = p.slice(home.length);
+  if (rest === '') return '~';
+  if (rest.startsWith('/') || rest.startsWith('\\')) {
+    return '~' + rest.split(/[\\/]/).join('/');
+  }
+  return p; // 形如 home=/home/u 而路径=/home/user2/... —— 不是"home 之下"，别误伤
+}
+
+/** `~` 可移植形式 → 本机绝对路径（非 `~` 开头原样返回，兼容已有绝对路径配置） */
+function fromPortablePath(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(os.homedir(), ...p.slice(2).split(/[\\/]/));
+  }
+  return p;
+}
+
+/** 路径是否明显属于**另一个平台**（跨平台拷贝 .agent 目录的典型残留） */
+function isForeignPlatformPath(p: string): boolean {
+  return process.platform === 'win32'
+    ? p.startsWith('/') && !p.startsWith('//') // Windows 上读到 POSIX 绝对路径
+    : /^[A-Za-z]:[\\/]/.test(p);               // POSIX 上读到盘符路径
+}
+
 /** 默认最大上下文 Token 数 */
 export const DEFAULT_MAX_CONTEXT_TOKENS = 200000;
 
@@ -339,7 +375,27 @@ export class ConfigManager {
     } catch {
       // 全局配置不存在，使用默认值
     }
-    return config;
+    return this.revivePaths(config);
+  }
+
+  /**
+   * 反序列化后的路径修正：
+   *  - `~` 形式 → 本机绝对路径；
+   *  - 明显属于**他平台**的残留值 → 丢弃该字段，回落动态默认。
+   *
+   * 后者是跨平台拷贝 .agent 目录的兜底：若无此步，消费点会拿到一个必然 ENOENT
+   * 的路径，且**看起来像"用户显式配置"**，极难排查（Termux 上 File not found: C:\…）。
+   */
+  private revivePaths(config: AgentConfig): AgentConfig {
+    const mf = config.memoryFile;
+    if (typeof mf !== 'string' || mf.length === 0) return config;
+    const expanded = fromPortablePath(mf);
+    if (isForeignPlatformPath(expanded)) {
+      // 丢弃该值，回落本平台默认（DEFAULT_CONFIG.memoryFile 由 os.homedir() 现算，
+      // 故在当前平台必然正确）
+      return { ...config, memoryFile: DEFAULT_CONFIG.memoryFile };
+    }
+    return { ...config, memoryFile: expanded };
   }
 
   /**
@@ -350,12 +406,18 @@ export class ConfigManager {
     await this.ensureDir();
     // ui 是用户偏好（主题等），单独管理写全局
     const { ui, ...businessConfig } = config;
+    // 路径可移植化：home 下的绝对路径存成 `~` 形式（见文件内 toPortablePath 注释），
+    // 否则平台路径会被固化进 config.json，跨机器/跨平台即失效。
+    const persisted: AgentConfig = { ...businessConfig };
+    if (typeof persisted.memoryFile === 'string' && persisted.memoryFile.length > 0) {
+      persisted.memoryFile = toPortablePath(persisted.memoryFile);
+    }
     // ⚠️ **顺序要紧** ✗：必须先写业务段，再「合并式」写回 ui。
     // 反过来（先写 ui，再用不含 ui 的快照整体覆盖**同一个文件**）会把 ui 抹掉 ✓ ——
     // 2026-09-20 用户报「切主题后又退回」就是这个：盘上永远没有 ui.* ⇒
     // 任何一次配置重载都回到默认 ⇒ 画面退回 ✓（也解释了为何"开个页面就 merge 一次"会顶掉主题 ✓）。
     // `saveUserSection` 是读-改-写 ⇒ 放在最后不会抹掉业务段 ✓。
-    await fs.writeFile(this.getConfigPath(), JSON.stringify(businessConfig, null, 2), 'utf-8');
+    await fs.writeFile(this.getConfigPath(), JSON.stringify(persisted, null, 2), 'utf-8');
     if (ui !== undefined) {
       await this.saveUserSection({ ui } as Partial<AgentConfig>);
     }

@@ -73,3 +73,77 @@ describe('ConfigManager.saveApiKeyToEnv', () => {
     expect(fs.existsSync(envPath)).toBe(false);
   });
 });
+
+/**
+ * 路径可移植化回归 —— 事故驱动（2026-10-07）：
+ * 用户在 Termux 跑 hyacinth，bash/read/write 全部 "找不到路径"。
+ * 根因：config.json 固化了 os.homedir() 拼出的**平台绝对路径**，跨平台后失效
+ * （POSIX 上 `C:\...` 被当**相对路径**，posix.isAbsolute === false）。
+ */
+describe('ConfigManager 路径可移植化（memoryFile 跨平台）', () => {
+  let tempDir: string;
+  let manager: ConfigManager;
+  const cfgPath = () => path.join(tempDir, '.agent', 'config.json');
+  const writeCfg = (obj: unknown) => {
+    fs.mkdirSync(path.join(tempDir, '.agent'), { recursive: true });
+    fs.writeFileSync(cfgPath(), JSON.stringify(obj, null, 2), 'utf8');
+  };
+  /** 本机默认 memoryFile（home 被 mock 成 tempDir，故这里是 tempDir 下的绝对路径） */
+  const defaultMemory = () => path.join(tempDir, '.agent', 'prompts', 'persona', 'memory.md');
+
+  beforeEach(() => {
+    tempDir = path.join(os.tmpdir(), `agent-cfg-${crypto.randomUUID()}`);
+    mockHomedir.mockReturnValue(tempDir);
+    manager = new ConfigManager();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('save：home 下的绝对路径存成 ~ 形式（不把平台路径固化进盘）', async () => {
+    await manager.save({ ...(await manager.load()), memoryFile: defaultMemory() });
+    const raw = JSON.parse(fs.readFileSync(cfgPath(), 'utf8'));
+    expect(raw.memoryFile).toBe('~/.agent/prompts/persona/memory.md');
+    expect(raw.memoryFile).not.toContain(tempDir);
+  });
+
+  it('load：~ 形式展开为本机绝对路径', async () => {
+    writeCfg({ memoryFile: '~/.agent/prompts/persona/memory.md' });
+    const cfg = await manager.load();
+    expect(cfg.memoryFile).toBe(defaultMemory());
+  });
+
+  /**
+   * 「回落默认」的期望值**不是** defaultMemory()：DEFAULT_CONFIG 在**模块加载时**
+   * 计算 memoryFile，那一刻 hoisted mock 返回的还是 os.tmpdir()（beforeEach 才把它
+   * 改成 tempDir）。故回落值基于 os.tmpdir()。
+   */
+  const fallbackMemory = () => path.join(os.tmpdir(), '.agent', 'prompts', 'persona', 'memory.md');
+
+  it('load：他平台残留路径被丢弃并回落本机默认（跨平台拷贝 .agent 的兜底）', async () => {
+    const orig = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    try {
+      writeCfg({ memoryFile: 'C:\\Users\\someone\\.agent\\prompts\\persona\\memory.md' });
+      const cfg = await manager.load();
+      expect(cfg.memoryFile).not.toContain('someone');
+      expect(cfg.memoryFile).toBe(fallbackMemory());
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true });
+    }
+  });
+
+  it('load：本平台绝对路径原样保留（向后兼容旧配置）', async () => {
+    const abs = path.join(tempDir, '.agent', 'custom', 'mem.md');
+    writeCfg({ memoryFile: abs });
+    const cfg = await manager.load();
+    expect(cfg.memoryFile).toBe(abs);
+  });
+
+  it('load：未设置时用默认（消费点 fallback 仍可用）', async () => {
+    writeCfg({ maxTurns: 7 });
+    const cfg = await manager.load();
+    expect(cfg.memoryFile).toBe(fallbackMemory());
+  });
+});
