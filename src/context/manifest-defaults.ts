@@ -22,7 +22,7 @@
  *   template   — 含 {{变量}}，由 resolveTemplate() 渲染
  *
  * ── 各 Section 的注册位置索引 ───────────────────────────
- *   persona_soul  → src/prompts/persona/ (SOUL.md, IDENTITY.md, USER.md)
+ *   persona_soul  → src/prompts/persona/ (SOUL.md, USER.md)
  *   tool_rules    → src/prompts/tools/tool-rules.md
  *   tool_bundles  → src/gateway/factory.ts (ContextSource 注册)
  *                  + src/tools/bundle-registry.ts (ToolBundleRegistry)
@@ -71,7 +71,7 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
       role: 'system',
       sections: [
         // ── 核心身份 ──
-        { name: 'persona_soul',            source: 'prompts/persona',               priority: 1,  type: 'static',     description: '用户 persona（SOUL/IDENTITY/USER）' },
+        { name: 'persona_soul',            source: 'prompts/persona',               priority: 1,  type: 'static',     description: '用户 persona（SOUL/USER）' },
         // { name: 'environment',             source: 'runtime:env',                   priority: 10, type: 'runtime',    description: '运行环境信息 → 已迁移为 system_info / channel_info 工具' },
         // framework_capabilities 已移除（2026-07-10）：工具描述已通过 API tools 字段提供，
         // TUI 斜杠命令（/session、/channel 等）不应进入 LLM 上下文，避免引发模型幻觉。

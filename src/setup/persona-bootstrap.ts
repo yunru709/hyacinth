@@ -16,7 +16,6 @@ const PERSONA_STATE_VERSION = 1;
 
 const PERSONA_FILE_NAMES = [
   'SOUL.md',
-  'IDENTITY.md',
   'USER.md',
   'PartnerSoul.md',
   'PartnerMemory.md',
@@ -196,13 +195,10 @@ export async function ensurePersonaFiles(
   // 自动检测：如果 persona 文件已被填写（内容 ≠ 模板）但 state 文件未反映，自动标记完成
   if (!state.setupCompletedAt) {
     try {
-      const identityPath = path.join(personaDir, 'IDENTITY.md');
       const userPath = path.join(personaDir, 'USER.md');
-      const identityTemplate = loadTemplateContent('IDENTITY.md');
       const userTemplate = loadTemplateContent('USER.md');
-      const identityChanged = await fileContentDiffersFromTemplate(identityPath, identityTemplate);
       const userChanged = await fileContentDiffersFromTemplate(userPath, userTemplate);
-      if (identityChanged || userChanged) {
+      if (userChanged) {
         state = { ...state, setupCompletedAt: now };
         logger.info('Persona setup auto-detected as complete (files already filled)');
       }
@@ -228,13 +224,10 @@ export async function ensurePersonaFiles(
   // 二次检查：如果文件已被修改但 state 尚未记录
   if (!state.setupCompletedAt) {
     try {
-      const identityPath = path.join(personaDir, 'IDENTITY.md');
       const userPath = path.join(personaDir, 'USER.md');
-      const identityTemplate = loadTemplateContent('IDENTITY.md');
       const userTemplate = loadTemplateContent('USER.md');
-      const identityChanged = await fileContentDiffersFromTemplate(identityPath, identityTemplate);
       const userChanged = await fileContentDiffersFromTemplate(userPath, userTemplate);
-      if (identityChanged || userChanged) {
+      if (userChanged) {
         state = { ...state, setupCompletedAt: now };
         logger.info('Persona setup detected as complete (user-modified files)');
       }
@@ -261,7 +254,7 @@ export async function validatePersonaFiles(personaDir: string): Promise<PersonaV
   const missing: PersonaFileName[] = [];
   const templateFiles: PersonaFileName[] = [];
 
-  for (const fileName of ['SOUL.md', 'IDENTITY.md', 'USER.md'] as PersonaFileName[]) {
+  for (const fileName of ['SOUL.md', 'USER.md'] as PersonaFileName[]) {
     const filePath = path.join(personaDir, fileName);
     let content: string;
     try {
@@ -295,7 +288,7 @@ export function validatePersonaFilesSync(personaDir: string): PersonaValidationR
   const missing: PersonaFileName[] = [];
   const templateFiles: PersonaFileName[] = [];
 
-  for (const fileName of ['SOUL.md', 'IDENTITY.md', 'USER.md'] as PersonaFileName[]) {
+  for (const fileName of ['SOUL.md', 'USER.md'] as PersonaFileName[]) {
     const filePath = path.join(personaDir, fileName);
     let content: string;
     try {

@@ -32,7 +32,7 @@ const nodeRequire = createRequire(import.meta.url);
 
 function loadOriginalPrompts(): Record<string, string> {
   const sources = ['src/prompts/persona', 'dist/prompts/persona'];
-  const files = ['SOUL.md', 'IDENTITY.md', 'USER.md'] as const;
+  const files = ['SOUL.md', 'USER.md'] as const;
   const result: Record<string, string> = {};
   for (const f of files) {
     for (const dir of sources) {
@@ -80,7 +80,7 @@ function checkEncoding(): CheckResult {
 
 function checkPersona(): CheckResult {
   const personaDir = path.join(os.homedir(), '.agent', 'prompts', 'persona');
-  const files = ['SOUL.md', 'IDENTITY.md', 'USER.md'] as const;
+  const files = ['SOUL.md', 'USER.md'] as const;
   const existing: string[] = [];
   const missing: string[] = [];
 
@@ -92,10 +92,10 @@ function checkPersona(): CheckResult {
 
   return {
     label: 'Persona 文件',
-    ok: existing.length >= 3,
+    ok: existing.length >= 2,
     detail: missing.length > 0
       ? `缺失: ${missing.join(', ')}`
-      : `完整 (${existing.length}/3 文件)`,
+      : `完整 (${existing.length}/2 文件)`,
     fix: missing.length > 0
       ? '运行 hyacinth setup 完成初始化'
       : undefined,

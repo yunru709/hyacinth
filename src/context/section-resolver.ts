@@ -364,7 +364,7 @@ function resolveConditional(
 
 // --- Helpers ---
 
-const PERSONA_SOUL_FILES = ['SOUL', 'IDENTITY', 'USER'] as const;
+const PERSONA_SOUL_FILES = ['SOUL', 'USER'] as const;
 
 export function buildSoulSection(): string {
   const parts: string[] = [];
