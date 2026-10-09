@@ -166,3 +166,46 @@ describe('loader 目录式 skill（一个文件夹 ＋ SKILL.md ＋ 子文件 �
     expect(scanSkillsDir(root, reg)).toEqual([]);
   });
 });
+
+describe('loader frontmatter YAML 子集（回归：`>-` 曾被静默解析成字面量 ">-"）', () => {
+  function loadFrom(text: string): SkillDefinition | null {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-fm-'));
+    try {
+      const file = path.join(dir, 's.md');
+      fs.writeFileSync(file, text, 'utf-8');
+      return loadSkillFile(file);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('块标量 `>-`：多行折叠成一行（回归：不再是 ">-"）', () => {
+    const s = loadFrom('---\nname: s\ndescription: >-\n  第一行\n  第二行\n---\nbody\n');
+    expect(s?.description).toBe('第一行 第二行');
+  });
+
+  it('块标量 `|`：保留换行', () => {
+    const s = loadFrom('---\nname: s\ndescription: |\n  a\n  b\n---\nbody\n');
+    expect(s?.description).toBe('a\nb');
+  });
+
+  it('引号标量去引号', () => {
+    const s = loadFrom('---\nname: "quoted"\ndescription: d\n---\nbody\n');
+    expect(s?.name).toBe('quoted');
+  });
+
+  it('flow 序列 tools: [a, b] 等价逗号列表', () => {
+    const s = loadFrom('---\nname: s\ndescription: d\ntools: [read, glob]\n---\nbody\n');
+    expect(s?.relatedTools).toEqual(['read', 'glob']);
+  });
+
+  it('CRLF 行尾同样可解析', () => {
+    const s = loadFrom('---\r\nname: crlf\r\ndescription: >-\r\n  x y\r\n  z\r\n---\r\nbody\r\n');
+    expect(s?.description).toBe('x y z');
+  });
+
+  it('`tools:` 空值 = 无工具（合法，不炸）', () => {
+    const s = loadFrom('---\nname: s\ndescription: d\ntools:\n---\nbody\n');
+    expect(s?.relatedTools).toEqual([]);
+  });
+});
