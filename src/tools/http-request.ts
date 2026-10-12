@@ -170,6 +170,11 @@ export class HttpRequestTool implements Tool {
     //   注：HTML 抽取路径不受影响（select 只对非 markup 响应生效）。
     const maxBytes = ctx.select ? Math.max(ctx.maxBytes, 8 * 1024 * 1024) : ctx.maxBytes;
 
+    // 体量的人类可读写法。此前三处截断提示都用 `Math.round(maxBytes / 1024) + 'KB'`，
+    // 上限小于 512 字节时会显示 **"0KB"** —— 一个"被截断在 0KB"的提示，纯属误导
+    // （是给 select 回归闸把上限压到 200 复现 bug 时才现形的）。小于 1KB 就报字节。
+    const sizeLabel = maxBytes < 1024 ? `${maxBytes}B` : `${Math.round(maxBytes / 1024)}KB`;
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -254,7 +259,7 @@ export class HttpRequestTool implements Tool {
         if (s.botWall) {
           lines.push(`[WARN] looks like an anti-bot / challenge page: ${s.botWall} — content may be a placeholder, not the real page`);
         }
-        if (rawTruncated) lines.push(`[WARN] raw body hit the ${Math.round(maxBytes / 1024)}KB cap before extraction`);
+        if (rawTruncated) lines.push(`[WARN] raw body hit the ${sizeLabel} cap before extraction`);
         if (r.title) lines.push(`[title] ${r.title}`);
 
         // 抽取近乎为空、但响应体不小 ⇒ 多半是 JS 渲染页 / 壳页，而不是"这页没有正文"。
@@ -296,7 +301,7 @@ export class HttpRequestTool implements Tool {
           }
         }
         payload = text;
-        if (s.truncated) payload += `\n\n... (extracted text truncated at ${Math.round(maxBytes / 1024)}KB)`;
+        if (s.truncated) payload += `\n\n... (extracted text truncated at ${sizeLabel})`;
       } else {
         payload = decoded || '(empty response)';
         if (section) lines.push('[section] ignored — section only applies to extracted HTML/XML text (omit format:"raw")');
@@ -318,7 +323,7 @@ export class HttpRequestTool implements Tool {
         }
 
         if (rawTruncated) {
-          payload += `\n\n... (response truncated at ${Math.round(maxBytes / 1024)}KB)`;
+          payload += `\n\n... (response truncated at ${sizeLabel})`;
         }
       }
 
