@@ -76,6 +76,14 @@ export class HttpRequestTool implements Tool {
         description:
           '只返回标题包含该字符串的章节（大小写不敏感）。需要开启提取（format auto/text）。可用于避免拉取整篇长页面。',
       },
+      select: {
+        type: 'string',
+        description:
+          '对 **JSON** 响应做字段投影，只回你要的字段 —— 避免大 JSON 撑爆工具结果被截断。'
+          + '语法：点号路径分隔层级，`[]` 表示"对该数组逐元素应用后续段"，末尾 `{a,b,c}` 表示"只留这几个字段"。'
+          + '例：select="results[].{title,publication_year,doi}" · select="data.items[].name" · select="meta.count"。'
+          + '另：值为「词 → 位置数组」形状的对象（如 OpenAlex 的 abstract_inverted_index）会自动还原成正文字符串。',
+      },
     },
     required: [],
   };
@@ -106,6 +114,8 @@ export class HttpRequestTool implements Tool {
     const format = ((args.format as string) ?? 'auto').toLowerCase();
     const keepLinks = args.keepLinks === true;
     const section = typeof args.section === 'string' && args.section.trim() ? args.section.trim() : undefined;
+    // ★ select：JSON 字段投影表达式（语法见 schema 里的描述与文末 projectJson 的注释）
+    const select = typeof args.select === 'string' && args.select.trim() ? args.select.trim() : undefined;
     // tools.http.timeoutMs（默认 30000）；硬上限 120000 保留为安全边界
     const timeoutMs = Math.min(
       (args.timeout as number) ?? getToolConfig('http.timeoutMs', 30000),
@@ -135,7 +145,7 @@ export class HttpRequestTool implements Tool {
     }
     Object.assign(headers, customHeaders);
 
-    const ctx: FetchCtx = { method, headers, body, timeoutMs, maxBytes, format, keepLinks, section };
+    const ctx: FetchCtx = { method, headers, body, timeoutMs, maxBytes, format, keepLinks, section, select };
 
     if (targets.length === 1) return this.fetchOne(targets[0]!, ctx);
 
@@ -150,7 +160,15 @@ export class HttpRequestTool implements Tool {
 
   /** 取一个 URL 并格式化输出（提取 / 原样 / 错误三种形态） */
   private async fetchOne(url: string, ctx: FetchCtx): Promise<string> {
-    const { method, headers, body, timeoutMs, maxBytes, format, keepLinks, section } = ctx;
+    const { method, headers, body, timeoutMs, format, keepLinks, section } = ctx;
+    // ★ 有 select 时放宽**接收**上限 —— 这是投影能成立的前提。
+    //   投影的意义正是"把大 JSON 收窄"，但**截断发生在投影之前**（见下方 reader 循环）：
+    //   若仍按 ctx.maxBytes 截断，超限的 JSON 会变成半截 ⇒ JSON.parse 失败 ⇒ 投影恒定失效、白给。
+    //   实测踩过：npm 包文档 58KB、而配置 tools.http.maxResponseBytes=51200
+    //     ⇒ select 永远回 "[select] ignored"，偏偏小 JSON 正常 ⇒ 极易误判成"表达式写错"。
+    //   放宽到 8MB 并保留硬上限，避免 select 变成"无视任何上限地拉大文件"。
+    //   注：HTML 抽取路径不受影响（select 只对非 markup 响应生效）。
+    const maxBytes = ctx.select ? Math.max(ctx.maxBytes, 8 * 1024 * 1024) : ctx.maxBytes;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -282,6 +300,23 @@ export class HttpRequestTool implements Tool {
       } else {
         payload = decoded || '(empty response)';
         if (section) lines.push('[section] ignored — section only applies to extracted HTML/XML text (omit format:"raw")');
+
+        // ★ select：JSON 字段投影。必须在这里做（**在截断与返回之前**）——
+        //   它的目的正是"别让大 JSON 撑爆工具结果"，放到截断之后就失去意义了。
+        //   只对非 markup 响应生效；format:"raw" 时跳过（raw 的语义就是"原样"）。
+        //   投影失败（非 JSON / 路径不匹配）只是加一行提示并回退原响应体，不报错 ——
+        //   select 写错时调用方仍能拿到数据自己看。
+        const sel = ctx.select;
+        if (sel && format !== 'raw') {
+          const projected = tryProject(decoded, sel);
+          if (projected) {
+            payload = projected.text;
+            lines.push(`[select] ${projected.note}`);
+          } else {
+            lines.push(`[select] ignored — response is not JSON, or the path did not match (expr: ${sel})`);
+          }
+        }
+
         if (rawTruncated) {
           payload += `\n\n... (response truncated at ${Math.round(maxBytes / 1024)}KB)`;
         }
@@ -308,6 +343,115 @@ interface FetchCtx {
   format: string;
   keepLinks: boolean;
   section?: string;
+  /** JSON 字段投影表达式（见 projectJson） */
+  select?: string;
+}
+
+/**
+ * 字段投影（select 参数）—— 把大 JSON 收窄成调用方真正要的字段。
+ *
+ * **动机**（真实痛点）：OpenAlex 一次查 5 个就 18–57KB，超出工具结果的缓冲阈值，
+ * 于是只能落盘再写脚本解析，每批检索白花 1–2 个往返。
+ *
+ * **语法**（够用即止，保持 LLM 好写）：
+ *   results[].{title,publication_year,doi}   遍历 results 数组，每元素只留这三个字段
+ *   data.items[].name                        点号路径 + 数组遍历
+ *   meta.count                               普通路径
+ * 语义：`[]` = "对该数组逐元素应用后续路径段"；`{a,b,c}` = "只留这些字段"。
+ *
+ * **倒排索引自动还原**：形如 `{"word":[0,5,9]}` 的对象（OpenAlex 的
+ * `abstract_inverted_index`）会按位置还原成正文字符串 —— 否则调用方拿到的是位置表，
+ * 还得自己写还原脚本（本项目为此专门写过 oa_show.py）。
+ *
+ * 不引入 jq 依赖：只覆盖"路径 + 数组 + 字段选择"三件事，更复杂的转换交调用方脚本处理。
+ */
+type SelectSeg = { kind: 'key'; key: string; each: boolean } | { kind: 'fields'; fields: string[] };
+
+function parseSelect(expr: string): SelectSeg[] {
+  const segs: SelectSeg[] = [];
+  for (const raw of expr.split('.')) {
+    const part = raw.trim();
+    if (!part) continue;
+    if (part.startsWith('{') && part.endsWith('}')) {
+      const fields = part.slice(1, -1).split(',')
+        .map((f) => f.trim().replace(/\[\]$/, ''))
+        .filter(Boolean);
+      if (fields.length) segs.push({ kind: 'fields', fields });
+      continue;
+    }
+    const each = part.endsWith('[]');
+    segs.push({ kind: 'key', key: each ? part.slice(0, -2) : part, each });
+  }
+  return segs;
+}
+
+/** 形如 {"w":[0,2],...} 的倒排索引 → 按位置还原的正文字符串；不像则返回 null */
+function invertIndexToString(v: unknown): string | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > 20000) return null;
+  const slots: string[] = [];
+  for (const [word, pos] of entries) {
+    if (!Array.isArray(pos) || pos.length === 0 || !pos.every((n) => typeof n === 'number')) return null;
+    for (const n of pos as number[]) slots[n] = word;
+  }
+  if (slots.length === 0 || slots.some((s) => s === undefined)) return null;
+  return slots.join(' ');
+}
+
+function projectJson(value: unknown, segs: SelectSeg[], depth = 0): unknown {
+  if (depth > 24 || segs.length === 0) return value;
+  const head = segs[0]!;
+  const rest = segs.slice(1);
+  if (head.kind === 'fields') {
+    const pick = (obj: unknown): unknown => {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+      const src = obj as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const f of head.fields) if (f in src) out[f] = src[f];
+      return rest.length ? projectJson(out, rest, depth + 1) : out;
+    };
+    return Array.isArray(value) ? value.map(pick) : pick(value);
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) return value.map((v) => projectJson(v, segs, depth + 1));
+  const next = (value as Record<string, unknown>)[head.key];
+  if (next === undefined) return undefined;
+  if (head.each && Array.isArray(next)) {
+    return rest.length ? next.map((v) => projectJson(v, rest, depth + 1)) : next;
+  }
+  return projectJson(next, rest, depth + 1);
+}
+
+/** 把结果里的倒排索引逐层还原成文本 */
+function reviveInverted(v: unknown, depth = 0): unknown {
+  if (depth > 24) return v;
+  const inv = invertIndexToString(v);
+  if (inv !== null) return inv;
+  if (Array.isArray(v)) return v.map((x) => reviveInverted(x, depth + 1));
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) o[k] = reviveInverted(val, depth + 1);
+    return o;
+  }
+  return v;
+}
+
+/** 执行投影。解析失败 / 非 JSON / 路径不匹配 ⇒ null（调用方回退到原响应体，不报错） */
+function tryProject(body: string, expr: string): { text: string; note: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const segs = parseSelect(expr);
+  if (segs.length === 0) return null;
+  const out = projectJson(parsed, segs);
+  if (out === undefined) return null;
+  const before = body.length;
+  const text = JSON.stringify(reviveInverted(out), null, 2);
+  return { text, note: `${before} → ${text.length} chars (projection: ${expr})` };
 }
 
 /**

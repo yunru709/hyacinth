@@ -28,6 +28,26 @@ beforeAll(async () => {
       res.end(JSON.stringify({ ok: true, n: 42 }));
       return;
     }
+    if (req.url === '/api/search') {
+      // select（字段投影）的回归点：一个端点同时覆盖
+      //   ① 数组遍历 results[] ② 多字段选择 {a,b,c} ③ 未选中字段必须被丢弃
+      //   ④ 倒排索引（abstract_inverted_index 形状）必须还原成正文
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        meta: { count: 2 },
+        results: [
+          {
+            title: 'Paper A',
+            publication_year: 2024,
+            doi: '10.1/a',
+            abstract_inverted_index: { The: [0], quick: [1], brown: [2], fox: [3] },
+            extra: 'MUST BE DROPPED',
+          },
+          { title: 'Paper B', publication_year: 2025, doi: '10.1/b', extra: 'MUST BE DROPPED' },
+        ],
+      }));
+      return;
+    }
     if (req.url === '/shell') {
       // JS 壳页：体积不小（>4KB），但几乎没有可读正文。
       // 复刻真实场景：Bing / ecosia 这类搜索页抓回来 51KB 静态 HTML，
@@ -136,5 +156,54 @@ describe('http_request 按需深挖', () => {
     expect(r).toContain('[hint]');
     expect(r).toContain('format=rss');      // 明确指向"机器口"
     expect(r).toContain('[raw head]');      // 附一段原始头，便于一眼分辨壳页/反爬墙
+  });
+});
+
+describe('http_request · select（JSON 字段投影）', () => {
+  it('数组遍历 + 多字段：只留指定字段，未选中的被丢弃', async () => {
+    const r = await tool.execute({ url: `${base}/api/search`, select: 'results[].{title,doi}' });
+    expect(r).toContain('[select]');
+    expect(r).toContain('Paper A');
+    expect(r).toContain('10.1/a');
+    expect(r).toContain('Paper B');
+    // 未选中的字段必须消失（这是投影存在的理由：少占上下文）
+    expect(r).not.toContain('MUST BE DROPPED');
+    expect(r).not.toContain('publication_year');
+    expect(r).not.toContain('meta');
+  });
+
+  it('普通路径：meta.count', async () => {
+    const r = await tool.execute({ url: `${base}/api/search`, select: 'meta.count' });
+    expect(r).toContain('[select]');
+    expect(r).toContain('2');
+    expect(r).not.toContain('Paper A');
+  });
+
+  it('倒排索引（abstract_inverted_index 形状）自动还原成正文字符串', async () => {
+    const r = await tool.execute({
+      url: `${base}/api/search`,
+      select: 'results[].{abstract_inverted_index}',
+    });
+    expect(r).toContain('The quick brown fox');
+    // 还原后不该再看到「词 → 位置数组」的形状
+    expect(r).not.toContain('"brown": [');
+  });
+
+  it('路径不匹配 ⇒ 加提示并回退原响应体（不报错）', async () => {
+    const r = await tool.execute({ url: `${base}/api/search`, select: 'nope.missing' });
+    expect(r).toContain('[select] ignored');
+    expect(r).toContain('MUST BE DROPPED'); // 回退 = 原响应体仍在
+  });
+
+  it('JSON 但表达式合法：小响应也能投影', async () => {
+    const r = await tool.execute({ url: `${base}/json`, select: 'n' });
+    expect(r).toContain('[select]');
+    expect(r).toContain('42');
+  });
+
+  it('format:"raw" 时跳过投影（raw 的语义就是原样）', async () => {
+    const r = await tool.execute({ url: `${base}/api/search`, select: 'meta.count', format: 'raw' });
+    expect(r).not.toContain('[select]');
+    expect(r).toContain('MUST BE DROPPED');
   });
 });
