@@ -48,6 +48,15 @@ beforeAll(async () => {
       }));
       return;
     }
+    if (req.url === '/bigjson') {
+      // select 回归闸的夹具（见文末 describe）：体积必须**明显大于**测试里压小的
+      // tools.http.maxResponseBytes（闸里压到 200 字节），且必须是**完整合法 JSON** ——
+      // 这样"能不能 parse"才是可判别信号：若投影晚于截断，decoded 会变成半截
+      // ⇒ JSON.parse 失败 ⇒ 恒定回 "[select] ignored"（就是那条真实踩过的 bug）。
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, pad: 'x'.repeat(2000) }));
+      return;
+    }
     if (req.url === '/shell') {
       // JS 壳页：体积不小（>4KB），但几乎没有可读正文。
       // 复刻真实场景：Bing / ecosia 这类搜索页抓回来 51KB 静态 HTML，
@@ -205,5 +214,47 @@ describe('http_request · select（JSON 字段投影）', () => {
     const r = await tool.execute({ url: `${base}/api/search`, select: 'meta.count', format: 'raw' });
     expect(r).not.toContain('[select]');
     expect(r).toContain('MUST BE DROPPED');
+  });
+});
+
+/**
+ * ── select 的回归闸：投影必须早于截断 ──
+ *
+ * 曾真实踩过的 bug：投影写在了 reader 截断**之后**（见 http-request.ts fetchOne 的说明）。
+ * 触发条件是"响应体 > tools.http.maxResponseBytes"：
+ *   超限 ⇒ reader.cancel() 截断 ⇒ decoded 是半截 JSON ⇒ JSON.parse 失败
+ *   ⇒ **恒定回 "[select] ignored"**。而投影存在的唯一理由恰恰是处理大响应 ——
+ *   它就这么静静地永不工作。
+ *
+ * 当时所有测试都放它过去：本地 fixture 都极小（19B / 2874B），永远碰不到截断。
+ * 所以这条闸的做法是**把上限压到比夹具还小**，强行把那条路径逼出来。
+ * 第二个 it 是对照组：证明"上限确实生效" —— 否则第一个 it 可能是假绿。
+ */
+const { injectToolConfigCenter } = await import('./tool-config.js');
+
+describe('http_request · select 回归闸（投影必须早于截断）', () => {
+  // 只覆盖 tools.http.maxResponseBytes，其余键回退各自默认值
+  const tinyCap = { get: (p: string) => (p === 'tools.http.maxResponseBytes' ? 200 : undefined) };
+
+  it('响应超过 tools.http.maxResponseBytes 时，select 仍必须生效', async () => {
+    injectToolConfigCenter(tinyCap as never);
+    try {
+      const r = await tool.execute({ url: `${base}/bigjson`, select: 'ok' });
+      expect(r).not.toContain('[select] ignored');
+      expect(r).toContain('[select]');
+      expect(r).toContain('true');
+    } finally {
+      injectToolConfigCenter(null);
+    }
+  });
+
+  it('对照组：同样压小上限、不带 select ⇒ 确实被截断（证明上限真的生效）', async () => {
+    injectToolConfigCenter(tinyCap as never);
+    try {
+      const r = await tool.execute({ url: `${base}/bigjson` });
+      expect(r).toContain('truncated');
+    } finally {
+      injectToolConfigCenter(null);
+    }
   });
 });
