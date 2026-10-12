@@ -317,7 +317,11 @@ export class BashTool implements Tool {
             stdio: ['ignore', 'pipe', 'pipe'],
           });
 
-      const handle = this.backgroundRegistry.register('bash', command, childProcess);
+      const reg = this.backgroundRegistry.register('bash', command, childProcess, {
+        async: true,
+        timeoutSec: timeout,
+      });
+      const handle = reg.handle;
       // 父死自灭 watchdog：主进程被外部强杀时由 watchdog 杀掉本命令树
       if (childProcess.pid) {
         spawnWatchdog(childProcess.pid);
@@ -338,10 +342,33 @@ export class BashTool implements Tool {
           keepEntry: true,
         });
       }, timeoutMs);
-      // 子进程正常退出时清除定时器，避免重复 kill
-      childProcess.on('exit', () => clearTimeout(timer));
 
-      return `[background:${handle}] PID ${pid}\nCommand: ${command}\n\nUse process_output("${handle}") to read output, process_kill("${handle}") to stop.`;
+      // ★ 超时前预警：在剩余约 10% 时往输出缓冲追加一条提示。
+      //   背景：watchdog 到点是**静默杀掉**，长跑者只能靠数落盘文件反推"做完了几个"，
+      //   代价是白等一整轮（曾真实踩过：9 个 run 只落盘 4 个）。
+      //   与 process_list 的 REMAIN 列互补：那一列是主动查询侧，这一条是被动侧。
+      const warnMs = Math.max(timeoutMs * 0.1, 1000);
+      const warnTimer = setTimeout(() => {
+        void this.backgroundRegistry?.note(
+          handle,
+          `[timeout warning] ~${Math.round(warnMs / 1000)}s left before this process is killed `
+          + `(timeout=${timeout}s). Check progress now and decide whether to shrink the workload.`,
+        );
+      }, timeoutMs - warnMs);
+
+      // 子进程正常退出时清除定时器，避免重复 kill / 重复预警
+      childProcess.on('exit', () => {
+        clearTimeout(timer);
+        clearTimeout(warnTimer);
+      });
+
+      // ★ 重复启动警告必须**在启动当时**返回，而不是等下次 process_list 才发现：
+      //   那时副本已经落盘，若汇总时不去重就会被当成独立样本（曾真实踩过）。
+      const dupNote = reg.duplicateOf
+        ? `\n\n⚠️ 同命令已在运行：${reg.duplicateOf}。两份副本产物逐位相同 —— `
+          + '汇总前务必按 (arm, seed) 去重，或先 kill 掉其中一个。'
+        : '';
+      return `[background:${handle}] PID ${pid}\nCommand: ${command}\n\nUse process_output("${handle}") to read output, process_kill("${handle}") to stop.${dupNote}`;
     }
 
     // ── 同步执行路径 ──
@@ -378,9 +405,11 @@ export class BashTool implements Tool {
       // 同步路径临时登记 + 父死自灭 watchdog：
       // - 登记：主进程优雅退出（exit 钩子 forceKillAll）时能杀到本命令树
       // - watchdog：主进程被外部强杀（TerminateProcess）时由 watchdog 杀掉本命令树
+      // ★ 不传 { async: true }：同步登记是临时的（settle 时 unregister），
+      //   不应参与"重复启动"检测 —— 否则它会和同时段启动的同命令 async 互相误报。
       let syncHandle: string | null = null;
       if (this.backgroundRegistry) {
-        syncHandle = this.backgroundRegistry.register('bash', command, childProcess);
+        syncHandle = this.backgroundRegistry.register('bash', command, childProcess).handle;
       }
       if (childProcess.pid) {
         spawnWatchdog(childProcess.pid);

@@ -24,10 +24,26 @@ export interface BackgroundProcessInfo {
   handle: string;
   name: string;
   command: string;
+  /**
+   * 子进程 PID。
+   * ⚠️ Windows 下 bash 走 `powershell -File <临时.ps1>`，所以**这是 shell 的 PID，
+   * 不是实际工作进程的 PID**；且 shell 退出后该 PID 会被 OS 复用 ——
+   * 曾出现"两个句柄显示同一个 PID、而真实工作进程是另一个 PID"的事故。
+   * ⇒ 判断"还在不在跑"请用 `alive`（实时探测），**不要只看 pid**。
+   */
   pid: number | null;
+  /** ★ 实时存活探测（`process.kill(pid, 0)`）。比 pid 可靠，理由见上。 */
+  alive: boolean;
   status: 'running' | 'stopped' | 'crashed';
   startTime: string;
   outputSize: number;
+  /**
+   * ★ 距超时还剩多少秒（仅 async 且设了 timeout 时有值）。
+   * null = 未设超时 / 已结束。长跑监控靠它提前决定"缩规模还是等"。
+   */
+  remainingSec: number | null;
+  /** ★ 与哪个仍在跑的句柄命令相同（同命令重复启动的警告锚点）。 */
+  duplicateOf?: string;
   /** 停止原因（如 'timeout after 600s'）。仅当 keepEntry 保留条目时存在。 */
   stoppedReason?: string;
 }
@@ -40,8 +56,23 @@ interface BackgroundEntry {
   outputBuffer: string[];
   maxOutputLines: number;
   startTime: Date;
+  /** ★ 超时截止时刻（epoch ms）。仅 async 路径设置。 */
+  deadlineAt?: number;
+  /** ★ 见 BackgroundProcessInfo.duplicateOf */
+  duplicateOf?: string;
   /** 见文件头说明：保留条目时的停止原因 */
   stoppedReason?: string;
+}
+
+/**
+ * register() 的返回：handle + 重复启动警告。
+ * ★ 重复必须在**启动当时**就让调用方知道 —— 等下次 process_list 才发现就晚了
+ *   （进程已经在跑，落盘副本已经产生，汇总时会被当成独立样本）。
+ */
+export interface RegisterResult {
+  handle: string;
+  /** 若同命令已有进程在跑：那个进程的 handle。 */
+  duplicateOf?: string;
 }
 
 let nextId = 1;
@@ -61,16 +92,47 @@ export class BackgroundProcessRegistry {
    * @param childProcess 已 spawn 的子进程
    * @returns handle 字符串（如 'bg_001'）
    */
-  register(name: string, command: string, childProcess: ChildProcess): string {
+  register(
+    name: string,
+    command: string,
+    childProcess: ChildProcess,
+    opts?: { async?: boolean; timeoutSec?: number },
+  ): RegisterResult {
     const handle = `bg_${String(nextId++).padStart(3, '0')}`;
+    const display = command.length > 120 ? command.slice(0, 117) + '...' : command;
+
+    // ★ 重复启动检测 —— 只对 async 做（同步路径的登记是临时的，settle 时会移除）。
+    //   这不是"优化"，是**防数据污染**：同命令跑两份 ⇒ 产物逐位相同 ⇒
+    //   汇总时若不去重就会被当成独立样本，直接改变配对差的分母（今日真实踩过：
+    //   17 个落盘文件其实只有 12 个 (arm, seed)）。startTime 判活不靠 stoppedReason，
+    //   因为 keepEntry 的条目会带 stoppedReason 而仍在跑的不会。
+    let duplicateOf: string | undefined;
+    if (opts?.async) {
+      for (const other of this.entries.values()) {
+        if (other.command === display && other.stoppedReason === undefined) {
+          duplicateOf = other.handle;
+          break;
+        }
+      }
+      if (duplicateOf) {
+        logger.warn(
+          `Duplicate launch detected: ${handle} has the same command as running ${duplicateOf}. ` +
+          `Products of the two copies will be identical — dedupe before aggregating.`,
+        );
+      }
+    }
+
     const entry: BackgroundEntry = {
       handle,
       name,
-      command: command.length > 120 ? command.slice(0, 117) + '...' : command,
+      command: display,
       childProcess,
       outputBuffer: [],
       maxOutputLines: 1000,
       startTime: new Date(),
+      // ★ deadlineAt 供 process_list 报"还剩多少秒"（超时前预警的依据）
+      ...(opts?.timeoutSec !== undefined ? { deadlineAt: Date.now() + opts.timeoutSec * 1000 } : {}),
+      ...(duplicateOf !== undefined ? { duplicateOf } : {}),
     };
 
     // 捕获 stdout
@@ -110,7 +172,7 @@ export class BackgroundProcessRegistry {
 
     this.entries.set(handle, entry);
     logger.debug(`Registered background process ${handle}: ${command.slice(0, 80)}`);
-    return handle;
+    return duplicateOf !== undefined ? { handle, duplicateOf } : { handle };
   }
 
   /** 注销一个后台进程（进程已自然结束时从注册表移除，避免残留） */
@@ -138,17 +200,54 @@ export class BackgroundProcessRegistry {
     else if (exited && entry.childProcess.exitCode !== 0) status = 'crashed';
     else if (exited) status = 'stopped';
 
+    const pid = entry.childProcess.pid ?? null;
+
+    // ★ 实时存活探测。见 BackgroundProcessInfo.pid 的说明：Windows 下 pid 是 shell 的
+    //   PID 且会被 OS 复用，所以"句柄里的 pid"本身**不足以下判断** —— 这里直接问内核。
+    //   `process.kill(pid, 0)` 不真发信号，只做存在性检查（不存在 ⇒ 抛 ESRCH）。
+    //   已在非 running 状态的条目不再探测：其 pid 早已消失，探测只会误导。
+    let alive = false;
+    if (status === 'running' && pid !== null) {
+      try {
+        process.kill(pid, 0);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+
+    // ★ 剩余时间（超时前预警的数据来源）。仅 running 且 async 设了 deadline 时有值。
+    let remainingSec: number | null = null;
+    if (status === 'running' && entry.deadlineAt !== undefined) {
+      remainingSec = Math.max(0, Math.round((entry.deadlineAt - Date.now()) / 1000));
+    }
+
     return {
       handle: entry.handle,
       name: entry.name,
       command: entry.command,
-      pid: entry.childProcess.pid ?? null,
+      pid,
+      alive,
       status,
       startTime: entry.startTime.toISOString(),
       outputSize: entry.outputBuffer.length,
+      remainingSec,
       // exactOptionalPropertyTypes 下不可直接赋 undefined，用条件展开
+      ...(entry.duplicateOf !== undefined ? { duplicateOf: entry.duplicateOf } : {}),
       ...(entry.stoppedReason !== undefined ? { stoppedReason: entry.stoppedReason } : {}),
     };
+  }
+
+  /**
+   * ★ 往某个后台进程的输出缓冲里追加一条**注册表自身的**提示行。
+   * 用途：bash.ts 的超时前预警 —— 让"还剩多久"也出现在 process_output 里，
+   * 与 outputSize 变化一起被察觉（光靠 process_list 需要我主动去查）。
+   */
+  note(handle: string, text: string): boolean {
+    const entry = this.entries.get(handle);
+    if (!entry) return false;
+    entry.outputBuffer.push(text);
+    return true;
   }
 
   /** 获取进程输出 */

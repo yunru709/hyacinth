@@ -12,7 +12,9 @@ export function createProcessListTool(registry: BackgroundProcessRegistry): Tool
   return {
     name: 'process_list',
     description:
-      '列出所有通过 bash(async:true) 启动的后台进程。返回每个进程的句柄、命令、PID、状态（运行中/已停止/崩溃）、启动时间和输出缓冲区大小。',
+      '列出所有通过 bash(async:true) 启动的后台进程。返回句柄、PID、ALIVE（实时存活探测）、'
+      + '状态、REMAIN（距超时还剩秒数）、输出缓冲区大小。'
+      + '注意：Windows 下 PID 是 shell 的 PID 且会被 OS 复用，判断"还在不在跑"请以 ALIVE 列为准。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -23,17 +25,33 @@ export function createProcessListTool(registry: BackgroundProcessRegistry): Tool
       if (processes.length === 0) return '(no background processes)';
 
       const lines: string[] = [];
-      lines.push(`${'HANDLE'.padEnd(8)} ${'PID'.padEnd(8)} ${'STATUS'.padEnd(8)} ${'OUTPUT'.padEnd(8)} COMMAND`);
-      lines.push('-'.repeat(80));
+      lines.push(
+        `${'HANDLE'.padEnd(8)} ${'PID'.padEnd(7)} ${'ALIVE'.padEnd(6)} ${'STATUS'.padEnd(8)} `
+        + `${'REMAIN'.padEnd(8)} ${'OUTPUT'.padEnd(10)} COMMAND`,
+      );
+      lines.push('-'.repeat(100));
       for (const p of processes) {
         const handle = p.handle.padEnd(8);
-        const pid = String(p.pid ?? '?').padEnd(8);
+        const pid = String(p.pid ?? '?').padEnd(7);
+        // ★ ALIVE：实时存活探测结果。单独一列，因为 pid 本身不足以下判断（见工具描述）：
+        //   曾出现"两个句柄显示同一个 PID、而真正在跑的是另一个 PID"，据此误判成"没启动"。
+        const alive = (p.status === 'running' ? (p.alive ? 'yes' : 'NO') : '-').padEnd(6);
         // 带上停止原因（如 timeout after 600s）：否则"进程停了我不知道为什么"，
         // 长跑监控场景下无法区分"死了"和"闲着"。
         const statusText = p.stoppedReason ? `${p.status}(${p.stoppedReason})` : p.status;
         const status = statusText.padEnd(8);
-        const output = `${p.outputSize} lines`.padEnd(8);
-        lines.push(`${handle} ${pid} ${status} ${output} ${p.command}`);
+        // ★ REMAIN：距超时还剩多少秒。长跑时靠它提前决定"缩规模还是等"，
+        //   而不是等 watchdog 静默杀掉之后、靠数落盘文件反推已完成几个 run。
+        const remain = (p.remainingSec === null ? '-' : `${p.remainingSec}s`).padEnd(8);
+        const output = `${p.outputSize} lines`.padEnd(10);
+        const dup = p.duplicateOf ? `  <== DUPLICATE of ${p.duplicateOf}` : '';
+        lines.push(`${handle} ${pid} ${alive} ${status} ${remain} ${output} ${p.command}${dup}`);
+      }
+      const dupes = processes.filter((p) => p.duplicateOf !== undefined);
+      if (dupes.length > 0) {
+        lines.push('');
+        lines.push(`WARNING 同命令重复启动: ${dupes.map((p) => `${p.handle} -> ${p.duplicateOf}`).join(', ')}`);
+        lines.push('  两份副本的产物逐位相同 ==> 汇总前必须按 (arm, seed) 去重，否则会被当成独立样本。');
       }
       return lines.join('\n');
     },
