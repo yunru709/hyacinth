@@ -111,32 +111,58 @@ function bundleTools(): Record<string, string[]> {
 }
 
 /**
- * 「自我管理最小集」——common 存在的意义是「不让 agent 失去自我管理能力」
- * （2026-10-08 用户明确）。守则③把它固化成断言：这些工具一旦离开 common，
- * agent 在**按需包模式**下会被困住。
+ * 「自我管理最小集」——common 存在的意义是「不让 agent 失去自我管理能力」。
  *
- * 判据一句话：**没有它，agent 会不会被困住？** 会 → 必须常驻 common。
- * 场景功能（定时任务、媒体生成…）不会困住 agent ⇒ 留在按需包，随时可 activate 取回。
+ * 判据（2026-10-10 收口）：**三类缺一不可**，缺了 agent 在按需包模式下会被困住：
+ *   ① 逃生舱（包管理三件套 / bash / switch_mode）
+ *   ② 高频刚需（基础读写执行）
+ *   ③ 自控与通讯（中断 / 重启 / 压缩、进程管理、说话）
+ * 三类之外（会话 / 工作流 / 回滚 / 通用工具 / 陪伴 / 自观测 / 定时 / 媒体…）不会
+ * 困住 agent ⇒ 留在按需包，随时可 activate 取回。
  */
 const SELF_MANAGEMENT_MINIMUM: string[] = [
-  // 基础操作：没有它什么都做不了
-  'read', 'write', 'edit', 'insert', 'bash', 'glob', 'grep', 'probe',
-  // 包自管理：不被锁死在某一个包里
+  // ① 逃生舱：缺了会被锁死
   'list_bundles', 'activate_bundle', 'deactivate_bundle',
-  'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
-  // 模式进出（含陪伴模式下"开口"的那条通道）
-  'switch_mode', 'companion_mode', 'reset_companion_session', 'companion_say',
-  // 会话自管理：知道自己在哪、能换、能开新分支
-  'current_session', 'list_sessions', 'new_session', 'switch_session',
-  'delete_session', 'session_fork',
-  // 回合与进程自控
+  'bash', 'switch_mode',
+  // ② 高频刚需：基础读写执行
+  'read', 'write', 'edit', 'insert', 'glob', 'grep', 'probe',
+  // ③ 自控与通讯
   'interrupt', 'restart', 'trigger_compression',
   'process_list', 'process_kill', 'process_output',
-  // 说话与发问
   'say', 'ask_user',
-  // 自身状态可观测
+  // 感知
+  'view_image', 'view_media',
+];
+
+/**
+ * 反例集（守则④）：这些工具**不该**常驻 common —— 它们不是逃生舱，属按需场景。
+ * 固化 2026-10-10 的瘦身决定，防止日后被「顺手」加回 common。
+ */
+const MUST_NOT_BE_COMMON: string[] = [
+  // 会话管理 → session 包
+  'list_sessions', 'new_session', 'switch_session', 'delete_session', 'session_fork',
+  // 工作流 / 回滚 / goal → workflow 包
+  'flow_start', 'flow_add', 'flow_complete', 'enter_goal', 'finish_goal', 'exit_goal', 'rollback', 'rollback_status',
+  // 通用杂项 → utility 包
+  'diff_files', 'json_edit', 'http_request', 'archive', 'disk_usage', 'send_channel_message',
+  // 陪伴 → companion 包
+  'companion_mode', 'companion_say', 'reset_companion_session',
+  // 工具包创作 → admin 包
+  'create_bundle', 'add_to_bundle', 'remove_from_bundle', 'delete_bundle',
+  // 自观测 / 会话统计 → admin / session 包
   'system_info', 'channel_info', 'mcp_status', 'session_stats',
 ];
+
+describe('工具包瘦身回归（守则④）', () => {
+  it('守则④：按需包工具不得回灌 common', () => {
+    const common = bundleTools().common ?? [];
+    const leaked = MUST_NOT_BE_COMMON.filter((t) => common.includes(t));
+    expect(
+      leaked,
+      '以下工具不该常驻 common —— 它们不是逃生舱，属按需场景：\n  ' + leaked.join('\n  '),
+    ).toEqual([]);
+  });
+});
 
 const isDynamic = (n: string): boolean =>
   n in DYNAMIC_TOOLS || DYNAMIC_PREFIXES.some(([pre]) => n.startsWith(pre));

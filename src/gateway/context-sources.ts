@@ -33,11 +33,12 @@ import { readScratchpadForContext, ensureScratchpadFile, ensurePathLine } from '
 export interface ContextSourceDeps {
   contextComposer: LayeredContextComposer;
   cwd: string;
-  sessionDir: string;
+  // ★ 此处**刻意不提供** sessionDir / currentSessionId：装配期捕获的值在
+  //   switch_session 后会陈旧（loop 实例跨会话存活）。需要"当前会话"时，
+  //   一律经 deps.loop.currentSessionDir **每轮现取**。
   channelsInfo: ChannelsInfo[] | undefined;
   envInfo: Promise<SystemEnvInfo>;
   currentChannel: string | undefined;
-  currentSessionIdForCtx: string;
   flowRegistry: MachineRegistry;
   memoryStore: MemoryStore;
   toolRegistry: ToolRegistry;
@@ -55,7 +56,7 @@ export interface ContextSourceDeps {
  * 需在 loopRef / loop / bundleRegistry 全部就绪后调用（行为等价，见文件头）。
  */
 export function registerContextSources(deps: ContextSourceDeps): void {
-  const { contextComposer, cwd, channelsInfo, flowRegistry, memoryStore, toolRegistry, skillRegistry, agentRegistry, sessionDir, summaryStore, loopRefBox, loop, bundleRegistry } = deps;
+  const { contextComposer, cwd, channelsInfo, flowRegistry, memoryStore, toolRegistry, skillRegistry, agentRegistry, summaryStore, loopRefBox, loop, bundleRegistry } = deps;
 
   // ── 环境信息采集（进程启动时执行一次，注册为 ContextSource） ────────
   contextComposer.registerSource({
@@ -67,6 +68,8 @@ export function registerContextSources(deps: ContextSourceDeps): void {
   });
 
   // ── 渠道上下文（告诉模型当前在哪个渠道、哪个 session） ──────────────
+  // ★ 会话 id 必须**每轮现取**：loop 跨会话存活（switch_session 只换 sessionDir），
+  //   装配期捕获的 id 在切换后会陈旧 ⇒ 此处经 loop.currentSessionDir 实时取。
   contextComposer.registerSource({
     name: 'channel_context',
     strategy: 'always_inline',
@@ -74,7 +77,8 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     description: '当前渠道和会话上下文',
     getContent: () => {
       if (!deps.currentChannel) return '';
-      return `You are currently communicating via **${deps.currentChannel}** channel (session: ${deps.currentSessionIdForCtx.slice(0, 20)}...).`;
+      const sid = path.basename(loop.currentSessionDir);
+      return `You are currently communicating via **${deps.currentChannel}** channel (session: ${sid.slice(0, 20)}...).`;
     },
   });
 
@@ -192,6 +196,10 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     getContent: async () => {
       const cap = loopRefBox.current?.getCurrentIntentCapability?.() ?? 'general';
       if (!cap || cap === 'general') return '';
+      // ★ 目录必须**每轮现取**（loop.currentSessionDir）：写入端（loop-cluster）用的是
+      //   实时 sessionDir，此处若用装配期捕获值，switch_session 后读写目录不对称 ⇒
+      //   会把**上一个会话**的意图簇摘要注入新会话。
+      const sessionDir = loop.currentSessionDir;
       // 修复 key 不匹配 bug：写入端摘要文件以 cluster_id 命名（cluster_{clusterId}.md，
       // 如 channel_config），而非 capability（coding）。故不能直接用 load(sessionDir, cap)，
       // 必须先从 cluster-index.json 聚合该 capability 对应的全部 cluster_id，再逐个读取合并。

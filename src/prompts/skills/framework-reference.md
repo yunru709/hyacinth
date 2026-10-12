@@ -11,7 +11,7 @@
 | 配置路径 | 含义 | 默认值 | 修改命令 |
 |---------|------|--------|---------|
 | `session.maxContext` | 上下文窗口软限制（tokens），不是模型原生上限 | 200000 | `/context <tokens>` |
-| `session.maxTurns` | 最大对话轮数 | 100 | `/turns <1-100>` |
+| `session.maxTurns` | 最大对话轮数 | 100 | `/turns <1-250>` |
 
 ### 压缩相关
 

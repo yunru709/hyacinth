@@ -74,10 +74,18 @@ describe('SkillRegistry 技能注册表', () => {
     expect(names).toContain('debug');
     expect(names).toContain('refactor');
     expect(names).toContain('framework-reference');
+    expect(names).toContain('running-experiments');
     for (const s of skills) {
-      expect(s.promptTemplate.length).toBeGreaterThan(0); // loadPrompt 已加载
+      expect(s.promptTemplate.length).toBeGreaterThan(0); // loadPrompt / loadSkillFile 已加载
       expect(s.source).toBe('builtin');
     }
+
+    // 目录式内置（一个文件夹 ＋ SKILL.md ＋ 子文件）：**必须带 dir** ——
+    // 主体里的相对路径（reference/methods.md、agent-experiment/SKILL.md）以 dir 为基准，
+    // 缺了它子文件无从解析（getFullDefinitions 的 dirNote 依赖同一字段）。
+    const dirSkill = skills.find((s) => s.name === 'running-experiments');
+    expect(dirSkill?.dir).toBeDefined();
+    expect(dirSkill?.promptTemplate).toContain('实验生命周期');
   });
 });
 

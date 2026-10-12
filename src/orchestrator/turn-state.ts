@@ -182,6 +182,12 @@ export interface TurnState {
    * undefined = 未提交。判定必须排在 toolCalled 之前（report 也是工具调用）。
    */
   sayStatus?: 'submitted' | 'aborted';
+  /**
+   * goal 模式状态（runTurn 预填，消费即重置）：
+   *   'achieved' = finish_goal 已通过审查 → finalize 判停（stopReason 'goal_achieved'）
+   * undefined = 未达成。判定同样必须排在 toolCalled 之前（finish_goal 也是工具调用）。
+   */
+  goalStatus?: 'achieved';
 }
 
 // ─── 会话状态（跨回合） ────────────────────────────────────────────

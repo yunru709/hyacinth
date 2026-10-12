@@ -17,7 +17,7 @@
 
 import type { Provider } from './interface.js';
 import type { Message, StreamEvent, ToolDefinition, ProviderType } from '../types.js';
-import { ResilientProvider } from './resilient.js';
+import { ResilientProvider, isAbortError } from './resilient.js';
 import type { RetryConfig, CircuitBreakerConfig } from './resilient.js';
 import { ProviderProbe } from './probe.js';
 import type { ProbeResult } from './probe.js';
@@ -200,6 +200,9 @@ export class FallbackProviderChain implements Provider {
         return;
       } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
+        // 用户中断（Ctrl+C / message.stop）不是"provider 故障" ⇒ 立即上抛，
+        // 不遍历降级链、不触发 onFallback/熔断。与 ResilientProvider 同款短路。
+        if (isAbortError(err)) throw err;
         errors.push(`[${label}] ${err.message}`);
         lastFailed = provider;
         lastErr = err;
@@ -245,6 +248,8 @@ export class FallbackProviderChain implements Provider {
           return;
         } catch (error: unknown) {
           const err = error instanceof Error ? error : new Error(String(error));
+          // 用户中断 ⇒ 上抛（同样不能污染候选探测缓存：中断≠候选不可用）
+          if (isAbortError(err)) throw err;
           errors.push(`[${label}] ${err.message}`);
           // 探测通过但真实流失败 → 失效 ok 缓存，防下个窗口立即复用
           this.probe.invalidate(cand.meta, cand.apiKey);
@@ -271,6 +276,8 @@ export class FallbackProviderChain implements Provider {
         return;
       } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
+        // 用户中断 ⇒ 上抛：这里尤其重要 —— 否则会把"已中断"又当成失败去 resetCircuitBreaker 重试
+        if (isAbortError(err)) throw err;
         errors.push(`[back-to-primary] ${err.message}`);
       }
     }

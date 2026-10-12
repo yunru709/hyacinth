@@ -1809,6 +1809,30 @@ export async function runTui(
       return;
     }
 
+    // ── /goal <目标> | /goal off —— goal 模式（不达成目标不退出 LOOP）──────────
+    // 走**消息注入**（转成一条用户指令，由 agent 调 enter_goal / exit_goal），与工具路径同源。
+    // 这是**有意的取舍**：做成 UI 本地命令要多开一条协议（ui-protocol/domains 加 `goal.*`
+    // 动作 + 服务端 handler + 类型契约），而消息注入等价且省掉那一整条链路。
+    // 因此 `/goal` **每次都是一次真实的 agent 回合**（会消耗一次模型调用、屏显里出现回显）。
+    // 若将来要「瞬时切换、不耗回合」，落点就是：ui-protocol/domains/ 新增 goal 域
+    // + 服务端 handler 调 loop.enterGoal/exitGoal，然后本处改成 protocolSend。
+    // 退出路径在 goal 模式下也成立 —— enter_goal/finish_goal/exit_goal 均被 loop 强制可见。
+    if (input === '/goal' || input.startsWith('/goal ')) {
+      const arg = input.slice('/goal'.length).trim();
+      if (!arg) {
+        chatLog.addSystem(theme.dim('用法： /goal <目标>  进入 goal 模式（达成前不退出回合）； /goal off  解除'));
+        tui.requestRender();
+        return;
+      }
+      const directive = arg === 'off'
+        ? '【用户要求】立刻调用 exit_goal 解除 goal 模式。'
+        : `【用户要求】立刻调用 enter_goal 进入 goal 模式；objective 用下面这句原文（不要改写）：\n${arg}`;
+      chatLog.addSystem(theme.accent(arg === 'off' ? '正在解除 goal 模式…' : '正在进入 goal 模式…'));
+      tui.requestRender();
+      await processBatch(directive);
+      return;
+    }
+
     if (input === '/kb on') {
       // 当前 zone4 状态经协议 kb.get 读取（不再持有 knowledgeBase 引用）
       const kbRes = (await protocolSend('kb.get')) as { kb?: { zone4Enabled?: boolean } } | null | undefined;
@@ -1945,8 +1969,8 @@ export async function runTui(
     // ── /turns <n> ──
     if (input.startsWith('/turns ')) {
       const n = parseInt(input.slice(7).trim(), 10);
-      if (isNaN(n) || n < 1 || n > 100) {
-        chatLog.addSystem(theme.warning('Usage: /turns <1-100>'));
+      if (isNaN(n) || n < 1 || n > 250) {
+        chatLog.addSystem(theme.warning('Usage: /turns <1-250>'));
         tui.requestRender();
         updateTokenEstimate();
         return;

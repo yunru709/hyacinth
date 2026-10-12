@@ -29,7 +29,7 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
     name: 'turn-finalize',
     version: '1.0.0',
     // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明
-    reads: ['stop', 'toolCalled', 'flowStillActive', 'sayStatus'],
+    reads: ['stop', 'toolCalled', 'flowStillActive', 'sayStatus', 'goalStatus'],
     writes: ['stop', 'stopReason'],
     async run(state: TurnState, ctx: KernelStageContext): Promise<TurnState> {
       // ── 回合回滚：回合结束记录（尽力而为，不阻塞主循环） ──
@@ -38,6 +38,19 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
         turnRecorder.endTurn().catch((err: unknown) => {
           ctx.logger.warn('TurnRecorder endTurn failed', { error: (err as Error).message });
         });
+      }
+
+      // ── goal 验收通过判停（必须先于 sayStatus / toolCalled）──
+      // finish_goal 通过审查后 loop 置 goalStatus='achieved'；它同样是一次工具调用，
+      // 若排在 toolCalled 之后便永远停不下来（与 say 同理）。
+      if (state.goalStatus === 'achieved') {
+        const sessionDirG = ctx.require('sessionDir');
+        await appendEvent(sessionDirG, {
+          type: 'stop',
+          reason: 'goal_achieved',
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
+        return { ...state, stop: true, stopReason: 'goal_achieved' };
       }
 
       // ── report 交付/中止判停（必须先于 toolCalled）──

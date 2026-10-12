@@ -1225,6 +1225,8 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 **`filtered-registry.ts` — `FilteredToolRegistry extends ToolRegistry`**
 - 包装父注册表 + 白名单 `allowedTools`，重写 get/getAll/getToolDefinitions/has。
+- **本地优先（2026-10-08 修）**：本注册表 `register()` 进去的实例覆盖父同名工具，`get`/`getAll` 本地优先、无则回落父。这是子 Agent 隔离的命门 —— 父 registry 里的 `view_image`/`view_media` 闭包捕获的是**父 loop** 的 `pendingImageInjections`/`pendingMediaInjections`/`imageStore`，而子 loop 构造时会注册绑定**自身**状态的同名实例；旧实现只读父 ⇒ 子 Agent 的图被推进**父 loop** 队列（视觉静默失效 + 反向污染主 Agent 上下文）。同一条黑洞当时也吞掉了沙箱包装与工作区围栏的注册。
+- 白名单是唯一准入判据（对父、本地一律生效）；无状态工具仍从父回落 ⇒ 父 loop 的结构事实（file-tracker）对子 Agent 依旧可见。
 - 用途：子 Agent 工具隔离（子 Agent 只见/只能调用白名单内工具）。
 
 **`path-sandbox.ts`** — 路径沙箱包装

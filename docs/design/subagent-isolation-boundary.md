@@ -47,6 +47,15 @@
   **实测证据**：`src/orchestrator/loop-reference-analysis.test.ts`（端到端，断言走兜底、结果与字符串扫描同源）。
 - 但子代理**共享父的工具实例**（`delegate-tool.ts:243` `FilteredToolRegistry(parentContext.toolRegistry, …)`）
   ⇒ 进程内的结构事实（`file-tracker`：哪个文件刚被读/写）对子代理可见。
+  > ⚠️ **2026-10-08 补记（实测，非本文件原结论）**：这条"共享"的副作用比当时设想的重 ——
+  > 它不止是"能力可见性"，还会**破坏工具自身的状态隔离**。`view_image`/`view_media` 注册时
+  > 闭包捕获的是**父 loop** 的 `pendingImageInjections`/`pendingMediaInjections`/`imageStore`；
+  > 子 loop 虽在构造时注册了绑定**自身**状态的同名实例，但旧 `get`/`getAll` 只读父注册表 ⇒
+  > 子 Agent 调 `view_media` 时图被推进**父 loop 的队列**：子 Agent 视觉**静默失效**
+  > （工具仍返回成功文案），图反而泄漏进主 Agent 上下文。同一条黑洞还吞掉了 `:246-249`
+  > 的沙箱包装（见 §3，即那道防线**连"设了 sandboxRoot 也照样失效"**）。
+  > 修法（已实施）：`FilteredToolRegistry` 改为**本地优先、无则回落父** —— 只影响"子 loop
+  > 自建实例"的优先级，无状态工具仍走父 ⇒ **本文件 §2 的结论不变**。
 
 **选项**
 | | 做法 | 代价 |

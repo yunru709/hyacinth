@@ -23,6 +23,7 @@ import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { GitManager } from '../evolution/git-manager.js';
 import type { IContextRouter } from '../context/router.js';
 import type { TurnRecorder } from '../rollback/turn-recorder.js';
+import type { GoalState, GoalToolFilter } from './goal.js';
 import type { BypassManager } from '../bypass/manager.js';
 import type { LoopHookBus } from './loop-hooks.js';
 import type { LLMOrchestrator } from './planner.js';
@@ -65,6 +66,10 @@ export interface StageServiceMap {
   toolService: ToolService | undefined;
   /** 意图簇 + deep 压缩状态服务（替代旧 clusterTransform/deepCompressRestore 两闭包） */
   clusterService: ClusterService | undefined;
+  /** goal 状态访问（goal 未激活 → null）。装配侧过滤 / UI 查询用 */
+  getGoalState: (() => GoalState | null) | undefined;
+  /** goal 工具过滤器（goal 未激活 → undefined）。与执行侧 loop.makeToolExecContext **同源** */
+  filterToolsForGoal: GoalToolFilter | undefined;
 }
 
 /** 内核服务键（get/require 的编译期键空间） */

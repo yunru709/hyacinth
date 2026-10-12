@@ -237,7 +237,6 @@ export async function createAgentAssembly(
 
   // ── 渠道上下文（ContextSource 注册已抽离至 context-sources.ts） ────
   const currentChannel = options.channel;
-  const currentSessionIdForCtx = currentSessionId;
 
   // ── Flow 注入 / Memory / 陪伴 Memory / session-tools ContextSource 已抽离 ──
   const memoryFilePath = config.memoryFile ?? path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md');
@@ -613,6 +612,26 @@ export async function createAgentAssembly(
     companionSessionManager,
   });
 
+  // ── goal 模式审查官接线（2026-10-10）────────────────────────────────────
+  // 审查官是**独立职责**的子 agent（用户裁定「独立」）：模型走 assessment 角色通道，
+  // 工具 [read/glob/grep/bash]（能自行复核），每轮全新 session（用后即弃）。
+  // 未接线时 loop 视为「审查不可用」→ 放行并标注未核验（不锁死）。
+  {
+    const { createGoalReviewer } = await import('../agents/goal-reviewer.js');
+    loop.setGoalReviewer(createGoalReviewer({
+      modelRouter,
+      toolRegistry,
+      sessionDir,
+      maxContextTokens: maxContext,
+      dependencyAnalyzer,
+      createSubProvider: (userId: string) => {
+        const scoped = modelRouter.createScopedProvider('assessment', userId);
+        if (!scoped) throw new Error('Cannot create goal-reviewer provider: channel "assessment" unavailable.');
+        return scoped;
+      },
+    }));
+  }
+
   // 注册 MCP 状态变更回调 — 消息通过 ContextSource (runtime:mcp_status) 自动注入 Zone 5，
   // 此处仅保留日志记录（未来可扩展为 TUI 状态栏更新）
   // ── 渠道注册表 + 定时任务处理器 + 配置订阅（接线抽离 runtime-wiring.ts）──
@@ -658,11 +677,9 @@ export async function createAgentAssembly(
   registerContextSources({
     contextComposer,
     cwd,
-    sessionDir,
     channelsInfo,
     envInfo,
     currentChannel,
-    currentSessionIdForCtx,
     flowRegistry,
     memoryStore,
     toolRegistry,

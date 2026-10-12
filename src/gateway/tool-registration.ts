@@ -102,4 +102,16 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
     const { createSayTool } = await import('../tools/say.js');
     toolRegistry.register(createSayTool((content) => loop.submitSay(content)));
   }
+
+  // ── goal 模式工具（2026-10-10）─────────────────────────────────────
+  // 进入（/goal 命令是用户路径；enter_goal 是 agent「应用户要求」的路径）与
+  // 提交验收（finish_goal → 审查子 agent）。业务全在 loop 侧，工具零依赖。
+  // 注意：这两个工具属 workflow 包（按需）；但 goal 生效时 finish_goal 会被
+  // loop.filterToolsForGoal **强制可见**，否则「进得去、出不来」。
+  {
+    const { createEnterGoalTool, createFinishGoalTool, createExitGoalTool } = await import('../tools/runtime-control/goal.js');
+    toolRegistry.register(createEnterGoalTool((objective, by) => loop.enterGoal(objective, by)));
+    toolRegistry.register(createFinishGoalTool((evidence, conclusion) => loop.submitGoal(evidence, conclusion)));
+    toolRegistry.register(createExitGoalTool(() => loop.exitGoal('用户要求')));
+  }
 }

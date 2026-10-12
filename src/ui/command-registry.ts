@@ -239,7 +239,7 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     description: '设置最大对话轮数',
     icon: '\u21C5',
     category: 'config',
-    args: '<1-100>',
+    args: '<1-250>',
     executeLocal: true,
   },
   {

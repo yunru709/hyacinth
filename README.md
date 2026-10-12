@@ -1,6 +1,6 @@
 # Hyacinth
 
-> npm v0.9.60 · MIT · TypeScript 6.0 · Node.js (ESM) · 93+ 工具 · 17 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
+> npm v0.9.61 · MIT · TypeScript 6.0 · Node.js (ESM) · 106 工具 · 19 Provider · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
 
 **Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在飞书 / 微信 / WebUI 等渠道之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
 
@@ -46,9 +46,9 @@ Hyacinth 是一个可编程、可扩展的智能体框架。它把 Agent 的每�
 
 ## 特性
 
-### 工具系统（93+ 静态注册）
+### 工具系统（106 个静态注册工具）
 
-- **基础文件/命令**：`read` / `write` / `edit` / `multi_edit` / `bash` / `glob` / `grep` / `diff_files` / `json_edit` / `git` / `http_request` / `db_query` 等 17 个
+- **基础文件/命令**：`read` / `write` / `edit` / `multi_edit` / `bash` / `glob` / `grep` / `diff_files` / `json_edit` / `git` / `http_request` / `db_query` / `insert` / `archive` / `disk_usage` / `system_info` 等（`src/tools/` 顶层共 44 个工具）
 
 - **子 Agent 编排**：`delegate_to_agent` / `spawn_sub_agent` / `create_sub_agent`，支持委托、并行、异步三种协作模式
 
@@ -58,9 +58,9 @@ Hyacinth 是一个可编程、可扩展的智能体框架。它把 Agent 的每�
 
 - **大结果不塞爆上下文**：超阈值自动写磁盘缓冲，回传指针消息引导模型分段读取
 
-### 多 Provider（17 种类型）
+### 多 Provider（19 种类型）
 
-anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / volcengine / groq / xai / mistral / openrouter / moonshot / local（llama.cpp、Ollama、vLLM 三态）/ ollama / llamacpp。弹性链：重试 + 熔断 + 降级 + 工具参数自动恢复，运行时可 `registerProviderFactory()` 外置扩展厂商。
+anthropic / openai / deepseek / gemini / qwen / zhipu / minimax / mimo / volcengine / groq / xai / mistral / openrouter / moonshot / opencode / commandcode（聚合中转），以及本地三型 local / ollama / llamacpp（本地后端支持 llama.cpp、Ollama、vLLM、LM Studio、custom 五种）。弹性链：重试 + 熔断 + 降级 + 工具参数自动恢复，运行时可 `registerProviderFactory()` 外置扩展厂商。
 
 ### 多渠道
 
@@ -74,7 +74,7 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及飞书（WebSocket 长连接）
 
 - **自修复**：文本循环检测（滑动窗口 Jaccard）、工具风暴抑制、会话垃圾清理
 
-- **热重载**：16 Watcher，配置 / 插件 / 工具 / 技能 / MCP 等修改即生效
+- **热重载**：15 Watcher，配置 / 插件 / 工具 / 技能 / MCP 等修改即生效
 
 - **定时调度**：Cron / Daily / Interval / Fixed-time，支持跨渠道主动推送
 
@@ -143,7 +143,7 @@ TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microso
 | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `hyacinth [prompt]`                                   | 单次执行或进入交互（`-i` 交互、`--session <id>` 恢复、`-p/--provider` 指定厂商）                    |
 | `hyacinth setup` / `setup-generation`                 | 配置向导 / 生成能力向导（图 / 视频 / 音频厂商）                                                   |
-| `hyacinth doctor [--fix]`                             | 7 项系统诊断 + 自动修复                                                                 |
+| `hyacinth doctor [--fix]`                             | 10 项系统诊断 + 自动修复                                                                 |
 | `hyacinth tui`                                        | 全屏终端界面（`--guardian` 守护开关）                                                      |
 | `hyacinth serve`                                      | HTTP API（`--port 3000`、`--api-key`、`--webui`、`--webui-port 3100`，绑定 127.0.0.1） |
 | `hyacinth webui`                                      | 等价 `serve --webui`，自动开浏览器                                                      |
@@ -152,7 +152,7 @@ TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microso
 | `hyacinth model switch/list/info`                     | Provider 与模型管理                                                                 |
 | `hyacinth skill enable/disable` `tool enable/disable` | 技能 / 工具开关（黑名单机制）                                                               |
 | `hyacinth arch list/get/toggle`                       | 可替换点目录与插件启停（serve 运行中热生效）                                                      |
-| `hyacinth plugin install/list/uninstall`              | 插件管理（本地目录或 git URL → `.agent/plugins/`）                                        |
+| `hyacinth plugin install/list/uninstall`              | 插件管理（本地目录或 git URL → `~/.agent/plugins/`）                                        |
 | `hyacinth supervisor-status`                          | Guardian 状态 / 重启存档 / 残留诊断                                                      |
 | `hyacinth backup [label]`                             | git bundle + tag 双保险快照                                                         |
 | `hyacinth update`                                     | GitHub Release / 本地源更新                                                         |
@@ -161,9 +161,9 @@ TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microso
 
 ### 配置体系
 
-- **全局** **`~/.agent/`** — `config.json`（主配置）、`.env`（密钥）、`extension-registry.json`（扩展名单）、`providers.json`、`model-channels.json`、`agents.json`、`tool-bundles.json`、`mcp.json`、`prompts/`、`skills/`、`tools/`、`plugins/`、`sessions/`、`media/`、`knowledge/` 等
+- **全局** **`~/.agent/`** — `config.json`（主配置）、`.env`（密钥）、`extension-registry.json`（扩展名单）、`providers.json`、`model-channels.json`、`agents.json`、`tool-bundles.json`、`mcp.json`、`plugins.config.json`（插件配置）、`context-manifest.json`（上下文分层清单）、`models.json`（本地模型目录）、`modes/`、`prompts/`、`skills/`、`tools/`、`plugins/`、`sessions/`、`media/`、`knowledge/` 等
 
-- **项目** **`<cwd>/.agent/`** — 同名文件项目级覆盖，另有 `context-manifest.json`、`models.json`、`specs/`、`backups/`
+- **项目** **`<cwd>/.agent/`** — 仅数据面走项目级：`modes/`（同名覆盖全局）、`specs/`（Flow 规格）、`backups/`。**配置本身不设项目级** —— `ConfigManager` 只读 `~/.agent/config.json`（P-Config 收敛，构造参数 `projectDir` 仅为调用方兼容保留）
 
 - 项目根 `commands.json` — 斜杠命令，模型可经 write/edit 修改并热重载
 
@@ -180,8 +180,9 @@ src/index.ts
        └─ executeAction()
             ├─ Provider 创建 → AgentLoop 装配（gateway/agent-assembly.ts）
             │    ├─ boot()                  # 配置加载 + 会话恢复三分支
-            │    ├─ 贡献批依序装配            # base → infra → channel → arch替换 → context →
-            │    │                           # 工具 → orchestrator → core → 插件 → loop → 服务替换
+            │    ├─ 贡献批依序装配            # base → infra → channel → context-chain → orchestrator → core
+            │    │                           # → 插件管理 → arch 替换(provider/router/agent) → service/slot
+            │    │                           # 替换 → 插件 → loop 依赖工具 → runtime → source 替换（最晚）
             │    └─ new AgentLoop(...)       # provider:main 替换必须在 Loop 构造前完成
             └─ Guardian 守护（默认启用）      # 退出码 42=重启 43=更新 44=插件热更新兜底
 ```
@@ -216,7 +217,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 
 ### 监督与替换：架构注册表
 
-`supervisor/extension-registry.ts` 维护 11 类可替换点（`REPLACEABLE_POINTS`）：6 个 pipeline 槽位、22 个 service、`provider:main`、2 个 router、9 个 context source，以及 `adapter:*` / `channel:*` / `tool:*` / `skill:*` / `agent:*` / `plugin:*` 动态族。
+`supervisor/extension-registry.ts` 维护 11 类可替换点（`REPLACEABLE_POINTS`）：6 个 pipeline 槽位、22 个 service、`provider:main`、2 个 router、10 个 context source，以及 `adapter:*` / `channel:*` / `tool:*` / `skill:*` / `agent:*` / `plugin:*` 动态族（合计 47 条）。
 
 裁决链：**用户配置 > 插件 priority > 插件 ID > 内置基线**。替换在 `gateway/arch-assembly.ts` 应用（动态 import + 形状校验 + 记录生效/失败），名单文件 `.agent/extension-registry.json` 支持 serve 运行中热生效。
 
@@ -230,18 +231,18 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 
 | 域            | 模块                                                  | 职责                                                                                         |
 | ------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| **启动与监督**    | `gateway/`                                          | 装配层：cli/tui/server 入口 + factory + agent-assembly + arch-assembly + 16 个贡献批                 |
+| **启动与监督**    | `gateway/`                                          | 装配层：cli/tui/server 入口 + factory + agent-assembly + arch-assembly + 9 个装配贡献批                 |
 | <br />       | `supervisor/`                                       | 架构监督：assembly-registry 出厂图、extension-registry 名单裁决、guardian 守护、protocol 重启协议、shutdown 优雅关闭 |
 | <br />       | `kernel/`                                           | 内核三件套（pipeline / hook-bus / plugin-host）+ security/ 安全内核                                   |
 | <br />       | `update/` `diagnostics/`                            | 自更新；doctor 诊断 + 自动修复                                                                       |
 | <br />       | `setup/` `env/`                                     | 首启向导（含 persona 初始化）；环境采集                                                                   |
 | **内核执行链**    | `orchestrator/`                                     | AgentLoop 主循环 + 6 阶段 stages/ + TurnState + planner + plan-store                            |
-| <br />       | `provider/`                                         | 17 种 Provider 适配、路由、弹性链、模型目录                                                               |
+| <br />       | `provider/`                                         | 19 种 Provider 适配、路由、弹性链、模型目录                                                               |
 | <br />       | `context/`                                          | 5-Zone、manifest、composer、compressor、router、cache-strategy、tokenizer                        |
 | <br />       | `tools/`                                            | 内置工具 + 运行时控制工具族 + 注册表 / 执行器 / 沙箱 / 结果缓冲                                                    |
 | <br />       | `registry/`                                         | GenericRegistry 基座 + Tool / Skill / Agent 三注册表                                             |
 | <br />       | `parser/`                                           | 流式事件输出路由（TEXT/THINKING/TOOL\_USE/USAGE/STOP）                                               |
-| <br />       | `prompts/`                                          | 提示词模板库（加载链：.agent/prompts > \~/.agent/prompts > dist/prompts）                              |
+| <br />       | `prompts/`                                          | 提示词模板库（加载链：\~/.agent/prompts > dist/prompts）                              |
 | **记忆与进化**    | `memory/`                                           | 会话存储族 + 跨会话记忆 + 摘要                                                                         |
 | <br />       | `knowledge/`                                        | 知识库（FTS5 + 结构化库 + watcher）                                                                 |
 | <br />       | `evolution/`                                        | GitManager 原语 + AutoGit 策略 + bundle/tag 备份                                                 |
@@ -256,7 +257,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | <br />       | `machine/` `schedule/` `dependency/`                | Flow 状态机；定时调度；依赖分析                                                                         |
 | **交互界面**     | `channels/`                                         | ChannelManager + TUI/HTTP 内置渠道 + feishu/clawbot 插件渠道 + 跨渠道分发                               |
 | <br />       | `ui/` `ui-protocol/` `webui/`                       | TUI 组件；统一 RPC+事件协议（19 域）；WebUI 静态前端                                                        |
-| **基础设施**     | `hot-reload/` `lifecycle/`                          | 16 Watcher 家族；受管进程状态                                                                      |
+| **基础设施**     | `hot-reload/` `lifecycle/`                          | 15 Watcher 家族；受管进程状态                                                                      |
 | <br />       | `runtime/` `logging/` `utils/` `shims/`             | 运行时配置中心；日志器；通用工具；类型兜底                                                                      |
 
 ***
@@ -278,9 +279,9 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 git clone https://github.com/yunru709/hyacinth
 cd hyacinth
 pnpm install
-pnpm build          # tsc + copy-prompts + copy-webui + clean-tests + clean-maps
+pnpm build          # tsc + clean-stale + copy-prompts + copy-webui + clean-tests + clean-maps + copy-grammars
 pnpm dev            # watch 模式
-pnpm test           # vitest（225 个测试套件）
+pnpm test           # vitest（231 个测试套件）
 pnpm smoke          # 真实装配链冒烟（stub provider）
 pnpm verify:layers  # 分层约束机器校验
 ```

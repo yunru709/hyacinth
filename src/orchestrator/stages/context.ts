@@ -140,6 +140,13 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
         toolDefinitions = toolDefinitions.filter((t) => !blocked.has(t.name));
       }
 
+      // ── goal 模式工具管制（2026-10-10）──
+      // 过滤器由 loop 注入（stage 服务），与执行侧 loop.makeToolExecContext **同源**；
+      // 两处必须一致，否则重演「组装侧看得见、执行侧拦下来」（陪伴工具已踩过一次）。
+      // goal 未激活时该服务为 undefined 或原样返回，零开销。
+      const goalToolFilter = ctx.get('filterToolsForGoal');
+      if (goalToolFilter) toolDefinitions = goalToolFilter(toolDefinitions);
+
       // ── 2. 历史预处理：effectiveHistory（Router 过滤） ──
       let effectiveHistory = state.historyWithoutLastUser;
       let effectivePersonaDir = personaDir;

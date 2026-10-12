@@ -123,7 +123,15 @@ function isRetryableError(error: Error): boolean {
   return false;
 }
 
-function isAbortError(err: Error): boolean {
+/**
+ * 判定"用户主动中断"（Ctrl+C / message.stop → AbortController.abort）。
+ *
+ * 中断**不是**故障：任何重试/降级逻辑都必须立即原样上抛，否则会被
+ * 当成 provider 失败处理，最终把中断聚合成 "All N provider(s) failed"，
+ * error.name 也随之退化成 'Error' ⇒ 消费侧（llm.ts 白名单）识别不出中断。
+ * 导出给 FallbackProviderChain 复用，保证两侧判定口径一致。
+ */
+export function isAbortError(err: Error): boolean {
   return err.name === 'AbortError' || err.name === 'APIUserAbortError';
 }
 

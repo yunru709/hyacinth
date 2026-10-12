@@ -1,6 +1,8 @@
+import path from 'node:path';
 import { GenericRegistry } from './base.js';
 import type { SkillDefinition } from '../types.js';
-import { loadPrompt } from '../prompts/loader.js';
+import { loadPrompt, getPromptsDir } from '../prompts/loader.js';
+import { loadSkillFile } from '../skills/loader.js';
 
 /**
  * Skill 注册表
@@ -79,7 +81,31 @@ export class SkillRegistry extends GenericRegistry<SkillDefinition> {
   }
 }
 
-/** 创建内置 Skill 列表（内容从 src/prompts/skills/ 加载） */
+/**
+ * 加载**目录式**内置 skill（一个文件夹 ＋ SKILL.md ＋ 子文件）。
+ *
+ * 为什么单文件内置不够：目录式 skill 的主体里会写「细则见 reference/xxx.md」这类
+ * **相对路径**，必须带上 `dir` 才解析得了（见本文件 getFullDefinitions 的 dirNote，
+ * 以及 SkillTool 激活时附带的那行 Skill directory）。单文件的 loadPrompt 只返回内容、
+ * 不带 dir ⇒ 子文件无从取到。
+ *
+ * 因此这里复用 skills/loader 的 loadSkillFile —— 它按**同一套** frontmatter 规则解析
+ * （含 `>-` 折叠块等，见 loader.ts 文件头记录的历史事故），并把 dir 一并带上。
+ * source 覆写为 'builtin'：内置资产随包分发（dist/prompts），仍可被 ~/.agent/skills 里
+ * 的**同名文件 skill** 覆盖 —— 文件 skill 后注册，会遮蔽内置（这是有意的覆盖顺序）。
+ *
+ * ⚠️ 不静默：内置资产缺失 / frontmatter 无 name ⇒ 直接抛（与 loadPrompt 的 throw 语义一致）。
+ *    否则这道 skill 会**悄悄少一项**，而 Zone 2 索引里看不出少了什么。
+ */
+function loadBuiltinDirSkill(name: string, relatedTools: string[]): SkillDefinition {
+  const dir = path.join(getPromptsDir(), 'skills', name);
+  const main = path.join(dir, 'SKILL.md');
+  const skill = loadSkillFile(main, dir);
+  if (!skill) throw new Error(`内置目录式 skill 无法加载：${main}（文件缺失或 frontmatter 缺 name）`);
+  return { ...skill, relatedTools, source: 'builtin' as const };
+}
+
+/** 创建内置 Skill 列表（单文件从 src/prompts/skills/ 加载；目录式见 loadBuiltinDirSkill） */
 export function createBuiltinSkills(): SkillDefinition[] {
   return [
     {
@@ -110,5 +136,10 @@ export function createBuiltinSkills(): SkillDefinition[] {
       relatedTools: ['get_config', 'update_config', 'list_model_channels', 'model_channel_info', 'config_schema'],
       source: 'builtin' as const,
     },
+    // ── 目录式内置（一个文件夹 ＋ SKILL.md ＋ 子文件）──
+    // 2026-10-10：由 ~/.agent/skills/running-experiments 收编进源码（随包分发，单一真源）。
+    // 主体里的细则都在同目录子文件里（reference/*.md、agent-experiment/SKILL.md），
+    // 故 relatedTools 只给读类工具；子文件的基准目录由 loadBuiltinDirSkill 写进 dir。
+    loadBuiltinDirSkill('running-experiments', ['read', 'glob']),
   ];
 }

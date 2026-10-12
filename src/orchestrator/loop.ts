@@ -15,7 +15,7 @@ import type { EventStore } from '../memory/events.js';
 import { appendEvent } from '../memory/events.js';
 import type { StatsManager } from '../memory/stats.js';
 import type { SummaryStore } from '../memory/summary.js';
-import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent, SessionType } from '../types.js';
+import type { Message, MessageContent, ToolCall, TextContent, ThinkingContent, ToolUseContent, ToolResultContent, SessionType, ToolDefinition } from '../types.js';
 import { LLMOrchestrator } from './planner.js';
 import type { Plan } from './plan-store.js';
 import type { SkillRegistry } from '../skills/registry.js';
@@ -35,6 +35,11 @@ import { removeLastRoundFromJsonl, eraseLastToolRoundJsonl, removeTaskTriggerJso
 import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
 import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
+import {
+  createGoalState, decideGoalGate, isToolForbiddenInGoal, isToolForcedVisibleInGoal,
+  GOAL_FORCED_VISIBLE_TOOLS, loadGoalState, saveGoalState, DEFAULT_GOAL_BUDGET,
+  type GoalState, type GoalReviewRequest, type GoalReviewResult,
+} from './goal.js';
 import { averageHitRate, formatCacheDisplay } from './cache-rate.js';
 import { Pipeline, type SlotSpec } from '../kernel/pipeline.js';
 import { createKernel, DEFAULT_PIPELINE_SLOTS, type KernelComponents } from './create-kernel.js';
@@ -331,6 +336,13 @@ export class AgentLoop {
   private sayFailureCount = 0;
   /** say 待落盘的交付正文（延后到 tool_result 之后落盘，见 takeSayStatus 注释） */
   private sayPendingContent: string | null = null;
+  // ── goal 模式（2026-10-10：只改出口 —— 不达成目标不退出 LOOP）────────────
+  /** goal 状态（session 级，落 <sessionDir>/goal.json，跨 restart 存活） */
+  private goalState: GoalState | null = null;
+  /** finish_goal 通过审查的回合标志（预填进 TurnState，finalize 消费即重置） */
+  private goalStatus: 'achieved' | null = null;
+  /** 审查官实现（装配方经 setGoalReviewer 注入；未注入 → 视为审查不可用） */
+  private goalReviewer: ((req: GoalReviewRequest) => Promise<GoalReviewResult>) | null = null;
   private compressCount = 0;
   private needsAggressiveCompress = false;
   private cacheHitTokens = 0;
@@ -346,6 +358,16 @@ export class AgentLoop {
   private currentTurn = 0;
   /** 公开只读访问器 — 供 TurnRecorder / RollbackTool 等查询当前回合号 */
   get turnNumber(): number { return this.currentTurn; }
+
+  /**
+   * 公开只读访问器 — **当前会话目录**（活取值：`switch_session` 应用后随即更新）。
+   *
+   * 为什么需要：装配期 `registerContextSources` 捕获的 `sessionDir` 在会话切换后会**陈旧**
+   * —— loop 实例跨会话存活（`applyPendingSessionSwitch()` 直接改写私有 `sessionDir`）。
+   * 因此凡「需要当前会话」的 ContextSource.getContent() 必须经此**每轮现取**，
+   * 不得捕获装配期的值；否则读/写目录不对称（写入端用实时目录、读取端用旧目录）。
+   */
+  get currentSessionDir(): string { return this.sessionDir; }
   private lastSavedSummary: string | undefined;
   private pendingImpactInfo: string | null = null;
   private requestId: string;
@@ -682,6 +704,12 @@ export class AgentLoop {
     this.stageServices.set('loopHooks', this.loopHooks);
     // 惰性闭包：activeRouter 是 getter（随 companion 模式切换）
     this.stageServices.set('getRouter', () => this.activeRouter);
+    // ── goal 模式（2026-10-10）──
+    // ① 从盘上恢复 goal 状态（跨 restart 存活 —— 用户要的「自我递归改进」场景）；
+    // ② 给 context 阶段注入工具过滤器，与执行侧 makeToolExecContext **同源**（避免两处不同序）。
+    this.goalState = loadGoalState(sessionDir);
+    this.stageServices.set('getGoalState', () => this.getGoalState());
+    this.stageServices.set('filterToolsForGoal', (defs: ToolDefinition[]) => this.filterToolsForGoal(defs));
     // ── P1 M5：llm/tools 阶段服务注册 ──
     this.stageServices.set('eventStore', this.eventStore);
     this.stageServices.set('orchestrator', orchestrator);
@@ -1025,6 +1053,206 @@ export class AgentLoop {
     }
 
     return status ?? undefined;
+  }
+
+  // ── goal 模式（2026-10-10：只改出口 —— 不达成目标不退出 LOOP）────────────────
+  // 说明：judgments 全在 ./goal.ts（纯函数 + 落盘）；这里只做接线与副作用。
+
+  /** 装配方注入审查官实现（agent-assembly 构造；未注入 → 视为审查不可用） */
+  setGoalReviewer(fn: (req: GoalReviewRequest) => Promise<GoalReviewResult>): void {
+    this.goalReviewer = fn;
+  }
+
+  /** 当前 goal 状态（未激活 → null）。装配侧过滤 / UI 查询用。 */
+  getGoalState(): GoalState | null {
+    return this.goalState?.active ? this.goalState : null;
+  }
+
+  /**
+   * goal 工具过滤器（装配侧注入 context 阶段；与执行侧 makeToolExecContext **同源**）。
+   * goal 未激活 → 原样返回；激活 → 去掉「换环境 / 宣布完成」类，并**强制可见 finish_goal**。
+   */
+  filterToolsForGoal(defs: ToolDefinition[]): ToolDefinition[] {
+    if (!this.goalState?.active) return defs;
+    const kept = defs.filter((d) => !isToolForbiddenInGoal(d.name));
+    const have = new Set(kept.map((d) => d.name));
+    for (const name of GOAL_FORCED_VISIBLE_TOOLS) {
+      if (have.has(name)) continue;
+      const forced = this.toolRegistry.getToolDefinitions().find((d) => d.name === name);
+      if (forced) kept.push(forced);
+    }
+    return kept;
+  }
+
+  /** 进入 goal 模式（/goal 命令 或 enter_goal 工具）。已在 goal → 返回错误（防借此重设目标）。 */
+  enterGoal(
+    objective: string,
+    by: 'user' | 'agent',
+  ): { ok: true; note: string } | { ok: false; error: string } {
+    const obj = (objective ?? '').trim();
+    if (!obj) return { ok: false, error: 'objective（目标）不能为空。' };
+    if (this.goalState?.active) {
+      return {
+        ok: false,
+        error: `已在 goal 模式下（目标：${this.goalState.objective}）。如需换目标，先解除（/goal off）。`,
+      };
+    }
+    this.goalState = createGoalState(obj, by);
+    saveGoalState(this.sessionDir, this.goalState);
+    return {
+      ok: true,
+      note:
+        `已进入 goal 模式。目标：${obj}\n` +
+        '达成之前不会结束回合：say 等「宣布完成 / 换环境」类工具已禁用。' +
+        '达成后调用 finish_goal 提交 evidence（可核验的证据）与 conclusion（结论），由审查子 agent 验收。',
+    };
+  }
+
+  /**
+   * 解除 goal 模式。三条来路：用户要求（TUI `/goal off` → exit_goal 工具）、
+   * 验收通过（submitGoal 内部）、预算触顶（applyGoalGate 内部）。返回是否确有解除动作。
+   *
+   * 注意：**用户来路必须始终可达** —— goal 模式废掉了默认出口，若这里也不通，
+   * 用户就被锁在自己的目标里了。这也是 exit_goal 进 GOAL_FORCED_VISIBLE_TOOLS 的原因。
+   */
+  exitGoal(reason: string): boolean {
+    if (!this.goalState?.active) return false;
+    this.goalState = null;
+    saveGoalState(this.sessionDir, null);
+    this.outputHandler?.onStatus?.(`goal 模式已解除（${reason}）`, 'info');
+    return true;
+  }
+
+  /** 消费 goal 状态（预填进 TurnState；消费即重置），语义与 takeSayStatus 对齐 */
+  private takeGoalStatus(): 'achieved' | undefined {
+    const s = this.goalStatus;
+    this.goalStatus = null;
+    return s ?? undefined;
+  }
+
+  /**
+   * finish_goal 提交入口：跑审查子 agent →
+   *   通过   → 置 goalStatus='achieved'（finalize 判停），并把 conclusion 交付用户；
+   *   不通过 → 返回理由（工具层抛错 → is_error → 主 agent 继续）。
+   *
+   * 审查不可用（未注入 / 抛错）→ **自动重试 1 次**；仍不可用则**退出 goal 但不算通过**：
+   * 不置 goalStatus（绝不写 'goal_achieved'），只解除 goalState，并向工具返回「退出 + 未审查」
+   * （2026-10-10 用户要求）。这样既不会把 agent 永久锁死，也绝不假装成通过。
+   */
+  async submitGoal(
+    evidence: string,
+    conclusion: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!this.goalState?.active) {
+      return { ok: false, error: '当前不在 goal 模式下，无需 finish_goal；直接 say 交付即可。' };
+    }
+    const ev = (evidence ?? '').trim();
+    const cc = (conclusion ?? '').trim();
+    if (!ev) {
+      return { ok: false, error: 'evidence（证据）不能为空：请给出可核验的证据（命令+输出 / 文件路径 / 测试结果）。' };
+    }
+    if (!cc) return { ok: false, error: 'conclusion（结论）不能为空：请写清目标已如何达成。' };
+
+    const attempt = this.goalState.reviewAttempts + 1;
+    this.goalState.reviewAttempts = attempt;
+    saveGoalState(this.sessionDir, this.goalState);
+
+    const req: GoalReviewRequest = {
+      objective: this.goalState.objective,
+      evidence: ev,
+      conclusion: cc,
+      attempt,
+    };
+    let result = await this.runGoalReview(req);
+    if (result.verdict === 'unavailable') {
+      result = await this.runGoalReview(req); // 自动重试 1 次
+    }
+
+    // ── 硬门兜底（2026-10-10 实测缺陷修复：目标未达成却被放行）──────────────
+    // 审查官即使判 pass，只要没确认「目标已达成」（objectiveAchieved !== true），
+    // 一律按不通过处理。缺了这道机器可断言的闸，「诚实的负面报告」就能绕过出口 ——
+    // 因为证据确实支持「目标未达成」这个结论（判据写错在「证据是否支持结论」）。
+    // 详见 goal.ts 的 GoalReviewResult 与 agents/goal-reviewer.ts 文件头。
+    if (result.verdict === 'pass' && result.objectiveAchieved !== true) {
+      result = {
+        verdict: 'fail',
+        reason: `审查官未确认目标已达成（objective_achieved ≠ true）。${result.reason}`,
+      };
+    }
+
+    // ── 审查通过：放行退出（交付结论 + 置 goalStatus 让 finalize 判停）──
+    if (result.verdict === 'pass') {
+      await this.conversationStore.append(this.sessionDir, {
+        role: 'assistant',
+        content: [{ type: 'text', text: cc }],
+      }).catch(() => {});
+      if (this.outputHandler?.onSay) this.outputHandler.onSay(cc);
+      else this.outputHandler?.onText?.(cc);
+      this.outputHandler?.onStatus?.(`goal 验收通过：${result.reason || 'ok'}`, 'info');
+      this.goalStatus = 'achieved';
+      this.goalState = null;
+      saveGoalState(this.sessionDir, null);
+      return { ok: true };
+    }
+
+    // ── 审查**不可用**：退出 goal，但**不算通过**（2026-10-10 用户要求）──
+    // 出问题时要明确返回「退出 + 未审查」这类东西，绝不假装 'ok' / 通过。
+    // 实现要点：**不置 goalStatus** —— 那是"验收通过"专用的判停路径；只解除 goalState。
+    // 效果：本回合照常继续（toolCalled=true），agent 看到这条结果后用 say 如实交付，
+    // 出口回到普通 end_turn。这样事件流里也不会出现假的 'goal_achieved'。
+    if (result.verdict === 'unavailable') {
+      this.exitGoal(`审查服务不可用：${result.reason}`);
+      this.outputHandler?.onStatus?.(`goal 退出（未审查）：${result.reason}`, 'warn');
+      return {
+        ok: false,
+        error:
+          `【goal 已退出 · **未审查**】审查服务不可用（${result.reason}），自动重试 1 次仍失败。\n` +
+          'goal 模式已解除，本次提交**没有经过审查、不等于通过**。不要重试 finish_goal。\n' +
+          '请直接用 say 把结论与证据如实交付给用户，并明确说明「未经审查」。',
+      };
+    }
+
+    // fail：把审查意见带回给主 agent，继续干活
+    this.goalState.lastRejection = result.reason;
+    saveGoalState(this.sessionDir, this.goalState);
+    this.outputHandler?.onStatus?.(`goal 审查不通过：${result.reason}`, 'warn');
+    return {
+      ok: false,
+      error: `审查不通过：${result.reason}\n请据此补齐证据 / 修正结论后再次调用 finish_goal。`,
+    };
+  }
+
+  /** 调一次审查官（未注入 → unavailable） */
+  private async runGoalReview(req: GoalReviewRequest): Promise<GoalReviewResult> {
+    if (!this.goalReviewer) return { verdict: 'unavailable', reason: '审查官未注入' };
+    try {
+      return await this.goalReviewer(req);
+    } catch (err) {
+      return { verdict: 'unavailable', reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * goal 出口闸门：未达成而想停 → 拽回继续（带预算兜底）。与验证门 / 证据门同构。
+   * 判定是纯逻辑（goal.decideGoalGate）；这里只做副作用（注入消息、累加 nudges、触顶解除）。
+   */
+  private async applyGoalGate(
+    stop: boolean,
+    stopReason?: string,
+  ): Promise<{ stop: boolean; stopReason?: string }> {
+    if (!this.goalState?.active) return { stop, stopReason };
+    const decision = decideGoalGate(stop, stopReason, this.goalState, DEFAULT_GOAL_BUDGET);
+    if (decision.message) {
+      this.goalState.nudges++;
+      await this.conversationStore.append(this.sessionDir, {
+        role: 'user',
+        content: { type: 'text', text: decision.message },
+      }).catch(() => {});
+      this.outputHandler?.onStatus?.(decision.message.slice(0, 120), 'warn');
+      saveGoalState(this.sessionDir, this.goalState);
+    }
+    if (decision.stopReason === 'goal_budget_exceeded') this.exitGoal('预算触顶');
+    return { stop: decision.stop, stopReason: decision.stopReason };
   }
 
   /** 获取当前 active Provider（考虑 Router 路由） */
@@ -1974,11 +2202,18 @@ export class AgentLoop {
       await this.checkTextLoop(textParts);
       // ── P1 M3：finalize 阶段（endTurn + stop 判定，经内核管道执行） ──
       // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成
-      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus() }, this.makeStageCtx());
+      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus(), goalStatus: this.takeGoalStatus() }, this.makeStageCtx());
       // ── 钩子：迭代结束（stop 判定已出） ──
       await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finA.stop, stopReason: finA.stopReason });
+      // ── goal 闸门（2026-10-10）**先于**验证/证据门 ──
+      // 理由：goal_achieved 是权威放行，不能被「改了没验证」这类门拽回去继续；
+      // goal_pending 时先拽回（stop=false），后两门见 stop=false 自然不干预。
+      const goalA = await this.applyGoalGate(finA.stop, finA.stopReason);
+      if (goalA.stopReason === 'goal_achieved' || goalA.stopReason === 'goal_budget_exceeded') {
+        return { stop: goalA.stop, stopReason: goalA.stopReason, toolCalled: finA.toolCalled };
+      }
       // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
-      const gatedA = await this.applyVerificationGate(finA.stop, finA.stopReason);
+      const gatedA = await this.applyVerificationGate(goalA.stop, goalA.stopReason);
       // ── 证据门（P1-B）：改了却不验证，不许直接结束 ──
       const gatedA2 = await this.applyEvidenceGate(gatedA.stop, gatedA.stopReason);
       return { stop: gatedA2.stop, stopReason: gatedA2.stopReason, toolCalled: finA.toolCalled };
@@ -2129,13 +2364,27 @@ export class AgentLoop {
       addEvidence: () => { this.turnEvidenceCount += 1; },
       evidenceCount: () => this.turnEvidenceCount,
       inlineToolResults: this.inlineToolResults,
-      // 执行侧工具包对称校验（治本）：从 bundleRegistry 派生"是否在激活包内"。
-      // undefined（未注入 bundleRegistry，如子 Agent）→ 不拦截，保持既有行为。
-      isToolAllowedByBundle: this.bundleRegistry
+      // 执行侧工具过滤（治本）：与**组装侧** stages/context.ts 同序 ——
+      //   ① Router 白名单非空 → 只认白名单（陪伴等模式靠它放行）
+      //   ② 否则按 bundle 展开；全量模式 / 空集 → 放行
+      //   ③ 黑名单始终剔除
+      // 曾经只看 bundle，与组装侧不同序 ⇒ 模式白名单下的工具「看得见、调不通」
+      // （2026-10-10 把陪伴工具移出 common 时暴露）。undefined（未注入
+      // bundleRegistry，如子 Agent）→ 不拦截，保持既有行为。
+      isToolAllowedByBundle: (this.bundleRegistry || this.goalState?.active)
         ? (name: string) => {
-            // 全量模式（无限制）或激活包为空 → 放行（与组装侧 context.ts 语义一致）
-            if (this.bundleRegistry!.isAllMode()) return true;
-            const active = this.bundleRegistry!.getActiveToolNames();
+            // goal 模式工具管制（2026-10-10）：与装配侧 loop.filterToolsForGoal **同源**。
+            // 黑名单优先（拦住「换环境 / 宣布完成」类）；finish_goal / exit_goal 强制放行。
+            if (this.goalState?.active) {
+              if (isToolForbiddenInGoal(name)) return false;
+              if (isToolForcedVisibleInGoal(name)) return true;
+            }
+            if (!this.bundleRegistry) return true;
+            const router = this.activeRouter;
+            if (router.toolBlacklist.includes(name)) return false;
+            if (router.toolAllowlist.length > 0) return router.toolAllowlist.includes(name);
+            if (this.bundleRegistry.isAllMode()) return true;
+            const active = this.bundleRegistry.getActiveToolNames();
             if (active.length === 0) return true;
             return active.includes(name);
           }
