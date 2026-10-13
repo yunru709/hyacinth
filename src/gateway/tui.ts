@@ -161,6 +161,26 @@ export async function runTui(
     sweepOrphanedWatchdogs().catch(() => {}),
   );
 
+  // ── 主线程卡死探测器（2026-10-13，孑遗指派）────────────────────────────
+  // 背景：进程**偶发卡死**（界面发白 = Windows 判「未响应」），孑遗只能手动强杀后重启。
+  //   已排查 8 个候选并**全部有证据排除**：provider 请求超时（时间不符）/ prompt-watcher（只清缓存）/
+  //   MCP 进程泄漏（实测只有一套）/ install-manager（不走安装路径）/ orphan-sweeper（异步）/
+  //   env-collector 的 execSync（**实测否证**：nvidia-smi 46ms）/ clawbot poll（有退避）/ tui.log 写盘（异步流）。
+  //   ⇒ 症结不在"没找到"，而在**主线程卡死的证据只存在于那一刻的内存里 —— 强杀后什么都不剩**。
+  // 做法：主线程持续写心跳 → **独立 worker 线程**盯它 → 超时即 `process.report.writeReport()`
+  //   （报告含**所有 JS 线程的调用栈**）落盘到 `~/.agent/crash/stall-<时间戳>.json`。
+  // ⚠️ 为什么非 worker + SharedArrayBuffer 不可：主线程一旦冻住，**它自己的定时器同样不会跑**，
+  //    连 postMessage 都发不出去 —— 自己检测自己在原理上就不可能。详见该模块头部注释。
+  // 代价：worker 常驻（每秒一次 Atomics.load），**平时零文件 IO**；worker 已 unref ⇒ 不阻止退出。
+  // 失败绝不影响主流程：模块内部自吞异常并只记 warn ✓
+  // 注：目前只挂在 TUI 入口（孑遗的卡死场景在 TUI）。若将来 WebUI/CLI 也要，整体移到 bootstrap 即可。
+  void import('../lifecycle/stall-detector.js')
+    .then(({ startStallDetector, ensureStallReportDir }) => {
+      ensureStallReportDir(); // 先建目录：卡死那一刻主线程正冻着，那时再 mkdir 不可靠
+      startStallDetector();
+    })
+    .catch(() => {});
+
   // ── Local Model ──
   const localModel = LocalModelModule.getInstance();
   localModel.initialize(process.cwd());
