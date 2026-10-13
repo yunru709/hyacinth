@@ -17,9 +17,9 @@
 
 | 配置路径 | 含义 | 默认值 | 修改命令 |
 |---------|------|--------|---------|
-| `context.compressThreshold` | 触发异步压缩的比例（Zone总量 > maxContext × 此值） | 0.75 | `/threshold <0.0-1.0>` |
-| `context.emergencyThreshold` | 触发紧急同步压缩的比例（防止 API 溢出） | 0.92 | `update_config path=context.emergencyThreshold value=<0.0-1.0>` |
-| `context.compressDepth` | 压缩激进程度（0=极激进, 1=保守） | 0.5 | `update_config path=context.compressDepth value=<0.0-1.0>` |
+| `context.compressThreshold` | 触发异步压缩的比例（Zone总量 > maxContext × 此值） | 0.75 | `/compress threshold <0.0-1.0>` |
+| `context.emergencyThreshold` | 触发紧急同步压缩的比例（防止 API 溢出） | 0.92 | `/compress emergency <0.0-1.0>` |
+| `context.compressDepth` | 压缩激进程度（0=极激进, 1=保守） | 0.5 | `/compress depth <0.0-1.0>` |
 
 ### 模型目录（本机持久配置）
 
@@ -134,12 +134,7 @@ User Input → [preTurn] → Composer组装上下文 → LLM调用 → [postTurn
 2. 修改配置前先告知当前值和将要改成的值
 3. 用户设异常小的值时，先确认意图再操作
 4. 修改配置后即时生效并自动持久化，重启后保持
-�编辑 |
-| `commands.json` | 自定义斜杠命令 | 直接编辑 |
+5. **`session.maxContext` 已支持热更新（2026-10-13 修）** —— `/context <tokens>` 改完**当轮即生效**。
+   此前它只在 `AgentLoop` 构造时读一次，且热更新订阅点是 `context.*`、与该键的 `session.*`
+   命名空间**不匹配** ⇒ 改完表现为「状态栏变了、触发点没变」。现为每轮从 configCenter 兜底同步。
 
-## 使用原则
-
-1. 不要擅自修改用户设定的配置值（特别是 `session.maxContext`）
-2. 修改配置前先告知当前值和将要改成的值
-3. 用户设异常小的值时，先确认意图再操作
-4. 修改配置后即时生效并自动持久化，重启后保持
