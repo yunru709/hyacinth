@@ -13,6 +13,16 @@
 | `session.maxContext` | 上下文窗口软限制（tokens），不是模型原生上限 | 200000 | `/context <tokens>` |
 | `session.maxTurns` | 最大对话轮数 | 100 | `/turns <1-250>` |
 
+> ⚠️ **顶层遗留字段**：`config.json` 里另有一对顶层 `maxTurns` / `maxContext`，是「结构化改造前」的
+> 存储位，与 `session.*` 语义重复。**权威值是 `session.*`** —— configCenter、`AgentLoop`、TUI 状态栏、
+> 斜杠命令全部读它。`ConfigManager.load()` 会在加载时把顶层按 `session.*` 对齐（2026-10-13 归一）
+> ⇒ **手改顶层那对不会生效**，一律改 `session.*`。
+>
+> `/context <tokens>` 的取值上限 = **当前模型的原生窗口**（代码按 `getModelContextWindow` 校验）。
+>
+> 窗口值同时是**压缩触发判断的分母**（阈值 = 窗口 × `compressThreshold`）⇒ 改它等同于移动
+> 「何时开始压缩」这条线。
+
 ### 压缩相关
 
 | 配置路径 | 含义 | 默认值 | 修改命令 |
