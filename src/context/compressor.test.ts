@@ -97,6 +97,25 @@ describe('CompressorOrchestrator（四阶段差分压缩）', () => {
     expect(stats.usageRatio).toBe(0.5);
   });
 
+  it('setMaxContextTokens：运行中改窗口 ⇒ 分母立即更换（2026-10-13 统一分母回归）', () => {
+    const c = new CompressorOrchestrator(constTokenizer, makeSummarizer() as never, 200, {
+      compressThreshold: 0.75,
+    });
+    // 20 条 = 200 token；窗口 200 ⇒ 占用率 1.0，触发
+    expect(c.getCompressionStats(makeHistory(20)).usageRatio).toBe(1);
+    expect(c.needsCompression(makeHistory(20))).toBe(true);
+
+    // 窗口提到 400 ⇒ 同一份消息占用率减半，不再触发
+    c.setMaxContextTokens(400);
+    expect(c.getCompressionStats(makeHistory(20)).usageRatio).toBe(0.5);
+    expect(c.needsCompression(makeHistory(20))).toBe(false);
+
+    // 非法值不得污染分母：若写成 0/NaN ⇒ 占用率恒 Infinity/NaN ⇒ 要么永不触发、要么每轮都触发
+    c.setMaxContextTokens(0);
+    c.setMaxContextTokens(Number.NaN);
+    expect(c.getCompressionStats(makeHistory(20)).usageRatio).toBe(0.5);
+  });
+
   it('compress 成功：_compressed 标记（intent/summary_hash/compressed_at）+ 收敛不超压', async () => {
     const summarizer = makeSummarizer();
     const c = new CompressorOrchestrator(constTokenizer, summarizer as never, 300, {

@@ -813,6 +813,19 @@ export class CompressorOrchestrator {
   }
 
   /**
+   * Update the context window at runtime.
+   *
+   * 与 setCompressThreshold 同因：`/context <tokens>` 改窗口后必须即时生效，不能等重启。
+   * 此前窗口值只在构造时从 configCenter 读一次、且**没有任何更新入口** ⇒ 改配置后
+   * 触发点仍按旧窗口算，而状态栏另读一份副本 ⇒ 两个分母长期错位
+   * （2026-10-13 实测：状态栏 85% 不触发、89% 才触发）。
+   * 调用方 `AgentLoop` 每轮兜底同步（见 loop.ts 的窗口值每轮同步块）。
+   */
+  setMaxContextTokens(tokens: number): void {
+    if (typeof tokens === 'number' && tokens > 0) this.maxContextTokens = tokens;
+  }
+
+  /**
    * Update the compression threshold at runtime.
    * This allows config changes to take effect without reconstruction.
    */

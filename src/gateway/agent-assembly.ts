@@ -475,7 +475,10 @@ export async function createAgentAssembly(
   }, {
     sessionDir,
     maxTurns: effectiveMaxTurns,
-    maxContextTokens: maxContext,
+    // 与 maxTurns 同源：都取 configCenter 解析后的有效值（2026-10-13「统一分母」）。
+    // 此前这里用原始 options.maxContext，而上一行 maxTurns 用 effectiveMaxTurns ——
+    // 同一份配置两个取法，构造期就埋下分母分叉（loop 内部还另有每轮兜底同步）。
+    maxContextTokens: effectiveMaxContext,
     personaDir: effectivePersonaDir,
     dangerousTools: new Set(deriveDangerousTools(() => toolRegistry.getAll())),
     allowlistTools: new Set(),

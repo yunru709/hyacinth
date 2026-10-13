@@ -179,6 +179,55 @@ describe('AgentLoop maxContextTokens 兜底链（490ef42 回归）', () => {
   });
 });
 
+// ── 运行中改窗口 → 每轮收敛（2026-10-13「统一分母」回归）────────────────
+//
+// 背景：`/context <tokens>` 写的是 `session.maxContext`，但窗口值此前**只在构造时读一次**
+// 且没有任何更新入口 ⇒ 改完触发点仍按旧窗口算；而状态栏/压缩器各持一份独立副本 ⇒
+// 分母分叉，表现为「状态栏 85% 不触发、89% 才触发」。
+// 现 runTurn 每轮开头按 configCenter 实时值收敛三处：实例字段 / 阶段服务表 / 压缩器。
+
+describe('AgentLoop 运行中改 session.maxContext → 每轮收敛（2026-10-13）', () => {
+  it('构造后改配置再跑一轮：实例字段 / 阶段服务表 / 压缩器 / getTurnInfo 全部跟随', async () => {
+    const pathValues: Record<string, unknown> = { 'session.maxContext': 300000 };
+    const configCenter = {
+      get: vi.fn((p: string) => pathValues[p]),
+      set: vi.fn(),
+      watch: vi.fn(() => () => {}),
+    } as unknown as RuntimeConfigCenter;
+
+    const services = makeServices(makeProvider().provider);
+    // 压缩器换成带 setter 的 spy（真实 CompressorOrchestrator 有该方法）
+    const setMaxContextTokens = vi.fn();
+    (services as unknown as { compressor: unknown }).compressor = {
+      compress: vi.fn().mockResolvedValue(null),
+      setMaxContextTokens,
+    };
+    (services as unknown as { configCenter: unknown }).configCenter = configCenter;
+
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() } as never);
+    const internals = loop as unknown as {
+      maxContextTokens: number;
+      stageServices: Map<string, unknown>;
+      runTurn(): Promise<{ stop: boolean }>;
+    };
+
+    // 构造期按 config 取（既有兜底链语义不变）
+    expect(internals.maxContextTokens).toBe(300000);
+    expect(setMaxContextTokens).not.toHaveBeenCalled(); // 值未变 ⇒ 不发起无谓写入
+
+    // 模拟 `/context 600000`
+    pathValues['session.maxContext'] = 600000;
+
+    await internals.runTurn();
+
+    expect(internals.maxContextTokens).toBe(600000);
+    expect(internals.stageServices.get('maxContextTokens')).toBe(600000);
+    expect(setMaxContextTokens).toHaveBeenCalledWith(600000);
+    // 状态栏取值口径（state.get → buildStateSnapshot → getTurnInfo）
+    expect(loop.getTurnInfo(1, 100).maxContextTokens).toBe(600000);
+  });
+});
+
 // ── 输出被截断：可见提示（A）+ 自动续写（B）（2026-10-02 新增）────────
 
 describe('AgentLoop 截断处理：length/max_tokens → 提示 + 有限续写', () => {

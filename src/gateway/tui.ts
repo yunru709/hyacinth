@@ -309,12 +309,22 @@ export async function runTui(
 
     // ── Read live config (overrides startup defaults) ──
     const liveCfg = RuntimeConfigCenter.getInstance();
-    const liveMaxContext = liveCfg.get<number>('session.maxContext')!;
+    const liveMaxContext = liveCfg.get<number>('session.maxContext');
     const liveMaxTurns = liveCfg.get<number>('session.maxTurns') || maxTurns;
 
     const activeInfo: TurnInfo = {
       ...info,
       maxTurns: liveMaxTurns,
+      // ★ 窗口分母统一取实时配置（2026-10-13）：
+      // `liveMaxContext` 此前**读了却没用**（死变量，注释却写着 overrides startup defaults）
+      // ⇒ maxContextTokens 一直沿用各调用点自带的那份启动快照（runTui 的 maxContext 参数 /
+      // loop 透传值），与触发侧分母不同源 ⇒ 状态栏可能在 85% 不触发、89% 才触发。
+      // 三条刷新路径（MESSAGE_CONTEXT_UPDATE / 压缩后本地合成 / 协议快照）都经本函数
+      // ⇒ 此处一处覆盖全部。缺失/非法时回退透传值，避免状态栏出现 NaN%。
+      maxContextTokens:
+        typeof liveMaxContext === 'number' && liveMaxContext > 0
+          ? liveMaxContext
+          : info.maxContextTokens,
       // 缺失时补上粘性缓存值：任何刷新路径都不会把 token 总量抹掉
       totalInputTokens: lastTotalInputTokens,
       totalOutputTokens: lastTotalOutputTokens,

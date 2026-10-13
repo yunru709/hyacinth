@@ -2061,6 +2061,34 @@ export class AgentLoop {
     initState.ephemeralInput = this.activeRouter.ephemeralInput ?? null;
     initState.modeName = this.activeRouter.name;
     this.stageServices.set('sessionDir', this.sessionDir);
+    // ── 窗口值每轮同步（2026-10-13「统一分母」）─────────────────────────────
+    // 问题：`session.maxContext` 此前只在**构造时**读一次（见构造函数「优先级」注释），
+    // 而 `/context <tokens>` 改的正是这个键 ⇒ 改完触发点仍按旧窗口算；同时状态栏、
+    // 压缩器各持一份独立的副本 ⇒ 分母分叉，表现为「状态栏 85% 不触发、89% 才触发」。
+    // 这里按 configCenter 的**实时值**兜底同步三处：
+    //   ① this.maxContextTokens —— getTurnInfo()/状态栏、强制重压缩提示读它
+    //   ② stageServices('maxContextTokens') —— context 阶段的触发阈值判断读它
+    //   ③ compressor.setMaxContextTokens —— 压缩预算基准
+    // 放在每轮开头（与 sessionDir 同处）意味着**任何来源**的改动都自动收敛：
+    // 用户 /context、model-catalog-watcher 同步、fallback 适配改写，一视同仁。
+    // 只在值真的变了时才写，避免每轮无条件 set 造成无谓抖动。
+    {
+      const liveMaxContext = this.configCenter?.get<number>('session.maxContext');
+      if (
+        typeof liveMaxContext === 'number' &&
+        liveMaxContext > 0 &&
+        liveMaxContext !== this.maxContextTokens
+      ) {
+        const previousMaxContext = this.maxContextTokens;
+        this.maxContextTokens = liveMaxContext;
+        this.stageServices.set('maxContextTokens', liveMaxContext);
+        this.compressor.setMaxContextTokens(liveMaxContext);
+        this.logger.info('Max context synced from config', {
+          from: previousMaxContext,
+          to: liveMaxContext,
+        });
+      }
+    }
     const st = await this.pipeline.runSlot('input', initState, this.makeStageCtx());
     const history = st.history;
     let userInputText = st.userInput;
