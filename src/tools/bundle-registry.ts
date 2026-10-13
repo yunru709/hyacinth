@@ -415,6 +415,45 @@ export class ToolBundleRegistry {
     logger.info(`Tools removed from bundle ${bundleName}: ${toolNames.join(', ')}`);
   }
 
+  /**
+   * 精确同步一个 bundle 的工具列表 —— 供**外部自动维护**使用（当前用途：MCP server 的工具集）。
+   *
+   * 与 addTools/removeTools 的区别：那两个是**增量**，这个是**对齐**（以 tools 为准多退少补）——
+   * MCP server 重连后工具可能增删，增量做法会残留幽灵条目。
+   *
+   * ⚠️⚠️ **tools 为空 ⇒ 删除该包，绝不留下空包**。原因：`tools: []` 在本模块的语义是
+   *   「无过滤 = 全量」（见 BUILTIN_ALL），留个空包会让「激活它」变成**放开一切** ——
+   *   与「按需收窄」的意图正好相反，而且是静默的。
+   * ⚠️ 删除若导致激活集变空，必须回填 common：空激活集同样等于全量模式
+   *   （见 getActiveToolNames 的 `if (actives.length === 0) return []`）。
+   *   这不是用户的选择（用户只是拔掉了一个 MCP），所以不能顺势滑进全量。
+   */
+  syncTools(name: string, description: string, tools: string[]): void {
+    if (tools.length === 0) {
+      if (!this.config.bundles[name]) return;
+      const wasActive = this.config.activeBundles.includes(name);
+      this.delete(name);
+      if (wasActive && this.config.activeBundles.length === 0) {
+        this.config.activeBundles = ['common'];
+        this.save();
+        logger.info('active bundles fell empty after removing a synced bundle → fell back to common');
+      }
+      return;
+    }
+    const existing = this.config.bundles[name];
+    if (existing) {
+      existing.description = description;
+      existing.tools = [...tools];
+      // 同步包不是内置包：清掉这些标记，避免 load() 把它当内置包做工具回填/元数据覆盖。
+      delete existing.removedTools;
+      delete existing.builtin;
+      this.save();
+      logger.info(`Bundle synced: ${name} (${tools.length} tools)`);
+      return;
+    }
+    this.create(name, description, tools);
+  }
+
   // ── Persist ──────────────────────────────────────────────────────
 
   reload(): void {

@@ -707,6 +707,9 @@ export async function createAgentAssembly(
   // ── Tool Bundle 工具注册（接线，保留）───────────────────────────────
   registerBundleTools(toolRegistry, bundleRegistry);
   loop.setBundleRegistry(bundleRegistry);
+  // MCP：每个 server 自动同步一个独立工具包（`mcp-<server>`）⇒ 可按需 activate_bundle（2026-10-13 孑遗指派）
+  // ⚠️ `all` 模式保持原样（启用 all = 所有工具可用，含 MCP）—— 本包的价值只在「不用 all」时体现，不给 all 开特例。
+  mcpSystem.setBundleRegistry(bundleRegistry);
 
   // ── 架构监督基线上报（阶段 5）：未被替换点补记 builtin 生效条目，
   // 使 arch.list 一屏可见「谁在实际岗位上」（幂等，不覆盖名单替换条目）

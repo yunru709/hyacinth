@@ -1,6 +1,7 @@
 import { MCPConfigLoader, type MCPConfigEntry } from './config.js';
 import { MCPServerManager } from './lifecycle.js';
-import { MCPBridge } from './bridge.js';
+import { MCPBridge, sanitizeMcpName } from './bridge.js';
+import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import { MCPInstallManager } from './install-manager.js';
 import { sweepOrphanedMcpProcesses } from './orphan-sweeper.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -155,11 +156,59 @@ export class MCPSystem {
     this.logger.info(`MCPSystem reloaded: ${this.managers.length} servers`);
   }
 
+  /**
+   * 工具包注册表（可选注入）。设置后每个 MCP server 会自动拥有一个独立工具包
+   * `mcp-<server>`，用户可用 activate_bundle 按需启用 —— 见 setBundleRegistry。
+   */
+  private bundleRegistry?: ToolBundleRegistry;
+
   /** 注册到 ToolRegistry */
   registerToToolRegistry(registry: ToolRegistry): void {
     if (this.toolRegistries.has(registry)) return;   // 幂等：同一会话重复注册直接跳过 ✓
     this.toolRegistries.add(registry);
     this.bridge.registerToRegistry(registry);
+  }
+
+  /**
+   * 接线「工具包注册表」—— 让每个 MCP server 自动拥有一个**独立工具包**（`mcp-<server>`），
+   * 用 activate_bundle 按需启用（2026-10-13，孑遗指派）。
+   *
+   * 为什么需要：MCP 工具数可观（REA 实测 170 个），常驻工具列表既耗上下文、又拖低选择准确率。
+   * 建包后即可「不用 all、只激活需要的包」⇒ 按需启用。
+   *
+   * ⚠️ 与 `all` 的关系（孑遗 2026-10-13 明确裁定）：**all 保持原样** —— 启用它就该所有工具可用
+   *    （含 MCP）。所以本包的价值只在「不用 all」时体现，**不给 all 开特例**。
+   * ⚠️ 包内工具名必须是**全名**（`mcp__<server>__<tool>`），与 bridge 注册进 registry 的名字逐字一致；
+   *    否则包内名字对不上任何工具 ⇒ 激活了也看不见（静默失效）。
+   */
+  setBundleRegistry(registry: ToolBundleRegistry): void {
+    this.bundleRegistry = registry;
+    // 立即对齐一次：接线可能发生在若干 server 已连上之后（装配阶段顺序不保证）。
+    for (const manager of this.managers) this.syncBundleFor(manager.getName());
+  }
+
+  /**
+   * 同步某个 MCP server 对应的工具包。
+   *
+   * server 已不在（断开/移除/连接失败）⇒ 传**空列表** ⇒ registry 侧会**删包**
+   * （绝不留空包：空 tools 在本框架的语义是「无过滤 = 全量」，留空包会让「激活它」
+   *  变成「放开一切」，与按需收窄的意图正好相反 ✗）。
+   */
+  private syncBundleFor(serverName: string): void {
+    if (!this.bundleRegistry) return;
+    const bundleName = `mcp-${sanitizeMcpName(serverName)}`;
+    const manager = this.managers.find((m) => m.getName() === serverName);
+    if (!manager) {
+      this.bundleRegistry.syncTools(bundleName, '', []);
+      return;
+    }
+    const prefix = `mcp__${sanitizeMcpName(serverName)}__`;
+    const tools = manager.getClient().getTools().map((t) => `${prefix}${t.name}`);
+    this.bundleRegistry.syncTools(
+      bundleName,
+      `MCP server «${serverName}» 的全部工具（${tools.length} 个）— 按需激活`,
+      tools,
+    );
   }
 
   /** 注册到 ContextComposer — 每个 Server 注册为独立 ContextSource */
@@ -301,6 +350,10 @@ export class MCPSystem {
       this.bridge.registerToRegistry(registry);
     }
 
+    // 同步该 server 的独立工具包（`mcp-<server>`）⇒ 用户可按需启用/停用（2026-10-13）
+    // （bundleRegistry 可能尚未注入 ⇒ syncBundleFor 内部直接返回 ✓ 接线后会补一次对齐）
+    this.syncBundleFor(config.name);
+
     // 注册到 ContextComposer — 热插拔与持久化使用不同 cacheability
     for (const composer of this.contextComposers) {
       this.registerServerContextSource(config.name, manager, composer, isHotPlug);
@@ -342,6 +395,10 @@ export class MCPSystem {
 
     this.managers.splice(idx, 1);
     this.syncBridge();
+
+    // 同步该 server 的工具包：此刻它已不在 managers 里 ⇒ syncBundleFor 走「删包」分支 ✓
+    // （绝不留空包：空 tools 的语义是「无过滤 = 全量」，留空包会让「激活它」变成放开一切 ✗）
+    this.syncBundleFor(name);
 
     this.emitStatus({ type: 'removed', name, tools: oldToolNames });
   }
