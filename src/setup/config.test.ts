@@ -147,3 +147,55 @@ describe('ConfigManager 路径可移植化（memoryFile 跨平台）', () => {
     expect(cfg.memoryFile).toBe(fallbackMemory());
   });
 });
+
+/**
+ * 遗留扁平字段归一回归（2026-10-13「统一分母」）：
+ * config.json 同时有顶层 `maxTurns`/`maxContext`（结构化改造前的存储位）与 `session.*`
+ * （权威位：configCenter / AgentLoop / TUI 状态栏 / 斜杠命令全读它）。两份值不一致时，
+ * 消费方「读到哪个算哪个」⇒ 同一份配置长出两套行为。本机实测顶层 200000 / session 段
+ * 500000，导致状态栏与压缩触发点长期错位。归一在唯一加载入口处完成。
+ */
+describe('ConfigManager 遗留扁平字段归一（2026-10-13）', () => {
+  let tempDir: string;
+  let manager: ConfigManager;
+  const cfgPath = () => path.join(tempDir, '.agent', 'config.json');
+  const writeCfg = (obj: unknown) => {
+    fs.mkdirSync(path.join(tempDir, '.agent'), { recursive: true });
+    fs.writeFileSync(cfgPath(), JSON.stringify(obj, null, 2), 'utf8');
+  };
+
+  beforeEach(() => {
+    tempDir = path.join(os.tmpdir(), `agent-cfg-${crypto.randomUUID()}`);
+    mockHomedir.mockReturnValue(tempDir);
+    manager = new ConfigManager();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('顶层与 session 段不一致 ⇒ 以 session 段为准（本机那对 200000/500000 就是这形态）', async () => {
+    writeCfg({
+      maxTurns: 100,
+      maxContext: 200000,
+      session: { maxTurns: 250, maxContext: 500000 },
+    });
+    const cfg = await manager.load();
+    expect(cfg.maxContext).toBe(500000);
+    expect(cfg.maxTurns).toBe(250);
+  });
+
+  it('session 段缺失 ⇒ 保留顶层值（归一不得把有效配置抹成默认）', async () => {
+    writeCfg({ maxTurns: 42, maxContext: 123456 });
+    const cfg = await manager.load();
+    expect(cfg.maxContext).toBe(123456);
+    expect(cfg.maxTurns).toBe(42);
+  });
+
+  it('session 段值非法（0 / 负数）⇒ 不覆盖顶层（否则分母变 0 ⇒ 占用率恒 Infinity）', async () => {
+    writeCfg({ maxContext: 300000, session: { maxContext: 0, maxTurns: -1 } });
+    const cfg = await manager.load();
+    expect(cfg.maxContext).toBe(300000);
+    expect(cfg.maxTurns).toBe(100); // 未被 -1 污染，回落 DEFAULT_CONFIG
+  });
+});

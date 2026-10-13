@@ -368,12 +368,27 @@ export class ConfigManager {
    */
   async load(): Promise<AgentConfig> {
     let config = { ...DEFAULT_CONFIG };
+    let raw: Record<string, unknown> = {};
     try {
       const content = await fs.readFile(this.getConfigPath(), 'utf-8');
-      const parsed = JSON.parse(content);
-      config = { ...config, ...parsed };
+      raw = JSON.parse(content) as Record<string, unknown>;
+      config = { ...config, ...raw };
     } catch {
       // 全局配置不存在，使用默认值
+    }
+    // ── 遗留扁平字段归一（2026-10-13「统一分母」）────────────────────────
+    // 顶层 maxTurns / maxContext 是「结构化改造前」的存储位，与 session.* 语义完全重复。
+    // 权威值是 session.*（configCenter、AgentLoop、TUI 状态栏、斜杠命令全读它）；
+    // 顶层那对只在少数入参路径上被读（如 setup 完成后回传 TUI 的那条，且正常启动时
+    // 还会被 getModelContextWindow 覆盖）。两份值不一致时，消费方「读到哪个算哪个」
+    // ⇒ 同一份配置长出两套行为（本机实测：顶层 200000 / session 段 500000，状态栏与
+    // 压缩触发点因此长期错位）。在唯一的加载入口处对齐，下游无需知情，save() 写回即自愈。
+    const session = raw.session as { maxContext?: unknown; maxTurns?: unknown } | undefined;
+    if (typeof session?.maxContext === 'number' && session.maxContext > 0) {
+      config.maxContext = session.maxContext;
+    }
+    if (typeof session?.maxTurns === 'number' && session.maxTurns > 0) {
+      config.maxTurns = session.maxTurns;
     }
     return this.revivePaths(config);
   }
