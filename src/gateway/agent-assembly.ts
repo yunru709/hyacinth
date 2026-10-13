@@ -293,7 +293,12 @@ export async function createAgentAssembly(
   const securityWorkspaceRoot = (config as { security?: { workspaceRoot?: string } }).security?.workspaceRoot ?? cwd;
   // 额外可写根：agent 自维护区（与 memory.md 同目录的 persona 目录；Zone 5 临时记事本也在此）
   // —— 目录由 scratchpadPath() 推导（不写死字符串 ✓），且只放行这一个目录 ✓
-  applyWorkspaceFence(toolRegistry, securityWorkspaceRoot, [path.dirname(scratchpadPath())]);
+  const extraWritableRoots = [path.dirname(scratchpadPath())];
+  // ── 权限统一（2026-10-13）：越界写入 = 「可确认」而非「不可能」──
+  // 同一个 Set 交给两边：围栏读（决定放行）、loop 权限层写（用户点 yes/always 后记录）。
+  // 缺了任何一边 ⇒ 要么越界永远写不进去，要么确认后仍被拒（静默不一致）。
+  const approvedWriteRoots = new Set<string>();
+  applyWorkspaceFence(toolRegistry, securityWorkspaceRoot, extraWritableRoots, approvedWriteRoots);
   // ── 编排贡献批（行数收尾第七批：planStore/orchestrator/providerRouter/
   // agentRegistry/toolExecutor/backgroundRegistry）——在 toolRegistry 建后执行。
   const orchResults = await runOrchestratorContributions({
@@ -474,6 +479,11 @@ export async function createAgentAssembly(
     personaDir: effectivePersonaDir,
     dangerousTools: new Set(deriveDangerousTools(() => toolRegistry.getAll())),
     allowlistTools: new Set(),
+    // ── 权限统一（2026-10-13）：与上方 applyWorkspaceFence 共享**同一份**围栏参数与已批准根 ──
+    // 三处必须同源；漏任一处 ⇒ 越界写入要么永远写不进、要么确认后仍被拒（静默失效）
+    approvedWriteRoots,
+    workspaceFenceRoot: securityWorkspaceRoot,
+    workspaceFenceExtraRoots: extraWritableRoots,
     // 循环级验证门信号：plan_execute 预测落空时置位（repair.verification 消费）
     planHandoff,
     // 统一宿主：loop 复用 PluginManager 的 PluginHost —— 内核插件（bypass/world-engine/

@@ -252,6 +252,17 @@ export interface AgentLoopConfigOptions {
   personaDir?: string;
   dangerousTools?: Set<string>;
   allowlistTools?: Set<string>;
+  /**
+   * 「已批准可写根」集合（可选）。传入时与工作区围栏共享同一引用，
+   * 使「越界写入 → 用户确认 → 放行」闭环成立（2026-10-13 权限统一）。
+   */
+  approvedWriteRoots?: Set<string>;
+  /**
+   * 工作区围栏根 + 额外可写根（与装配层传给 applyWorkspaceFence 的**同源**）。
+   * 权限层据此提前判定「越界写入」——缺省 ⇒ 不做越界预判，退回纯工具级判定（旧行为）。
+   */
+  workspaceFenceRoot?: string;
+  workspaceFenceExtraRoots?: readonly string[];
   loopHooks?: LoopHookBus;
   /**
    * 循环级验证门信号（plan_execute 预测落空时置位，repair.verification 消费）。
@@ -453,8 +464,26 @@ export class AgentLoop {
   private dangerousTools: Set<string>;
   /** Tools whitelisted by user (skip confirmation — session-level, from 'always' response) */
   private allowlistTools: Set<string>;
+  /**
+   * 经用户确认放行的「可写根」（会话级）——与工作区围栏（path-sandbox）**共享同一引用**：
+   * 权限层（loop-tools）在确认通过后写入，围栏在 execute 前读取。
+   * 语义：越界写入不是"不可能"，而是"需要点头"（2026-10-13 权限统一）。
+   */
+  private approvedWriteRoots: Set<string>;
+  /**
+   * 工作区围栏参数（与装配层传给 applyWorkspaceFence 的完全同源）：
+   * 权限层据此**提前**判定「越界写入」，从而在工具级白名单之外仍要求确认。
+   * 缺省 undefined ⇒ 权限层不做越界预判，退回纯工具级判定（旧行为）。
+   */
+  private workspaceFenceRoot?: string;
+  private workspaceFenceExtraRoots: readonly string[] = [];
   /** AOR (Absence of Restriction): skip all future permission checks for this session */
   private unrestrictedTools = false;
+  /**
+   * 「AOR 由会话持久化恢复」的提示只发一次。
+   * 重启后权限条不会再弹，不主动说一句用户就会忘掉自己仍处于全放行（2026-10-13）。
+   */
+  private aorRestoreNotified = false;
   /** Allowed bash commands (glob pattern matched, from config) */
   private allowedCommands: Set<string> = new Set();
   private configCenter?: RuntimeConfigCenter;
@@ -516,7 +545,7 @@ export class AgentLoop {
       configCenter, modelRouter, turnRecorder,
     } = services;
     // 配置层（AgentLoopConfigOptions）：字面量/策略集合
-    const { sessionDir, maxTurns, maxContextTokens, personaDir, dangerousTools, allowlistTools, loopHooks, pluginHost, planHandoff } = opts;
+    const { sessionDir, maxTurns, maxContextTokens, personaDir, dangerousTools, allowlistTools, approvedWriteRoots, workspaceFenceRoot, workspaceFenceExtraRoots, loopHooks, pluginHost, planHandoff } = opts;
     // ── 依赖注入（显式赋值，替代旧位置参数属性） ──
     this.provider = provider;
     this.contextComposer = contextComposer;
@@ -565,6 +594,22 @@ export class AgentLoop {
     this.flowRegistry = flowRegistry!;
     this.dangerousTools = dangerousTools ?? new Set(deriveDangerousTools(() => this.toolRegistry.getAll()));
     this.allowlistTools = allowlistTools ?? new Set();
+    this.approvedWriteRoots = approvedWriteRoots ?? new Set();
+    // 围栏参数（与装配层 applyWorkspaceFence **同源**）——权限层据此判定「越界写入」。
+    // ⚠️ 漏赋值 ⇒ 越界预判永久失效且**不报错**（静默）⇒ 改这里时三处（opts/字段/此处）同查。
+    this.workspaceFenceRoot = workspaceFenceRoot;
+    this.workspaceFenceExtraRoots = workspaceFenceExtraRoots ?? [];
+    // ── AOR 会话级持久化恢复（2026-10-13）──
+    // 用**同步**读：构造函数本身是同步的，异步回填会与首轮工具调用竞态
+    //（明明持久化了却仍弹一次权限条 —— 偶发不确定性比慢几十微秒坏得多）。
+    // ⚠️ 只认本 sessionDir ⇒ **不跨会话**（防越权的第一道闸；换会话即恢复默认）。
+    // ⚠️ 不动围栏：`.git` 仍恒拒，越界写入仍走围栏判定（AOR 只免掉"弹条"这一步）。
+    this.unrestrictedTools = sessionAllowlist.isUnrestrictedSync(sessionDir);
+    // 会话重启后回填（allowlist.json 的 allowedWriteRoots）—— 让"总是允许"跨 restart 存活。
+    // 与 allowedTools 同属会话级白名单，故在同处恢复。
+    void sessionAllowlist.getWriteRoots(sessionDir).then((roots) => {
+      for (const r of roots) this.approvedWriteRoots.add(r);
+    }).catch(() => {});
     this.configCenter = configCenter;
     // 优先级：configCenter（配置为权威）→ opts.maxContextTokens（调用方显式传入）
     // → DEFAULT。修复：原实现忽略 opts.maxContextTokens 且 configCenter 未配时
@@ -2354,9 +2399,30 @@ export class AgentLoop {
       dangerousTools: this.dangerousTools,
       allowlistTools: this.allowlistTools,
       allowedCommands: this.allowedCommands,
+      // 权限统一（2026-10-13）：与工作区围栏同源的三件套 ——
+      // approvedWriteRoots 共享引用（权限层写 / 围栏读），fence 参数供权限层做越界预判。
+      approvedWriteRoots: this.approvedWriteRoots,
+      workspaceFenceRoot: this.workspaceFenceRoot,
+      workspaceFenceExtraRoots: this.workspaceFenceExtraRoots,
       loopGuard: this.loopGuard,
-      getUnrestricted: () => this.unrestrictedTools,
-      setUnrestricted: (v) => { this.unrestrictedTools = v; },
+      getUnrestricted: () => {
+        // AOR 由**会话级持久化**恢复 ⇒ 必须主动提示一次：重启后不再弹权限条，
+        // 不说一句用户就会忘掉自己仍处于全放行 —— 这正是「越权」最容易发生的地方。
+        if (this.unrestrictedTools && !this.aorRestoreNotified) {
+          this.aorRestoreNotified = true;
+          this.outputHandler?.onStatus?.(
+            '⚠️ 本会话仍处于 AOR（全放行）—— 由会话级持久化恢复。关闭途径：换一个会话，或删 allowlist.json 里的 unrestricted 字段后重启。',
+            'warn',
+          );
+        }
+        return this.unrestrictedTools;
+      },
+      setUnrestricted: (v) => {
+        this.unrestrictedTools = v;
+        // 会话级持久化（2026-10-13）：同一会话重启后不必重按一遍。
+        // ⚠️ 只写本 sessionDir ⇒ **不跨会话**；`.git` 恒拒不受影响（围栏独立判定）。
+        void sessionAllowlist.setUnrestricted(this.sessionDir, v).catch(() => {});
+      },
       getPendingImpact: () => this.pendingImpactInfo,
       setPendingImpact: (v) => { this.pendingImpactInfo = v; },
       markMutation: () => { this.turnHadMutation = true; },

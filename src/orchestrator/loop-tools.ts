@@ -30,6 +30,7 @@ import type { TurnRecorder } from '../rollback/turn-recorder.js';
 import type { LoopHookBus } from './loop-hooks.js';
 import { runAttributed } from '../kernel/security/index.js';
 import * as sessionAllowlist from '../tools/session-allowlist.js';
+import { classifyWriteTarget } from '../tools/path-sandbox.js';
 
 /**
  * 工具执行上下文：执行器所需的全部依赖 + 可变状态访问器。
@@ -65,6 +66,19 @@ export interface ToolExecContext {
   dangerousTools: Set<string>;
   allowlistTools: Set<string>;
   allowedCommands: Set<string>;
+  /**
+   * 经用户确认放行的「可写根」（会话级）。与工作区围栏（path-sandbox）共享**同一引用**：
+   * 本文件的权限链在 onPermissionRequest 返回 yes/always 时写入，围栏在 execute 前读取。
+   * 未注入（子 Agent / 测试）⇒ 越界写入一律拒，保持既有安全下限。
+   */
+  approvedWriteRoots?: Set<string>;
+  /**
+   * 工作区围栏根 + 额外可写根（与 path-sandbox 的判据**同源**）。
+   * 有值 ⇒ 权限层对写类工具做「越界预判」：越界写入**不受工具级白名单豁免**，
+   * 必须走确认 —— 这正是「write 与 bash 语义统一」的落点。
+   */
+  workspaceFenceRoot?: string;
+  workspaceFenceExtraRoots?: readonly string[];
   loopGuard: LoopGuard;
   // ── 可变状态（loop 的私有字段，经访问器读写，避免共享裸字段）──
   getUnrestricted(): boolean;
@@ -166,14 +180,32 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
   }
 
   for (const tc of effectiveCalls) {
-    if (ctx.dangerousTools.has(tc.name) && ctx.outputHandler?.onPermissionRequest) {
+    // ── 越界写入预判（与 path-sandbox.classifyWriteTarget **同源判据**）──
+    // 越界写入**不受工具级白名单豁免**：`allowlistTools` 记的是"这个工具别再问我"，
+    // 不该顺带成为"可写工作区外任意位置"的通行证。有这一条，write 的越界与
+    // bash 的危险命令才真正落在同一条确认通道上（2026-10-13 权限统一）。
+    const filePath = typeof tc.input?.file_path === 'string' ? (tc.input.file_path as string) : '';
+    const outsideWrite =
+      !!filePath &&
+      !!ctx.workspaceFenceRoot &&
+      isWriteTool(tc.name) &&
+      classifyWriteTarget(ctx.workspaceFenceRoot, ctx.workspaceFenceExtraRoots ?? [], filePath) === 'outside';
+
+    // AOR（全局放行）同样记入「已批准可写根」——否则「全部放行」会被围栏拦下，名不副实。
+    // ⚠️ 必须覆盖**两种**情形，缺一即「按一次 AOR 当次写不出去」（2026-10-13 实测）：
+    //   ① 本轮调用前 AOR 已开 ⇒ 由这里记录；② 本轮应答就是 'aor' ⇒ 见下方 result 判定处。
+    if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots) {
+      ctx.approvedWriteRoots.add(path.dirname(path.resolve(filePath)));
+    }
+
+    if ((ctx.dangerousTools.has(tc.name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
       // Step 0: AOR — unrestricted mode, skip all permissions
       if (ctx.getUnrestricted()) {
         permittedCalls.push(tc);
         continue;
       }
-      // Step 1: check session allowlist
-      if (ctx.allowlistTools.has(tc.name)) {
+      // Step 1: check session allowlist（越界写入不适用 —— 见上）
+      if (ctx.allowlistTools.has(tc.name) && !outsideWrite) {
         permittedCalls.push(tc);
         continue;
       }
@@ -203,6 +235,17 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
       if (result === 'aor') {
         ctx.setUnrestricted(true);
         ctx.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
+      }
+      // 'yes' / 'always' / 'aor' — allow this call。越界写入获批 ⇒ 记入「已批准可写根」，
+      // 围栏（path-sandbox）据此放行；否则围栏仍拒（兜底）。
+      // 语义：yes/aor = 本会话内该目录不再拦（框架无"仅本次"的放行通道，见 path-sandbox 注释）；
+      //       always = 额外落盘，跨 restart 存活。
+      // ⚠️ 必须含 'aor'（与 inline 侧同理）：这是「本次才开 AOR」的那一次调用 —— 上面的 AOR
+      //    记录点此刻已经走过去了（setUnrestricted 在 await 之后才被调用）。漏掉即「按一次 AOR 写不出去」。
+      if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite) {
+        const dir = path.dirname(path.resolve(filePath));
+        ctx.approvedWriteRoots?.add(dir);
+        if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
       }
       // 'yes', 'always', or 'aor' — allow this call
       if (result === 'always') {
@@ -420,11 +463,29 @@ export async function runToolInline(
   }
 
   // Permission check for dangerous tools
-  if (ctx.dangerousTools.has(name) && ctx.outputHandler?.onPermissionRequest) {
+  // 越界写入预判：与批量路径 runToolDispatch **同源**（判据、豁免规则、记录动作三者一致）。
+  // 两条路径必须同改 —— 只改批量会漏掉流内调用（历史上同类缺陷的固定形态）。
+  const inlineFilePath = typeof input?.file_path === 'string' ? (input.file_path as string) : '';
+  const outsideWrite =
+    !!inlineFilePath &&
+    !!ctx.workspaceFenceRoot &&
+    isWriteTool(name) &&
+    classifyWriteTarget(ctx.workspaceFenceRoot, ctx.workspaceFenceExtraRoots ?? [], inlineFilePath) === 'outside';
+
+  // AOR（全局放行）同样记入「已批准可写根」（与批量路径同源；必须放在确认块之外）
+  // ⚠️ 必须覆盖**两种**情形，缺一即「按一次 AOR 当次写不出去」（2026-10-13 实测）：
+  //   ① 本轮调用前 AOR **已开**（getUnrestricted() 已 true）⇒ 由这里记录；
+  //   ② 本轮的应答**就是** 'aor'（本次才开启）⇒ 此时 setUnrestricted(true) 发生在 await **之后**，
+  //      这里的判断已经走过去了 ⇒ 只能由确认分支里的记录兜住（见下方 result 判定处）。
+  if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots) {
+    ctx.approvedWriteRoots.add(path.dirname(path.resolve(inlineFilePath)));
+  }
+
+  if ((ctx.dangerousTools.has(name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
     // Step 0: AOR — unrestricted mode, skip all permissions
     if (!ctx.getUnrestricted()) {
-      // Step 1: check session allowlist
-      if (ctx.allowlistTools.has(name)) {
+      // Step 1: check session allowlist（越界写入不适用 —— 见批量路径注释）
+      if (ctx.allowlistTools.has(name) && !outsideWrite) {
         // allowed, proceed
       } else if (name === 'bash' && checkCommandAllowed(ctx, input?.command as string)) {
         // Step 2: check allowedCommands glob
@@ -448,6 +509,15 @@ export async function runToolInline(
         if (result === 'aor') {
           ctx.setUnrestricted(true);
           ctx.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
+        }
+        // 越界写入获批 ⇒ 记入「已批准可写根」（围栏据此放行；yes/aor=本会话，always=跨 restart）
+        // ⚠️ 必须含 'aor' —— 这是「本次才开 AOR」的那一次调用：此刻块外的 AOR 记录点已经走过去了
+        //    （setUnrestricted(true) 在 await 之后才调用）。漏掉它 = 「按一次 AOR 当次写不出去」，
+        //    用户得连按两次（2026-10-13 实测确诊：DIAGRES 打出 result="aor"）。
+        if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite) {
+          const dir = path.dirname(path.resolve(inlineFilePath));
+          ctx.approvedWriteRoots?.add(dir);
+          if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
         }
         if (result === 'always') {
           ctx.allowlistTools.add(name);
