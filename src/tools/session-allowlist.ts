@@ -63,7 +63,11 @@ export async function load(sessionDir: string): Promise<SessionAllowlistData> {
     const raw = await fs.readFile(path.join(sessionDir, 'allowlist.json'), 'utf-8');
     return parseData(JSON.parse(raw));
   } catch {
-    return { ...EMPTY_DATA };
+    // ⚠️ 必须**深拷贝**：EMPTY_DATA 是模块级单例，其数组字段（allowedWriteRoots 等）
+    // 若被浅拷贝共享，`addWriteRoot` 里的 push 会**改写全局** ⇒ 此后所有"空返回"
+    // 都带上该根 ⇒ **跨会话静默放行**（2026-10-13 审计 B3，已实测：
+    // 在 A 会话记根后，B 会话 isWriteRootAllowed(B, 该根) === true）。
+    return structuredClone(EMPTY_DATA);
   }
 }
 
@@ -76,7 +80,7 @@ function loadSync(sessionDir: string): SessionAllowlistData {
     const raw = readFileSync(path.join(sessionDir, 'allowlist.json'), 'utf-8');
     return parseData(JSON.parse(raw));
   } catch {
-    return { ...EMPTY_DATA };
+    return structuredClone(EMPTY_DATA);   // 同上：深拷贝，防污染模块级单例
   }
 }
 

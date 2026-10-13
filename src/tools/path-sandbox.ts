@@ -73,9 +73,14 @@ export function classifyWriteTarget(
   filePath: string,
 ): WriteTargetVerdict {
   const resolved = path.resolve(workspaceRoot, filePath);
-  if (isInsideGitDir(resolved)) return 'git';
   // 用真实路径（跟随符号链接）判界，防 symlink 逃逸
   const realTarget = resolveRealPathSync(resolved);
+  // ⚠️ `.git` 检查必须**同时**看逻辑路径与真实路径（2026-10-13 审计 B1，已实测可绕过）：
+  // 只查 `resolved` 时，工作区里放一个指向 `.git` 的 junction/symlink 就能绕过 ——
+  // 逻辑路径不含 `.git` 段（红线检查放行），真实路径却仍落在工作区内（判 inside）⇒ 直写 `.git`。
+  // 实测：`mklink /J _git_probe .git` + write `_git_probe\x.txt` ⇒ 成功落入 `.git`（78B）。
+  // 红线是"**永不可授权**"的底线（git hook 跨会话存活 = 持久执行），必须用真实路径兜死。
+  if (isInsideGitDir(resolved) || isInsideGitDir(realTarget)) return 'git';
   if (isInsideReal(resolveRealPathSync(workspaceRoot), realTarget)) return 'inside';
   if (extraWritableRoots.some((r) => isInsideReal(resolveRealPathSync(r), realTarget))) return 'inside';
   return 'outside';

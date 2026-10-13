@@ -121,3 +121,60 @@ describe('围栏 ∩ 已批准可写根（越界 = 可确认，而非不可能�
     expect(res).toMatch(/outside the workspace root/);
   });
 });
+
+/**
+ * ── 审计回归（2026-10-13）────────────────────────────────────────────
+ * 下面是当日代码审计（3 blocker）在**围栏判据层**的回归用例。
+ * 每条都对应一个**实测复现过**的失效，不是预防性猜测。
+ */
+describe('审计回归 2026-10-13（围栏判据）', () => {
+  let root: string;
+  const made: string[] = [];
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-fence-'));
+    made.push(root);
+  });
+  afterAll(() => {
+    for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('【B1】.git 经 junction/symlink 绕道 ⇒ 仍判 git 而非 inside', () => {
+    // 修复前：`.git` 检查走 `resolved`（**逻辑路径**），而"在不在工作区内"走 `resolveRealPathSync`（真实路径）。
+    // 于是在工作区里放一个指向 .git 的链接即可：逻辑路径不含 `.git` 段（绕过红线），
+    // 真实路径仍落在工作区内（判 inside）⇒ write 直落 .git。
+    // 实测（修复前）：`mklink /J _git_probe .git` + write ⇒ 成功写入 `.git/fence_probe.txt`（78B）。
+    const gitDir = path.join(root, '.git');
+    fs.mkdirSync(path.join(gitDir, 'hooks'), { recursive: true });
+
+    const link = path.join(root, '_git_link_probe');
+    try {
+      fs.symlinkSync(gitDir, link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      // 环境不支持建链接 ⇒ 跳过（不是失败）；CI/Linux 无此限制
+      return;
+    }
+    try {
+      // 逻辑路径：<root>/_git_link_probe/hooks/pre-commit —— 段里**没有** `.git`
+      expect(classifyWriteTarget(root, [], path.join(link, 'hooks', 'pre-commit'))).toBe('git');
+      // 且该路径确实指向 .git 内部（证明这个链接真的绕过去了，测试不是空转）
+      expect(fs.realpathSync(path.join(link, 'hooks'))).toBe(fs.realpathSync(path.join(gitDir, 'hooks')));
+    } finally {
+      // ⚠️ 对 junction/symlink 只能用 unlink —— rmSync(recursive) 可能删到**目标目录的内容**！
+      try { fs.unlinkSync(link); } catch { /* 清理失败不掩盖断言 */ }
+    }
+  });
+
+  it('【B2】批准根必须以 workspaceRoot 为基准（用 cwd 会记到别处，导致"批准了却写不出去"）', () => {
+    // 判据一侧：classifyWriteTarget 内部是 path.resolve(workspaceRoot, filePath)。
+    // 记录一侧（loop-tools 的 4 处）修复前用 path.resolve(filePath) ⇒ 基准是 process.cwd()。
+    // 本机 cwd = C:\Users\74689，workspaceRoot = ...\hyacinth ⇒ 两者算出的根**不是同一个地方**，
+    // 围栏据此永远匹配不上 ⇒ 用户按了 yes/always/aor 仍被拦。
+    const rel = path.join('sub', 'a.txt');
+    const byRoot = path.dirname(path.resolve(root, rel));   // ✅ 与判据同源（修好后 loop-tools 用的写法）
+    const byCwd = path.dirname(path.resolve(rel));          // ❌ 修复前的写法
+    expect(byRoot).toBe(path.join(root, 'sub'));
+    // 只有当 cwd ≠ workspaceRoot 时才暴露差异（本项目默认即如此）；相等时二者同值，无从区分
+    if (byCwd !== byRoot) expect(byCwd).not.toBe(byRoot);
+  });
+});

@@ -194,8 +194,11 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
     // AOR（全局放行）同样记入「已批准可写根」——否则「全部放行」会被围栏拦下，名不副实。
     // ⚠️ 必须覆盖**两种**情形，缺一即「按一次 AOR 当次写不出去」（2026-10-13 实测）：
     //   ① 本轮调用前 AOR 已开 ⇒ 由这里记录；② 本轮应答就是 'aor' ⇒ 见下方 result 判定处。
-    if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots) {
-      ctx.approvedWriteRoots.add(path.dirname(path.resolve(filePath)));
+    // ⚠️ 记录基准必须与 classifyWriteTarget **同源**（相对 workspaceFenceRoot，**不是 process.cwd()**）——
+    //   2026-10-13 审计 B2：原先用 path.resolve(filePath)（相对 cwd），本机 cwd≠workspaceRoot
+    //   ⇒ 记的根与围栏查的根**不是同一个地方** ⇒ 用户按了 yes/always/aor 仍被拦（"批准了却写不出去"）。
+    if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots && ctx.workspaceFenceRoot) {
+      ctx.approvedWriteRoots.add(path.dirname(path.resolve(ctx.workspaceFenceRoot, filePath)));
     }
 
     if ((ctx.dangerousTools.has(tc.name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
@@ -242,8 +245,11 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
       //       always = 额外落盘，跨 restart 存活。
       // ⚠️ 必须含 'aor'（与 inline 侧同理）：这是「本次才开 AOR」的那一次调用 —— 上面的 AOR
       //    记录点此刻已经走过去了（setUnrestricted 在 await 之后才被调用）。漏掉即「按一次 AOR 写不出去」。
-      if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite) {
-        const dir = path.dirname(path.resolve(filePath));
+      // ⚠️ 记录基准必须与 classifyWriteTarget **同源**（相对 workspaceFenceRoot，**不是 process.cwd()**）——
+      //    2026-10-13 审计 B2：原先用 path.resolve(filePath)（相对 cwd），本机 cwd≠workspaceRoot
+      //    ⇒ 记的根与围栏查的根不是同一个地方 ⇒ 用户按了 yes/always/aor 仍被拦（"批准了却写不出去"）。
+      if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite && ctx.workspaceFenceRoot) {
+        const dir = path.dirname(path.resolve(ctx.workspaceFenceRoot, filePath));
         ctx.approvedWriteRoots?.add(dir);
         if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
       }
@@ -477,8 +483,9 @@ export async function runToolInline(
   //   ① 本轮调用前 AOR **已开**（getUnrestricted() 已 true）⇒ 由这里记录；
   //   ② 本轮的应答**就是** 'aor'（本次才开启）⇒ 此时 setUnrestricted(true) 发生在 await **之后**，
   //      这里的判断已经走过去了 ⇒ 只能由确认分支里的记录兜住（见下方 result 判定处）。
-  if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots) {
-    ctx.approvedWriteRoots.add(path.dirname(path.resolve(inlineFilePath)));
+  // ⚠️ 基准必须与 classifyWriteTarget 同源（相对 workspaceFenceRoot，**不是 process.cwd()**）—— 审计 B2。
+  if (outsideWrite && ctx.getUnrestricted() && ctx.approvedWriteRoots && ctx.workspaceFenceRoot) {
+    ctx.approvedWriteRoots.add(path.dirname(path.resolve(ctx.workspaceFenceRoot, inlineFilePath)));
   }
 
   if ((ctx.dangerousTools.has(name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
@@ -514,8 +521,9 @@ export async function runToolInline(
         // ⚠️ 必须含 'aor' —— 这是「本次才开 AOR」的那一次调用：此刻块外的 AOR 记录点已经走过去了
         //    （setUnrestricted(true) 在 await 之后才调用）。漏掉它 = 「按一次 AOR 当次写不出去」，
         //    用户得连按两次（2026-10-13 实测确诊：DIAGRES 打出 result="aor"）。
-        if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite) {
-          const dir = path.dirname(path.resolve(inlineFilePath));
+        // ⚠️ 记录基准必须与 classifyWriteTarget 同源（相对 workspaceFenceRoot，**不是 process.cwd()**）—— 审计 B2。
+        if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite && ctx.workspaceFenceRoot) {
+          const dir = path.dirname(path.resolve(ctx.workspaceFenceRoot, inlineFilePath));
           ctx.approvedWriteRoots?.add(dir);
           if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
         }
