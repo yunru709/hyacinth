@@ -27,6 +27,9 @@ node_modules/
 # Per-user config (auto-generated on first run)
 .agent/
 
+# Command Code 本地配置/学习数据
+.commandcode/
+
 # OS
 .DS_Store
 Thumbs.db
