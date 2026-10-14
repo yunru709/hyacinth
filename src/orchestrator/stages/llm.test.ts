@@ -139,6 +139,56 @@ describe('llm 阶段（builtin:provider-stream）', () => {
     expect(st.cacheStats.turns[0]).toMatchObject({ hitTokens: 80, missTokens: 20, hitRate: 80 });
   });
 
+  it('usage 事件留痕：缓存命中量随 token 数一并落盘（且不依赖 logCacheHits）', async () => {
+    const provider = mkProvider([
+      { type: 'USAGE', input_tokens: 100, output_tokens: 10, cache_hit_tokens: 80, cache_miss_tokens: 20 },
+      { type: 'STOP', reason: 'end_turn' },
+    ]);
+    const ctx = makeCtx({});
+    // 关键：logHits 保持默认 false —— 留痕必须与开关解耦，
+    // 否则（历史事故）UI 上有命中率、events.jsonl 里却查不到，掉 0 无据可查。
+    const state = baseState({ activeProvider: provider as never });
+    expect(state.cacheStats.logHits).toBe(false);
+
+    await stage.run(state, ctx);
+
+    const es = ctx.require('eventStore') as { append: ReturnType<typeof vi.fn> };
+    expect(es.append).toHaveBeenCalledWith(
+      '/tmp/llm-test',
+      expect.objectContaining({
+        type: 'usage',
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_hit_tokens: 80,
+        cache_miss_tokens: 20,
+        cache_hit_rate: 80,
+        turn: 1,
+      }),
+    );
+  });
+
+  it('usage 事件留痕：厂商不给缓存字段时三者缺省（"无数据" ≠ "命中率 0%"）', async () => {
+    const provider = mkProvider([
+      { type: 'USAGE', input_tokens: 100, output_tokens: 10 },
+      { type: 'STOP', reason: 'end_turn' },
+    ]);
+    const ctx = makeCtx({});
+
+    await stage.run(baseState({ activeProvider: provider as never }), ctx);
+
+    const es = ctx.require('eventStore') as { append: ReturnType<typeof vi.fn> };
+    const call = es.append.mock.calls.find(
+      (c) => (c[1] as { type?: string }).type === 'usage',
+    );
+    expect(call).toBeTruthy();
+    const ev = call![1] as Record<string, unknown>;
+    expect(ev.input_tokens).toBe(100);
+    // 三键必须**不存在**（而非 0）——0 会被误读成"缓存全未命中"
+    expect(ev).not.toHaveProperty('cache_hit_tokens');
+    expect(ev).not.toHaveProperty('cache_miss_tokens');
+    expect(ev).not.toHaveProperty('cache_hit_rate');
+  });
+
   it('thinking-only 兜底：text 为空时 thinking 提升为 text', async () => {
     const provider = mkStreamEvents([{ type: 'THINKING', content: '让我想想' }]);
     const onText = vi.fn();

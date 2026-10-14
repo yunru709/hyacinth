@@ -45,6 +45,9 @@ import type { ResolverContext } from './section-resolver.js';
 import { getCacheStrategy } from './cache-strategy.js';
 import type { ZoneInfo, CacheMarker } from './cache-strategy.js';
 import type { ProviderType } from '../types.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('composer');
 
 function formatTimestamp(date: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -139,6 +142,27 @@ export interface SectionTrace {
   hash: string;
   /** 该段覆盖的消息条数（history 这类多消息段有意义） */
   msgCount?: number;
+  /**
+   * 多消息段的**逐条指纹**（2026-10-14 加）。
+   *
+   * 为什么需要：整段 hash 只要**末尾追加**就会变 ⇒ 无法区分"正常追加"与"头部被改写"。
+   * 而 auto-prefix 缓存的断裂点，必然落在**最早变化的那一条消息**上。故单独记
+   * 前若干条的逐条 hash：逐轮对比即可二分出断点位置，不必再靠推理。
+   *
+   * 配合 `tailHashes`：头部指纹相同 + 整体 hash 变 ⇒ 只是尾部追加（缓存不该断）；
+   * 头部指纹变 ⇒ 历史前缀被改写（真凶）。
+   */
+  msgHashes?: string[];
+  /** 末尾若干条的逐条指纹（用来确认"尾部追加"这一正常形态） */
+  tailHashes?: string[];
+  /**
+   * 段首若干条的**可读预览**（role + 前 40 字，2026-10-14 加）。
+   *
+   * 为什么：逐条 hash 只回答"第几条变了"，答不了"变成了什么"；预览让断裂点
+   * **当场可读**，省掉"再取原始文件人工比对"的往返。仅取前 3 条，体积可控，
+   * 且与 conversation.jsonl 同目录，无额外暴露面。
+   */
+  headPreview?: string[];
 }
 
 export interface LayeredContext {
@@ -420,12 +444,20 @@ export class LayeredContextComposer implements ContextComposer {
         }
         messages.push(...kept);
         // history 是多消息段 ⇒ 记「条数 ＋ 整体指纹」：用来发现"历史被重写/重排"
+        // 2026-10-14：整体 hash 只说明"变了"，分不清"尾部追加"（缓存不该断）与
+        // "头部被改写"（真凶）⇒ 补头部/尾部逐条指纹，二分断点。
+        const msgHash = (m: Message) => this.hashText(`${m.role}|${JSON.stringify(m.content)}`);
         traces.push({
           name: sec.name,
           zone: zoneKey,
           tokens: this.tokenCounter.countMessagesTokens(kept),
           hash: this.hashText(kept.map((m) => JSON.stringify(m.content)).join('\n')),
           msgCount: kept.length,
+          // 全量逐条指纹（2026-10-14）：只记前 16 条定位不了中段断点；全量才能二分出
+          // "最早变化的第几条"。headPreview 让断点当场可读（role + 前 60 字）。
+          msgHashes: kept.map(msgHash),
+          tailHashes: kept.slice(-4).map(msgHash),
+          headPreview: kept.slice(0, 3).map((m) => `${m.role}|${JSON.stringify(m.content).slice(0, 60)}`),
         });
         continue;
       }

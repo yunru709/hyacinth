@@ -192,6 +192,22 @@ export interface UsageEvent {
   type: 'usage';
   input_tokens: number;
   output_tokens: number;
+  /**
+   * 缓存用量留痕（2026-10-14 加）。此前 TUI 的命中率显示**没有任何落盘**：
+   * usage 事件只记 token 数，`cache-trace.jsonl` 又受 `logging.logCacheHits`
+   * 门控（该键默认为 false ⇒ 从未生成过）⇒ "命中率掉到 0 / 剧烈波动"这类现象
+   * 事后无法回查，只能靠猜。
+   *
+   * 故与 token 数**同频、默认可查**地记下每轮真实缓存用量；厂商不返回缓存字段
+   * 时三者均缺省 —— 这一点很关键：**"没有数据"与"命中率为 0"必须可区分**，
+   * 否则无法判断 0% 是真掉还是取不到值。
+   */
+  cache_hit_tokens?: number;
+  cache_miss_tokens?: number;
+  /** 命中率百分比（0-100，1 位小数）；仅当 hit/miss 均可用时给出 */
+  cache_hit_rate?: number;
+  /** 所在轮次（便于与 section 指纹、工具调用对齐回查） */
+  turn?: number;
   timestamp: string;
 }
 

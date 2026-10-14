@@ -60,6 +60,16 @@ import type { StageModule } from '../../kernel/pipeline.js';
 import type { ClusterService } from '../cluster-service.js';
 import type { KernelStageContext, StageServiceMap } from '../stage-services.js';
 import type { TurnState } from '../turn-state.js';
+import { createHash } from 'node:crypto';
+
+/**
+ * 短指纹（md5 前 12 位）—— 只用于**诊断留痕**（判断"变没变"），不用于任何安全用途。
+ * 为什么本地实现而不复用 composer 的：composer.hashText 是 private 实例方法，
+ * 且本处要对 tools 数组（非 Message）取指纹，语义不同 ⇒ 单独一个纯函数。
+ */
+function hashShort(text: string): string {
+  return createHash('md5').update(text).digest('hex').slice(0, 12);
+}
 
 export const CONTEXT_STAGE_ID = 'builtin:layered-composer';
 
@@ -249,13 +259,38 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
       //（零缓存断点）⇒ 判据只有一条：**最早变化的字节在哪**。逐轮记下每段的
       // hash ＋ token，一对比即可指认（分析：`node scripts/cache-trace.mjs`）。
       // 受 logging.logCacheHits 控制（与缓存日志同一个开关）；落盘失败不影响对话。
-      if (layeredResult.sectionTraces?.length && configCenter?.get('logging.logCacheHits') === true) {
+      // 2026-10-14 改为**始终落盘**（与逐轮 cacheTurns 记录同一理由）：
+      // `logging.logCacheHits` 默认 false ⇒ 该文件历史上**从未生成过**，
+      // 于是"命中率掉 0"事后无据可查、只能靠猜。段级指纹是"哪一段在变"的
+      // **唯一直接证据**，体积小（每轮一条、每条每段一行），故与开关解耦。
+      if (layeredResult.sectionTraces?.length) {
         try {
           await appendFile(
             joinPath(sessionDir, 'cache-trace.jsonl'),
             JSON.stringify({
               ts: new Date().toISOString(),
               total: layeredResult.zoneBreakdown.total,
+              // 压缩轮标记（2026-10-14）：压缩**必然**重写历史 ⇒ 必然 miss，属可接受成本。
+              // 记下它，回查时才能把"压缩导致的 miss"与"其他原因"分开归因（用户裁定）。
+              compressCount: state.compressCount,
+              // 工具表指纹（2026-10-14）：tools 排在请求**最前面**，且不属于任何 zone
+              // ⇒ 一旦变化，**整条前缀**作废（现象＝命中率直接掉到 0）。此前完全无留痕。
+              toolsHash: hashShort(JSON.stringify(toolDefinitions)),
+              toolsCount: toolDefinitions.length,
+              // 整条 prompt 指纹（2026-10-14，**顺序敏感**）：两次 compose 若它相同 ⇒ 请求
+              // 字节级一致、缓存必命中；不同则按 sections / msgHashes 二分定位。
+              // 这是"到底变没变"的终极判据 —— 免得再靠 token 数字做减法猜。
+              promptHash: hashShort(JSON.stringify(layeredResult.messages.map((m) => [m.role, m.content]))),
+              promptMsgCount: layeredResult.messages.length,
+              // 前缀指纹（2026-10-14）：只覆盖**请求最前面**的 tools + 前 3 条消息
+              //（= tools + Zone1/Zone2 合并出的 system + Zone3 头），**不随历史增长而变**。
+              // 判据：掉帧时它不变 ⇒ 前缀字节一致 ⇒ 断点在 provider 侧（缓存驱逐/TTL），
+              // 本地无解；它变了 ⇒ 本地内容漂移，再用 sections / msgHashes 二分追责。
+              prefixHash: hashShort(
+                JSON.stringify(toolDefinitions) +
+                  '|' +
+                  JSON.stringify(layeredResult.messages.slice(0, 3).map((m) => [m.role, m.content])),
+              ),
               sections: layeredResult.sectionTraces,
             }) + '\n',
             'utf-8',

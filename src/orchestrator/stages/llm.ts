@@ -22,6 +22,7 @@ import { getModelInfo } from '../../provider/catalog.js';
 import { scavengeToolCalls } from '../../repair/scavenge.js';
 import { isFlowTool } from '../../tools/flow.js';
 import { appendEvent } from '../../memory/events.js';
+import type { UsageEvent } from '../../memory/events.js';
 import { formatTimestamp, summarizeToolInput } from '../../utils/misc.js';
 import type { StageModule } from '../../kernel/pipeline.js';
 import type { ToolService } from '../tool-service.js';
@@ -99,6 +100,10 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
       const toolCalls: ToolCall[] = [];
       let usageInput = 0;
       let usageOutput = 0;
+      // 本次调用的缓存用量（留痕进 usage 事件，供事后回查命中率波动）。
+      // 保持 undefined 表示"厂商这次没给缓存字段" —— 与"命中率 0%"是两回事。
+      let usageCacheHit: number | undefined;
+      let usageCacheMiss: number | undefined;
       let stopReason: string | undefined;
       let inlineToolExecuted = state.inlineToolExecuted;
       const inlineToolResults = state.inlineToolResults;
@@ -163,6 +168,10 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
           effectiveHit = anthroRead;
           effectiveMiss = Math.max(0, inputTokens - anthroRead);
         }
+
+        // 留痕（不看 logCacheHits 开关，见 usage 事件处注释）
+        usageCacheHit = effectiveHit;
+        usageCacheMiss = effectiveMiss;
 
         if (effectiveHit !== undefined && effectiveMiss !== undefined) {
           cacheStats.hitTokens = effectiveHit;
@@ -317,13 +326,27 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
       await statsManager.update(sessionDir, statsUpdate as never);
 
       // ── 10. usage 事件 ──
+      // 缓存字段与 token 数**同频落盘**，且不受 `logging.logCacheHits` 门控
+      // （2026-10-14：该键默认 false ⇒ 明明 UI 上有命中率、events.jsonl 却查不到，
+      //  命中率波动/掉 0 无据可查）。厂商未返回缓存字段时三键缺省 —— 
+      //  "无数据"（缺省）与"命中率 0%"（hit=0, miss>0, rate=0）必须可区分。
       if (usageInput > 0 || usageOutput > 0) {
-        await eventStore.append(sessionDir, {
+        const event: UsageEvent = {
           type: 'usage',
           input_tokens: usageInput,
           output_tokens: usageOutput,
+          turn: state.turn,
           timestamp: formatTimestamp(),
-        });
+        };
+        if (usageCacheHit !== undefined && usageCacheMiss !== undefined) {
+          event.cache_hit_tokens = usageCacheHit;
+          event.cache_miss_tokens = usageCacheMiss;
+          const total = usageCacheHit + usageCacheMiss;
+          event.cache_hit_rate = total > 0
+            ? Math.round((usageCacheHit / total) * 1000) / 10
+            : 0;
+        }
+        await eventStore.append(sessionDir, event);
       }
 
       // ── 12. assistant 消息构建 + 落盘 ──
