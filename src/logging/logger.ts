@@ -61,6 +61,20 @@ let _loggingOff = false;
  * logging.level 同步给 logger——使配置中心成为日志级别的权威来源，
  * env 仅作启动级兜底。
  */
+/**
+ * 当前是否启用某个日志级别。
+ *
+ * 用途：给"**只在需要时才付出代价**"的诊断探针用。探针的**计算**（例如把整个请求体
+ * `JSON.stringify` 一遍、再逐字节求公共前缀）比日志调用本身贵几个数量级，因此必须在
+ * **构造 ctx 之前**就能问出"这个级别开不开"，否则关着也在每轮白烧 CPU 与内存。
+ *
+ * 挂到 `logging.level` 上 ⇒ `/log debug` 即时开启、`/log info` 即时关闭，**无需重启**。
+ * （`createLogger` 在 off 时返回 NoopLogger，此处按 getMinLevel() 判定，行为一致。）
+ */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return LEVEL_WEIGHT[level] >= LEVEL_WEIGHT[getMinLevel()];
+}
+
 export function setLogLevel(level: LogLevel | 'off'): void {
   if (level === 'off') {
     _loggingOff = true;

@@ -17,6 +17,18 @@ import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.j
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
+import { createLogger, isLogLevelEnabled } from '../logging/logger.js';
+
+const logger = createLogger('provider');
+
+/**
+ * 上一次发出的**完整请求体**（JSON 字符串），仅供缓存诊断比对（2026-10-14 临时探针）。
+ *
+ * 刻意放在**模块级**而非实例级：压缩器 / 旁路 / 子 Agent 各自持有独立的 provider 实例，
+ * 只有模块级才能看见它们与主会话调用的**交错** —— 这正是「长 loop 里命中率莫名下掉」
+ * 的头号待验假设（交错调用是否挤掉了主会话的缓存块）。
+ */
+let lastRequestBody: string | null = null;
 
 /** media_type → OpenAI input_audio format（仅支持 wav/mp3，其余归 wav） */
 function audioInputFormat(mediaType: string): 'wav' | 'mp3' {
@@ -192,6 +204,36 @@ export class OpenAICompatibleProvider implements Provider {
       params as unknown as Record<string, unknown>,
       buildThinkingParams(this.thinkingStyle, this.thinkingEnabled, this.reasoningEffort),
     );
+
+    // ── 缓存诊断探针（2026-10-14 临时，验证完可删）─────────────────────────
+    // 为什么必须在**这一层**：composer 的 section / msgHashes 只覆盖它自己的产物，
+    // 看不见 convertMessages（sanitizeStrings / reasoning_content 注入 / 孤儿 tool 清理）
+    // 与 translateFields（user_id 注入）这一层；而 provider 的缓存池正是按 user_id 隔离的。
+    // 判据：commonPct ≈ 100 ⇒ 本次请求是上一次的**严格前缀扩展** ⇒ 本地字节无责（provider 侧）；
+    // 偏低 ⇒ 本地内容漂移，或中间插入了别的角色（压缩器/旁路/子 Agent）的调用。
+    // 默认**关**——只有 `logging.level=debug` 时才启用（`/log debug` 即时开、`/log info` 即时关，无需重启）。
+    // 判据：commonPct ≈ 100 却低命中 ⇒ provider 侧无责可查；< 95 ⇒ 本地有漂移源。
+    if (isLogLevelEnabled('debug')) {
+      const body = JSON.stringify(params);
+      const prev = lastRequestBody;
+      let common = 0;
+      if (prev) {
+        const n = Math.min(prev.length, body.length);
+        while (common < n && prev.charCodeAt(common) === body.charCodeAt(common)) common += 1;
+      }
+      lastRequestBody = body;
+      logger.debug('request', {
+        userId: this.userId ?? '(none)',
+        topLevelKeys: Object.keys(topLevel).join(','),
+        model: this.model,
+        msgs: params.messages.length,
+        tools: (params.tools ?? []).length,
+        bodyChars: body.length,
+        prevChars: prev?.length ?? 0,
+        commonChars: common,
+        commonPct: prev && prev.length > 0 ? Number(((common / prev.length) * 100).toFixed(1)) : null,
+      });
+    }
 
     const toolCallAccumulators = new Map<
       number,
