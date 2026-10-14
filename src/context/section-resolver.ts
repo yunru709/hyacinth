@@ -429,8 +429,8 @@ async function resolveContextSourceContent(
 
 /**
  * 收集所有 cacheability === 'live' 的 MCP 源，生成会话临时 MCP 索引。
- * 用于 Zone 5 session_mcp section — 热插拔 MCP 不进 Zone 2，避免破坏前缀缓存。
- * 下次启动时这些 MCP 会自动归位到 Zone 2（cacheability 变为 'manifest'）。
+ * 用于 Zone 5 session_mcp section — 热插拔 MCP 不进 Zone 1（`mcp` 段所在区），避免破坏前缀缓存。
+ * 下次启动时这些 MCP 会自动归位到 Zone 1（cacheability 变为 'manifest'）。
  */
 function buildLiveMcpIndex(ctx: ResolverContext): string | undefined {
   if (!ctx.sources) return undefined;
@@ -450,7 +450,10 @@ function buildLiveMcpIndex(ctx: ResolverContext): string | undefined {
     (source) => `- ${source.name}: ${source.description ?? '(no description)'}`,
   );
 
-  return `会话临时 MCP — 本次对话可用\n${parts.join('\n')}`;
+  // ⚠️ 措辞：这里只代表**服务器已连接**，不代表工具已对模型可用 ——
+  // MCP 工具要进请求的 tools 数组，必须先 activate_bundle mcp-<server>（不会被自动激活）。
+  // 旧文案「本次对话可用」会让人误以为工具已挂上（2026-10-14 实测：热插拔前后 toolsCount 恒为 55、未变）。
+  return `会话临时 MCP — 本会话已连接（工具需 activate_bundle 启用）\n${parts.join('\n')}`;
 }
 
 async function buildSourcePartsFromCtx(
