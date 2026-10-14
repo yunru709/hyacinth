@@ -246,7 +246,12 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     cacheability: 'manifest',
     description: '工具包索引',
     getContent: () => {
-      const bundles = bundleRegistry.list();
+      // ★ 顺序必须**确定**（2026-10-14 修缓存抖动）：本段位于 Zone 2 末尾，其后紧跟整个
+      //   Zone 3（对话历史）⇒ 顺序一变，整块前缀缓存作废（自动前缀缓存判据 = "从头开始
+      //   连续逐字节相同"）。故用 listStable()（按 name 排序），而非 list()（插入顺序，
+      //   会被 MCP 断连重连的 delete+create 打乱 —— 实测复现）。
+      //   激活集同样排序：activeBundles 是用户/agent 传入的顺序，换个传法就换个显示顺序。
+      const bundles = bundleRegistry.listStable();
       if (bundles.length === 0) return '';
       const activeNames = new Set(bundleRegistry.getActive().map(b => b.name));
       const lines = bundles.map(b => {
@@ -261,7 +266,7 @@ export function registerContextSources(deps: ContextSourceDeps): void {
       });
       const statusLine = bundleRegistry.isAllMode()
         ? '当前状态: 全量模式 — 所有工具均可用'
-        : `当前激活: ${[...activeNames].join(', ')}`;
+        : `当前激活: ${[...activeNames].sort().join(', ')}`;
       return `${statusLine}\n\n${lines.join('\n')}`;
     },
   });

@@ -322,9 +322,31 @@ export class ToolBundleRegistry {
     return this.config.bundles[name];
   }
 
-  /** 列出所有 bundle */
+  /** 列出所有 bundle（**插入顺序** —— 会被 MCP 断连重连打乱，见 listStable） */
   list(): ToolBundle[] {
     return Object.values(this.config.bundles);
+  }
+
+  /**
+   * 列出所有 bundle —— **按 name 稳定排序**。
+   *
+   * ★ 为什么必须单立一个方法（2026-10-14 修缓存抖动）：
+   *   `list()` 返回 `Object.values(config.bundles)`，即**插入顺序**。而 MCP 工具包由
+   *   `syncTools` 在**运行期**动态建删（server 连接建包、断开删包）—— `delete` 之后再
+   *   `create` 会把该包挪到对象**末尾**，于是插入顺序随「谁先断线重连」而漂移。
+   *
+   *   这个顺序会被**渲染进 Zone 2 的 tool_bundles 段**，而该段位于 Zone 2 末尾、其后
+   *   紧跟整个 Zone 3（对话历史）⇒ 顺序一变，**整块前缀缓存作废**（自动前缀缓存的判据
+   *   是"从头开始连续逐字节相同"）。表现即命中率无规律暴跌。
+   *
+   *   姊妹段（skills / agents / mcp，见 section-resolver.buildSourcePartsFromCtx）早已
+   *   显式按 name 排序抗这种漂移，**唯独本段此前漏了** —— 故补齐。
+   *
+   * 凡"要进上下文 / 要跨轮稳定"的调用方一律用本方法；`list()` 保留原语义，供
+   * 「按创建先后顺序」的极少数场景（如 list_bundles 工具输出）使用。
+   */
+  listStable(): ToolBundle[] {
+    return [...this.list()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ── Mutate ───────────────────────────────────────────────────────
