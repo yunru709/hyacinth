@@ -29,7 +29,7 @@ provider 只认**从头开始逐字节相同**的那一段；**第一个不同�
 ```
 persona_soul · attention · tool_rules · skills · agents · mcp · memory · tool_bundles   ← 都在 history 之前
 history_summary · history                                                              ← 唯一增长区，压缩器管边界
-channel_context · scratchpad · timestamp · user_input                                  ← 尾部，每轮必变（安全）
+channel_context · session_mcp? · scratchpad · timestamp · user_input                                  ← 尾部，每轮必变（安全）
 ```
 
 ⚠️ **`~/.agent/context-manifest.json` 一旦存在就完全覆盖代码默认值**（`manifest-defaults.ts`）。
@@ -42,8 +42,13 @@ channel_context · scratchpad · timestamp · user_input                        
    而该源**只在 server 连接成功后才注册** ⇒ **进程刚启动那十几秒该段为空 ⇒ 整段消失 ⇒ 断点落在它那里** ⇒
    其后的 memory/tool_bundles/history_summary/history 全废（**每次重启必付一次**）。
    **正解是让段的存在性与连接时序解耦（装配期预注册），不是把它挪到 history 后面。**
-2. **改 `mcp.json` 的代价不对称**：**新增/修改** server 走 `isHotPlug:true` ⇒ `cacheability:'live'` ⇒ 进 Zone 5（**安全**）；
-   **删除** server 会 `unregisterSource('mcp-<name>')` ⇒ Zone 1 的 `mcp` 段少一行 ⇒ **断一次（贵）**。
+2. **改 `mcp.json` 的三条路代价不同（2026-10-14 实测）**：
+   - **新增**一台此前没有的 server ⇒ 只走 `addServer({isHotPlug:true})` ⇒ `cacheability:'live'` ⇒ 进 Zone 5 ⇒ **不破前缀** ✓
+   - **修改**一台已存在的 server ⇒ `removeServer` + `addServer(hot-plug)`；**remove 会注销 Zone 1 的那一行 ⇒ 破一次（贵）**，
+     且此后该 server 一直待在 Zone 5（Zone 1 的 `mcp` 段永久少一行，直到重启）
+   - **删除** server ⇒ `removeServer` ⇒ **破一次（贵）**
+   ⇒ 实测：把 `chrome-devtools-mcp@latest` 钉成 `@1.10.1` 时，Zone 1 的 `mcp` 段 **28 → 16 token**、
+     新增 Zone 5 段 `session_mcp(34t)`、`prefixHash` 随之变化 ⇒ **确认破了前缀**（日志顺序：`changed` → `removed` → `added`）。
    （MCP **崩溃/自动重连不改段** —— 段渲染的是注册时的静态 name/description，不读连接状态。）
 3. **命中率的天花板是 ~96–99%，不是 100%**：Zone 5 尾部每轮必变，天然不可缓存。
    且 TUI 上那个数字可能是**本轮/会话的加权平均**，会被少数几次暴跌拖低 ⇒ **别把平均值当单次值看**。
