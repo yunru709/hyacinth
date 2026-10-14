@@ -1,6 +1,74 @@
 # Agent 框架配置指南
 
-你收到的消息由多个 Zone 按编号顺序拼接而成。Zone 1-3 使用 `cache_control` 缓存，内容不变时不消耗 token 计费。压缩只影响 Zone 3（对话记录），不影响身份/工具/Skill 等固定内容。
+> 本文档 = **运行时配置** + **上下文/缓存架构**。第 0 节是最常踩的坑，建议先读。
+
+## 0. 上下文与缓存（最重要的一节）
+
+### 缓存是「前缀缓存」
+
+provider 只认**从头开始逐字节相同**的那一段；**第一个不同的字节之后，全部重算**。
+机制按厂商分派（权威：`src/context/cache-strategy.ts` 的 `CacheMode`）：
+
+| 厂商 | cacheMode | 说明 |
+|---|---|---|
+| Anthropic | `manual-markers` | 需在消息上打 `cache_control` 断点（最多 4 个，按 Zone 边界算） |
+| **DeepSeek / OpenAI / 其他 OpenAI 兼容** | **`auto-prefix`** | **自动比对请求前缀字节，不需要任何标记** |
+| Gemini | `auto-prefix`（隐式） | 显式 CachedContent 尚未实现 |
+| local / llamacpp | `none` | 无缓存 |
+
+⚠️ **本机跑 OpenAI 兼容（`auto-prefix`）⇒ 消息上根本没有 `cache_control`**。
+命中与否**完全取决于请求体前多少字节与上一次相同**。
+
+> **由前缀语义推出的一条工程铁律：**
+> **任何排在 `history` 之前的 section，字节变一次，它后面的一切（含 93%+ 的对话历史）全部作废。**
+> 排在 `history` **之后**的 section，抖动只赔它自己那点 token。
+> ⇒ **易变内容必须放 Zone 5（history 之后）；放前面就是给自己埋雷。**
+
+### 真实段序（以实测 `cache-trace.jsonl` 为准）
+
+```
+persona_soul · attention · tool_rules · skills · agents · mcp · memory · tool_bundles   ← 都在 history 之前
+history_summary · history                                                              ← 唯一增长区，压缩器管边界
+channel_context · scratchpad · timestamp · user_input                                  ← 尾部，每轮必变（安全）
+```
+
+⚠️ **`~/.agent/context-manifest.json` 一旦存在就完全覆盖代码默认值**（`manifest-defaults.ts`）。
+两处冲突时**以本地这份为准** ⇒ 改 zone/section **必须同时改它**，否则只改代码不会生效。
+
+### 三个已知的坑
+
+1. **空 section 会被整段丢弃**（`composer.ts`：`if (!content) continue`）
+   ⇒ runtime 段的**「存在性」挂在了异步就绪上**。实例：`mcp` 段的内容 = 已注册的 `mcp-<name>` 源的名字列表，
+   而该源**只在 server 连接成功后才注册** ⇒ **进程刚启动那十几秒该段为空 ⇒ 整段消失 ⇒ 断点落在它那里** ⇒
+   其后的 memory/tool_bundles/history_summary/history 全废（**每次重启必付一次**）。
+   **正解是让段的存在性与连接时序解耦（装配期预注册），不是把它挪到 history 后面。**
+2. **改 `mcp.json` 的代价不对称**：**新增/修改** server 走 `isHotPlug:true` ⇒ `cacheability:'live'` ⇒ 进 Zone 5（**安全**）；
+   **删除** server 会 `unregisterSource('mcp-<name>')` ⇒ Zone 1 的 `mcp` 段少一行 ⇒ **断一次（贵）**。
+   （MCP **崩溃/自动重连不改段** —— 段渲染的是注册时的静态 name/description，不读连接状态。）
+3. **命中率的天花板是 ~96–99%，不是 100%**：Zone 5 尾部每轮必变，天然不可缓存。
+   且 TUI 上那个数字可能是**本轮/会话的加权平均**，会被少数几次暴跌拖低 ⇒ **别把平均值当单次值看**。
+
+### 缓存池按 `user_id` 隔离（`src/provider/user-id.ts`）
+
+| 调用点 | 实测池键 |
+|---|---|
+| 主会话 | **`hyacinth-chat`** —— `derivedUserId('chat')`，按**通道名**派生，**不含会话名** ⇒ 所有 chat 流量共用一池，多会话并行会互相挤占 |
+| 压缩器 | `hyacinth-compressor-{sessionTag}` |
+| 旁路 Agent | `hyacinth-orchestrator` / `hyacinth-narration` |
+| 子 Agent | `hyacinth-sub-{name}-{instanceId}` |
+
+### 诊断工具（已内置）
+
+| 工具 | 用途 |
+|---|---|
+| `~/.agent/sessions/<type>/<id>/cache-trace.jsonl` | 每次 compose 一行：逐段 hash/token · `toolsHash` · `prefixHash` · `msgHashes`（逐条全量）· `compressCount` |
+| `scripts/cache-hits.mjs` | 命中率时间线 × 段级指纹按时间对齐 |
+| `scripts/cache-trace.mjs` | 段级指纹查看 |
+| provider 侧请求体探针（`compatible.ts` 内） | **默认关**，`/log debug` 即开。打 `commonPct` = 与上一次请求的公共前缀占比 ⇒ **`≈100` 却低命中 = provider 侧无责可查；`<95` = 本地有漂移** |
+
+判断优先级：**先看 `prefixHash`/`msgHashes` 变没变** —— 没变就别查本地了。
+
+---
 
 ## 可修改的配置项
 
@@ -135,8 +203,17 @@ User Input → [preTurn] → Composer组装上下文 → LLM调用 → [postTurn
 | `world-engine.json` | 世界引擎开关与参数（仅陪伴模式，默认关） | 直接编辑 |
 | `models.json` | 本地模型配置 | `/model local register` 或直接编辑 |
 | `agents.json` | 子 Agent 定义 | 直接编辑 |
-| `skills/*.md` | Skill 提示词模板 | 直接编辑 |
+| `skills/*.md` | Skill 提示词模板 | 直接编辑 —— ⚠️ **要改 `~/.agent/prompts/skills/` 那一份，不是 `dist/`** |
 | `commands.json` | 自定义斜杠命令 | 直接编辑 |
+
+> ⚠️ **提示词是「外部优先」三级覆盖**（权威：`src/prompts/loader.ts:7-10`）：
+> `① <cwd>/.agent/prompts/{name}.md` → `② ~/.agent/prompts/{name}.md` → `③ dist/prompts/{name}.md`（内置默认）
+>
+> ⇒ **改 `src/prompts/` 或 `dist/prompts/` 都可能被 `~/.agent/prompts/` 下的同名副本静默盖掉。**
+> **改任何提示词 / Skill（含内置的 `framework-reference` 本身）：先看 `~/.agent/prompts/` 有无同名文件 —— 有就改它，并同步改源码那份（两份都改，别只改一边）。**
+>
+> 实测教训（2026-10-14）：只改了 `src/prompts/skills/framework-reference.md` + 重新 build，
+> 运行实例读到的仍是 `~/.agent/prompts/skills/` 下的**旧副本** —— 白改一轮。
 
 ## 使用原则
 
