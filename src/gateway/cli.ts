@@ -178,6 +178,16 @@ function createCliHandler(): OutputHandler {
 export async function runCli(): Promise<void> {
   const program = new Command();
 
+  // ── 位置化选项（必须！）────────────────────────────────────────
+  // 父命令与子命令存在**同名选项**时（本例：父 `-p, --provider` 与
+  // 子命令 `webui --provider`），commander 默认会把「子命令名之后」的同名
+  // 选项吞给父命令 ⇒ 子命令的 options 里**根本没有该字段**。
+  // 实测后果（2026-10-16）：`hyacinth webui --provider deepseek` 静默失效，
+  // server 仍按 config.provider.active 建 Provider；当该项（anthropic）没有
+  // 对应 API key 时，WebUI 直接崩在启动阶段，且报错信息完全看不出是参数没生效。
+  // 开此开关后：子命令名**之后**的选项归子命令，**之前**的归父命令 —— 符合直觉。
+  program.enablePositionalOptions();
+
   program
     .name('hyacinth')
     .description('AI Agent with context management')
@@ -308,9 +318,15 @@ export async function runCli(): Promise<void> {
       // 对外开放（局域网可访问）：--lan 等价 0.0.0.0；--host 可显式指定 ✓
       // 没配钥匙时会被通道里的 fail-closed 守卫拒绝启动 ✓（这是有意的 ✓）
       host: options.lan ? '0.0.0.0' : options.host,
-      // 早期测试：不校验钥匙（用户 2026-09-20 要求；对外开放时会大声警告 ✓）
-      // options 的静态类型是 string（commander 实际给 boolean）⇒ 显式收成布尔 ✓
-      noAuth: !!options.noAuth,
+      // ⚠️ commander 的 `.option('--no-auth')` 生成的是 **`options.auth === false`**，
+      // **不会**生成 `options.noAuth` —— 旧代码写的 `!!options.noAuth` 恒为 false，
+      // 导致 `--no-auth` **从未生效**：WS 升级仍 fail-closed 返回 401，
+      // 表现就是"WebUI 页面能打开、但一直显示离线"（2026-10-16 用 CDP 探针实测确认：
+      //   keys=["port","auth"] / auth=false / noAuth=undefined）。
+      // 保留 `!!options.noAuth` 兜底，兼容以代码方式（非 commander）传入的调用方。
+      // 类型注记：options 的静态类型是 Record<string, string>，而 commander 实际给的是
+      // boolean ⇒ 先经 unknown 过渡再比较，否则 TS2367（'string' 与 'boolean' 无重叠）报错。
+      noAuth: (options as Record<string, unknown>).auth === false || !!options.noAuth,
       webuiRoot,
     });
 
@@ -354,6 +370,16 @@ export async function runCli(): Promise<void> {
    * Windows → start；macOS → open；Linux → xdg-open。
    */
   function openBrowser(url: string): void {
+    // ── 抑制开关（桌面壳 / 自动化脚本用）──────────────────────────
+    // 调用方自己已经有 UI（如 Hyacinth 桌面窗口）时，再弹一个系统浏览器纯属打扰。
+    // 背景（2026-10-16 用户实报）：桌面壳用 `webui` 子命令拉后端 ⇒ **每次启动都额外
+    // 打开一个浏览器并显示 WebUI**。这里读环境变量抑制，而不是砍掉默认行为 ——
+    // 用户直接在命令行跑 `hyacinth webui` 时"自动开浏览器"仍是期望行为 ✓
+    if (process.env.HYACINTH_NO_OPEN_BROWSER === '1') {
+      console.log(`\nWebUI 已启动：${url}（已按 HYACINTH_NO_OPEN_BROWSER=1 抑制自动打开浏览器）`);
+      return;
+    }
+
     const platform = process.platform;
     let cmd: string;
     let args: string[];
