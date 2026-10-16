@@ -17,7 +17,9 @@
     "test:watch": "vitest",
     "verify:layers": "node scripts/verify-layers.mjs",
     "setup:llamacpp": "powershell -ExecutionPolicy Bypass -File scripts/setup-llamacpp.ps1",
-    "webui": "node dist/index.js webui"
+    "webui": "node dist/index.js webui",
+    "desktop:build": "powershell -ExecutionPolicy Bypass -File scripts/desktop-build.ps1",
+    "desktop": "powershell -ExecutionPolicy Bypass -File scripts/desktop-build.ps1 -SkipBuild -Launch"
   },
   "keywords": [
     "ai",

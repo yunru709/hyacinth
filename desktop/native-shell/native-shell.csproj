@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>native_shell</RootNamespace>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 必须指定 RID（win-x64）。AnyCPU 构建下 WebView2 的原生 loader
+         （WebView2Loader.dll）只落在 runtimes/win-x64/native/，**不在 exe 同目录**，
+         导致 CoreWebView2Environment 初始化直接抛 0x8000FFFF「灾难性故障」
+         （2026-10-16 实测：bin 顶层无该 dll）。指定 RID 后 loader 会被复制到输出根。 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+</Project>
