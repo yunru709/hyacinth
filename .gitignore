@@ -51,6 +51,9 @@ desktop/native-shell/bin/
 desktop/native-shell/obj/
 desktop/native-shell/out/
 desktop/native-shell/out-standalone/
+desktop/native-shell/pub-out/
+# 绿色版桌面包（约 1 GB：自带 node + node_modules）—— 本地产物，不入库
+desktop/dist/
 
 # Training 数据库（本地运行产物）
 *.db
