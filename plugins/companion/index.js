@@ -62,18 +62,20 @@ export default {
       api.registerService('world-engine.agent', worldAgent);
     }
 
-    // ── 陪伴模式激活：切 Router + 回填角色 + 激活旁路模式 ──
-    // ⚠️ 模式真源 = session type，跨模式闸门会**明确拒绝**把 normal 会话切进陪伴
-    // （loop.switchSession 的跨模式守卫）⇒ 开机时（会话通常是 normal）这一步必被拒。
-    // 这不是错误：本插件的能力注册（世界引擎）已完成，模式该由用户经 UI
-    // companion.activate 进入（或 startup.defaultMode=companion 时另行处理）。
-    // ⇒ 捕获该拒绝并记 info —— 否则每次开机都报「plugin activate failed: companion」，
-    //   既误导又把这次失败的切换说成插件故障（2026-10-16 实测该错误长期存在）。
+    // ── 模式对齐：让模式**跟随会话类型**，而不是"强制进陪伴" ──
+    // ⚠️ 2026-10-16 修正：原先无条件 `activateCompanion()` 会把「启动默认模式」
+    //   这个设置**整个覆盖掉** —— 实测：config.startup.defaultMode=normal，开机
+    //   `companion.get` 仍报 active:true（新会话被强行带进陪伴）。
+    //   设计意图（用户 2026-10-16 明确）：① 运行时**可**切换是否进入陪伴模式；
+    //   ② 由「启动默认模式」决定**下次启动**进哪个模式。插件不该有第三个发言权。
+    //   模式真源 = session type（boot 依 startup.defaultMode 定新会话类型、恢复时依
+    //   meta.type）⇒ 跟随它：sessionType=companion 时才真正切入陪伴，其余是空操作 ✓
+    //   （能力注册——世界引擎——不受影响，它在上面的分支里独立完成。）
     if (contextMode) {
       try {
-        await contextMode.activateCompanion(characterName);
+        await contextMode.syncToSessionType({ activeCompanionName: characterName });
       } catch (err) {
-        api.logger.info('companion mode not switched at plugin activation', {
+        api.logger.info('companion mode not synced at plugin activation', {
           reason: err instanceof Error ? err.message : String(err),
         });
       }

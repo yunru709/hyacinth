@@ -59,7 +59,11 @@ function makeManager(projectDir: string): PluginManager {
 }
 
 /** 统一宿主：挂内核基座插件 + 注册内核能力服务（等价 agent-assembly 装配） */
-function wireKernelHost(host: ReturnType<PluginManager['getHost']>, loop: { bypassManager?: BypassManager | null }) {
+function wireKernelHost(
+  host: ReturnType<PluginManager['getHost']>,
+  loop: { bypassManager?: BypassManager | null },
+  opts?: { sessionType?: string },
+) {
   const hostAny = host as unknown as {
     setHooks(b: unknown): void;
     mount(p: unknown): Promise<unknown>;
@@ -74,9 +78,20 @@ function wireKernelHost(host: ReturnType<PluginManager['getHost']>, loop: { bypa
   // 内核能力服务（轻量引用）：世界引擎工厂 + 模式切换 —— 不 mount 任何世界引擎插件
   hostAny.register('world-engine.createAgent', (name: string) => new WorldEngine(name));
   // 模式服务绑定 fake loop（模式真源 = session type；syncRouter 按名改写 activeRouter）
-  const fakeLoop: any = { bypassManager: undefined, activeRouter: { name: 'normal' } };
+  // ⚠️ 2026-10-16：插件改为 `syncToSessionType()`（**跟随**会话类型），不再强制进陪伴
+  //   ⇒ fake loop 必须提供 sessionType。既有用例都在"陪伴会话"语境 ⇒ 缺省取 companion。
+  const fakeLoop: any = {
+    bypassManager: undefined,
+    activeRouter: { name: 'normal' },
+    sessionType: opts?.sessionType ?? 'companion',
+    // NormalRouter.onActivate 的收尾路径需要的最小面（避免测试打到真实会话目录）
+    channelKey: 'tui',
+    sessionDir: '/tmp/fake-normal-session',
+    switchSession: async () => { /* no-op */ },
+    setActiveUserId: () => { /* no-op */ },
+  };
   fakeLoop.syncRouter = async (target?: string) => {
-    fakeLoop.activeRouter = { name: target ?? 'normal' };
+    fakeLoop.activeRouter = { name: target ?? fakeLoop.sessionType ?? 'normal' };
   };
   hostAny.register('context.mode', createContextModeService(fakeLoop));
   wireKernelHostLoop = fakeLoop;
@@ -148,7 +163,6 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
     const host = mgr.getHost();
     const loop = { bypassManager: undefined as BypassManager | undefined };
     wireKernelHost(host, loop);
-
     mgr.setHooks(host as never);
     await mgr.loadAll();
 
@@ -160,6 +174,52 @@ describe('companion 目录插件（自带插件 · 内核只供能力服务）',
 
     await mgr.deactivate('companion');
     expect(wireKernelHostLoop?.activeRouter.name).toBe('normal');
+
+    await host.dispose();
+  });
+
+  it('会话类型=normal ⇒ 插件**不覆盖**「启动默认模式」（2026-10-16 回归）', async () => {
+    // 事故：插件在激活时无条件 `activateCompanion()` ⇒ config.startup.defaultMode=normal
+    // 被整个覆盖：任何新后端/新壳开机 `companion.get` 就报 active（实测定案），
+    // 设置页那个「启动时自动进入的模式」因此形同虚设。
+    // 设计意图（用户明确）：① 运行时**可**切换是否进入陪伴；② 由设置决定**下次启动**的模式
+    // ⇒ 插件不该有第三个发言权。修法：改为 `syncToSessionType()` 跟随会话类型 ⇒ 空操作。
+    fs.writeFileSync(path.join(tmp, '.agent', 'plugins.config.json'), JSON.stringify({
+      plugins: { companion: { enabled: true, config: { characterName: '柔柔' } } },
+    }));
+
+    const mgr = makeManager(tmp);
+    const host = mgr.getHost();
+    const loop = { bypassManager: undefined as BypassManager | undefined };
+    wireKernelHost(host, loop, { sessionType: 'normal' });
+
+    mgr.setHooks(host as never);
+    await mgr.loadAll();
+
+    // 能力注册照常（世界引擎仍由插件创建并注册）……
+    expect(mgr.get('companion')?.status).toBe('activated');
+    expect(loop.bypassManager?.getAgent('world-engine')).toBeTruthy();
+    // ……但**模式必须不动** —— 这正是「启动默认模式被忽略」的根因所在
+    expect(wireKernelHostLoop?.activeRouter.name).toBe('normal');
+
+    await host.dispose();
+  });
+
+  it('会话类型=companion ⇒ 插件**应当**对齐到陪伴（设计意图②不被误伤）', async () => {
+    // 反向锁：只锁"normal 不动"会被"插件彻底不干活"的假实现骗过。
+    fs.writeFileSync(path.join(tmp, '.agent', 'plugins.config.json'), JSON.stringify({
+      plugins: { companion: { enabled: true, config: { characterName: '柔柔' } } },
+    }));
+
+    const mgr = makeManager(tmp);
+    const host = mgr.getHost();
+    const loop = { bypassManager: undefined as BypassManager | undefined };
+    wireKernelHost(host, loop, { sessionType: 'companion' });
+
+    mgr.setHooks(host as never);
+    await mgr.loadAll();
+
+    expect(wireKernelHostLoop?.activeRouter.name).toBe('companion');
 
     await host.dispose();
   });
