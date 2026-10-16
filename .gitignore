@@ -36,8 +36,10 @@ Thumbs.db
 
 # 本地打包产物（npm pack 生成的 .tgz，不应提交）
 *.tgz
-# 生成产物（用户环境 ~/.agent/generation，源码目录不应残留）
-/outputs/generation/
+# 生成产物 / 本地调试产物（用户环境 ~/.agent/generation、桌面壳探针的输出等）
+# ⚠️ 用整目录而不是逐个白名单：outputs/ 下**没有任何被跟踪的文件**（2026-10-16 核对），
+#    而逐个列会让每次新增一类调试输出就在 git status 里冒一批未跟踪文件 ✗
+/outputs/
 tsconfig.tsbuildinfo
 
 # Training 数据库（本地运行产物）
