@@ -42,6 +42,10 @@ Thumbs.db
 /outputs/
 tsconfig.tsbuildinfo
 
+# docs/ 下的**新增**研究/草稿不入库（用户 2026-10-16 裁定：docs 里的东西都可以不入库）
+# ⚠️ .gitignore 不影响**已跟踪**文件 ⇒ 已入库的那 13 份 docs 保持跟踪，不会被删
+/docs/
+
 # Training 数据库（本地运行产物）
 *.db
 !docs/**/*.db
