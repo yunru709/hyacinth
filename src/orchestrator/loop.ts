@@ -959,15 +959,45 @@ export class AgentLoop {
     // 未注册类型（如插件自定义 session type）→ 保持当前 Router 不动
     if (!targetRouter || this.activeRouter?.name === targetRouter.name) return;
 
+    // ── 原子切换（2026-10-16）──────────────────────────────────────
+    // onActivate 内部会切 session，而跨模式闸门（switchSession）可能**明确拒绝**。
+    // 原实现先提交 Router/_sessionType 再 await onActivate ⇒ 一旦 onActivate 抛错，
+    // Loop 就永久停在「模式已翻、会话却属旧模式」的不一致态。实测后果：UI 侧
+    // companion.get 恒报 active=true（桌面壳正常会话的主界面显示「陪伴会话进行中」）。
+    // ⇒ 失败必须回滚这两个字段，让被拒的切换退化成 no-op —— 与闸门自身判据一致
+    //   （宁可等价没切，也不要卡在中间态）。
+    const prevRouter = this.activeRouter;
+    const prevType = this._sessionType;
+
     // 切出旧 Router
-    if (this.activeRouter) {
-      await this.activeRouter.onDeactivate?.(this);
+    if (prevRouter) {
+      await prevRouter.onDeactivate?.(this);
     }
 
     // 切入新 Router（其 onActivate 负责切到对应类型的 session）
     this.activeRouter = targetRouter;
     this._sessionType = targetRouter.name as SessionType;
-    await this.activeRouter.onActivate?.(this);
+    try {
+      await this.activeRouter.onActivate?.(this);
+    } catch (err) {
+      this.activeRouter = prevRouter;
+      this._sessionType = prevType;
+      if (prevRouter) {
+        // 尽力恢复旧 Router；失败只记日志，绝不掩盖原始错误
+        await prevRouter.onActivate?.(this).catch((e: unknown) => {
+          this.logger?.warn?.('syncRouter rollback: prevRouter.onActivate failed', {
+            router: prevRouter.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
+      this.logger?.warn?.('syncRouter rolled back (onActivate rejected)', {
+        from: prevRouter?.name ?? null,
+        to: targetRouter.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   /**

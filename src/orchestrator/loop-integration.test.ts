@@ -422,3 +422,57 @@ describe('AgentLoop 截断处理：incomplete（上游提前断流）也接管',
     ).toBe(false);
   });
 });
+
+// ============================================================
+// syncRouter 原子性（2026-10-16 回归）
+// ============================================================
+// 事故：CompanionRouter.onActivate 内部会 loop.switchSession(companionDir)
+// （src/context/router.ts:526），而跨模式闸门（loop.switchSession 的守卫）会
+// **明确拒绝**把 normal 会话切进陪伴 ⇒ onActivate 抛错。
+// 原实现先提交 activeRouter/_sessionType 再 await onActivate（旧 loop.ts:968-970）
+// ⇒ 一次被拒的切换把 Loop 永久留在「模式已翻、会话却属旧模式」的不一致态。
+// 实测后果：UI 侧 companion.get 恒报 active=true，桌面壳里一个正常会话的主界面
+// 显示「陪伴会话进行中」（config.startup.defaultMode 明明是 normal）。
+// 修法：失败即回滚，让被拒的切换退化成 no-op。下面两条锁「回滚」与「不误伤成
+// 功路径」——只锁一条会被"永远不切"的假实现骗过。
+describe('AgentLoop.syncRouter 原子性（2026-10-16 回归）', () => {
+  it('目标 Router 的 onActivate 抛错 ⇒ 回滚 Router/sessionType，不留中间态', async () => {
+    const { getRouterByName } = await import('../context/profiles.js');
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    expect(loop.activeRouter.name, '初始应为 normal').toBe('normal');
+
+    const companionRouter = getRouterByName('companion')!;
+    expect(companionRouter, 'companion Router 应已由 profiles 内置注册').toBeDefined();
+
+    // 用桩替换 onActivate，模拟「跨模式闸门拒绝」
+    companionRouter.onActivate = async () => {
+      throw new Error('跨模式切换被拒绝（测试桩）');
+    };
+    try {
+      await expect(loop.syncRouter('companion')).rejects.toThrow('跨模式切换被拒绝');
+      // 关键断言：不得停在中间态
+      expect(loop.activeRouter.name).toBe('normal');
+      expect(loop.sessionType).toBe('normal');
+    } finally {
+      // onActivate 是**原型方法**，赋过桩后成了自有属性 ⇒ 删掉即复原
+      delete (companionRouter as unknown as Record<string, unknown>).onActivate;
+    }
+  });
+
+  it('onActivate 成功 ⇒ 正常切换（回滚逻辑不误伤成功路径）', async () => {
+    const { getRouterByName } = await import('../context/profiles.js');
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+
+    const companionRouter = getRouterByName('companion')!;
+    companionRouter.onActivate = async () => { /* 成功、无副作用 */ };
+    try {
+      await loop.syncRouter('companion');
+      expect(loop.activeRouter.name).toBe('companion');
+      expect(loop.sessionType).toBe('companion');
+    } finally {
+      delete (companionRouter as unknown as Record<string, unknown>).onActivate;
+    }
+  });
+});

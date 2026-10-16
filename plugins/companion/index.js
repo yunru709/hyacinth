@@ -63,8 +63,20 @@ export default {
     }
 
     // ── 陪伴模式激活：切 Router + 回填角色 + 激活旁路模式 ──
+    // ⚠️ 模式真源 = session type，跨模式闸门会**明确拒绝**把 normal 会话切进陪伴
+    // （loop.switchSession 的跨模式守卫）⇒ 开机时（会话通常是 normal）这一步必被拒。
+    // 这不是错误：本插件的能力注册（世界引擎）已完成，模式该由用户经 UI
+    // companion.activate 进入（或 startup.defaultMode=companion 时另行处理）。
+    // ⇒ 捕获该拒绝并记 info —— 否则每次开机都报「plugin activate failed: companion」，
+    //   既误导又把这次失败的切换说成插件故障（2026-10-16 实测该错误长期存在）。
     if (contextMode) {
-      await contextMode.activateCompanion(characterName);
+      try {
+        await contextMode.activateCompanion(characterName);
+      } catch (err) {
+        api.logger.info('companion mode not switched at plugin activation', {
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     if (autoActivate && bypassManager) {
       await bypassManager.activateForMode('companion').catch(() => {});
