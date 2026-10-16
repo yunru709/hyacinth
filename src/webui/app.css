@@ -577,3 +577,91 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   background: color-mix(in srgb, var(--hyacinth-primary) 14%, transparent);
   color: var(--hyacinth-primary);
 }
+
+/* ── markdown 渲染样式（交付正文）────────────────────────────────────
+   背景：交付正文（say 的 content）是 markdown，此前被 esc() 塞进单个 <p>，
+        `**加粗**` / 围栏 / `| 表格 |` / `# 标题` 全部按字面显示 ✗
+        （渲染器见 src/webui/markdown.js，本次新增）。
+   为什么必须手写这些规则：Tailwind preflight 会清零标题/列表的默认间距 ⇒
+        只把 HTML 渲染出来仍然会「挤成一坨」，等于没渲染。
+   作用域：全部限定在 .message-bubble 内，不外溢到其它面板。
+   字号：固定 .875rem（= 原 `text-sm`）⇒ 渲染后观感与修复前一致，无视觉回归。 */
+.message-bubble { font-size: 0.875rem; line-height: 1.65; }
+.message-bubble > *:first-child { margin-top: 0; }
+.message-bubble > *:last-child { margin-bottom: 0; }
+
+.message-bubble .md-p { margin: 0 0 0.625em; line-height: 1.65; }
+
+.message-bubble .md-h { margin: 0.9em 0 0.45em; font-weight: 600; line-height: 1.35; }
+.message-bubble h1.md-h { font-size: 1.35em; }
+.message-bubble h2.md-h { font-size: 1.22em; }
+.message-bubble h3.md-h { font-size: 1.1em; }
+.message-bubble h4.md-h,
+.message-bubble h5.md-h,
+.message-bubble h6.md-h { font-size: 1em; color: var(--hyacinth-muted-foreground); }
+
+.message-bubble ul,
+.message-bubble ol { margin: 0 0 0.625em; padding-left: 1.4em; }
+.message-bubble ul { list-style: disc; }
+.message-bubble ol { list-style: decimal; }
+.message-bubble li { margin: 0.2em 0; line-height: 1.6; }
+.message-bubble li > ul,
+.message-bubble li > ol { margin: 0.2em 0 0.1em; }
+
+.message-bubble .md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--hyacinth-foreground) 9%, transparent);
+}
+.message-bubble .md-pre {
+  margin: 0 0 0.625em;
+  padding: 0.7em 0.85em;
+  border: 1px solid var(--hyacinth-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hyacinth-foreground) 6%, transparent);
+  font-size: 0.85em;
+  line-height: 1.55;
+}
+.message-bubble .md-pre code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.message-bubble .md-link {
+  color: var(--hyacinth-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-bubble .md-quote {
+  margin: 0 0 0.625em;
+  padding: 0.1em 0 0.1em 0.8em;
+  border-left: 3px solid var(--hyacinth-border);
+  color: var(--hyacinth-muted-foreground);
+}
+
+.message-bubble .md-hr { margin: 0.9em 0; border: 0; border-top: 1px solid var(--hyacinth-border); }
+
+.message-bubble .md-table-wrap { margin: 0 0 0.625em; overflow-x: auto; }
+.message-bubble .md-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.message-bubble .md-table th,
+.message-bubble .md-table td {
+  border: 1px solid var(--hyacinth-border);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+.message-bubble .md-table th {
+  background: color-mix(in srgb, var(--hyacinth-foreground) 5%, transparent);
+  font-weight: 600;
+}
+.message-bubble .md-table .md-center { text-align: center; }
+.message-bubble .md-table .md-right { text-align: right; }
+
+.message-bubble strong { font-weight: 600; }
+.message-bubble del { opacity: 0.65; }
+

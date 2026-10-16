@@ -2299,6 +2299,8 @@
     </div>
   </div>
 
+  <!-- markdown 渲染器：必须排在 app.js 之前（app.js 同步读 window.HyMarkdown）✓ -->
+  <script src="/markdown.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

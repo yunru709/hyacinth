@@ -117,6 +117,25 @@
     return div.innerHTML;
   }
 
+  /**
+   * 交付正文（say 的 content）是 **markdown** —— 此前直接 esc() 塞进单个 <p>，
+   * 于是 `**加粗**`、``` 围栏、`| 表格 |`、`# 标题` 全部按字面显示 ✗
+   * （TUI 有自己的渲染器，WebUI 没有 ⇒ 两端观感不一致）。
+   *
+   * 现在交给 markdown.js（经典脚本，挂在 window.HyMarkdown）渲染：
+   *   - 渲染器缺失（脚本没加载/被拦）或抛错 ⇒ 退回转义纯文本，**不白屏**
+   *   - 空文本也至少产出一个 <p> ⇒ 流式路径 querySelector('p') 不会拿到 null
+   */
+  function renderRich(text) {
+    const md = window.HyMarkdown;
+    let html = '';
+    if (md && typeof md.render === 'function') {
+      try { html = md.render(text); } catch (e) { html = ''; }
+    }
+    if (!html) html = `<p class="md-p">${esc(text)}</p>`;
+    return html;
+  }
+
   function fmtTokens(n) {
     if (n == null) return '—';
     if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -278,7 +297,7 @@
     avatar.innerHTML = '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
     const body = el('div', 'max-w-[90%] md:max-w-[75%] space-y-3');
     const b = el('div', 'message-bubble rounded-xl px-4 py-3 bg-card border border-border text-foreground shadow-sm');
-    b.innerHTML = `<p class="text-sm leading-relaxed">${esc(text)}</p>`;
+    b.innerHTML = renderRich(text);
     body.appendChild(b);
     body.appendChild(el('span', 'block text-[10px] text-muted-foreground', nowTime()));
     wrap.appendChild(avatar);

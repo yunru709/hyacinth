@@ -58,6 +58,7 @@ function isPublicWebUIRoute(url: string): boolean {
     path === '/theme.css' ||
     path === '/app.css' ||
     path === '/app.js' ||
+    path === '/markdown.js' ||
     path === '/favicon.ico' ||
     path.startsWith('/vendor/') ||
     path.startsWith('/assets/')
