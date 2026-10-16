@@ -46,8 +46,43 @@ export class CompanionSessionManager {
       mkdirSync(this.dir, { recursive: true });
       this.initSessionSync();
       logger.info('Created companion session', { dir: this.dir });
+      return this.dir;
     }
+    // ── 已存在的目录也要**校正 meta.type**（2026-10-16）──────────────────
+    // 本目录按定义就是陪伴会话（位于 ~/.agent/companion/<角色>/），但 meta.json
+    // 可能是更早的版本写的 —— 实测：柔柔/meta.json = {"type":"normal"}（2026-09-17），
+    // 而 sessionModeOfDir 以 meta.type 为准 ⇒ 陈旧的 type 会让跨模式闸门**拒绝**
+    // 把会话切进陪伴（报「该会话属于「normal」模式，当前是「companion」模式」），
+    // 表现为陪伴模式彻底进不去。⇒ 只重写 meta.json 这一个文件，**绝不触碰**
+    // conversation/events/stats（那是对话数据）。
+    this.ensureCompanionMeta();
     return this.dir;
+  }
+
+  /**
+   * 校正 meta.json 的 `type` 为 companion（仅此一个文件；已正确则不写盘）。
+   * 保留其余字段（createdAt / projectKey 等），只改 type。
+   */
+  private ensureCompanionMeta(): void {
+    const metaPath = path.join(this.dir, 'meta.json');
+    if (existsSync(metaPath)) {
+      try {
+        const raw = JSON.parse(readFileSync(metaPath, 'utf8')) as { type?: string } & Record<string, unknown>;
+        if (raw && raw.type === 'companion') return; // 已正确 ⇒ 不写盘
+        writeFileSync(metaPath, JSON.stringify({ ...raw, type: 'companion' }), 'utf-8');
+        logger.warn('Companion session meta.type corrected', {
+          dir: this.dir,
+          from: raw?.type ?? '(missing)',
+        });
+      } catch {
+        // 损坏 / 不可读 → 重写为最小可用 meta（对话数据不动）
+        writeFileSync(metaPath, JSON.stringify({ type: 'companion', createdAt: new Date().toISOString() }), 'utf-8');
+        logger.warn('Companion session meta.json rewritten (unreadable)', { dir: this.dir });
+      }
+    } else {
+      writeFileSync(metaPath, JSON.stringify({ type: 'companion', createdAt: new Date().toISOString() }), 'utf-8');
+      logger.warn('Companion session meta.json created', { dir: this.dir });
+    }
   }
 
   /**
