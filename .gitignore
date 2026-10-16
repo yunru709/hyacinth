@@ -54,6 +54,10 @@ desktop/native-shell/out-standalone/
 desktop/native-shell/pub-out/
 # 绿色版桌面包（约 1 GB：自带 node + node_modules）—— 本地产物，不入库
 desktop/dist/
+# Electron 配方的工作区与依赖：stage 是物化出的依赖树（materialize.mjs 13s 可重建）、
+# shell/node_modules 含 electron 二进制（约 250 MB，pnpm install 可重建）
+desktop/electron/stage/
+desktop/electron/shell/node_modules/
 
 # Training 数据库（本地运行产物）
 *.db

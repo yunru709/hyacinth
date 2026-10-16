@@ -9,23 +9,39 @@
 
 ```
 desktop/electron/
-  shell/             Electron 壳源码（main.js / preload.js / package.json，electron 44.7.2）
-  materialize.mjs    ① 物化依赖树：从仓库 .pnpm **解引用 + hoisted 展平**（13.4s，断链 0）
-  build-package.ps1  ③ 组装 DSH 样式包（调用 make-asar.cjs）
-  make-asar.cjs      把壳打进 resources\app.asar
+  shell/             Electron 壳源码 + 依赖（main.js / preload.js / package.json；electron 44.7.2 + @electron/asar）
+  materialize.mjs    ① 物化：把仓库 node_modules 解引用+hoisted 展平，**并放入负载本体**（dist/plugins/package.json）
+  build-package.ps1  ③ 组装 DSH 样式包（内部会生成 make-asar.cjs 把壳打进 resources\app.asar）
   scan-reparse.ps1   ② 跨盘可搬性判据：包内 reparse point 必须为 0
   accept.ps1         ④⑤⑥ 跨盘验收（进程归属 / health / CDP 页面 / 截图）
   start-backend.ps1  开发期辅助：不起 Electron，只把后端拉起来
   BUILD-NOTES.md     ★ 完整配方、可复现命令、踩坑与原始读数 —— **先读这份**
 ```
 
-## 一键（幂等，可重复跑）
+> **路径基准 = 仓库自身**（2026-10-17 起）：所有脚本默认值都由 `$PSScriptRoot` / `__dirname` 推导，
+> **不再指向任何仓库外目录**（早先那两处 `…\hyacinth-desktop`、`…\hyacinth-electron` 已删除）。
+> 物化工作区落在 `desktop\electron\stage\`（已 gitignore），可随时代谢重建。
+
+## 依赖准备（一次性）
 
 ```powershell
-node desktop\electron\materialize.mjs                                   # ① 物化依赖
-powershell -File desktop\electron\scan-reparse.ps1 -Root <包目录>        # ② 链接数必须 0
-powershell -File desktop\electron\build-package.ps1 -OutDir F:\Hyacinth-Electron   # ③ 组装
-powershell -File desktop\electron\accept.ps1 -Root F:\Hyacinth-Electron            # ④ 验收
+cd desktop\electron\shell
+$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'   # GitHub 被拦 ⇒ 走 npmmirror 镜像
+pnpm install --ignore-workspace
+```
+
+⚠️ 两个坑（都实测过）：
+1. **pnpm 默认不跑构建脚本** ⇒ `shell\package.json` 里必须保留 `pnpm.onlyBuiltDependencies:["electron"]`，
+   否则 `electron\dist` 是**空的**（`pnpm install` 照样报成功 —— "文件存在"≠"下载成功"）。
+2. **`ELECTRON_MIRROR` 不设则下不动**（electron 的 postinstall 从 GitHub Releases 取二进制）。
+
+## 一键（幂等，可重复跑；`materialize` 可裸跑）
+
+```powershell
+node desktop\electron\materialize.mjs                                   # ① 物化依赖 + 负载
+powershell -File desktop\electron\scan-reparse.ps1 -Root desktop\electron\stage\app   # ② 链接数必须 0
+powershell -File desktop\electron\build-package.ps1 -Out F:\Hyacinth-Electron         # ③ 组装
+powershell -File desktop\electron\accept.ps1 -Root F:\Hyacinth-Electron               # ④ 验收
 ```
 
 ## 三个必须知道的坑（详见 BUILD-NOTES.md）

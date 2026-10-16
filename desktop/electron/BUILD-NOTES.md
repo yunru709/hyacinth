@@ -1,3 +1,13 @@
+> ⚠️ **路径已全部改为「以仓库为基准」（2026-10-17）** —— 本文档写于配方还在**仓库外两个临时目录**
+> （`C:\...\hyacinth-electron\stage`、`C:\...\hyacinth-desktop`）的时期，**下文出现的这些绝对路径都是
+> 历史记录，别再照抄**。当前实际路径（见 `desktop\electron\README.md`）：
+>   · 物化工作区 `<repo>\desktop\electron\stage`（gitignore；`materialize.mjs` 13s 可重建，**已含负载本体**）
+>   · 壳源码与依赖 `<repo>\desktop\electron\shell`（`pnpm install` 装 electron + @electron/asar）
+>   · Electron 运行时 `<repo>\desktop\electron\shell\node_modules\electron\dist`
+>   · 产物默认 `F:\Hyacinth-Electron`（`-Out` 可指到任何盘；跨盘能跑才算自包含）
+> 那两处仓库外目录**已于 2026-10-17 删除**，不再需要。
+
+
 # Hyacinth Electron 桌面包 —— 构建笔记
 
 > 目标：把 hyacinth 打成 `F:\DSH` 那种样式的**自包含 Electron 桌面包** ——

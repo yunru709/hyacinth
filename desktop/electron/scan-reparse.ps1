@@ -53,6 +53,9 @@ if ($hits.Count -gt 0) {
   "NONE - 完全无链接，可跨盘搬运"
 }
 
-# 落盘报告
-$hits | ConvertTo-Json -Depth 4 | Out-File 'C:\Users\74689\Desktop\Agent\hyacinth-electron\stage\reparse-report.json' -Encoding utf8
-"报告 -> stage\reparse-report.json"
+# 落盘报告：默认写进**仓库内**的 stage\（该目录已 gitignore；无则自动建）
+$report = Join-Path $PSScriptRoot 'stage\reparse-report.json'
+$reportDir = Split-Path -Parent $report
+if (-not (Test-Path $reportDir)) { New-Item -ItemType Directory -Force -Path $reportDir | Out-Null }
+$hits | ConvertTo-Json -Depth 4 | Out-File $report -Encoding utf8
+"报告 -> $report"

@@ -18,9 +18,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const REPO = process.argv[2];   // C:\...\hyacinth
-const OUT = process.argv[3];    // 目标 app 目录（其下建 node_modules）
+// 路径基准 = **仓库自身**（2026-10-17 孑遗指正：GUI 与 tui / webui 是**平行** UI，
+// 配方不该指向仓库外的临时目录）。因此两个参数都给仓库相对的默认值，裸跑即可。
+// 用法：node desktop\electron\materialize.mjs [REPO] [OUT]
+//   默认 REPO = 本脚本目录往上两级（= 仓库根）；OUT = <本脚本目录>\stage\app（已 gitignore）
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = process.argv[2] || path.resolve(HERE, '..', '..');
+const OUT = process.argv[3] || path.join(HERE, 'stage', 'app');
 
 const srcRoot = path.join(REPO, 'node_modules');
 const dstRoot = path.join(OUT, 'node_modules');
@@ -87,6 +93,25 @@ function placePkg(name, src, tag) {
 }
 
 fs.mkdirSync(dstRoot, { recursive: true });
+
+// ── 第 0 步：把后端**负载本体**放进 OUT（dist / plugins / package.json）──
+// ⚠️ 这一步原先缺失（子代理当时是手工补的）⇒ OUT 里只有 node_modules，build-package.ps1 会因
+//    缺 dist 直接 throw（2026-10-17 实测）。它属于"物化"：否则配方不完整、换台机器重建不出来。
+function copyDir(src, dst) {
+  fs.rmSync(dst, { recursive: true, force: true });
+  fs.cpSync(src, dst, { recursive: true });
+}
+for (const item of ['dist', 'plugins', 'package.json']) {
+  const src = path.join(REPO, item);
+  if (!fs.existsSync(src)) { log(`! 缺少 ${src}（跳过）`); continue; }
+  const dst = path.join(OUT, item);
+  if (fs.statSync(src).isDirectory()) copyDir(src, dst); else fs.copyFileSync(src, dst);
+  log('+ 负载', item);
+}
+if (!fs.existsSync(path.join(OUT, 'dist', 'index.js'))) {
+  log('❌ OUT 里没有 dist/index.js —— 先在仓库根跑 pnpm run build');
+  process.exit(1);
+}
 
 // ── 第 1 步：顶层 node_modules 的每个符号链接（含 @scope 目录）解引用 ──
 function walkTop(dir, prefix) {

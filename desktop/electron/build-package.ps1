@@ -17,15 +17,30 @@
 #   `ELECTRON_RUN_AS_NODE=1 electron.exe dist/index.js webui --port N` 实测被 commander
 #   拒为 `unknown option '--port'`（真 node 同一命令正常）⇒ 后端改用包内 runtime\node.exe。
 #   Electron 只负责窗口，不承担后端运行时 —— 两侧解耦，互不牵连。
+# 路径一律**以仓库为基准**（孑遗 2026-10-17 指正：GUI 是 tui / webui 的**平行** UI，源码与配方都该待在
+# 仓库里 ⇒ 不许指向仓库外的临时目录）。$PSScriptRoot = <repo>\desktop\electron
 param(
-  [string]$Out   = 'F:\Hyacinth-Electron',
-  [string]$Stage = 'C:\Users\74689\Desktop\Agent\hyacinth-electron\stage',
-  [string]$Shell = 'C:\Users\74689\Desktop\Agent\hyacinth-desktop',
-  [string]$ElecDist = 'C:\Users\74689\Desktop\Agent\hyacinth-desktop\node_modules\electron\dist',
-  [string]$NodeExe  = 'F:\Node\node.exe'
+  [string]$Out      = 'F:\Hyacinth-Electron',   # 产物落点（分发形态，可以放任何盘）
+  [string]$Stage    = '',                        # 物化工作区（默认 <repo>\desktop\electron\stage，已 gitignore）
+  [string]$Shell    = '',                        # 壳源码（默认 <repo>\desktop\electron\shell）
+  [string]$ElecDist = '',                        # Electron 运行时（默认 shell\node_modules\electron\dist）
+  [string]$NodeExe  = 'F:\Node\node.exe',        # 包内自带的那份真 node
+  [string]$IconSrc  = ''                         # 图标源；空 = 用仓库内 icon.png
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 默认值在这里补（不在 param 里用 $PSScriptRoot —— 不同 PS 版本对其就绪时机不一致，别赌）
+if (-not $Stage)    { $Stage    = Join-Path $PSScriptRoot 'stage' }
+if (-not $Shell)    { $Shell    = Join-Path $PSScriptRoot 'shell' }
+if (-not $ElecDist) { $ElecDist = Join-Path $Shell 'node_modules\electron\dist' }
+if (-not $IconSrc)  { $IconSrc  = Join-Path $PSScriptRoot 'icon.png' }
+
+if (-not (Test-Path (Join-Path $ElecDist 'electron.exe'))) {
+  throw ("找不到 Electron 运行时：$ElecDist`n" +
+         "  修法：cd desktop\electron\shell; `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; pnpm install`n" +
+         "  （pnpm 默认**不跑**构建脚本 ⇒ shell\package.json 里必须保留 pnpm.onlyBuiltDependencies:['electron']，否则 electron\dist 是空的）")
+}
 function Log($m) { Write-Host "[build] $m" }
 
 # ── 0. 清理 ───────────────────────────────────────────────
