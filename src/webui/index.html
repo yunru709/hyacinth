@@ -649,7 +649,7 @@
                   <div class="settings-row">
                     <label for="input-max-context" class="settings-label">最大上下文长度</label>
                     <div class="flex items-center">
-                      <input id="input-max-context" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-context" value="200000" min="1024" max="200000" step="1024">
+                      <input id="input-max-context" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-context" value="200000" min="1024" max="2000000" step="1024">
                       <span class="settings-unit">tokens</span>
                     </div>
                   </div>
@@ -1350,6 +1350,38 @@
                   <div class="settings-card-header"><i data-lucide="list" class="w-4 h-4"></i><span>后台进程</span><span id="proc-count" class="settings-desc" style="margin-left:auto"></span></div>
                   <div id="proc-list" data-dom-id="proc-list"></div>
                 </div>
+                <div class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="activity" class="w-4 h-4"></i>
+                    <span>运行时监督</span>
+                    <span id="sup-uptime" class="settings-desc" data-dom-id="sup-uptime" style="margin-left:auto">—</span>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">进程</div>
+                      <div class="settings-desc" id="sup-proc" data-dom-id="sup-proc">加载中…</div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">热重载监听</div>
+                      <div class="settings-desc" id="sup-watchers" data-dom-id="sup-watchers">—</div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">工作区（git）</div>
+                      <div class="settings-desc" id="sup-git" data-dom-id="sup-git">—</div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">内核插件</div>
+                      <div class="settings-desc" id="sup-plugins" data-dom-id="sup-plugins">—</div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
               <div class="settings-panel" id="panel-mcp" data-dom-id="panel-mcp" role="tabpanel" aria-labelledby="label-mcp">
                 <section class="settings-card">

@@ -74,6 +74,15 @@ export const UI_EVENT = {
   // companion 域事件（业务核心产生，非协议层产生）
   COMPANION_SAY: 'companion.say',
   COMPANION_VOICE: 'companion.voice',
+  /**
+   * 场景图更新（scene_render 产物落盘）。
+   *
+   * 为什么由**适配层**发出：场景由旁路 agent 的 scene_render 工具写盘，是
+   * 被动产物、没有事件源；而业务核心不得依赖 UI 适配层（分层规则 2）
+   * ⇒ 只能由 UI 侧监视场景目录、把"文件变化"转成协议事件。
+   * 前端据此刷新陪伴背景，替代此前的 15s 轮询（2026-10-16）。
+   */
+  COMPANION_SCENE: 'companion.scene',
 } as const;
 
 // ── companion 事件载荷 ───────────────────────────────────────

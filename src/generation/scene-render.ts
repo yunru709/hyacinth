@@ -71,9 +71,14 @@ interface SceneMeta {
 
 // ── 内部：路径 / 签名 ─────────────────────────────────────────────
 
+/** 场景**根**目录：~/.agent/companion/（其下每个子目录 = 一个角色） */
+export function getSceneRoot(): string {
+  return path.join(os.homedir(), '.agent', 'companion');
+}
+
 /** scene 输出目录：~/.agent/companion/<角色>/ */
 export function getSceneDir(characterName: string): string {
-  return path.join(os.homedir(), '.agent', 'companion', characterName);
+  return path.join(getSceneRoot(), characterName);
 }
 
 /** 规范化签名：去空白 + 折叠重复空格 + 取前 500 字 → sha256 前 16 */

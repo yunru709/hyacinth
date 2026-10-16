@@ -164,12 +164,9 @@
     if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
     if (view === 'settings' && connected) loadToolsAndMCP();
     if (view === 'companion' && connected) loadCompanion();
-    // 离开陪伴视图：停场景轮询、清 live 场景状态（下次进入重新加载）
+    // 离开陪伴视图：清 live 场景状态（下次进入重新加载）。
+    // 场景刷新已改事件驱动 ⇒ 无需停轮询（旧 companionScenePollTimer 已删）
     if (view !== 'companion') {
-      if (companionScenePollTimer) {
-        clearInterval(companionScenePollTimer);
-        companionScenePollTimer = null;
-      }
       companionLiveScene = null;
       companionLiveSceneSig = '';
     }
@@ -694,6 +691,11 @@
       case 'companion.voice':
         handleCompanionVoice(payload);
         break;
+      case 'companion.scene':
+        // 场景图更新推送：后端监视 scene.json 落盘后广播 ⇒ 即时刷新，无需轮询
+        // （此前是每 15s 拉一次 companion.scene，最多迟 15 秒才换背景）
+        loadCompanionScene();
+        break;
       case 'permission.request':
         showPermission(payload);
         break;
@@ -864,8 +866,10 @@
 
   async function refreshState() {
     try {
-      const snap = await client.request('state.get');
-      updateHeader(snap);
+      // state.subscribe（而非 state.get）：语义是"订阅 + 立刻回传当前快照"。
+      // 请求即登记订阅意图，后续靠 state.update 事件持续刷新，无需轮询。
+      const res = await client.request('state.subscribe');
+      if (res && res.snapshot) updateHeader(res.snapshot);
     } catch (e) { /* ignore */ }
   }
 
@@ -2096,11 +2100,68 @@
     });
   }
 
+  // ── 运行时监督（supervisor.status）────────────────────────────
+  // 「我的 GUI」的观测面：进程 / 守护 / 上次重启 / 热重载 watcher / git 工作区 / 内核插件。
+  // 协议契约：watchers 与 git 是**可选**字段 —— 后端未注入时协议层返回 null。
+  // ⇒ 必须把「未提供」与「取不到」分开显示，否则会把"没接上"误读成"坏了"。
+  function fmtUptime(sec) {
+    const n = Number(sec);
+    if (!Number.isFinite(n) || n < 0) return '—';
+    const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600);
+    const m = Math.floor((n % 3600) / 60), s = Math.floor(n % 60);
+    if (d) return `${d} 天 ${h} 小时`;
+    if (h) return `${h} 小时 ${m} 分`;
+    if (m) return `${m} 分 ${s} 秒`;
+    return `${s} 秒`;
+  }
+
+  /**
+   * 截断长文本。UI 里任何「长度不可控」的字段都必须过它。
+   * 教训（2026-10-16 实测）：supervisor.status 的 lastRestart.detail 是一整段
+   * 收尾说明（数百字），直接塞进 settings-desc 会把卡片撑变形。
+   */
+  function cut(s, n) {
+    const t = String(s == null ? '' : s);
+    return t.length > n ? t.slice(0, n) + '…' : t;
+  }
+
+  async function loadSupervisor() {
+    const setText = (sel, text) => { const n = $(sel); if (n) n.textContent = text; };
+    try {
+      const s = await client.request('supervisor.status');
+      if (!s) throw new Error('空响应');
+      let proc = `pid ${s.pid} · ${s.node}` + (s.guardian ? ' · 守护中' : ' · 无守护');
+      if (s.lastRestart) {
+        const r = typeof s.lastRestart === 'object'
+          ? (s.lastRestart.reason || JSON.stringify(s.lastRestart))
+          : String(s.lastRestart);
+        proc += ' · 上次重启：' + cut(r, 60);
+      }
+      setText('#sup-uptime', '运行 ' + fmtUptime(s.uptimeSec));
+      setText('#sup-proc', proc);
+      setText('#sup-watchers', s.watchers
+        ? (s.watchers.started ? '已启动' : '未启动') +
+          ` · ${s.watchers.watcherCount} 个 watcher · 合并窗口 ${s.watchers.debounceMs}ms`
+        : '未提供（后端未注入）');
+      setText('#sup-git', s.git
+        ? (s.git.isRepo ? (s.git.dirty ? '有未提交改动' : '工作区干净') : '不是 git 仓库') +
+          (s.git.lastAutoCommit ? ' · 最近自动提交：' + cut(s.git.lastAutoCommit, 60) : '')
+        : '未提供（后端未注入）');
+      const ps = Array.isArray(s.plugins) ? s.plugins : [];
+      setText('#sup-plugins', ps.length
+        ? ps.map((p) => `${p.id}（${p.state === 'mounted' ? '已挂载' : '错误' + (p.error ? '：' + cut(p.error, 40) : '')}）`).join(' · ')
+        : '无');
+    } catch (e) {
+      setText('#sup-uptime', '取不到监督状态：' + ((e && e.message) || '未知错误'));
+    }
+  }
+
   function loadSystemPanel() {
     bindSystemOnce();
     loadOrchestrator();
     loadSessionStats();
     loadProcesses();
+    loadSupervisor();
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
   }
 
@@ -2393,7 +2454,7 @@
   // 轮询检测 signature/createdAt 变化 → 淡入切换；无场景时回落 demo 序列。
   let companionLiveScene = null;       // 当前真实场景 { signature, imageUrl, ... }
   let companionLiveSceneSig = '';      // 上次渲染的签名（变化才重绘）
-  let companionScenePollTimer = null;  // 场景轮询定时器（15s）
+  // 场景刷新已改为事件驱动（后端推 companion.scene）⇒ 不再有轮询定时器
 
   // demo 场景序列（无真实场景时的兜底氛围；有 scene.png 时切为 live 单图）
   const COMPANION_SCENES = [
@@ -2869,12 +2930,11 @@
         updateCompanionButton();
       }
       companionSessionId = currentSessionId;
-      // 场景：先启动 demo 兜底，再尝试真实场景（有 scene.png 则切换为 live 单图）；
-      // 轮询 15s 检测 scene_render 变化（旁路 agent 写文件是被动产物，无事件推送）
+      // 场景：先启动 demo 兜底，再尝试真实场景（有 scene.png 则切换为 live 单图）。
+      // 后续变化由后端**推送** companion.scene 事件驱动（后端监视 scene.json 落盘）
+      // —— 此前是每 15s 拉一次（companionScenePollTimer），已改为事件驱动 ✓
       companionStartScene();
       await loadCompanionScene();
-      if (companionScenePollTimer) clearInterval(companionScenePollTimer);
-      companionScenePollTimer = setInterval(loadCompanionScene, 15000);
       await loadCompanionHistory();
     } catch (e) {
       companionSetDialogue('进入陪伴模式失败: ' + ((e && e.message) || '未知错误'));

@@ -15,6 +15,7 @@
 // ============================================================
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { UIAdapter } from '../../ui-protocol/adapter.js';
 import type { AgentFactory, ChannelOutputHandler } from '../interface.js';
@@ -53,7 +54,8 @@ import { createCompanionDomain, type SceneReaderLike, type CompanionSceneMeta } 
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
 import { getSayHistoryStore } from '../../companion/say-history.js';
-import { getSceneDir } from '../../generation/index.js';
+import { getSceneDir, getSceneRoot } from '../../generation/index.js';
+import { watchCompanionScenes, type CompanionSceneWatchHandle } from './companion-scene-watch.js';
 import { getManifestLoader } from '../../hot-reload/manifest-watcher.js';
 import { createLogger } from '../../logging/logger.js';
 import { UI_EVENT } from '../../events.js';
@@ -313,6 +315,8 @@ export class UiProtocolSession {
   private statsProvider?: (sessionId: string) => Promise<unknown>;
   /** 后端依赖存档（rebindRuntimeRegistry 重绑 model 域时复用其余 options） */
   private backend: UiProtocolSessionBackend;
+  /** 陪伴场景目录监视句柄（scene_render 落盘 → COMPANION_SCENE 事件；close 时释放） */
+  private sceneWatch: CompanionSceneWatchHandle | null = null;
 
   constructor(adapter: UIAdapter, sessionId: string | undefined, backend: UiProtocolSessionBackend) {
     this.adapter = adapter;
@@ -516,6 +520,23 @@ export class UiProtocolSession {
       // attach 协议服务器 → 消息自动进入 7 域路由
       this.server.attach(this.adapter);
       this.server.broadcast('ui.connected', { sessionId: this.sessionId });
+
+      // 陪伴场景推送：scene_render 落盘（被动产物、无事件源）⇒ UI 侧监视目录，
+      // 变化即广播 COMPANION_SCENE，前端据此即时换背景（替代此前的 15s 轮询）。
+      // 监视不可用 ⇒ 句柄 inactive，记一条 warn（前端仍有首次 loadCompanionScene 兜底），
+      // 绝不静默（2026-10-15 纪律：catch 不能把错误变成"看起来正常"）。
+      this.sceneWatch = watchCompanionScenes({
+        root: getSceneRoot(),
+        onChange: (character) => {
+          this.server.broadcast(UI_EVENT.COMPANION_SCENE, { character });
+        },
+      });
+      if (!this.sceneWatch.active) {
+        logger.warn('Companion scene watch unavailable (scene background will not auto-refresh)', {
+          root: getSceneRoot(),
+        });
+      }
+
       logger.info('UI protocol session initialized', { sessionId: this.sessionId });
     } catch (err) {
       logger.error('UI protocol session init failed', err instanceof Error ? err : new Error(String(err)));
@@ -536,6 +557,9 @@ export class UiProtocolSession {
   }
 
   async close(): Promise<void> {
+    // 释放场景目录监视（不释放会持续持有 fs 句柄；每个 WS 连接各有一份）
+    this.sceneWatch?.close();
+    this.sceneWatch = null;
     this.adapter.close();
     this.loop = null;
   }

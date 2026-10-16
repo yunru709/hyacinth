@@ -32,7 +32,7 @@ export { GenerationService } from './service.js';
 export type { GenerateOptions } from './service.js';
 export { VolcengineProvider, createVolcengineProvider, meta as volcengineMeta } from './adapters/volcengine.js';
 export { BUILTIN_ADAPTERS } from './adapters/index.js';
-export { SCENE_RENDER_TOOL, executeSceneRender, getSceneDir } from './scene-render.js';
+export { SCENE_RENDER_TOOL, executeSceneRender, getSceneDir, getSceneRoot } from './scene-render.js';
 export type { SceneRenderDeps } from './scene-render.js';
 export { resolveVendorInheritance, getLlmProvidersPath } from './vendor.js';
 export {
