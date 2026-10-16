@@ -558,13 +558,14 @@
             updateCompanionButton();
           }
         }).catch(() => {});
-        // 启动默认模式：startup.defaultMode=陪伴模式 → UI 启动即进入陪伴视图
-        //（一次性；进入后 loadCompanion 会经协议层激活后端 Router。用户切走不拉回）
+        // 启动默认模式：**只问后端**（真源 = config.startup.defaultMode，不再有 localStorage
+        // 缓存 —— 那条缓存已整体移除，理由见 bindUI 之前的说明段）。
+        // companion → 进陪伴视图（一次性；进入后 loadCompanion 会经协议层激活后端 Router；
+        // 用户切走不拉回）。
         if (!startupModeApplied) {
           startupModeApplied = true;
           client.request('config.get', { path: 'startup.defaultMode' }).then((r) => {
             const mode = (r && r.value) || 'normal';
-            try { localStorage.setItem('hyacinth.startupMode', mode); } catch (e) { /* ignore */ }
             if (mode === 'companion' && currentView() === 'chat') goTo('#/companion');
           }).catch(() => {});
         }
@@ -2343,13 +2344,11 @@
 
   // 绑定设置视图交互：控件 change → config.set；重置按钮 → config.reset
   function bindSettingsView() {
-    // 默认模式：修改时同步本地缓存（下次启动直接进入对应模式，无闪屏）
-    const modeSel = $('[data-dom-id="select-default-context-mode"]');
-    if (modeSel) {
-      modeSel.addEventListener('change', () => {
-        try { localStorage.setItem('hyacinth.startupMode', modeSel.value || 'normal'); } catch (e) { /* ignore */ }
-      });
-    }
+    // ⚠️ 「默认模式」这里**不再写 localStorage 缓存**（2026-10-16 移除）：它曾与后端配置
+    //   构成两个真源，且会在配置经**别的渠道**变更后变陈旧 ⇒ 页面按陈旧值跳错视图
+    //   （实测：config=normal 而页面停在 #/companion）。
+    //   本控件现在只负责写 config（由 SETTINGS_MAP 的通用绑定完成 config.set）；
+    //   「启动时进哪个模式」的读取与跳转一律问后端（ui.connected → config.get）。
     // 陪伴音色：换选 → 绑定为默认陪伴角色的音色（协议 companion.voiceBind）
     const voiceSel = $('[data-dom-id="select-companion-voice"]');
     if (voiceSel) {
@@ -3773,15 +3772,14 @@
 
   // 主题：先按本地缓存立即应用（避免加载闪烁），再渲染选择器
   initThemeFromCache();
-  // 启动默认模式（本地缓存的 startup.defaultMode）：陪伴模式 → 直接以陪伴视图
-  // 启动（在 navigate() 前设 hash，打开即陪伴页，不闪主界面）。
-  // 缓存在 ui.connected 读取配置时与设置页修改默认模式时更新；
-  // 首次打开无缓存时走连接后的兜底跳转。
-  try {
-    if (localStorage.getItem('hyacinth.startupMode') === 'companion' && !location.hash) {
-      location.hash = '#/companion';
-    }
-  } catch (e) { /* 隐私模式忽略 */ }
+  // ⚠️ 这里**故意不再**用 localStorage 缓存抢先跳到 #/companion（2026-10-16 移除）：
+  //   那份缓存只在"本页写、本页读"时自洽；一旦配置经**别的渠道**变更
+  //   （TUI `/default-mode`、直接改 config.json、另一个窗口），缓存就陈旧
+  //   ⇒ 页面按陈旧值跳进陪伴视图，而配置与后端其实都是 normal。
+  //   实测复现：config=normal、后端 companion.get={active:false}，页面 hash 却是 `#/companion`。
+  //   现在「启动默认模式」的真源 = **后端配置**：ui.connected 后读
+  //   `config.get startup.defaultMode` 再决定是否跳转（见 handleEvent 的 ui.connected 分支）。
+  //   代价：配置为陪伴时，首屏可能有一瞬 chat 再切到陪伴 —— 用"正确"换掉"不闪" ✓
   bindUI();
   renderThemes();
   navigate();
