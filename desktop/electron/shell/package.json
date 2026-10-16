@@ -1,0 +1,11 @@
+{
+    "name":  "hyacinth-desktop",
+    "version":  "0.0.1",
+    "private":  true,
+    "description":  "Hyacinth 桌面外壳（Electron）——把 hyacinth 的后端 + 现有 WebUI 前端装进一个原生窗口",
+    "main":  "main.js",
+    "scripts":  {
+                    "start":  "electron .",
+                    "shot":  "electron . --shot"
+                }
+}
