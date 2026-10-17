@@ -559,26 +559,29 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   word-break: break-word;
 }
 
-/* ── 交付气泡（say）—— 它是「答案」，要和「过程 / 普通回复」一眼区分 ──────
-   设计取舍：
-     · 左侧 3px 强调条 + primary 淡底：靠左缘与底色区分，不用大色块抢正文焦点
-     · 「交付」徽章由 ::before 伪元素改成**真实头行**：
-       正文现在是 markdown（h1/h2/表格都是块级元素），伪元素与块级首元素并排时
-       行内/块级的间距不可控；拆成独立头行后间距由 flex 统一管 ✓
-     · 复制按钮复制的是**原始 markdown**（不是渲染后的 DOM 文本）⇒ 粘出去仍可用 */
-.message-bubble.message-delivery {
-  border-color: color-mix(in srgb, var(--hyacinth-primary) 42%, var(--hyacinth-border));
-  border-left: 3px solid var(--hyacinth-primary);
-  background: color-mix(in srgb, var(--hyacinth-primary) 6%, var(--hyacinth-card));
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+/* ── 助手内容块（say / 普通回复）—— **不用气泡** ─────────────────────────
+   设计取向（2026-10-17 按体验调整）：
+     助手回复的信息量远大于用户提问（表格 / 围栏 / 长列表），气泡的 max-width 与内边距
+     会把长内容挤窄 ✗ ⇒ 改为**全宽文档流**，横向空间全部留给正文。
+     用户消息仍是气泡（短、且需与助手区分）⇒ 纵向节奏变成「右气泡 / 左文档」。
+
+   交付与普通助手的区别只靠两处低成本标记（**不整块着色** —— 长回答会被压得很重）：
+     · 左侧 2px primary 细线
+     · 头行的 `交付` 徽章 + 复制按钮
+   两类共用同样的 padding-left / border 宽度 ⇒ 左缘对齐、切换时不跳动。 */
+.assistant-block {
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 2px solid transparent;
 }
+.assistant-block.is-delivery { border-left-color: var(--hyacinth-primary); }
 
 .delivery-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .delivery-chip {
   display: inline-block;
@@ -616,44 +619,44 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 /* 头行之后的首个正文块去掉上边距（否则标题会多出 0.9em 空隙） */
 .delivery-head + .msg-rich > *:first-child { margin-top: 0; }
 
-/* ── markdown 渲染样式（交付正文）────────────────────────────────────
-   背景：交付正文（say 的 content）是 markdown，此前被 esc() 塞进单个 <p>，
+/* ── markdown 渲染样式（助手正文）────────────────────────────────────
+   背景：助手正文是 markdown，此前被 esc() 塞进单个 <p>，
         `**加粗**` / 围栏 / `| 表格 |` / `# 标题` 全部按字面显示 ✗
-        （渲染器见 src/webui/markdown.js，本次新增）。
+        （渲染器见 src/webui/markdown.js）。
    为什么必须手写这些规则：Tailwind preflight 会清零标题/列表的默认间距 ⇒
         只把 HTML 渲染出来仍然会「挤成一坨」，等于没渲染。
-   作用域：全部限定在 .message-bubble 内，不外溢到其它面板。
-   字号：固定 .875rem（= 原 `text-sm`）⇒ 渲染后观感与修复前一致，无视觉回归。 */
-.message-bubble { font-size: 0.875rem; line-height: 1.65; }
-.message-bubble .msg-rich > *:first-child { margin-top: 0; }
-.message-bubble .msg-rich > *:last-child { margin-bottom: 0; }
+   作用域：限定在 .msg-rich（助手内容块专用），不外溢到用户气泡与其它面板。
+   字号：固定 .875rem（= 原 `text-sm`）⇒ 与原观感一致，无视觉回归。 */
+.msg-rich { min-width: 0; font-size: 0.875rem; line-height: 1.65; max-width: 74rem; }
+.msg-rich > *:first-child { margin-top: 0; }
+.msg-rich > *:last-child { margin-bottom: 0; }
 
-.message-bubble .md-p { margin: 0 0 0.625em; line-height: 1.65; }
+.msg-rich .md-p { margin: 0 0 0.625em; line-height: 1.65; }
 
-.message-bubble .md-h { margin: 0.9em 0 0.45em; font-weight: 600; line-height: 1.35; }
-.message-bubble h1.md-h { font-size: 1.35em; }
-.message-bubble h2.md-h { font-size: 1.22em; }
-.message-bubble h3.md-h { font-size: 1.1em; }
-.message-bubble h4.md-h,
-.message-bubble h5.md-h,
-.message-bubble h6.md-h { font-size: 1em; color: var(--hyacinth-muted-foreground); }
+.msg-rich .md-h { margin: 0.9em 0 0.45em; font-weight: 600; line-height: 1.35; }
+.msg-rich h1.md-h { font-size: 1.35em; }
+.msg-rich h2.md-h { font-size: 1.22em; }
+.msg-rich h3.md-h { font-size: 1.1em; }
+.msg-rich h4.md-h,
+.msg-rich h5.md-h,
+.msg-rich h6.md-h { font-size: 1em; color: var(--hyacinth-muted-foreground); }
 
-.message-bubble ul,
-.message-bubble ol { margin: 0 0 0.625em; padding-left: 1.4em; }
-.message-bubble ul { list-style: disc; }
-.message-bubble ol { list-style: decimal; }
-.message-bubble li { margin: 0.2em 0; line-height: 1.6; }
-.message-bubble li > ul,
-.message-bubble li > ol { margin: 0.2em 0 0.1em; }
+.msg-rich ul,
+.msg-rich ol { margin: 0 0 0.625em; padding-left: 1.4em; }
+.msg-rich ul { list-style: disc; }
+.msg-rich ol { list-style: decimal; }
+.msg-rich li { margin: 0.2em 0; line-height: 1.6; }
+.msg-rich li > ul,
+.msg-rich li > ol { margin: 0.2em 0 0.1em; }
 
-.message-bubble .md-code {
+.msg-rich .md-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
   padding: 0.12em 0.35em;
   border-radius: 4px;
   background: color-mix(in srgb, var(--hyacinth-foreground) 9%, transparent);
 }
-.message-bubble .md-pre {
+.msg-rich .md-pre {
   margin: 0 0 0.625em;
   padding: 0.7em 0.85em;
   border: 1px solid var(--hyacinth-border);
@@ -662,44 +665,45 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   font-size: 0.85em;
   line-height: 1.55;
 }
-.message-bubble .md-pre code {
+.msg-rich .md-pre code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: none;
   padding: 0;
   font-size: inherit;
 }
 
-.message-bubble .md-link {
+.msg-rich .md-link {
   color: var(--hyacinth-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.message-bubble .md-quote {
+.msg-rich .md-quote {
   margin: 0 0 0.625em;
   padding: 0.1em 0 0.1em 0.8em;
   border-left: 3px solid var(--hyacinth-border);
   color: var(--hyacinth-muted-foreground);
 }
 
-.message-bubble .md-hr { margin: 0.9em 0; border: 0; border-top: 1px solid var(--hyacinth-border); }
+.msg-rich .md-hr { margin: 0.9em 0; border: 0; border-top: 1px solid var(--hyacinth-border); }
 
-.message-bubble .md-table-wrap { margin: 0 0 0.625em; overflow-x: auto; }
-.message-bubble .md-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
-.message-bubble .md-table th,
-.message-bubble .md-table td {
+.msg-rich .md-table-wrap { margin: 0 0 0.625em; overflow-x: auto; }
+.msg-rich .md-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.msg-rich .md-table th,
+.msg-rich .md-table td {
   border: 1px solid var(--hyacinth-border);
   padding: 0.35em 0.6em;
   text-align: left;
   vertical-align: top;
 }
-.message-bubble .md-table th {
+.msg-rich .md-table th {
   background: color-mix(in srgb, var(--hyacinth-foreground) 5%, transparent);
   font-weight: 600;
 }
-.message-bubble .md-table .md-center { text-align: center; }
-.message-bubble .md-table .md-right { text-align: right; }
+.msg-rich .md-table .md-center { text-align: center; }
+.msg-rich .md-table .md-right { text-align: right; }
 
-.message-bubble strong { font-weight: 600; }
-.message-bubble del { opacity: 0.65; }
+.msg-rich strong { font-weight: 600; }
+.msg-rich del { opacity: 0.65; }
+
 

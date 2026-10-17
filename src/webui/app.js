@@ -367,16 +367,19 @@
   }
 
   /**
-   * 助手气泡。
+   * 助手内容块。
    *
-   * opts.delivery = 这是**交付结论**（say 的 content）—— 要能和「过程 / 普通回复」一眼区分：
-   *   · 头像换 accent + send 图标（不是普通的 bot 图标）
-   *   · 气泡加左侧强调条 + primary 淡底（.message-delivery，见 app.css）
-   *   · 顶部一行：`交付` 徽章 + 复制按钮（复制**原始 markdown**，而非渲染后的 DOM 文本）
-   *   · 更宽（表格/围栏需要横向空间）
+   * 设计取向（2026-10-17 按体验调整）：**助手侧不用气泡**。
+   *   助手回复的信息量远大于用户提问（表格 / 围栏 / 长列表），气泡的 max-width 与内边距
+   *   会把长内容挤窄 ⇒ 改为**全宽文档流**（flex-1 + min-w-0），横向空间全留给正文。
+   *   用户消息仍用气泡（短、且需与助手区分）⇒ 纵向节奏变成「右气泡 / 左文档」。
    *
-   * 正文统一包一层 .msg-rich：markdown 渲染结果的块级元素间距靠它收口
-   * （首块去上边距、末块去下边距），且与「是否有交付头行」解耦。
+   * opts.delivery = 这是**交付结论**（say 的 content）—— 用两处低成本标记区分：
+   *   · 头像换 accent + send 图标
+   *   · 左侧 2px primary 细线 + 头行（`交付` 徽章 + 复制按钮）
+   *   刻意不整块着色：长回答会被压得很重。
+   *
+   * 正文包一层 .msg-rich：markdown 块级元素间距靠它收口（首块去上边距、末块去下边距）。
    */
   function bubbleAssistant(text, opts) {
     const delivery = !!(opts && opts.delivery);
@@ -387,21 +390,19 @@
     avatar.innerHTML = delivery
       ? '<i data-lucide="send" class="w-4 h-4 text-accent"></i>'
       : '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
-    const body = el('div', delivery
-      ? 'max-w-[92%] md:max-w-[85%] space-y-2'
-      : 'max-w-[90%] md:max-w-[75%] space-y-3');
-    const b = el('div', 'message-bubble rounded-xl px-4 py-3 bg-card border border-border text-foreground shadow-sm');
+    // 全宽：flex-1 吃满剩余宽度；min-w-0 防长表格/长 URL 把 flex 子项撑破
+    const body = el('div', 'flex-1 min-w-0 space-y-2');
+    const block = el('div', delivery ? 'assistant-block is-delivery' : 'assistant-block');
     if (delivery) {
-      b.classList.add('message-delivery');
       const head = el('div', 'delivery-head');
       head.appendChild(el('span', 'delivery-chip', '交付'));
       head.appendChild(makeCopyButton(text));
-      b.appendChild(head);
+      block.appendChild(head);
     }
     const content = el('div', 'msg-rich');
     content.innerHTML = renderRich(text);
-    b.appendChild(content);
-    body.appendChild(b);
+    block.appendChild(content);
+    body.appendChild(block);
     body.appendChild(el('span', 'block text-[10px] text-muted-foreground', nowTime()));
     wrap.appendChild(avatar);
     wrap.appendChild(body);
