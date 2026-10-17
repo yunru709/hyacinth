@@ -291,13 +291,116 @@
     return wrap;
   }
 
-  function bubbleAssistant(text) {
+  // ── 交付气泡的「复制原文」────────────────────────────────────────
+  /**
+   * 复制纯文本。优先 async clipboard（127.0.0.1 属安全上下文 ⇒ 可用 ✓），
+   * 非安全上下文或权限被拒时退回 textarea + execCommand。
+   */
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* 落到兜底 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
+
+  /**
+   * 剪贴板不可用时的退化：选中气泡正文，让用户自己 Ctrl+C。
+   * 触发场景：非安全上下文（用 --lan 从别的机器访问 http 页面）或浏览器拒绝授权。
+   */
+  function selectBubbleText(btn) {
+    try {
+      const bubble = btn.closest('.message-bubble');
+      const target = bubble && bubble.querySelector('.msg-rich');
+      if (!target) return false;
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const sel = window.getSelection();
+      if (!sel) return false;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /** 复制按钮：点击后原地反馈「已复制 / 已选中·Ctrl+C / 失败」，约 1.8s 后复位 */
+  function makeCopyButton(raw) {
+    const icon = (name) => '<i data-lucide="' + name + '" class="w-3.5 h-3.5"></i>';
+    const btn = el('button', 'delivery-copy');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', '复制这条交付内容');
+    btn.title = '复制原文（markdown）';
+    const refreshIcons = () => { if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } } };
+    const reset = () => {
+      btn.classList.remove('is-copied', 'is-selected', 'is-failed');
+      btn.innerHTML = icon('copy');
+      refreshIcons();
+    };
+    btn.innerHTML = icon('copy');
+    btn.addEventListener('click', async () => {
+      const ok = await copyText(raw);
+      // 写剪贴板失败 ⇒ 退化成立即选中正文（不清选区，用户马上就能 Ctrl+C）
+      const selected = ok ? false : selectBubbleText(btn);
+      btn.classList.toggle('is-copied', ok);
+      btn.classList.toggle('is-selected', selected);
+      btn.classList.toggle('is-failed', !ok && !selected);
+      btn.innerHTML = ok
+        ? icon('check') + '<span>已复制</span>'
+        : selected
+          ? icon('clipboard') + '<span>已选中 · Ctrl+C</span>'
+          : icon('x') + '<span>复制失败</span>';
+      refreshIcons();
+      setTimeout(reset, 1800);
+    });
+    return btn;
+  }
+
+  /**
+   * 助手气泡。
+   *
+   * opts.delivery = 这是**交付结论**（say 的 content）—— 要能和「过程 / 普通回复」一眼区分：
+   *   · 头像换 accent + send 图标（不是普通的 bot 图标）
+   *   · 气泡加左侧强调条 + primary 淡底（.message-delivery，见 app.css）
+   *   · 顶部一行：`交付` 徽章 + 复制按钮（复制**原始 markdown**，而非渲染后的 DOM 文本）
+   *   · 更宽（表格/围栏需要横向空间）
+   *
+   * 正文统一包一层 .msg-rich：markdown 渲染结果的块级元素间距靠它收口
+   * （首块去上边距、末块去下边距），且与「是否有交付头行」解耦。
+   */
+  function bubbleAssistant(text, opts) {
+    const delivery = !!(opts && opts.delivery);
     const wrap = el('div', 'flex justify-start gap-3');
-    const avatar = el('div', 'w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-1');
-    avatar.innerHTML = '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
-    const body = el('div', 'max-w-[90%] md:max-w-[75%] space-y-3');
+    const avatar = el('div', delivery
+      ? 'w-7 h-7 rounded-md bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0 mt-1'
+      : 'w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-1');
+    avatar.innerHTML = delivery
+      ? '<i data-lucide="send" class="w-4 h-4 text-accent"></i>'
+      : '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
+    const body = el('div', delivery
+      ? 'max-w-[92%] md:max-w-[85%] space-y-2'
+      : 'max-w-[90%] md:max-w-[75%] space-y-3');
     const b = el('div', 'message-bubble rounded-xl px-4 py-3 bg-card border border-border text-foreground shadow-sm');
-    b.innerHTML = renderRich(text);
+    if (delivery) {
+      b.classList.add('message-delivery');
+      const head = el('div', 'delivery-head');
+      head.appendChild(el('span', 'delivery-chip', '交付'));
+      head.appendChild(makeCopyButton(text));
+      b.appendChild(head);
+    }
+    const content = el('div', 'msg-rich');
+    content.innerHTML = renderRich(text);
+    b.appendChild(content);
     body.appendChild(b);
     body.appendChild(el('span', 'block text-[10px] text-muted-foreground', nowTime()));
     wrap.appendChild(avatar);
@@ -422,8 +525,7 @@
     const sayText = historySayText(m);
     if (sayText) {
       flushHistoryProcess(true);
-      const dwrap = bubbleAssistant(sayText);
-      dwrap.classList.add('msg-delivery');
+      const dwrap = bubbleAssistant(sayText, { delivery: true });
       ml.appendChild(dwrap);
       return;
     }
@@ -614,8 +716,7 @@
         if (companionActive) break;      // 陪伴会话走 companion.say，不进主界面 ✓
         const sayText = (payload && payload.content) || '';
         if (sayText) {
-          const wrap = bubbleAssistant(sayText);
-          wrap.classList.add('msg-delivery');   // 专属样式 ⇒ 一眼看出"这是交付" ✓
+          const wrap = bubbleAssistant(sayText, { delivery: true });   // 专属样式 ⇒ 一眼看出「这是交付」✓
           const ml = $('#message-list');
           if (ml) ml.appendChild(wrap);
         }

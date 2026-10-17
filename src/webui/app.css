@@ -559,24 +559,62 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   word-break: break-word;
 }
 
-/* ── 交付输出（say）：回合的"最终输出"，与「过程」区分开 ✓ ────────────────
-   说明：`.msg-delivery` 加在 bubbleAssistant 生成的外层包裹上，
-   所以用后代选择器给里面的气泡换一套更醒目的样式 ✓ */
-.msg-delivery .message-bubble {
-  border-color: var(--hyacinth-primary);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hyacinth-primary) 35%, transparent);
+/* ── 交付气泡（say）—— 它是「答案」，要和「过程 / 普通回复」一眼区分 ──────
+   设计取舍：
+     · 左侧 3px 强调条 + primary 淡底：靠左缘与底色区分，不用大色块抢正文焦点
+     · 「交付」徽章由 ::before 伪元素改成**真实头行**：
+       正文现在是 markdown（h1/h2/表格都是块级元素），伪元素与块级首元素并排时
+       行内/块级的间距不可控；拆成独立头行后间距由 flex 统一管 ✓
+     · 复制按钮复制的是**原始 markdown**（不是渲染后的 DOM 文本）⇒ 粘出去仍可用 */
+.message-bubble.message-delivery {
+  border-color: color-mix(in srgb, var(--hyacinth-primary) 42%, var(--hyacinth-border));
+  border-left: 3px solid var(--hyacinth-primary);
+  background: color-mix(in srgb, var(--hyacinth-primary) 6%, var(--hyacinth-card));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }
-.msg-delivery .message-bubble::before {
-  content: '交付';
+
+.delivery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.delivery-chip {
   display: inline-block;
-  margin-right: 6px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 10px;
-  vertical-align: middle;
-  background: color-mix(in srgb, var(--hyacinth-primary) 14%, transparent);
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--hyacinth-primary) 15%, transparent);
   color: var(--hyacinth-primary);
+  user-select: none;
 }
+.delivery-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 10px;
+  line-height: 1.6;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.delivery-copy:hover { opacity: 1; background: color-mix(in srgb, var(--hyacinth-foreground) 7%, transparent); }
+.delivery-copy:focus-visible { opacity: 1; outline: 2px solid var(--hyacinth-ring); outline-offset: 1px; }
+.delivery-copy.is-copied { opacity: 1; color: var(--hyacinth-primary); }
+.delivery-copy.is-selected { opacity: 1; color: var(--hyacinth-accent); }
+.delivery-copy.is-failed { opacity: 1; color: #d94343; }
+
+/* 头行之后的首个正文块去掉上边距（否则标题会多出 0.9em 空隙） */
+.delivery-head + .msg-rich > *:first-child { margin-top: 0; }
 
 /* ── markdown 渲染样式（交付正文）────────────────────────────────────
    背景：交付正文（say 的 content）是 markdown，此前被 esc() 塞进单个 <p>，
@@ -587,8 +625,8 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
    作用域：全部限定在 .message-bubble 内，不外溢到其它面板。
    字号：固定 .875rem（= 原 `text-sm`）⇒ 渲染后观感与修复前一致，无视觉回归。 */
 .message-bubble { font-size: 0.875rem; line-height: 1.65; }
-.message-bubble > *:first-child { margin-top: 0; }
-.message-bubble > *:last-child { margin-bottom: 0; }
+.message-bubble .msg-rich > *:first-child { margin-top: 0; }
+.message-bubble .msg-rich > *:last-child { margin-bottom: 0; }
 
 .message-bubble .md-p { margin: 0 0 0.625em; line-height: 1.65; }
 
