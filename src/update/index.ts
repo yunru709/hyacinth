@@ -1,8 +1,8 @@
 export { loadConfig, saveConfig } from './config.js';
 export { checkForUpdate } from './check.js';
 export { downloadWithProgress } from './download.js';
-export { findExtractedDir, stageRelease, smokeTestRelease, ensureSelfBuildBaseline } from './install.js';
-export type { StageReleaseOptions, StageReleaseResult } from './install.js';
+export { findExtractedDir, stageRelease, smokeTestRelease, ensureSelfBuildBaseline, commitRelease } from './install.js';
+export type { StageReleaseOptions, StageReleaseResult, CommitReleaseOptions } from './install.js';
 export {
   resolveInstallRoot,
   readPointer,

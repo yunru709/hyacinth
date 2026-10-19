@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, smokeTestRelease, resolveInstallRoot, readPointer, writePointerAtomic, pruneReleases, releaseDir, ensureSelfBuildBaseline, makeBuildId, writeRollbackRecord } from '../update/index.js';
+import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, commitRelease, resolveInstallRoot, readPointer, writePointerAtomic, releaseDir, ensureSelfBuildBaseline, makeBuildId, writeRollbackRecord } from '../update/index.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import type { ProviderType, ProviderConfig } from '../types.js';
@@ -1199,21 +1199,21 @@ export async function runCli(): Promise<void> {
        * 在首启失败时回退（`lastGood !== version`）。
        */
       const finishUpdate = (newBuildId: string, newVer: string, currentBuildId: string): never => {
-        if (!smokeTestRelease(installDir, newBuildId, newVer)) {
-          process.stderr.write(`[update] 新版本 v${newVer} (${newBuildId}) 自检未通过，已保留旧版本运行（未切换指针）。\n`);
+        try {
+          // 冒烟 → 双壳副本 → 指针 → prune → pending。失败不切指针。
+          commitRelease(installDir, {
+            newBuildId,
+            newVersion: newVer,
+            currentBuildId,
+            writePending: (p) => writeUpdatePending(p),
+          });
+        } catch (err) {
+          process.stderr.write(
+            `[update] 新版本 v${newVer} (${newBuildId}) 切换失败：${err instanceof Error ? err.message : String(err)}。` +
+            '已保留旧版本运行（未切换指针）。\n',
+          );
           process.exit(1);
         }
-        // 双壳副本：新版壳写入 installDir/dist（旧 shim 与新 bin 都指向合法壳）
-        const srcBootstrap = path.join(releaseDir(installDir, newBuildId), 'dist', 'bootstrap.js');
-        if (fsSync.existsSync(srcBootstrap)) {
-          fsSync.mkdirSync(path.join(installDir, 'dist'), { recursive: true });
-          fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'bootstrap.js'));
-          fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'index.js'));
-        }
-        // 原子切指针 + 写 pending（guardian 据此自动回退/定案）
-        writePointerAtomic(installDir, { version: newBuildId, lastGood: currentBuildId });
-        pruneReleases(installDir, 3, [`v${newBuildId}`, `v${currentBuildId}`]);
-        writeUpdatePending({ version: newBuildId, lastGood: currentBuildId });
         process.stderr.write(`[update] ✅ 已更新到 v${newVer} (${newBuildId})。正在自动重启...\n`);
         // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
         writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer} (${newBuildId})` });

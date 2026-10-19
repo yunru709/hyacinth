@@ -9,7 +9,13 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { execSync } from 'node:child_process';
-import { stageRelease, smokeTestRelease, findExtractedDir, ensureSelfBuildBaseline } from './install.js';
+import {
+  stageRelease,
+  smokeTestRelease,
+  findExtractedDir,
+  ensureSelfBuildBaseline,
+  commitRelease,
+} from './install.js';
 import { readPointer, releaseDir } from './releases.js';
 
 const mockExecSync = vi.mocked(execSync);
@@ -182,6 +188,53 @@ describe('ensureSelfBuildBaseline（编译前备份旧产物）', () => {
 
     expect(second).toBe(first);
     expect(readPointer(install)?.version).toBe(first);
+  });
+});
+
+describe('commitRelease（指针切换）', () => {
+  it('冒烟通过 → 切指针、复制新壳、写 pending；lastGood 是旧 buildId', () => {
+    const current = '0.9.56';
+    const next = '0.9.56-20261019T120000-abcdef12';
+    touch(join(install, 'dist', 'index.js'), 'old-index');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56' }));
+    touch(join(releaseDir(install, current), 'dist', 'bootstrap.js'), 'old-boot');
+    touch(join(releaseDir(install, next), 'dist', 'bootstrap.js'), 'new-boot');
+    const writePending = vi.fn();
+
+    commitRelease(install, {
+      newBuildId: next,
+      newVersion: '0.9.56',
+      currentBuildId: current,
+      smokeTest: () => true,
+      writePending,
+    });
+
+    expect(readPointer(install)).toEqual({ version: next, lastGood: current });
+    expect(writePending).toHaveBeenCalledWith({ version: next, lastGood: current });
+    // 扁平入口切成新壳（下次重启读指针）
+    expect(readFileSync(join(install, 'dist', 'index.js'), 'utf-8')).toBe('new-boot');
+    expect(readFileSync(join(install, 'dist', 'bootstrap.js'), 'utf-8')).toBe('new-boot');
+  });
+
+  it('冒烟失败 → 不切指针、不写 pending', () => {
+    const current = '0.9.56';
+    const next = '0.9.56-bad';
+    touch(join(install, 'dist', 'index.js'), 'old-index');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56' }));
+    writeFileSync(join(install, 'releases-current.json'), 'x'); // 无关文件，避免空目录假设
+    const writePending = vi.fn();
+
+    expect(() =>
+      commitRelease(install, {
+        newBuildId: next,
+        newVersion: '0.9.56',
+        currentBuildId: current,
+        smokeTest: () => false,
+        writePending,
+      }),
+    ).toThrow(/冒烟未通过/);
+    expect(writePending).not.toHaveBeenCalled();
+    expect(readFileSync(join(install, 'dist', 'index.js'), 'utf-8')).toBe('old-index');
   });
 });
 

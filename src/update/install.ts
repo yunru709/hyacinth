@@ -1,7 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
-import { migrateLegacyDist, readPointer, releaseDir, writePointerAtomic, writeReleaseMeta } from './releases.js';
+import {
+  migrateLegacyDist,
+  pruneReleases,
+  readPointer,
+  releaseDir,
+  writePointerAtomic,
+  writeReleaseMeta,
+} from './releases.js';
 import { GUARDIAN_ENV } from '../supervisor/protocol.js';
 
 export function findExtractedDir(tmpDir: string): string {
@@ -148,6 +155,46 @@ export function ensureSelfBuildBaseline(installDir: string, currentVersion: stri
   }
 
   return pointer.version;
+}
+
+export interface CommitReleaseOptions {
+  newBuildId: string;
+  newVersion: string;
+  /** 当前正在跑的 release id（写进 lastGood；必须与 newBuildId 不同才会触发回退） */
+  currentBuildId: string;
+  /** 测试注入；缺省用 smokeTestRelease */
+  smokeTest?: (buildId: string, version: string) => boolean;
+  /** 测试注入；生产传 writeUpdatePending（写 ~/.agent/pending-update.json） */
+  writePending?: (p: { version: string; lastGood: string }) => void;
+}
+
+/**
+ * 原子切换 release：冒烟 → 双壳副本 → 指针 → prune → pending。
+ *
+ * 只要任何一步失败都**不切指针**，旧 release 继续运行；pending 里的
+ * lastGood 是当前可运行 release，guardian 首启失败时回退它（不是源码）。
+ */
+export function commitRelease(installDir: string, opts: CommitReleaseOptions): void {
+  const smoke = opts.smokeTest ?? ((buildId: string, version: string) =>
+    smokeTestRelease(installDir, buildId, version));
+  if (!smoke(opts.newBuildId, opts.newVersion)) {
+    throw new Error(`release v${opts.newBuildId} 冒烟未通过，未切换指针`);
+  }
+
+  // 双壳副本：新版壳写入 installDir/dist（旧 shim 与新 bin 都指向合法壳）
+  const srcBootstrap = path.join(releaseDir(installDir, opts.newBuildId), 'dist', 'bootstrap.js');
+  if (fs.existsSync(srcBootstrap)) {
+    fs.mkdirSync(path.join(installDir, 'dist'), { recursive: true });
+    fs.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'bootstrap.js'));
+    fs.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'index.js'));
+  }
+
+  writePointerAtomic(installDir, {
+    version: opts.newBuildId,
+    lastGood: opts.currentBuildId,
+  });
+  pruneReleases(installDir, 3, [`v${opts.newBuildId}`, `v${opts.currentBuildId}`]);
+  opts.writePending?.({ version: opts.newBuildId, lastGood: opts.currentBuildId });
 }
 
 /** 冒烟验证超时（ms） */
