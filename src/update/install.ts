@@ -194,7 +194,19 @@ export function commitRelease(installDir: string, opts: CommitReleaseOptions): v
     lastGood: opts.currentBuildId,
   });
   pruneReleases(installDir, 3, [`v${opts.newBuildId}`, `v${opts.currentBuildId}`]);
-  opts.writePending?.({ version: opts.newBuildId, lastGood: opts.currentBuildId });
+  try {
+    opts.writePending?.({ version: opts.newBuildId, lastGood: opts.currentBuildId });
+  } catch (err) {
+    // pending 写失败 ⇒ guardian 不会回退；把指针退回旧 release，避免“新版本无兜底”。
+    writePointerAtomic(installDir, {
+      version: opts.currentBuildId,
+      lastGood: opts.currentBuildId,
+    });
+    throw new Error(
+      `写入 pending 失败，已把指针退回旧的 v${opts.currentBuildId}：` +
+      (err instanceof Error ? err.message : String(err)),
+    );
+  }
 }
 
 /** 冒烟验证超时（ms） */

@@ -216,6 +216,26 @@ describe('commitRelease（指针切换）', () => {
     expect(readFileSync(join(install, 'dist', 'bootstrap.js'), 'utf-8')).toBe('new-boot');
   });
 
+  it('pending 写失败 → 指针退回旧 release（不留“新版本无兜底”状态）', () => {
+    const current = '0.9.56';
+    const next = '0.9.56-pending-fail';
+    touch(join(install, 'dist', 'index.js'), 'old-index');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56' }));
+    touch(join(releaseDir(install, current), 'dist', 'bootstrap.js'), 'old-boot');
+    touch(join(releaseDir(install, next), 'dist', 'bootstrap.js'), 'new-boot');
+
+    expect(() =>
+      commitRelease(install, {
+        newBuildId: next,
+        newVersion: '0.9.56',
+        currentBuildId: current,
+        smokeTest: () => true,
+        writePending: () => { throw new Error('disk full'); },
+      }),
+    ).toThrow(/pending/);
+    expect(readPointer(install)).toEqual({ version: current, lastGood: current });
+  });
+
   it('冒烟失败 → 不切指针、不写 pending', () => {
     const current = '0.9.56';
     const next = '0.9.56-bad';
