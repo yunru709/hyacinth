@@ -70,7 +70,7 @@ describe('finalize 阶段（builtin:turn-finalize）', () => {
     expect(fs.existsSync(path.join(sessionDir, 'events.jsonl'))).toBe(false);
   });
 
-  it('正常结束：endTurn 被调、stop 事件写入、返回 stop:true + stopReason', async () => {
+  it('正常结束：endTurn 被调、只返回暂定 stop（stop 事件由 driver 单写）', async () => {
     const endTurn = vi.fn().mockResolvedValue(null);
     const sessionDir = tmpSessionDir();
     const ctx = makeCtx({ turnRecorder: { endTurn }, sessionDir });
@@ -80,18 +80,14 @@ describe('finalize 阶段（builtin:turn-finalize）', () => {
     expect(endTurn).toHaveBeenCalledTimes(1);
     expect(st.stop).toBe(true);
     expect(st.stopReason).toBe('end_turn');
-    const eventsFile = path.join(sessionDir, 'events.jsonl');
-    expect(fs.existsSync(eventsFile)).toBe(true);
-    const line = fs.readFileSync(eventsFile, 'utf8').trim();
-    const evt = JSON.parse(line);
-    expect(evt.type).toBe('stop');
-    expect(evt.reason).toBe('end_turn');
+    // finalize 不落盘：截断/异步/门链之后才由 _runInternal 统一写一条 stop。
+    expect(fs.existsSync(path.join(sessionDir, 'events.jsonl'))).toBe(false);
   });
 
   // ── say 工具（2026-09-18）──
   // 关键：report 本身也是一次工具调用（toolCalled=true），判定必须排在它之前，
   // 否则"调用了 report 却停不下来"。以下两条用例锁定这个顺序语义。
-  it('report 已提交：即使 toolCalled=true 也停（say_submitted）并写 stop 事件', async () => {
+  it('report 已提交：即使 toolCalled=true 也停（say_submitted），事件留给 driver', async () => {
     const endTurn = vi.fn().mockResolvedValue(null);
     const sessionDir = tmpSessionDir();
     const ctx = makeCtx({ turnRecorder: { endTurn }, sessionDir });
@@ -103,8 +99,7 @@ describe('finalize 阶段（builtin:turn-finalize）', () => {
 
     expect(st.stop).toBe(true);
     expect(st.stopReason).toBe('say_submitted');
-    const line = fs.readFileSync(path.join(sessionDir, 'events.jsonl'), 'utf8').trim();
-    expect(JSON.parse(line).reason).toBe('say_submitted');
+    expect(fs.existsSync(path.join(sessionDir, 'events.jsonl'))).toBe(false);
   });
 
   it('say 连续失败中止：stop=true + say_failed（不再空转到 maxTurns）', async () => {

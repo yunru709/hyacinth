@@ -476,3 +476,156 @@ describe('AgentLoop.syncRouter 原子性（2026-10-16 回归）', () => {
     }
   });
 });
+
+// ── stop 事件单一写者 / stop 门链（2026-10-19 修复回归）────────────────────
+
+/** 固定 stopReason 的 provider（用于正常结束 / 截断 / 流提前结束场景） */
+function makeStopProvider(reason: string) {
+  const createStream = vi.fn().mockImplementation(() => ({
+    async *[Symbol.asyncIterator]() {
+      // OutputRouter 按大写分发；小写会被 default 分支吞掉 ⇒ stopReason 退化成 end_turn。
+      yield { type: 'TEXT', content: 'hi' };
+      yield { type: 'STOP', reason };
+    },
+  }));
+  const provider = {
+    getProviderType: () => 'deepseek',
+    getModel: () => 'deepseek-chat',
+    getCapabilities: () => ({ vision: false }),
+    setThinking: vi.fn(),
+    createStream,
+  } as unknown as Provider;
+  return { provider, createStream };
+}
+
+function readEvents(dir: string): Array<{ type: string; reason?: string }> {
+  const file = path.join(dir, 'events.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; reason?: string });
+}
+
+function makeConfigCenter(values: Record<string, unknown>): RuntimeConfigCenter {
+  return {
+    get: vi.fn((p: string) => values[p]),
+    watch: vi.fn(() => () => {}),
+  } as unknown as RuntimeConfigCenter;
+}
+
+describe('stop 事件单一写者（P0 回归）', () => {
+  it('正常结束：一个用户回合恰好一条 stop，reason=end_turn', async () => {
+    const { provider } = makeProvider();
+    const dir = tmpdir();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: dir });
+
+    await loop.run('hi');
+
+    const stops = readEvents(dir).filter((e) => e.type === 'stop');
+    expect(stops).toHaveLength(1);
+    expect(stops[0].reason).toBe('end_turn');
+  });
+
+  it('截断续写：1~4 次续写只留最终一条 stop（不再每次续写都写假 stop）', async () => {
+    const { provider } = makeStopProvider('length');
+    const dir = tmpdir();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: dir });
+
+    await loop.run('hi');
+
+    const stops = readEvents(dir).filter((e) => e.type === 'stop');
+    expect(stops).toHaveLength(1);
+    expect(stops[0].reason).toBe('length');
+  });
+});
+
+describe('stop 门链（goal / verification / evidence）', () => {
+  it('goal active + 文本收尾 → 拽回继续，不写 stop，nudges+1', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.enterGoal('完成测试目标', 'user');
+
+    const out = await (loop as unknown as {
+      resolveStopGates(r: { stop: boolean; stopReason?: string }): Promise<{ stop: boolean; stopReason?: string }>;
+    }).resolveStopGates({ stop: true, stopReason: 'end_turn' });
+
+    expect(out.stop).toBe(false);
+    expect(out.stopReason).toBe('goal_pending');
+    expect(loop.getGoalState()?.nudges).toBe(1);
+  });
+
+  it('goal 预算触顶 → 放行 goal_budget_exceeded 并解除 goal', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.enterGoal('完成测试目标', 'user');
+    const goal = loop.getGoalState()!;
+    goal.nudges = 40;
+
+    const out = await (loop as unknown as {
+      resolveStopGates(r: { stop: boolean; stopReason?: string }): Promise<{ stop: boolean; stopReason?: string }>;
+    }).resolveStopGates({ stop: true, stopReason: 'end_turn' });
+
+    expect(out.stop).toBe(true);
+    expect(out.stopReason).toBe('goal_budget_exceeded');
+    expect(loop.getGoalState()).toBeNull();
+  });
+
+  it('evidence hard：有 mutation、无证据 → 拽回 evidence_pending', async () => {
+    const { provider } = makeProvider();
+    const services = makeServices(provider);
+    services.configCenter = makeConfigCenter({ 'repair.evidenceGate.mode': 'hard' });
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    (loop as unknown as { turnHadMutation: boolean }).turnHadMutation = true;
+    (loop as unknown as { turnEvidenceCount: number }).turnEvidenceCount = 0;
+
+    const out = await (loop as unknown as {
+      resolveStopGates(r: { stop: boolean; stopReason?: string }): Promise<{ stop: boolean; stopReason?: string }>;
+    }).resolveStopGates({ stop: true, stopReason: 'end_turn' });
+
+    expect(out.stop).toBe(false);
+    expect(out.stopReason).toBe('evidence_pending');
+  });
+
+  it('verification hard：plan_execute 落空 → 拽回 verification_pending', async () => {
+    const { provider } = makeProvider();
+    const services = makeServices(provider);
+    services.configCenter = makeConfigCenter({ 'repair.verification.mode': 'hard' });
+    const loop = new AgentLoop(services, { sessionDir: tmpdir() });
+    (loop as unknown as { planHandoff: { pending: string | null } }).planHandoff.pending = '预测落空';
+
+    const out = await (loop as unknown as {
+      resolveStopGates(r: { stop: boolean; stopReason?: string }): Promise<{ stop: boolean; stopReason?: string }>;
+    }).resolveStopGates({ stop: true, stopReason: 'end_turn' });
+
+    expect(out.stop).toBe(false);
+    expect(out.stopReason).toBe('verification_pending');
+  });
+});
+
+describe('goal 逃逸口封堵', () => {
+  it('goal active 时 submitSay 直接拒绝（防同批 / plan_execute 泄漏）', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.enterGoal('完成测试目标', 'user');
+
+    const res = await loop.submitSay('提前宣布完成');
+
+    expect(res.ok).toBe(false);
+    expect((loop as unknown as { sayStatus: string | null }).sayStatus).toBeNull();
+  });
+
+  it('finish_goal 提交达到 maxReviews 后解除 goal（预算不再失效）', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.enterGoal('完成测试目标', 'user');
+    loop.setGoalReviewer(async () => ({ verdict: 'fail', reason: '证据不足' }));
+
+    for (let i = 0; i < 10; i++) {
+      const r = await loop.submitGoal('evidence', 'conclusion');
+      expect(r.ok).toBe(false);
+    }
+    const eleventh = await loop.submitGoal('evidence', 'conclusion');
+
+    expect(eleventh.ok).toBe(false);
+    expect(loop.getGoalState()).toBeNull();
+  });
+});

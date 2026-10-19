@@ -1071,6 +1071,14 @@ export class AgentLoop {
    * 返回 ok=false 时由工具层抛错 → is_error → loop 自动续轮让模型重写。
    */
   async submitSay(content: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    // goal 模式下 say 是「宣布完成/结束回合」的逃逸口：工具过滤只是第一道门，
+    // 这里再兜一层 —— 同批 enter_goal+say、plan_execute 内部裸执行 say 都能绕过过滤。
+    if (this.goalState?.active) {
+      return {
+        ok: false,
+        error: 'goal 模式下不能使用 say。请继续工作，达成后调用 finish_goal 提交 evidence 与 conclusion；需要中止请用 exit_goal。',
+      };
+    }
     const text = (content ?? '').trim();
     if (!text) {
       this.sayFailureCount++;
@@ -1227,6 +1235,18 @@ export class AgentLoop {
       return { ok: false, error: 'evidence（证据）不能为空：请给出可核验的证据（命令+输出 / 文件路径 / 测试结果）。' };
     }
     if (!cc) return { ok: false, error: 'conclusion（结论）不能为空：请写清目标已如何达成。' };
+
+    // 审查次数硬上限：此前 reviewAttempts 只增不减，唯一比较它的 decideGoalGate
+    // 在正常出口上到不了 —— 预算等于没有。这里在提交入口直接兑现。
+    if (this.goalState.reviewAttempts >= DEFAULT_GOAL_BUDGET.maxReviews) {
+      this.exitGoal('审查次数触顶');
+      return {
+        ok: false,
+        error:
+          `finish_goal 提交次数已达上限（${DEFAULT_GOAL_BUDGET.maxReviews} 次），goal 模式已解除。` +
+          '请向用户如实说明当前进度与卡点；如需继续，重新进入 goal 或直接交付。',
+      };
+    }
 
     const attempt = this.goalState.reviewAttempts + 1;
     this.goalState.reviewAttempts = attempt;
@@ -1648,12 +1668,21 @@ export class AgentLoop {
       // 不再推进时，避免无限空转 —— 由 LoopGuard/空转兜底双保险）
       let idleTurnCount = 0;
       const IDLE_TURN_LIMIT = 3;
+      // 验证证据账本（P1-B）：作用域是**用户回合**（一次 run），不是单次 runTurn 迭代。
+      // 必须放在 while 之前复位：mutation 发生在工具轮，而 stop 发生在后续的文本轮；
+      // 若按迭代复位，证据门永远看不到「改了 + 想停」同时成立（结构性死代码）。
+      this.turnEvidenceCount = 0;
+      this.turnHadMutation = false;
+      /** 本用户回合最终停止原因（由所有出口统一设置；null = 异常/未停） */
+      let finalStopReason: string | null = null;
       // 输出被截断（finish_reason='length' / stop_reason='max_tokens'）后的自动续写次数。
       // 计在 loop 实例的局部变量上（不是模块级），避免多会话共享同一个计数器。
       let truncationContinues = 0;
       while (true) {
         if (this.interrupted) {
           this.outputHandler?.onStatus?.('Agent stopped by user.', 'info');
+          finalStopReason = 'interrupted';
+          lastResult = { stop: true, stopReason: finalStopReason };
           break;
         }
 
@@ -1661,7 +1690,7 @@ export class AgentLoop {
         // 上一轮的 tool_result 已全部落盘，此处切换不会写错目录。
         await this.applyPendingSessionSwitch();
 
-        const result = await this.runTurn();
+        let result = await this.runTurn();
         turnCount++;
         lastResult = result;
         if (result.toolCalled) {
@@ -1670,37 +1699,6 @@ export class AgentLoop {
         } else {
           idleTurnCount++; // 无工具调用：可能正常结束（stop）或 flow 强制继续
         }
-        // ── 钩子：迭代结束（异步子Agent注入 / stats / loopGuard 可在此挂载） ──
-        await this.loopHooks.emit('onIterationEnd', {
-          turn: turnCount,
-          stop: result.stop,
-          stopReason: result.stopReason,
-        });
-
-        // ── 迭代级上下文占用推送（UI 即时刷新进度条，无需等整轮结束） ──
-        // 与回合级 MESSAGE_TURN_INFO 语义区分：本事件不表示回合结束。
-        // 必带会话累计 token 总量：本事件比 turn_info 频繁（每轮迭代都发），
-        // 若不带这两个字段，UI 侧后发的刷新会把刚渲染的总量覆盖掉（表现"时有时无"）。
-        this.emitUiEvent(UI_EVENT.MESSAGE_CONTEXT_UPDATE, {
-          turnCount: this.turnNumber,
-          tokensUsed: this.lastContextTokens,
-          totalInputTokens: this.totalInputTokens,
-          totalOutputTokens: this.totalOutputTokens,
-          // 命中率与上下文量**同频**逐轮刷新（看即时效果）。"本回合均值"只在回合结束时给，
-          // 故此处不传 turnAvg（回合尚未成立）；显示片段同样由后端格式化。
-          cacheHitRate: this.cacheTurns.at(-1)
-            ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
-            : undefined,
-          cacheHitRateAvg: averageHitRate(this.cacheTurns),
-          cacheTurnsCount: this.cacheTurns.length,
-          cacheDisplay: formatCacheDisplay({
-            last: this.cacheTurns.at(-1)
-              ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
-              : undefined,
-            avg: averageHitRate(this.cacheTurns),
-          }),
-        });
-
         // ── 异步子Agent 结果回合内注入 ─────────────────────────
         // delegate-tool 中异步任务完成后会将结果推送到此队列。
         // 本轮迭代结束后检查：有已完成的结果→注入对话→强制继续迭代，
@@ -1722,6 +1720,7 @@ export class AgentLoop {
             });
           }
           result.stop = false; // 强制继续迭代，让 LLM 看到注入的异步结果
+          idleTurnCount = 0;   // 异步结果注入是推进，不是空转
         }
 
         // ── 输出被截断：可见提示（A） + 自动续写（B）──────────────────────────
@@ -1778,6 +1777,55 @@ export class AgentLoop {
           }
         }
 
+        // ── stop 门链：只在**真正要结束**时执行一次 ─────────────────
+        // 此前 goal 门只挂在 toolCalls 分支，另两门挂在两个分支且作用域是单次迭代，
+        // 导致三者在正常路径上都拿不到「mutation/pending + stop=true」的组合。
+        // 现在两个分支都只返回暂定 stop，由这里在截断/异步调整之后统一过门。
+        const wasTentativeStop = result.stop;
+        if (result.stop) {
+          result = await this.resolveStopGates(result);
+          // 门把 stop 拽回继续（goal_pending / verification_pending / evidence_pending）
+          // 不是空转，否则 3 次后会被 idleTurnCount 误杀。
+          if (wasTentativeStop && !result.stop) idleTurnCount = 0;
+        }
+        lastResult = result;
+
+        // ── 钩子：迭代结束（在门链之后，插件看到的是最终判停） ──
+        await this.loopHooks.emit('beforeIterationEnd', {
+          turn: turnCount,
+          stop: result.stop,
+          stopReason: result.stopReason,
+        });
+        await this.loopHooks.emit('onIterationEnd', {
+          turn: turnCount,
+          stop: result.stop,
+          stopReason: result.stopReason,
+        });
+
+        // ── 迭代级上下文占用推送（UI 即时刷新进度条，无需等整轮结束） ──
+        // 与回合级 MESSAGE_TURN_INFO 语义区分：本事件不表示回合结束。
+        // 必带会话累计 token 总量：本事件比 turn_info 频繁（每轮迭代都发），
+        // 若不带这两个字段，UI 侧后发的刷新会把刚渲染的总量覆盖掉（表现"时有时无"）。
+        this.emitUiEvent(UI_EVENT.MESSAGE_CONTEXT_UPDATE, {
+          turnCount: this.turnNumber,
+          tokensUsed: this.lastContextTokens,
+          totalInputTokens: this.totalInputTokens,
+          totalOutputTokens: this.totalOutputTokens,
+          // 命中率与上下文量**同频**逐轮刷新（看即时效果）。"本回合均值"只在回合结束时给，
+          // 故此处不传 turnAvg（回合尚未成立）；显示片段同样由后端格式化。
+          cacheHitRate: this.cacheTurns.at(-1)
+            ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
+            : undefined,
+          cacheHitRateAvg: averageHitRate(this.cacheTurns),
+          cacheTurnsCount: this.cacheTurns.length,
+          cacheDisplay: formatCacheDisplay({
+            last: this.cacheTurns.at(-1)
+              ? Math.round(this.cacheTurns.at(-1)!.hitRate * 10) / 10
+              : undefined,
+            avg: averageHitRate(this.cacheTurns),
+          }),
+        });
+
         // 更新 stats
         await this.statsManager.increment(this.sessionDir, 'turn_count', 1);
 
@@ -1806,6 +1854,8 @@ export class AgentLoop {
         }
 
         if (result.stop) {
+          finalStopReason = result.stopReason ?? 'end_turn';
+          lastResult = { stop: true, stopReason: finalStopReason };
           break;
         }
 
@@ -1816,7 +1866,8 @@ export class AgentLoop {
             `No tool calls for ${IDLE_TURN_LIMIT} consecutive turns. Stopping to prevent idle loop.`,
             'warn',
           );
-          lastResult = { stop: true, stopReason: 'idle_loop' };
+          finalStopReason = 'idle_loop';
+          lastResult = { stop: true, stopReason: finalStopReason };
           break;
         }
 
@@ -1826,6 +1877,8 @@ export class AgentLoop {
             `Reached max turns (${this.maxTurns}). Stopping to honor the configured limit.`,
             'warn',
           );
+          finalStopReason = 'max_turns';
+          lastResult = { stop: true, stopReason: finalStopReason };
           break;
         }
 
@@ -1835,8 +1888,26 @@ export class AgentLoop {
             'LoopGuard: repeated suppression detected. Stopping to prevent infinite loop.',
             'warn',
           );
+          finalStopReason = 'loop_guard';
+          lastResult = { stop: true, stopReason: finalStopReason };
           break;
         }
+      }
+
+      // ── stop 事件单一写者 ───────────────────────────────────────
+      // 所有会真正结束用户回合的出口都收敛到这里：正常判停、goal 预算触顶、
+      // maxTurns、idle_loop、LoopGuard、用户中断。截断/异步/门链的「改判继续」
+      // 都发生在写事件之前，因此一个用户回合恰好一条 stop，且 reason 是最终值。
+      if (finalStopReason) {
+        await appendEvent(this.sessionDir, {
+          type: 'stop',
+          reason: finalStopReason,
+          timestamp: new Date().toISOString(),
+        }).catch((err: unknown) => {
+          this.logger?.warn?.('append stop event failed', {
+            error: (err as Error).message,
+          });
+        });
       }
 
       // ── Post-turn cleanup（由 Router 控制）────────────────────
@@ -2062,9 +2133,7 @@ export class AgentLoop {
     this.currentTurn++;
     // ── 钩子：回合开始 ──────────────────────────────────────────
     await this.loopHooks.emit('onTurnStart', { turn: this.currentTurn });
-    // ── 验证证据账本：本轮复位（P1-B） ──
-    this.turnEvidenceCount = 0;
-    this.turnHadMutation = false;
+    // 验证证据账本按**用户回合**复位，见 _runInternal 的 while 之前 —— 不能在这里复位。
     // ── 回合回滚：记录回合开始前状态 ──
     if (this.turnRecorder) {
       this.turnRecorder.startTurn(this.currentTurn).catch(err => {
@@ -2303,23 +2372,11 @@ export class AgentLoop {
 
       // 工具执行完毕后，不停止，继续下一轮
       await this.checkTextLoop(textParts);
-      // ── P1 M3：finalize 阶段（endTurn + stop 判定，经内核管道执行） ──
-      // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成
+      // ── P1 M3：finalize 阶段（endTurn + 暂定 stop 判定，经内核管道执行） ──
+      // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成。
+      // stop 门链与 stop 事件统一由 _runInternal 在「真正决定是否结束」时处理。
       const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus(), goalStatus: this.takeGoalStatus() }, this.makeStageCtx());
-      // ── 钩子：迭代结束（stop 判定已出） ──
-      await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finA.stop, stopReason: finA.stopReason });
-      // ── goal 闸门（2026-10-10）**先于**验证/证据门 ──
-      // 理由：goal_achieved 是权威放行，不能被「改了没验证」这类门拽回去继续；
-      // goal_pending 时先拽回（stop=false），后两门见 stop=false 自然不干预。
-      const goalA = await this.applyGoalGate(finA.stop, finA.stopReason);
-      if (goalA.stopReason === 'goal_achieved' || goalA.stopReason === 'goal_budget_exceeded') {
-        return { stop: goalA.stop, stopReason: goalA.stopReason, toolCalled: finA.toolCalled };
-      }
-      // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
-      const gatedA = await this.applyVerificationGate(goalA.stop, goalA.stopReason);
-      // ── 证据门（P1-B）：改了却不验证，不许直接结束 ──
-      const gatedA2 = await this.applyEvidenceGate(gatedA.stop, gatedA.stopReason);
-      return { stop: gatedA2.stop, stopReason: gatedA2.stopReason, toolCalled: finA.toolCalled };
+      return { stop: finA.stop, stopReason: finA.stopReason, toolCalled: finA.toolCalled };
     }
 
     // 没有 tool_calls —— 先检查 Flow 状态机是否仍在运行。
@@ -2329,15 +2386,10 @@ export class AgentLoop {
     // 子 Agent 的 AgentLoop 无 flowRegistry，必须可选链，否则 undefined.getActive() 崩溃。
     const flowStillActive = this.flowRegistry?.getActive();
     await this.checkTextLoop(textParts);
-    // ── P1 M3：finalize 阶段（endTurn + stop 判定；flow 活跃时不写 stop 事件） ──
+    // ── P1 M3：finalize 阶段（endTurn + 暂定 stop 判定） ──
+    // stop 门链与 stop 事件统一由 _runInternal 处理（与 toolCalls 分支同一个出口）。
     const finB = await this.pipeline.runSlot('finalize', { ...stateRef, flowStillActive: !!flowStillActive }, this.makeStageCtx());
-    // ── 钩子：迭代结束（stop 判定已出） ──
-    await this.loopHooks.emit('beforeIterationEnd', { turn: this.currentTurn, stop: finB.stop, stopReason: finB.stopReason });
-    // ── 验证门（P0-3）：plan_execute 预测落空后禁止直接结束 ──
-    const gatedB = await this.applyVerificationGate(finB.stop, finB.stopReason);
-    // ── 证据门（P1-B）：改了却不验证，不许直接结束 ──
-    const gatedB2 = await this.applyEvidenceGate(gatedB.stop, gatedB.stopReason);
-    return { stop: gatedB2.stop, stopReason: gatedB2.stopReason, toolCalled: finB.toolCalled };
+    return { stop: finB.stop, stopReason: finB.stopReason, toolCalled: finB.toolCalled };
   }
 
   /**
@@ -2366,6 +2418,35 @@ export class AgentLoop {
   }
 
   /**
+   * 停止门链 —— 三个门只在**真正要结束**时按固定顺序执行一次：
+   *   goal（未达成→拽回 / 预算触顶放行）→ verification（预测落空）→ evidence（改而未验）。
+   *
+   * 为什么收口在这里：此前 goal 门只挂在 toolCalls 分支、另外两门挂在两个分支，
+   * 而 toolCalls 分支的暂定 stop 恒为 false —— goal 门永远拿不到 stop=true；
+   * 证据账本又按迭代复位，evidence 门也永远看不到「mutation + stop」同时成立。
+   * 现在两个分支都返回暂定结果，由 driver 在截断/异步调整之后统一过门。
+   */
+  private async resolveStopGates(
+    result: { stop: boolean; stopReason?: string },
+  ): Promise<{ stop: boolean; stopReason?: string }> {
+    if (!result.stop) return result;
+
+    const goal = await this.applyGoalGate(result.stop, result.stopReason);
+    // goal_achieved：权威放行，后两门不得把已验收的回合拽回去。
+    // goal_budget_exceeded：预算触顶放行（goal 已解除），同样不再追加其它门。
+    if (goal.stopReason === 'goal_achieved' || goal.stopReason === 'goal_budget_exceeded') {
+      return goal;
+    }
+    // goal_pending：已拽回继续，后两门见 stop=false 自然不干预。
+    if (!goal.stop) return goal;
+
+    const verification = await this.applyVerificationGate(goal.stop, goal.stopReason);
+    if (!verification.stop) return verification;
+
+    return this.applyEvidenceGate(verification.stop, verification.stopReason);
+  }
+
+  /**
    * 循环级验证门（P0-3）：plan_execute 预测落空后，模型不应在未修复时直接结束。
    * 由 repair.verification.mode 控制：
    *  - 'off'（默认）：不干预
@@ -2380,6 +2461,9 @@ export class AgentLoop {
     if (!mode || mode === 'off') return { stop, stopReason };
     // report 显式交付优先于自动校验：模型已明确"结论交给用户"，不应被验证门拽回继续
     if (stopReason === 'say_submitted' || stopReason === 'say_failed') return { stop, stopReason };
+    // 只在真正要停时消费 pending。此前在 stop=false 的工具轮就消费，
+    // 导致 hard 的「强制续轮」是空操作，到最终 stop 时 pending 已空（假刹车）。
+    if (!stop) return { stop, stopReason };
     if (!this.planHandoff.pending) return { stop, stopReason };
 
     const reason = this.planHandoff.pending;
@@ -2430,6 +2514,30 @@ export class AgentLoop {
       return { stop: false, stopReason: 'evidence_pending' };
     }
     return { stop, stopReason }; // soft：仅注入消息，不强制
+  }
+
+  /**
+   * 执行侧工具准入（goal 黑名单 + Router 名单 + 激活工具包）。
+   *
+   * 单一真源：stage 的装配侧过滤与 ToolExecContext 的执行侧过滤都走这里；
+   * `plan_execute` 的内层工具执行也复用同一谓词（它绕过 ToolExecContext，
+   * 曾经可以无视 goal 黑名单直接跑 say/switch_mode/new_session/update_config）。
+   */
+  isToolAllowedForExecution(name: string): boolean {
+    // goal 模式工具管制：黑名单优先（拦住「换环境 / 宣布完成」类）；
+    // finish_goal / exit_goal 强制放行。
+    if (this.goalState?.active) {
+      if (isToolForbiddenInGoal(name)) return false;
+      if (isToolForcedVisibleInGoal(name)) return true;
+    }
+    if (!this.bundleRegistry) return true;
+    const router = this.activeRouter;
+    if (router.toolBlacklist.includes(name)) return false;
+    if (router.toolAllowlist.length > 0) return router.toolAllowlist.includes(name);
+    if (this.bundleRegistry.isAllMode()) return true;
+    const active = this.bundleRegistry.getActiveToolNames();
+    if (active.length === 0) return true;
+    return active.includes(name);
   }
 
   /** 构造工具执行上下文（B1：每轮取当前值；可变状态经访问器读写） */
@@ -2496,22 +2604,7 @@ export class AgentLoop {
       // （2026-10-10 把陪伴工具移出 common 时暴露）。undefined（未注入
       // bundleRegistry，如子 Agent）→ 不拦截，保持既有行为。
       isToolAllowedByBundle: (this.bundleRegistry || this.goalState?.active)
-        ? (name: string) => {
-            // goal 模式工具管制（2026-10-10）：与装配侧 loop.filterToolsForGoal **同源**。
-            // 黑名单优先（拦住「换环境 / 宣布完成」类）；finish_goal / exit_goal 强制放行。
-            if (this.goalState?.active) {
-              if (isToolForbiddenInGoal(name)) return false;
-              if (isToolForcedVisibleInGoal(name)) return true;
-            }
-            if (!this.bundleRegistry) return true;
-            const router = this.activeRouter;
-            if (router.toolBlacklist.includes(name)) return false;
-            if (router.toolAllowlist.length > 0) return router.toolAllowlist.includes(name);
-            if (this.bundleRegistry.isAllMode()) return true;
-            const active = this.bundleRegistry.getActiveToolNames();
-            if (active.length === 0) return true;
-            return active.includes(name);
-          }
+        ? (name: string) => this.isToolAllowedForExecution(name)
         : undefined,
     };
   }

@@ -19,9 +19,23 @@ let planExecuteSeq = 0;
 /** 创建 plan_execute 工具（注入 ToolExecutor 以执行子命令；onHandoff 供循环级验证门消费） */
 export function createPlanExecuteTool(
   executor: ToolExecutor,
-  opts?: { onHandoff?: (reason: string) => void },
+  opts?: {
+    onHandoff?: (reason: string) => void;
+    /** 内层工具准入谓词（goal 黑名单 / 工具包 / Router 名单）；缺省不拦截 */
+    allow?: (name: string) => boolean;
+  },
 ): Tool {
   const run: RunCommand = async (call) => {
+    // 内层执行不走 loop-tools 的 ToolExecContext，必须在这里复用同一准入谓词。
+    // 否则 goal 模式下可用 plan_execute 调 say / switch_mode / new_session / update_config
+    // 等被禁工具，goal 的「换环境逃逸」防护形同虚设。
+    if (opts?.allow && !opts.allow(call.tool)) {
+      return {
+        tool: call.tool,
+        content: `Tool "${call.tool}" is not allowed in the current mode (goal blacklist / tool bundle / router restriction).`,
+        is_error: true,
+      };
+    }
     const result = await executor.execute({ id: `plan-execute-${++planExecuteSeq}`, name: call.tool, input: call.input });
     return { tool: call.tool, content: result.content, is_error: result.is_error ?? false };
   };

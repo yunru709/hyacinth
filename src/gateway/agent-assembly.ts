@@ -315,9 +315,15 @@ export async function createAgentAssembly(
   // 规划 + 结构化断言门控：命中预测自动推进，落空交回主循环。
   // onHandoff → 循环级验证门（repair.verification）消费：预测落空后禁止直接结束。
   const planHandoff = { pending: null as string | null };
-  toolRegistry.register(createPlanExecuteTool(toolExecutor, {
+  // allow 在 AgentLoop 创建后才能绑定（内层工具准入需要读 loop 的 goal/工具包状态）；
+  // 工具对象持有同一 options 引用，执行时现取，故先注册、后赋值即可。
+  const planExecOpts: {
+    onHandoff: (reason: string) => void;
+    allow?: (name: string) => boolean;
+  } = {
     onHandoff: (reason) => { planHandoff.pending = reason; },
-  }));
+  };
+  toolRegistry.register(createPlanExecuteTool(toolExecutor, planExecOpts));
 
   // 注入 BashTool（使其支持 async: true 模式）
   const bashTool = toolRegistry.get('bash');
@@ -493,6 +499,9 @@ export async function createAgentAssembly(
     // permission-chain）与目录插件共享宿主，目录插件可 deps 依赖 + getService 取服务
     pluginHost: pluginManager.getHost(),
   });
+
+  // plan_execute 内层工具准入：与 ToolExecContext 同一谓词（goal 黑名单 / 工具包 / Router）。
+  planExecOpts.allow = (name) => loop.isToolAllowedForExecution(name);
 
   // ── 模式真源注入：boot 的 sessionType（恢复自 meta.json；新建为 startup.defaultMode）
   // 决定首次 syncRouter() 激活哪个 Router（陪伴默认启动等）。
