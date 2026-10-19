@@ -12,6 +12,12 @@ import {
   releasesDir,
   pointerPath,
   releaseDir,
+  makeBuildId,
+  writeReleaseMeta,
+  readReleaseMeta,
+  writeRollbackRecord,
+  readRollbackRecord,
+  releaseExists,
 } from './releases.js';
 
 let install: string;
@@ -117,5 +123,54 @@ describe('migrateLegacyDist', () => {
     writeFileSync(releaseDir(install, '0.9.56') + '/package.json', '{}');
     migrateLegacyDist(install, '0.9.56');
     expect(readFileSync(releaseDir(install, '0.9.56') + '/package.json', 'utf-8')).toBe('{}');
+  });
+});
+
+describe('buildId / release meta / rollback 留痕', () => {
+  it('makeBuildId：同 semver 不同时间/sha 生成不同 id，且不含路径非法字符', () => {
+    const a = makeBuildId('0.9.61', 'abcdef123456', Date.UTC(2026, 9, 19, 12, 0, 0));
+    const b = makeBuildId('0.9.61', 'abcdef123456', Date.UTC(2026, 9, 19, 12, 0, 1));
+    const c = makeBuildId('0.9.61', 'ffffffff', Date.UTC(2026, 9, 19, 12, 0, 0));
+
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(c);
+    expect(a).toMatch(/^0\.9\.61-\d{8}T\d{6}-abcdef12$/);
+    expect(a).not.toMatch(/[\\/:*?"<>|]/);
+  });
+
+  it('meta 写入/读回；目录存在性判断以 buildId 为准', () => {
+    const buildId = '0.9.61-20261019T120000-abcdef12';
+    writeReleaseMeta(install, buildId, {
+      version: '0.9.61',
+      buildId,
+      createdAt: '2026-10-19T12:00:00.000Z',
+      gitHead: 'abcdef123456',
+      source: 'local-source',
+    });
+
+    expect(releaseExists(install, buildId)).toBe(true);
+    expect(readReleaseMeta(install, buildId)).toMatchObject({
+      version: '0.9.61',
+      buildId,
+      gitHead: 'abcdef123456',
+      source: 'local-source',
+    });
+    expect(readReleaseMeta(install, 'missing')).toBeNull();
+  });
+
+  it('rollback 记录写入/读回', () => {
+    writeRollbackRecord(install, {
+      from: '0.9.61-new',
+      to: '0.9.61-old',
+      at: '2026-10-19T12:00:00.000Z',
+      reason: 'first-boot failure (exit 1)',
+    });
+
+    expect(readRollbackRecord(install)).toEqual({
+      from: '0.9.61-new',
+      to: '0.9.61-old',
+      at: '2026-10-19T12:00:00.000Z',
+      reason: 'first-boot failure (exit 1)',
+    });
   });
 });

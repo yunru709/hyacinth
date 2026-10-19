@@ -26,6 +26,7 @@ import {
   resolveInstallRoot,
   readPointer,
   writePointerAtomic,
+  writeRollbackRecord,
   type ReleasePointer,
 } from '../update/releases.js';
 
@@ -135,8 +136,16 @@ export function runGuardian(args: string[]): void {
         }
       } else {
         // 升级后首启失败 → 自动回退到 lastGood 并重启
-        if (resolvePostExitAction(readUpdatePending(), readPointer(installDir)) === 'rollback') {
+        const pointer = readPointer(installDir);
+        if (resolvePostExitAction(readUpdatePending(), pointer) === 'rollback') {
           const pending = readUpdatePending()!;
+          // 留痕：回退后的版本起来时，agent 可读此记录判断上次为何崩、改了什么。
+          writeRollbackRecord(installDir, {
+            from: pending.version,
+            to: pending.lastGood,
+            at: new Date().toISOString(),
+            reason: `first-boot failure (exit ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`,
+          });
           writePointerAtomic(installDir, { version: pending.lastGood, lastGood: pending.lastGood });
           clearUpdatePending();
           process.stderr.write(

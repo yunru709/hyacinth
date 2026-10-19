@@ -9,8 +9,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { execSync } from 'node:child_process';
-import { stageRelease, smokeTestRelease, findExtractedDir } from './install.js';
-import { releaseDir } from './releases.js';
+import { stageRelease, smokeTestRelease, findExtractedDir, ensureSelfBuildBaseline } from './install.js';
+import { readPointer, releaseDir } from './releases.js';
 
 const mockExecSync = vi.mocked(execSync);
 
@@ -54,7 +54,7 @@ describe('stageRelease', () => {
       onStatus: () => {},
     });
 
-    expect(res).toEqual({ version: '0.9.57', depChanged: false });
+    expect(res).toEqual({ version: '0.9.57', buildId: '0.9.57', depChanged: false });
     // 新版本在 releases/v0.9.57/
     expect(readFileSync(join(releaseDir(install, '0.9.57'), 'dist', 'index.js'), 'utf-8')).toBe('new');
     // 首迁基线在 releases/v0.9.56/
@@ -63,6 +63,50 @@ describe('stageRelease', () => {
     expect(readFileSync(join(install, 'dist', 'index.js'), 'utf-8')).toBe('old');
     // 依赖无变化 → 不触发 pnpm install
     expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it('自构建唯一 buildId：不覆盖同 semver 的旧 release，并写 meta.json', () => {
+    // 旧安装：扁平 dist + package.json（首迁移会复制成 releases/v0.9.56 基线）
+    touch(join(install, 'dist', 'index.js'), 'old');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56', dependencies: {} }));
+    // 新构建仍是 0.9.56，但 buildId 唯一
+    makeSrc({ version: '0.9.56', dependencies: {} }, { 'index.js': 'new' });
+    const buildId = '0.9.56-20261019T120000-abcdef12';
+
+    const res = stageRelease(extracted, install, {
+      currentVersion: '0.9.56',
+      currentBuildId: '0.9.56',
+      buildId,
+      gitHead: 'abcdef123456',
+      source: 'local-source',
+      onStatus: () => {},
+    });
+
+    expect(res).toEqual({ version: '0.9.56', buildId, depChanged: false });
+    // 新构建进唯一目录；旧基线 v0.9.56 仍是旧内容（回退目标没被覆盖）
+    expect(readFileSync(join(releaseDir(install, buildId), 'dist', 'index.js'), 'utf-8')).toBe('new');
+    expect(readFileSync(join(releaseDir(install, '0.9.56'), 'dist', 'index.js'), 'utf-8')).toBe('old');
+    const meta = JSON.parse(readFileSync(join(releaseDir(install, buildId), 'meta.json'), 'utf-8'));
+    expect(meta).toMatchObject({ version: '0.9.56', buildId, source: 'local-source' });
+  });
+
+  it('同 buildId 已存在 → 拒绝覆盖（release 目录不可变）', () => {
+    touch(join(install, 'dist', 'index.js'), 'old');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56', dependencies: {} }));
+    makeSrc({ version: '0.9.56', dependencies: {} }, { 'index.js': 'new' });
+    const buildId = '0.9.56-existing';
+    touch(join(releaseDir(install, buildId), 'dist', 'index.js'), 'keep-me');
+
+    expect(() =>
+      stageRelease(extracted, install, {
+        currentVersion: '0.9.56',
+        currentBuildId: '0.9.56',
+        buildId,
+        onStatus: () => {},
+      }),
+    ).toThrow(/release 已存在/);
+    // 原内容未被覆盖
+    expect(readFileSync(join(releaseDir(install, buildId), 'dist', 'index.js'), 'utf-8')).toBe('keep-me');
   });
 
   it('依赖变化 → 在版本目录内触发 install', () => {
@@ -111,6 +155,36 @@ describe('stageRelease', () => {
   });
 });
 
+describe('ensureSelfBuildBaseline（编译前备份旧产物）', () => {
+  it('扁平安装：先复制旧 dist 为 release，写指针，再把入口切到 bootstrap', () => {
+    touch(join(install, 'dist', 'index.js'), 'old-index');
+    touch(join(install, 'dist', 'bootstrap.js'), 'old-bootstrap');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56' }));
+
+    const id = ensureSelfBuildBaseline(install, '0.9.56');
+
+    expect(id).toBe('0.9.56');
+    // 旧编译产物进 release（回退目标）
+    expect(readFileSync(join(releaseDir(install, '0.9.56'), 'dist', 'index.js'), 'utf-8')).toBe('old-index');
+    // 指针指向基线
+    expect(readPointer(install)).toEqual({ version: '0.9.56', lastGood: '0.9.56' });
+    // 扁平入口切到 bootstrap（下次重启走指针）
+    expect(readFileSync(join(install, 'dist', 'index.js'), 'utf-8')).toBe('old-bootstrap');
+  });
+
+  it('已有指针：不重复写基线、不改变当前 release', () => {
+    touch(join(install, 'dist', 'index.js'), 'old-index');
+    touch(join(install, 'dist', 'bootstrap.js'), 'old-bootstrap');
+    touch(join(install, 'package.json'), JSON.stringify({ version: '0.9.56' }));
+    const first = ensureSelfBuildBaseline(install, '0.9.56');
+
+    const second = ensureSelfBuildBaseline(install, '0.9.56');
+
+    expect(second).toBe(first);
+    expect(readPointer(install)?.version).toBe(first);
+  });
+});
+
 describe('smokeTestRelease', () => {
   it('真 spawn：入口可加载且输出版本号 → true', () => {
     const ver = '9.9.9';
@@ -120,6 +194,17 @@ describe('smokeTestRelease', () => {
     touch(join(releaseDir(install, ver), 'package.json'), JSON.stringify({ version: ver }));
 
     expect(smokeTestRelease(install, ver)).toBe(true);
+  });
+
+  it('buildId 与 semver 分离：目录用 buildId，输出校验 semver', () => {
+    const buildId = '0.9.61-20261019T120000-abcdef12';
+    const version = '0.9.61';
+    const entry = join(releaseDir(install, buildId), 'dist', 'index.js');
+    touch(entry, `console.log('${version}');`);
+
+    expect(smokeTestRelease(install, buildId, version)).toBe(true);
+    // 只给 buildId 时，输出里没有 buildId → false（防止调用方漏传 semver）
+    expect(smokeTestRelease(install, buildId)).toBe(false);
   });
 
   it('缺 dist/index.js → false', () => {

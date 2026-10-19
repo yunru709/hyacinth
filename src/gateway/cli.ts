@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, smokeTestRelease, resolveInstallRoot, readPointer, writePointerAtomic, pruneReleases, releaseDir } from '../update/index.js';
+import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, smokeTestRelease, resolveInstallRoot, readPointer, writePointerAtomic, pruneReleases, releaseDir, ensureSelfBuildBaseline, makeBuildId, writeRollbackRecord } from '../update/index.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import type { ProviderType, ProviderConfig } from '../types.js';
@@ -1180,37 +1180,53 @@ export async function runCli(): Promise<void> {
           process.exit(1);
         }
         writePointerAtomic(installDir, { version: pointer.lastGood, lastGood: pointer.lastGood });
+        writeRollbackRecord(installDir, {
+          from: pointer.version,
+          to: pointer.lastGood,
+          at: new Date().toISOString(),
+          reason: 'manual: hyacinth update --rollback',
+        });
         process.stderr.write(`[update] 已回退到 v${pointer.lastGood}。正在重启...\n`);
         writeRestartReason({ code: RESTART_EXIT_CODE, source: 'rollback', detail: `v${pointer.lastGood}` });
         process.exit(RESTART_EXIT_CODE);
       }
 
-      /** 升级收尾：冒烟 → 双壳副本 → 原子切指针 → 写 pending → 43 重启 */
-      const finishUpdate = (newVer: string, currentVersion: string): never => {
-        if (!smokeTestRelease(installDir, newVer)) {
-          process.stderr.write(`[update] 新版本 v${newVer} 自检未通过，已保留旧版本运行（未切换指针）。\n`);
+      /**
+       * 升级收尾：冒烟 → 双壳副本 → 原子切指针 → 写 pending → 43 重启。
+       *
+       * newBuildId 是唯一 release id（远程=新 semver；自构建=semver+时间戳+sha），
+       * currentBuildId 是当前正在跑的 release id —— 两者必须不同，guardian 才会
+       * 在首启失败时回退（`lastGood !== version`）。
+       */
+      const finishUpdate = (newBuildId: string, newVer: string, currentBuildId: string): never => {
+        if (!smokeTestRelease(installDir, newBuildId, newVer)) {
+          process.stderr.write(`[update] 新版本 v${newVer} (${newBuildId}) 自检未通过，已保留旧版本运行（未切换指针）。\n`);
           process.exit(1);
         }
         // 双壳副本：新版壳写入 installDir/dist（旧 shim 与新 bin 都指向合法壳）
-        const srcBootstrap = path.join(releaseDir(installDir, newVer), 'dist', 'bootstrap.js');
+        const srcBootstrap = path.join(releaseDir(installDir, newBuildId), 'dist', 'bootstrap.js');
         if (fsSync.existsSync(srcBootstrap)) {
           fsSync.mkdirSync(path.join(installDir, 'dist'), { recursive: true });
           fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'bootstrap.js'));
           fsSync.copyFileSync(srcBootstrap, path.join(installDir, 'dist', 'index.js'));
         }
         // 原子切指针 + 写 pending（guardian 据此自动回退/定案）
-        writePointerAtomic(installDir, { version: newVer, lastGood: currentVersion });
-        pruneReleases(installDir, 3, [`v${newVer}`, `v${currentVersion}`]);
-        writeUpdatePending({ version: newVer, lastGood: currentVersion });
-        process.stderr.write(`[update] ✅ 已更新到 v${newVer}。正在自动重启...\n`);
+        writePointerAtomic(installDir, { version: newBuildId, lastGood: currentBuildId });
+        pruneReleases(installDir, 3, [`v${newBuildId}`, `v${currentBuildId}`]);
+        writeUpdatePending({ version: newBuildId, lastGood: currentBuildId });
+        process.stderr.write(`[update] ✅ 已更新到 v${newVer} (${newBuildId})。正在自动重启...\n`);
         // 43 = 更新完成：guardian 剥离子命令参数，重新拉起默认入口
-        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer}` });
+        writeRestartReason({ code: RESTART_AFTER_UPDATE_EXIT_CODE, source: 'self-update', detail: `v${newVer} (${newBuildId})` });
         process.exit(RESTART_AFTER_UPDATE_EXIT_CODE);
       };
 
+      const currentVersion = JSON.parse(
+        fsSync.readFileSync(path.join(installDir, 'package.json'), 'utf-8'),
+      ).version as string;
+      const currentBuildId = readPointer(installDir)?.version ?? currentVersion;
+
       if (repo) {
         // ── 远程 ──
-        const currentVersion = JSON.parse(fsSync.readFileSync(path.join(installDir, 'package.json'), 'utf-8')).version;
         const result = await checkForUpdate(repo, currentVersion, msg => process.stderr.write(`[update] ${msg}\n`));
         if (!result) { process.stderr.write('[update] 检查失败\n'); process.exit(1); }
         const { version, downloadUrl } = result;
@@ -1234,23 +1250,59 @@ export async function runCli(): Promise<void> {
         execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tmpDir}' -Force"`, { stdio: 'pipe' });
 
         const extractedDir = findExtractedDir(tmpDir);
-        const { version: newVer } = stageRelease(extractedDir, installDir, {
+        // 远程 release 也用唯一 buildId：失败重试/同版本重投不会撞已有目录。
+        const remoteBuildId = makeBuildId(version.latest);
+        const { version: newVer, buildId: newBuildId } = stageRelease(extractedDir, installDir, {
           currentVersion,
+          currentBuildId,
+          buildId: remoteBuildId,
+          source: 'github',
           onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
         });
         fsSync.rmSync(tmpDir, { recursive: true, force: true });
-        finishUpdate(newVer, currentVersion);
+        finishUpdate(newBuildId, newVer, currentBuildId);
 
       } else if (sourcePath) {
         // ── 本地 ──
-        process.stderr.write(`[update] 本地编译: ${sourcePath}\n`);
-        execSync('pnpm build', { cwd: sourcePath, stdio: 'inherit' });
-        const currentVersion = JSON.parse(fsSync.readFileSync(path.join(installDir, 'package.json'), 'utf-8')).version;
-        const { version: newVer } = stageRelease(sourcePath, installDir, {
+        // 关键顺序：先把当前**运行中的编译产物**固化为基线，再编译新版本。
+        // 若先 build 再备份，旧 dist 已被覆盖，回退目标就没了（源码不是回退目标）。
+        const baselineBuildId = ensureSelfBuildBaseline(installDir, currentVersion);
+
+        let gitHead: string | undefined;
+        try {
+          gitHead = execSync('git rev-parse HEAD', { cwd: sourcePath, encoding: 'utf-8' }).trim();
+        } catch { /* 非 git / 无 git 命令：buildId 用 local 后缀 */ }
+
+        const buildId = makeBuildId(currentVersion, gitHead);
+        process.stderr.write(`[update] 本地编译: ${sourcePath} → release ${buildId}\n`);
+        try {
+          execSync('pnpm build', { cwd: sourcePath, stdio: 'inherit' });
+        } catch (err) {
+          // 编译失败可能已把扁平 dist/index.js 写成半成品；恢复基线 bootstrap 壳，
+          // 保证下一次重启仍走指针加载旧 release，而不是加载坏掉的扁平入口。
+          const baseBootstrap = path.join(
+            releaseDir(installDir, baselineBuildId),
+            'dist',
+            'bootstrap.js',
+          );
+          if (fsSync.existsSync(baseBootstrap)) {
+            fsSync.mkdirSync(path.join(installDir, 'dist'), { recursive: true });
+            fsSync.copyFileSync(baseBootstrap, path.join(installDir, 'dist', 'bootstrap.js'));
+            fsSync.copyFileSync(baseBootstrap, path.join(installDir, 'dist', 'index.js'));
+          }
+          process.stderr.write('[update] 编译失败，已保留上一个可运行 release；未切换指针。\n');
+          throw err;
+        }
+
+        const { version: newVer, buildId: newBuildId } = stageRelease(sourcePath, installDir, {
           currentVersion,
+          currentBuildId: baselineBuildId,
+          buildId,
+          gitHead,
+          source: 'local-source',
           onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
         });
-        finishUpdate(newVer, currentVersion);
+        finishUpdate(newBuildId, newVer, baselineBuildId);
 
       } else {
         process.stderr.write('请先配置更新源:\n');

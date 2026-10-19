@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
-import { migrateLegacyDist, releaseDir } from './releases.js';
+import { migrateLegacyDist, readPointer, releaseDir, writePointerAtomic, writeReleaseMeta } from './releases.js';
 import { GUARDIAN_ENV } from '../supervisor/protocol.js';
 
 export function findExtractedDir(tmpDir: string): string {
@@ -13,13 +13,22 @@ export function findExtractedDir(tmpDir: string): string {
 }
 
 export interface StageReleaseOptions {
-  /** 当前运行版本（作为回退基线 lastGood） */
+  /** 当前运行版本（semver；首次迁移的基线目录名） */
   currentVersion: string;
+  /** 当前运行 release id（有 releases 布局时是 buildId；缺省 = currentVersion） */
+  currentBuildId?: string;
+  /** 新 release 的唯一 id；缺省 = 新版本 semver（远程升级）；自构建必须传唯一值 */
+  buildId?: string;
+  /** 构建来源/元数据（落 meta.json，供回退后自修复） */
+  gitHead?: string;
+  source?: string;
+  note?: string;
   onStatus: (msg: string) => void;
 }
 
 export interface StageReleaseResult {
   version: string;
+  buildId: string;
   depChanged: boolean;
 }
 
@@ -49,14 +58,22 @@ export function stageRelease(
     dependencies?: Record<string, unknown>;
   };
   const version = newPkgJson.version ?? opts.currentVersion;
-  const dst = releaseDir(installDir, version);
+  const buildId = opts.buildId ?? version;
+  const dst = releaseDir(installDir, buildId);
 
   // 首次迁移：尚无 releases 基线时把当前 dist 固化为 lastGood（回退的地基）
   migrateLegacyDist(installDir, opts.currentVersion);
 
-  // 新版本完整落盘（全新目录，失败不影响现有版本；重装同版本时先清目标内旧产物）
+  // release 目录不可变：同 buildId 已存在时拒绝覆盖。
+  // 自构建必须传唯一 buildId；否则同版本重建会覆盖“上一个可运行版本”，
+  // 同时让 pending.lastGood === version，guardian 的自动回退直接失效。
+  if (fs.existsSync(dst)) {
+    throw new Error(
+      `release 已存在：v${buildId}。自构建请传唯一 buildId（见 makeBuildId）；` +
+      '禁止覆盖已有 release 目录。',
+    );
+  }
   fs.mkdirSync(dst, { recursive: true });
-  fs.rmSync(path.join(dst, 'dist'), { recursive: true, force: true });
   fs.cpSync(newDist, path.join(dst, 'dist'), { recursive: true });
   fs.cpSync(newPkg, path.join(dst, 'package.json'));
 
@@ -70,10 +87,10 @@ export function stageRelease(
     try {
       execSync('pnpm install --prod --no-frozen-lockfile', { cwd: dst, stdio: 'inherit' });
     } catch (err) {
-      // 恢复 installDir 的 package.json（releases/<currentVersion> 即备份），并重装旧依赖自愈
+      // 恢复 installDir 的 package.json（当前 release 即备份），并重装旧依赖自愈
       opts.onStatus('新依赖安装失败，恢复旧版本...');
       fs.cpSync(
-        path.join(releaseDir(installDir, opts.currentVersion), 'package.json'),
+        path.join(releaseDir(installDir, opts.currentBuildId ?? opts.currentVersion), 'package.json'),
         path.join(installDir, 'package.json'),
       );
       try {
@@ -87,7 +104,50 @@ export function stageRelease(
     opts.onStatus('依赖无变化，跳过重装');
   }
 
-  return { version, depChanged };
+  writeReleaseMeta(installDir, buildId, {
+    version,
+    buildId,
+    createdAt: new Date().toISOString(),
+    gitHead: opts.gitHead,
+    source: opts.source,
+    note: opts.note,
+  });
+
+  return { version, buildId, depChanged };
+}
+
+/**
+ * 自构建前置：把当前**运行中的编译产物**固化为可回退基线，并把入口切到
+ * bootstrap 壳（若尚未切）。
+ *
+ * 为什么必须在 `pnpm build` 之前调用：build 会原地重写 installDir/dist。
+ * 先备份再编译，编译失败/首启失败时才有旧 release 可回；顺序反了备份到的
+ * 就是新构建本身，等于没有 lastGood。
+ *
+ * 返回基线 release id。
+ */
+export function ensureSelfBuildBaseline(installDir: string, currentVersion: string): string {
+  // 1. 扁平布局 → releases/v<currentVersion>（复制，不动运行中的 dist）
+  migrateLegacyDist(installDir, currentVersion);
+
+  // 2. 没有指针时先把指针指向基线；否则 bootstrap 仍走扁平 dist
+  let pointer = readPointer(installDir);
+  if (!pointer) {
+    pointer = { version: currentVersion, lastGood: currentVersion };
+    writePointerAtomic(installDir, pointer);
+  }
+
+  // 3. 双壳：把基线的 bootstrap 复制到 installDir/dist，下一次重启才会读指针。
+  //    当前进程已加载的模块不受影响。
+  const srcBootstrap = path.join(releaseDir(installDir, pointer.version), 'dist', 'bootstrap.js');
+  if (fs.existsSync(srcBootstrap)) {
+    const flatDist = path.join(installDir, 'dist');
+    fs.mkdirSync(flatDist, { recursive: true });
+    fs.copyFileSync(srcBootstrap, path.join(flatDist, 'bootstrap.js'));
+    fs.copyFileSync(srcBootstrap, path.join(flatDist, 'index.js'));
+  }
+
+  return pointer.version;
 }
 
 /** 冒烟验证超时（ms） */
@@ -98,8 +158,12 @@ export const SMOKE_TIMEOUT_MS = 30_000;
  * 必须排在依赖安装之后；失败返回 false（调用方不切指针）。
  * 真实启动校验（首启即崩）由 guardian 的 pending 回退兜底。
  */
-export function smokeTestRelease(installDir: string, version: string): boolean {
-  const entry = path.join(releaseDir(installDir, version), 'dist', 'index.js');
+export function smokeTestRelease(
+  installDir: string,
+  buildId: string,
+  expectedVersion?: string,
+): boolean {
+  const entry = path.join(releaseDir(installDir, buildId), 'dist', 'index.js');
   if (!fs.existsSync(entry)) return false;
   try {
     const res = spawnSync(process.execPath, [entry, '--version'], {
@@ -111,7 +175,7 @@ export function smokeTestRelease(installDir: string, version: string): boolean {
     });
     if (res.error || res.status !== 0) return false;
     const out = (res.stdout ?? '') + (res.stderr ?? '');
-    return out.includes(version);
+    return out.includes(expectedVersion ?? buildId);
   } catch {
     return false;
   }

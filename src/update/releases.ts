@@ -11,8 +11,105 @@ import path from 'node:path';
 // 原则：升级从不修改运行中版本的文件；指针切换是唯一原子变更点。
 
 export interface ReleasePointer {
+  /**
+   * 当前 release id。正常升级时是 semver；自构建时是**唯一 buildId**
+   * （semver + 时间戳 + git sha），保证同版本重建不会覆盖旧 release。
+   */
   version: string;
+  /** 上一个**运行稳定**的 release id（不是“上一个版本号”） */
   lastGood: string;
+}
+
+/** release 元数据（落 releases/v<buildId>/meta.json；给回退后的自修复留痕） */
+export interface ReleaseMeta {
+  /** 人类可读 semver（package.json version） */
+  version: string;
+  /** 唯一 release id（目录名去掉 v 前缀） */
+  buildId: string;
+  createdAt: string;
+  /** 构建时的 git HEAD（无仓库/非 git 时缺省） */
+  gitHead?: string;
+  /** 构建来源（local-source / github / manual） */
+  source?: string;
+  /** 额外备注（例如触发它的会话/任务） */
+  note?: string;
+}
+
+/** 回退留痕（releases/last-rollback.json；guardian 自动回退时写） */
+export interface RollbackRecord {
+  from: string;
+  to: string;
+  at: string;
+  reason: string;
+}
+
+/**
+ * 生成唯一 buildId。
+ *
+ * 为什么不能只用 semver：agent 自改后版本号通常不变（0.9.61），
+ * 用 semver 做目录名会把“上一个可运行版本”覆盖掉，lastGood 也会指向自己，
+ * guardian 的 `lastGood !== version` 判定直接失效。
+ */
+export function makeBuildId(version: string, gitHead?: string, now: number = Date.now()): string {
+  const base = version.replace(/[^0-9A-Za-z._-]/g, '-');
+  const stamp = new Date(now).toISOString().replace(/[-:.]/g, '').slice(0, 15); // YYYYMMDDTHHMMSS
+  const sha = (gitHead ?? '').trim().slice(0, 8) || 'local';
+  return `${base}-${stamp}-${sha}`;
+}
+
+export function releaseExists(installDir: string, buildId: string): boolean {
+  return fs.existsSync(releaseDir(installDir, buildId));
+}
+
+export function writeReleaseMeta(installDir: string, buildId: string, meta: ReleaseMeta): void {
+  const dir = releaseDir(installDir, buildId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
+}
+
+export function readReleaseMeta(installDir: string, buildId: string): ReleaseMeta | null {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(releaseDir(installDir, buildId), 'meta.json'), 'utf-8'),
+    ) as Partial<ReleaseMeta>;
+    if (typeof raw.version !== 'string' || typeof raw.buildId !== 'string') return null;
+    return {
+      version: raw.version,
+      buildId: raw.buildId,
+      createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
+      gitHead: typeof raw.gitHead === 'string' ? raw.gitHead : undefined,
+      source: typeof raw.source === 'string' ? raw.source : undefined,
+      note: typeof raw.note === 'string' ? raw.note : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeRollbackRecord(installDir: string, record: RollbackRecord): void {
+  fs.mkdirSync(releasesDir(installDir), { recursive: true });
+  fs.writeFileSync(
+    path.join(releasesDir(installDir), 'last-rollback.json'),
+    JSON.stringify(record, null, 2),
+    'utf-8',
+  );
+}
+
+export function readRollbackRecord(installDir: string): RollbackRecord | null {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(releasesDir(installDir), 'last-rollback.json'), 'utf-8'),
+    ) as Partial<RollbackRecord>;
+    if (typeof raw.from !== 'string' || typeof raw.to !== 'string') return null;
+    return {
+      from: raw.from,
+      to: raw.to,
+      at: typeof raw.at === 'string' ? raw.at : '',
+      reason: typeof raw.reason === 'string' ? raw.reason : '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function releasesDir(installDir: string): string {
