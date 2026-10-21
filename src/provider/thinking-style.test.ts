@@ -12,13 +12,15 @@ import {
   buildThinkingParams,
   buildAnthropicThinking,
   normalizeThinkingStyle,
+  resolveThinkingStyle,
   EFFORT_OFF,
 } from './thinking-style.js';
 
 describe('normalizeThinkingStyle', () => {
-  it('接受四个合法值，并容错大小写与空白', () => {
+  it('接受全部合法值，并容错大小写与空白', () => {
     expect(normalizeThinkingStyle('deepseek')).toBe('deepseek');
     expect(normalizeThinkingStyle('effort')).toBe('effort');
+    expect(normalizeThinkingStyle('effort-required')).toBe('effort-required');
     expect(normalizeThinkingStyle('anthropic')).toBe('anthropic');
     expect(normalizeThinkingStyle('none')).toBe('none');
     expect(normalizeThinkingStyle('  EFFORT ')).toBe('effort');
@@ -32,6 +34,27 @@ describe('normalizeThinkingStyle', () => {
     expect(normalizeThinkingStyle(null)).toBeUndefined();
     expect(normalizeThinkingStyle(123)).toBeUndefined();
     expect(normalizeThinkingStyle({})).toBeUndefined();
+  });
+});
+
+describe('resolveThinkingStyle（模型级 > 厂商级 > none）', () => {
+  it('模型级声明覆盖厂商级 —— commandcode 的实际形状（厂商 effort / 模型 effort-required）', () => {
+    expect(resolveThinkingStyle('effort', 'effort-required')).toBe('effort-required');
+  });
+
+  it('模型未声明 ⇒ 用厂商级', () => {
+    expect(resolveThinkingStyle('effort', undefined)).toBe('effort');
+    expect(resolveThinkingStyle('deepseek', null)).toBe('deepseek');
+  });
+
+  it('两层都没有 ⇒ none（不往请求体塞未知字段）', () => {
+    expect(resolveThinkingStyle(undefined, undefined)).toBe('none');
+    expect(resolveThinkingStyle('garbage', 'also-garbage')).toBe('none');
+  });
+
+  it('模型级是非法值时不吞掉厂商级（回落而非中断）', () => {
+    expect(resolveThinkingStyle('effort', 'effort-required ')).toBe('effort-required');
+    expect(resolveThinkingStyle('effort', 'effortRequired')).toBe('effort');
   });
 });
 
@@ -57,6 +80,17 @@ describe('buildThinkingParams（OpenAI 兼容层）', () => {
     expect(buildThinkingParams('effort', true)).toEqual({ reasoning_effort: 'high' });
   });
 
+  it('effort-required 开启：照发档位', () => {
+    expect(buildThinkingParams('effort-required', true, 'max')).toEqual({ reasoning_effort: 'max' });
+    expect(buildThinkingParams('effort-required', true)).toEqual({ reasoning_effort: 'high' });
+  });
+
+  it('effort-required 关闭：**绝不发 off**（该模型收到 off 直接 400），也不发任何其它思考字段', () => {
+    const p = buildThinkingParams('effort-required', false);
+    expect(p).toEqual({});
+    expect(p).not.toHaveProperty('reasoning_effort');
+  });
+
   it('none / anthropic：不产生任何字段（缺省保守，不塞未知字段给网关）', () => {
     expect(buildThinkingParams('none', true, 'high')).toEqual({});
     expect(buildThinkingParams('none', false)).toEqual({});
@@ -64,7 +98,7 @@ describe('buildThinkingParams（OpenAI 兼容层）', () => {
   });
 
   it('任何 style 都不得产出 extra_body —— 那是 Python SDK 参数名，Node SDK 不展开', () => {
-    for (const style of ['deepseek', 'effort', 'anthropic', 'none'] as const) {
+    for (const style of ['deepseek', 'effort', 'effort-required', 'anthropic', 'none'] as const) {
       for (const enabled of [true, false]) {
         const p = buildThinkingParams(style, enabled, 'high');
         expect(p).not.toHaveProperty('extra_body');

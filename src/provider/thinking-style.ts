@@ -22,13 +22,25 @@
  *               必须显式发 disabled 才能关）
  * - `effort`    只认 effort 枚举的中转：只发顶层 `reasoning_effort`，**关闭 = 'off'**
  *               （官方对应值是 `none`，commandcode 实测为 `off`）
+ * - `effort-required`  同 effort，但**思考关不掉**：开启才发档位，关闭时**一个字段都不发**。
+ *               用于拒绝 'off' 的模型 —— 2026-10-21 实测 commandcode 的 minimax-m3.1-flash
+ *               发 `reasoning_effort:'off'` 直接 400（"does not support reasoning_effort \"off\".
+ *               Only models that can turn thinking off accept it."）。
+ *               语义提醒：这类模型**恒定思考**，`thinking:false` 只表示"我们关不掉"，
+ *               不表示"它不思考"（省思考 token 的期待要落空）。
  * - `anthropic` Anthropic 原生延长思考：`thinking:{type:'enabled',budget_tokens:N}`，
  *               关闭 = 不发（Anthropic 默认不思考）
  * - `none`      不发任何思考字段（缺省：不往请求体塞未知字段，免得严格网关直接 400）
  */
-export type ThinkingStyle = 'deepseek' | 'effort' | 'anthropic' | 'none';
+export type ThinkingStyle = 'deepseek' | 'effort' | 'effort-required' | 'anthropic' | 'none';
 
-const VALID_STYLES: readonly string[] = ['deepseek', 'effort', 'anthropic', 'none'];
+const VALID_STYLES: readonly string[] = [
+  'deepseek',
+  'effort',
+  'effort-required',
+  'anthropic',
+  'none',
+];
 
 /** effort 型上游的"关闭"取值（commandcode 实测合法枚举之一） */
 export const EFFORT_OFF = 'off';
@@ -68,6 +80,11 @@ export function buildThinkingParams(
     case 'effort':
       // 关闭时也**必须发**：上游思考默认开着，不显式发 'off' 就关不掉。
       return { reasoning_effort: enabled ? (effort ?? 'high') : EFFORT_OFF };
+    case 'effort-required':
+      // 该模型**拒绝 'off'**（发了直接 400）⇒ 关闭时一个字段都不发，思考照跑。
+      // ⚠️ 两处都别"顺手改"：① 不要给它补 EFFORT_OFF（400）
+      //                    ② 不要改成 'none'（那会把开启时的档位也一并吞掉）
+      return enabled ? { reasoning_effort: effort ?? 'high' } : {};
     default:
       // 'anthropic'（原生协议，不走这里）与 'none' 在 OpenAI 兼容层不产生字段
       return {};
@@ -87,4 +104,25 @@ export function buildAnthropicThinking(
 ): { type: 'enabled'; budget_tokens: number } | undefined {
   if (style !== 'anthropic' || !enabled) return undefined;
   return { type: 'enabled', budget_tokens: budget };
+}
+
+/**
+ * 解析生效的思考接线：**模型级 > 厂商级 > none**。
+ *
+ * 为什么模型级优先：同一家网关下，不同模型对"关闭思考"的接受度可以不同 ——
+ * commandcode 的 deepseek-v4.1-flash 必须发 `reasoning_effort:'off'` 才关得掉，
+ * 而 minimax-m3.1-flash 收到 'off' 直接 400（2026-10-21 实测）⇒ 厂商级单一声明
+ * 无法同时满足，只能让更具体的那一层（模型目录条目）覆盖。
+ *
+ * 非法值一律当"没声明"继续往下落，绝不把拼错的字符串透传到 wire。
+ */
+export function resolveThinkingStyle(
+  providerStyle: unknown,
+  modelStyle: unknown,
+): ThinkingStyle {
+  return (
+    normalizeThinkingStyle(modelStyle) ??
+    normalizeThinkingStyle(providerStyle) ??
+    'none'
+  );
 }

@@ -36,6 +36,14 @@ export interface ModelCatalogEntry {
   reasoning?: boolean;
   /** 推理/思考强度：high | max（仅 DeepSeek V4 等支持 reasoning 的模型有效） */
   reasoningEffort?: 'high' | 'max';
+  /**
+   * **模型级**思考接线覆盖（优先于厂商级 thinkingStyle，取值见 thinking-style.ts）。
+   *
+   * 为什么需要模型级：同一家网关下，模型对"关闭思考"的接受度可能不同 ——
+   * commandcode 的 deepseek-v4.1-flash 必须发 `reasoning_effort:'off'` 才关得掉，
+   * 而 minimax-m3.1-flash 收到 'off' 直接 400。厂商级单一声明无法同时满足两者。
+   */
+  thinkingStyle?: string;
 }
 
 /** 模型目录配置（兼容旧 models-catalog.json 结构） */
@@ -163,6 +171,14 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry[]> = {
     { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'opencode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.14, output: 0.28, cacheRead: 0.028 }, status: 'available', reasoning: true },
   ],
   commandcode: [
+    // 2026-10-21 新增（孑遗告知「免费」+ 当日对 api.commandcode.ai 实测）：
+    //   ① 1M 上下文、tool calling 正常（实测返回 tool_calls）、**带图 400 ⇒ 无视觉**；
+    //   ② **思考关不掉** —— 发 `reasoning_effort:'off'` 直接 400（"Only models that can turn
+    //      thinking off accept it."）⇒ 必须声明 `thinkingStyle: 'effort-required'`，
+    //      否则任何 thinking:false 的通道（压缩/编排/子 Agent）切到它都会当场崩。
+    //   ③ `:free` 是同一模型的免费档（同 context/maxTokens），付费档不写 cost 免得编价格。
+    { id: 'minimax/minimax-m3.1-flash', name: 'MiniMax M3.1 Flash', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
+    { id: 'minimax/minimax-m3.1-flash:free', name: 'MiniMax M3.1 Flash (free)', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
     { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, cost: { input: 0.3, output: 1.2, cacheRead: 0.006 }, status: 'available', reasoning: true },
     // 以下 5 个为免费/隐身模型，**上游可用性不稳定**（曾出现 403 下线）：
     // 保留在目录里供选择，失效时用户自行覆盖 —— 移除它们反而会让人以为"没这功能"。

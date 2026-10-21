@@ -9,7 +9,11 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
-import { buildThinkingParams, normalizeThinkingStyle, type ThinkingStyle } from './thinking-style.js';
+import {
+  buildThinkingParams,
+  resolveThinkingStyle,
+  type ThinkingStyle,
+} from './thinking-style.js';
 import { getProviderConfigLoader } from './config.js';
 import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
@@ -128,8 +132,10 @@ export class OpenAICompatibleProvider implements Provider {
     this.userId = opts.fields?.userId ?? opts.userId; // 缺省兜底在 translateFields（openai 协议）
     this.sampling = opts.sampling ?? modelInfo?.sampling; // 三级兜底：激活配置 → 模型目录默认
     this.fieldMap = opts.fieldMap;
-    // 思考接线：缺省 none（不往请求体塞未知字段）。deepseek 等内置厂商经工厂传入。
-    this.thinkingStyle = normalizeThinkingStyle(opts.thinkingStyle) ?? 'none';
+    // 思考接线：**模型级 > 厂商级 > none**。模型级必须能覆盖厂商级 —— 同家网关下
+    // 模型对"关闭思考"的接受度可以不同（2026-10-21 实测 commandcode：deepseek-v4.1-flash
+    // 必须发 'off' 才关得掉，minimax-m3.1-flash 收到 'off' 直接 400）。
+    this.thinkingStyle = resolveThinkingStyle(opts.thinkingStyle, modelInfo?.thinkingStyle);
   }
 
   getProviderType(): ProviderType {

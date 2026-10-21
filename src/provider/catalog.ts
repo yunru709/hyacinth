@@ -34,6 +34,8 @@ export interface ModelInfo {
   replacedBy?: string;
   /** 推理/思考强度（仅支持 reasoning 的模型有效） */
   reasoningEffort?: 'high' | 'max';
+  /** 模型级思考接线覆盖（优先于厂商级；见 model-types.ts 同名字段说明） */
+  thinkingStyle?: string;
   /** 模型级默认采样参数（激活配置/厂商级未覆盖时生效） */
   sampling?: ProviderSampling;
 }
@@ -46,6 +48,7 @@ function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
     contextWindow: entry.contextWindow,
     maxOutputTokens: entry.maxOutputTokens,
     reasoningEffort: entry.reasoningEffort,
+    thinkingStyle: entry.thinkingStyle,
     capabilities: {
       streaming: entry.capabilities.streaming,
       toolCalling: entry.capabilities.toolCalling,
