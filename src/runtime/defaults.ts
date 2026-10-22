@@ -217,7 +217,8 @@ export function getDefaultConfig(): FullConfig {
       pipeline: [
         { id: 'input', impl: 'builtin:input-normalize', enabled: true, requires: { reads: ['history', 'userInput'], writes: ['userInput'] } },
         { id: 'bypass', impl: 'builtin:bypass-preturn', enabled: true, requires: { reads: ['history', 'userInput'], writes: ['userInput', 'bypassInjections'] } },
-        { id: 'context', impl: 'builtin:layered-composer', enabled: true, requires: { reads: ['history', 'userInput', 'tools'], writes: ['messages', 'zoneBreakdown'] } },
+        // reads 里不含 'tools'：TurnState 无该字段（C-09，见 create-kernel.ts 同处注释）
+        { id: 'context', impl: 'builtin:layered-composer', enabled: true, requires: { reads: ['history', 'userInput'], writes: ['messages', 'zoneBreakdown'] } },
         { id: 'llm', impl: 'builtin:provider-stream', enabled: true, requires: { reads: ['messages'], writes: ['streamText', 'stopReason'] } },
         { id: 'tools', impl: 'builtin:tool-dispatch', enabled: true, requires: { reads: ['toolCalls'], writes: ['toolCalled'] } },
         { id: 'finalize', impl: 'builtin:turn-finalize', enabled: true, requires: { reads: ['stop'], writes: ['stop', 'stopReason'] } },

@@ -14,8 +14,18 @@ const BLOCKED_COMMANDS = new Set([
   'wscript', 'cscript',
 ]);
 
-/** 配置文件来源标记 */
+/**
+ * 配置文件来源标记。
+ *
+ * ⚠️ C-10（2026-10-22 核实）：P-Config 收敛后 **生产端只可能产生 `'user'`**
+ * （`getMCPConfigPaths` 只返回用户级）。`'project'` / `'project-agent'` 仍保留在类型里，
+ * 是因为：① UI 协议视图（`ui-protocol/domains/mcp.ts`）与前端可能按字符串分派；
+ * ② 历史数据/插件可能带着旧值。**新增代码不要假设这两个值会出现**。
+ */
 export type MCPConfigScope = 'user' | 'project' | 'project-agent';
+
+/** 生产端实际可产生的 scope（收口用；`getMCPConfigPaths` 的返回类型就是它） */
+export type ActiveMCPConfigScope = Extract<MCPConfigScope, 'user'>;
 
 export interface MCPConfigEntry {
   /** 配置文件路径（唯一来源，setEnabled 依赖它回写） */
@@ -36,8 +46,12 @@ export interface MCPConfigEntry {
  *
  * 项目级配置（<projectDir>/.mcp.json、<projectDir>/.agent/mcp.json）已取消，
  * 统一走全局 ~/.agent/mcp.json，减少配置层级。
+ *
+ * ⚠️ C-10（2026-10-22 收口）：返回类型里 scope 收窄成 `ActiveMCPConfigScope`（只有 'user'）——
+ * 让「生产端只会产生 user」这件事由编译器保证，而不是靠读注释。
+ * `projectDir` 参数保留只为调用方兼容（`MCPConfigLoader` 的接口形状），**不再参与定位**。
  */
-export function getMCPConfigPaths(projectDir: string): { file: string; scope: MCPConfigScope }[] {
+export function getMCPConfigPaths(_projectDir: string): { file: string; scope: ActiveMCPConfigScope }[] {
   return [
     { file: path.join(os.homedir(), '.agent', 'mcp.json'), scope: 'user' },
   ];

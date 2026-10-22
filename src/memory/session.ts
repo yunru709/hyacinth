@@ -322,6 +322,38 @@ export class SessionManager {
   }
 
   /**
+   * 列出**陪伴模式**的会话 —— 它们的数据源不在 `~/.agent/sessions`。
+   *
+   * ⚠️ C-13（2026-10-22 修复）：`CompanionSessionManager` 把陪伴会话放在
+   * `~/.agent/companion/<角色名>/`（其模块注释自陈「与正常 session 完全分开」），
+   * 而 `list()` 只扫 `getSessionsRoot()` ⇒ `listByMode('companion')` **恒返回空**
+   * （即使调用方传对了模式，列表仍是空的；TUI 写死 'normal' 只是叠加的第二层错误）。
+   *
+   * 判据 = 目录内存在 `meta.json`；id 取角色名（= 目录名 = 该会话的唯一标识）。
+   * type 强制为 'companion'：目录位置即定义，meta.json 里的陈旧 type 不足信
+   * （CompanionSessionManager.getOrCreate 会校正它，但历史数据可能是 'normal'）。
+   */
+  private async listCompanionSessions(): Promise<Session[]> {
+    const base = path.join(os.homedir(), '.agent', 'companion');
+    let entries: Array<{ isDirectory(): boolean; name: string }> = [];
+    try {
+      entries = await fs.readdir(base, { withFileTypes: true });
+    } catch {
+      return []; // 目录不存在 ⇒ 没进过陪伴模式
+    }
+
+    const out: Session[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const dir = path.join(base, entry.name);
+      if (!existsSync(path.join(dir, 'meta.json'))) continue;
+      const s = await this.readSessionAt(dir, entry.name);
+      if (s) out.push({ ...s, type: 'companion' });
+    }
+    return out;
+  }
+
+  /**
    * 只列**某个模式**的会话 —— 列表过滤的唯一入口
    * （`/命令`、WebUI 列表、agent 工具都该走它，别各自 filter ✗）。
    *
@@ -331,7 +363,11 @@ export class SessionManager {
   async listByMode(mode: string): Promise<Session[]> {
     const want = (mode ?? '').trim() || 'normal';
     const all = await this.list();
-    return all.filter((s) => (s.type ?? 'normal') === want);
+    const matched = all.filter((s) => (s.type ?? 'normal') === want);
+    if (want !== 'companion') return matched;
+    // 陪伴会话在**另一个根目录**，必须并入（C-13：只过滤 list() 永远拿不到）
+    const companions = await this.listCompanionSessions();
+    return [...matched, ...companions];
   }
 
   /**

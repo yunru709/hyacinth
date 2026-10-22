@@ -21,9 +21,15 @@ const logger = createLogger('extension-registry-watcher');
 
 /** 名单访问面（gateway 装配层注入：arch-assembly.createManifestAccess 的产物） */
 export interface ManifestAccessLike {
-  /** 两层名单文件路径（全局 + 项目） */
+  /**
+   * 需要 watch 的名单文件路径。
+   *
+   * ⚠️ C-10（2026-10-22 收口）：注释曾写「两层名单文件路径（全局 + 项目）」，但 P-Config 收敛后
+   * 项目级已取消 —— 两个"层"指向同一个文件，实现侧现已去重 ⇒ 实际只有一条。
+   * 仍返回数组只为不改 watcher 契约（将来若恢复项目级，这里天然支持多路径）。
+   */
   listManifestPaths(): string[];
-  /** 读两层名单并合并校验（宽容解析：非法条目剔除，错误列表返回） */
+  /** 读名单并合并校验（宽容解析：非法条目剔除，错误列表返回） */
   loadManifest(): { manifest: ExtensionManifest; errors: string[] };
 }
 

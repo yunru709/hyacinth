@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import type { MessageContent } from '../types.js';
 import { extractFrames } from './ffmpeg.js';
 import { recordMediaFile } from '../media/index.js';
@@ -50,10 +51,27 @@ export class ImageStore {
   private _dirty = true;
   private nextSeq = 1;
 
+  /**
+   * 内容指纹 —— 必须**真正把内容纳入哈希**。
+   *
+   * ⚠️ 历史 bug（2026-10-22 核实并实证）：旧实现是
+   *   `${mediaType}:${base64Data.length}:${head.length}:${tail.length}`
+   * head/tail 恒取 512 字符 ⇒ 对任何 >768 字节的图，后两段**恒为 512**
+   * ⇒ 哈希退化成「媒体类型 + 总长度」。而 `store()` 命中即 `return existing`
+   * （不入库、不覆盖、无日志）⇒ 同类型、同字节长度的两张**不同**图，
+   * 第二张会静默复用第一张的 id，用户看到的是上一张图。
+   * 实测：两个 32 字符的等长不同 base64 都返回 `img_001`，`list().length === 1`。
+   *
+   * 改法：sha256 全量内容（对几 MB 的图也只是毫秒级，只在 store 时算一次）。
+   * 以后改这里必须保留「内容参与哈希」这一点，别退回到取长度/取片段。
+   */
   private _contentHash(base64Data: string, mediaType: string): string {
-    const head = base64Data.slice(0, 512);
-    const tail = base64Data.slice(-512);
-    return `${mediaType}:${base64Data.length}:${head.length}:${tail.length}`;
+    return crypto
+      .createHash('sha256')
+      .update(mediaType)
+      .update('\0')
+      .update(base64Data)
+      .digest('hex');
   }
 
   store(base64Data: string, mediaType: string, sourcePath?: string): string {
@@ -75,6 +93,22 @@ export class ImageStore {
 
   get(id: string): ImageRecord | null {
     return this.images.get(id) ?? null;
+  }
+
+  /**
+   * 清空全部索引。
+   *
+   * ⚠️ C-08（2026-10-22 修复）：切会话时 orchestrator 会清 11 项会话态，**却没有一项涉及图片**
+   * （`pendingImageInjections` 只在 context 阶段消费后原地清空），而 `ImageStore` 也没有
+   * clear/reset/TTL ⇒ 切到新会话后旧的 `img_001..N` 仍然可被 `view_image` 命中，
+   * 等于把上一个会话的图带进了新会话。
+   */
+  clear(): void {
+    this.images.clear();
+    this._hashIndex.clear();
+    this._cachedList = '';
+    this._dirty = true;
+    this.nextSeq = 1;
   }
 
   setDescription(id: string, desc: string): void {

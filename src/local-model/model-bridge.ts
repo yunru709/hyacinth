@@ -396,6 +396,17 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
     return found ?? 'ollama';
   }
 
+  /**
+   * 选一个端口。
+   *
+   * ⚠️ C-21（2026-10-22 修复）：旧实现在扫描 `startPort..startPort+20` 全被占后
+   * **兜底 `return startPort`** —— 那必然是 `used` 里的端口（否则循环早就返回了）
+   * ⇒ 必然冲突，且冲突要到 healthCheck 连错端口时才暴露，表现为"模型起不来但无原因"。
+   * 现在扩大扫描范围，真耗尽就抛明确错误（含已占用清单），而不是谎报一个可用端口。
+   *
+   * 注意 `used` 只来自本进程已知的 manager/registry，**不查 OS 实际占用**；
+   * 真正的 bind 冲突仍由子进程/健康检查暴露（这里只保证"不自相矛盾"）。
+   */
   private findAvailablePort(backend?: string): number {
     const used = new Set<number>();
 
@@ -412,11 +423,14 @@ export class ModelBridge extends EventEmitter<ModelBridgeEvents> {
     }
 
     const startPort = backend === 'ollama' ? getOllamaEndpoints().port : 8080;
-    const maxPort = startPort + 20;
-    for (let p = startPort; p < maxPort; p++) {
+    const span = 100; // 20 太窄：多模型并行时容易耗尽
+    for (let p = startPort; p < startPort + span; p++) {
       if (!used.has(p)) return p;
     }
-    return startPort;
+    throw new Error(
+      `[model-bridge] 端口耗尽：${startPort}..${startPort + span - 1} 均已占用` +
+      `（已占用：${[...used].sort((a, b) => a - b).join(', ')}）。请显式给该模型指定 port。`,
+    );
   }
 
   private extractPortFromConfig(config: ManagedProcessConfig): number {

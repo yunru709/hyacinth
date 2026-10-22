@@ -595,13 +595,23 @@ export class CommandRegistry extends EventEmitter {
     this.reload();
   }
 
-  /** 获取单例 */
+  /**
+   * 获取单例。
+   *
+   * ⚠️ C-22（2026-10-22 修复）：无参调用且单例尚未初始化时，旧实现**直接抛错**。
+   * 而 `ui/slash-commands.ts` 的门面四个函数全部**无参**调用 ⇒ 可用性完全取决于
+   * 「谁先种下单例」（agent-assembly / http-webhook / tui 共 4 处）⇒ 时序依赖、无编译期保护。
+   * 现在退回 process.cwd()（commands.json 就在项目根）—— 退化但不崩，并留一条 warn。
+   */
   static getInstance(projectDir?: string): CommandRegistry {
     if (!CommandRegistry._instance) {
       if (!projectDir) {
-        throw new Error('CommandRegistry: projectDir required for first initialization');
+        logger.warn(
+          'CommandRegistry.getInstance() called without projectDir before initialization — ' +
+          'falling back to process.cwd() (C-22)',
+        );
       }
-      CommandRegistry._instance = new CommandRegistry(projectDir);
+      CommandRegistry._instance = new CommandRegistry(projectDir ?? process.cwd());
     }
     return CommandRegistry._instance;
   }

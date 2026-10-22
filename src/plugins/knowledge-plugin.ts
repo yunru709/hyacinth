@@ -89,11 +89,20 @@ export function createKnowledgePlugin(
       // 从 config 恢复 KB/Zone4 状态（持久化）
       const wantEnabled = config.enabled ?? configCenter?.get<boolean>('kb.enabled') ?? false;
       const wantZone4 = config.zone4 ?? configCenter?.get<boolean>('kb.zone4') ?? false;
-      if (wantEnabled) knowledgeBase.enable();
+
+      // ⚠️ C-11（2026-10-22 修复）：此前只在 `wantZone4` 为真时调 setter，**从不调 false**
+      // ⇒ `kb.zone4: false` 被整体忽略（store 默认 `_zone4Enabled = true`），
+      //    kb 内容照常注入、zone4 工具照常可用。
+      // ⚠️ 顺序有讲究：`setZone4Enabled(false)` 会**连带**把 `_enabled` 置 false
+      //    （store.ts 的 setZone4Enabled 实现）⇒ 必须先关 zone4、再按 wantEnabled 重新 enable，
+      //    否则简单的 else 分支补一次调用会把 `kb.enabled` 一并关掉。
+      knowledgeBase.setZone4Enabled(wantZone4);
       if (wantZone4) {
-        knowledgeBase.setZone4Enabled(true);
         contextComposer.activeConditions.add('zone4_enabled');
+      } else {
+        contextComposer.activeConditions.delete('zone4_enabled');
       }
+      if (wantEnabled) knowledgeBase.enable();
 
       // Zone 4 ContextSource（结构化 tag 匹配 + FTS5 兜底）
       const kbSource: import('../context/interface.js').ContextSource = {

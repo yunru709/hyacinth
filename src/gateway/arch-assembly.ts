@@ -145,8 +145,12 @@ export function recordBuiltinBaselines(deps: {
 export function createManifestAccess(cwd: string): ManifestAccessLike {
   return {
     listManifestPaths: () => {
+      // ⚠️ C-10（2026-10-22 收口）：P-Config 收敛后 `manifestPaths` 的 globalPath 与 projectPath
+      // **是同一个文件**，旧实现在这里返回 `[globalPath, projectPath]` ⇒ 同一路径被 watch 两次
+      // （watcher 侧虽有同一路径共用 StatWatcher + reloadLock，副作用未证实，但这纯属冗余）。
+      // 接口仍返回数组（watcher 契约不变），内容是去重后的真实路径集。
       const { globalPath, projectPath } = manifestPaths(cwd);
-      return [globalPath, projectPath];
+      return [...new Set([globalPath, projectPath])];
     },
     loadManifest: () => loadExtensionManifest(cwd),
   };

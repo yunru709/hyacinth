@@ -338,7 +338,10 @@ export async function createSubAgentLoop(
   }, {
     sessionDir: subSessionDir,
     maxTurns: agentDef.maxTurns,
-    maxContextTokens: parentContext.maxContextTokens,
+    // ⚠️ N-01（2026-10-22 修复）：这里原先传 `parentContext.maxContextTokens`，
+    // 把上面算好的 `subMaxContext` 白白丢掉 ⇒ debut 注释宣称的「窗口跟子通道走」并未生效。
+    // 传 subMaxContext 后，composer / compressor / 子 loop 三者才真正用同一个子窗口预算。
+    maxContextTokens: subMaxContext,
   });
 
   return { loop, sessionDir: subSessionDir, isNew };

@@ -47,7 +47,8 @@ function makeSystem(
       entry.enabled = enabled;
       return entry.file;
     },
-    addExternalServer: async (config) => { calls.added.push(config); },
+    // 2026-10-22：返回 boolean（true=可用）。原为 void，导致 mcp.add 无法判断成败。
+    addExternalServer: async (config) => { calls.added.push(config); return true; },
     removeExternalServer: async (name) => { calls.removed.push(name); },
   };
 }

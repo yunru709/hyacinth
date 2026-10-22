@@ -84,22 +84,29 @@ export class MCPSystem {
   }
 
   private async doStart(): Promise<void> {
-    this.currentConfigs = await this.configLoader.load(this.cwd);
+    const configs = await this.configLoader.load(this.cwd);
 
     // 连接前清扫上次异常退出遗留的孤儿 MCP 子进程树（失败不影响启动）
     try {
-      await sweepOrphanedMcpProcesses(this.currentConfigs);
+      await sweepOrphanedMcpProcesses(configs);
     } catch (err) {
       this.logger.warn('orphan sweep failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
 
-    for (const config of this.currentConfigs) {
-      await this.addServer(config);
+    const failed = new Set<string>();
+    for (const config of configs) {
+      if (!(await this.addServer(config))) failed.add(config.name);
     }
 
-    this.logger.info(`MCPSystem started: ${this.managers.length}/${this.currentConfigs.length} servers connected`);
+    // ⚠️ 失败项**不写进** currentConfigs（C-12/N-03）：
+    // currentConfigs 是 reload 的 diff 基线。一旦把连不上的写进去，下次 reload 会判定
+    // 「配置没变」⇒ 既不 added 也不 changed ⇒ 该 server **永久不再重试**（曾因此把
+    // 「装包失败/端口没起」做成需要重启进程才能恢复）。留在外面，下次 reload 会当 added 重走安装+连接。
+    this.currentConfigs = configs.filter((c) => !failed.has(c.name));
+
+    this.logger.info(`MCPSystem started: ${this.managers.length}/${configs.length} servers connected`);
   }
 
   /** 停止所有 MCP Server */
@@ -125,12 +132,14 @@ export class MCPSystem {
 
     const oldMap = new Map(this.currentConfigs.map(c => [c.name, c]));
     const newMap = new Map(newConfigs.map(c => [c.name, c]));
+    /** 本轮重连/新连失败的 server —— 见下方 currentConfigs 赋值（C-12/N-03） */
+    const failed = new Set<string>();
 
     // Added — 热插拔：新增 Server 标记 isHotPlug，ContextSource 进 Zone 5 临时区
     for (const [name, cfg] of newMap) {
       if (!oldMap.has(name)) {
         this.logger.info('MCP server added (hot-plug)', { name });
-        await this.addServer(cfg, { isHotPlug: true });
+        if (!(await this.addServer(cfg, { isHotPlug: true }))) failed.add(name);
       }
     }
 
@@ -148,11 +157,14 @@ export class MCPSystem {
       if (oldCfg && !configsEqual(oldCfg, newCfg)) {
         this.logger.info('MCP server changed (hot-plug)', { name });
         await this.removeServer(name);
-        await this.addServer(newCfg, { isHotPlug: true });
+        if (!(await this.addServer(newCfg, { isHotPlug: true }))) failed.add(name);
       }
     }
 
-    this.currentConfigs = newConfigs;
+    // ⚠️ 失败项**不写进** diff 基线（C-12/N-03）：写进去后下次 reload 判定「配置没变」
+    //    ⇒ 既不 added 也不 changed ⇒ 永久不再重试（必须重启进程才能恢复）。
+    //    留在基线之外，下次 reload 会把它当「新出现的配置」重走一遍安装 + 连接。
+    this.currentConfigs = newConfigs.filter((c) => !failed.has(c.name));
     this.logger.info(`MCPSystem reloaded: ${this.managers.length} servers`);
   }
 
@@ -285,9 +297,16 @@ export class MCPSystem {
   /**
    * 添加外部来源的 MCP Server（如插件注册）。
    * 与 mcp.json 配置的 Server 统一走 addServer 路径，享受相同的生命周期管理、热插拔缓存策略和优雅关闭保护。
+   *
+   * @returns true = 现在可用（含"本来就已添加"）；false = 安装或连接失败。
+   *   ⚠️ 2026-10-22 复核：此前声明 `Promise<void>` 并丢弃 addServer 的返回值 ⇒ 上层
+   *   （ui-protocol 的 `mcp.add`）无法判断成败，无条件回 `{ok:true}` ⇒ 用户在 WebUI 里
+   *   添加一个装不上/连不上的 server 时，界面提示"已添加"，但 servers 列表里没有它。
+   *   而 `onStatusChange` 的唯一注册点（gateway/runtime-wiring.ts）只写日志、不推前端
+   *   ⇒ 失败在前端完全不可见。改成透传 boolean，让调用方能如实反馈。
    */
-  async addExternalServer(config: MCPConfig, opts?: { isHotPlug?: boolean }): Promise<void> {
-    await this.addServer(config, opts);
+  async addExternalServer(config: MCPConfig, opts?: { isHotPlug?: boolean }): Promise<boolean> {
+    return this.addServer(config, opts);
   }
 
   /**
@@ -308,29 +327,36 @@ export class MCPSystem {
 
   // ── 内部方法 ──
 
-  /** 添加单个 MCP Server。isHotPlug=true 时 ContextSource 使用 live 缓存策略（进 Zone 5），避免破坏 Zone 2-3 前缀缓存。 */
-  private async addServer(config: MCPConfig, opts: { isHotPlug?: boolean } = {}): Promise<void> {
+  /**
+   * 添加单个 MCP Server。isHotPlug=true 时 ContextSource 使用 live 缓存策略（进 Zone 5），避免破坏 Zone 2-3 前缀缓存。
+   *
+   * @returns true = 现在可用（含"本来就已添加"的幂等情形）；false = 安装或连接失败。
+   *   调用方（doStart / reload）**必须**据返回值决定是否写入 `currentConfigs` ——
+   *   写进去就等于把它标成"已处理"，而 `currentConfigs` 是 diff 基线 ⇒ 永不重试（C-12/N-03）。
+   */
+  private async addServer(config: MCPConfig, opts: { isHotPlug?: boolean } = {}): Promise<boolean> {
     const isHotPlug = opts.isHotPlug ?? false;
 
     // 安装管理：确保包已安装，更新 command/args
     const resolved = await this.installManager.ensureInstalled(config);
     if (resolved === null && config.packageType) {
-      this.logger.warn(`MCP server "${config.name}" install failed, skipping`);
-      return;
+      this.logger.warn(`MCP server "${config.name}" install failed, skipping (will retry on next reload)`);
+      return false;
     }
     const effectiveConfig = resolved ? { ...config, command: resolved.command, args: resolved.args } : config;
 
     // 去重守卫（共享后必需 ✓）：共享实例会被**多个会话**的装配/插件管理器反复添加同一份配置，
     // 不加守卫就会重复 spawn 同一个 server ✗
+    // 已存在 ⇒ 视为成功：它确实可用，不该被当成失败项留在基线外反复重连。
     if (this.managers.some((m) => m.getName() === config.name)) {
       this.logger.info(`MCP server 「${config.name}」 already added, skipping duplicate`);
-      return;
+      return true;
     }
 
     const manager = new MCPServerManager(effectiveConfig);
     const ok = await manager.connect();
     if (!ok) {
-      this.logger.warn(`MCP server "${config.name}" connect failed, skipping`);
+      this.logger.warn(`MCP server "${config.name}" connect failed, skipping (will retry on next reload)`);
       // 连接失败时清理子进程
       try {
         await manager.disconnect();
@@ -338,7 +364,7 @@ export class MCPSystem {
         // 忽略断开连接时的错误
       }
       this.emitStatus({ type: 'failed', name: config.name });
-      return;
+      return false;
     }
 
     this.managers.push(manager);
@@ -365,6 +391,7 @@ export class MCPSystem {
     }
 
     this.emitStatus({ type: 'added', name: config.name, tools: manager.getClient().getTools().map(t => t.name) });
+    return true;
   }
 
   /** 移除单个 MCP Server */

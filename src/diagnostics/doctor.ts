@@ -339,12 +339,16 @@ function checkXrefCache(fix: boolean): CheckResult {
     lines.push('（加 --fix 可回收这些库）');
   }
 
-  const detail = lines.join('\n') + reclaimed;
-  const ok = orphans.length === 0 && suspects.length === 0;
+  // ⚠️ C-17（2026-10-22 修复）：提示必须**先 push 再 join**。
+  //    旧实现先算 `detail` 再 push，push 进去的那一行永远进不了返回值 ⇒ 提示从未显示过
+  //    （`checkXrefCache` 是活代码，detail 在 :450/:511 被打印）。
   if (active > 0) {
     // 大库不是"错"，但值得点出来 —— 任务单四.4 的阈值同源
     lines.push(`提示：${active} 个活跃库超 50MB，可考虑收窄构建范围（只索引需要的子目录）。`);
   }
+
+  const detail = lines.join('\n') + reclaimed;
+  const ok = orphans.length === 0 && suspects.length === 0;
   return { label: 'xref cache', ok, detail };
 }
 

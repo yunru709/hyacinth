@@ -185,7 +185,8 @@ export interface SchedulerStatus {
   startedAt: string | null;
   taskCount: number;
   enabledTaskCount: number;
-  recentExecutions: TaskExecutionRecord[];
+  // C-18（2026-10-22）：原 `recentExecutions` 字段已删除 —— getStatus 恒返回 []，
+  // 且全库零消费方（真正查记录用 getRecentRecords()）。留着只会误导成"没有执行记录"。
   uptime: number | null;
 }
 

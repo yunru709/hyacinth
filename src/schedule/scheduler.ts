@@ -67,14 +67,19 @@ export class HeartbeatScheduler {
     this.handler = handler;
   }
 
-  /** 获取调度器状态 */
+  /**
+   * 获取调度器状态
+   *
+   * ⚠️ C-18（2026-10-22 修复）：这里曾返回 `recentExecutions: []`（字面空数组）。
+   * 全库对该字段**零消费**（只有类型声明与本处赋值），而真正的执行记录查询是另一个
+   * 未接线的 `getRecentRecords()`。留一个恒空字段只会让人以为"没有执行记录" ⇒ 直接删掉。
+   */
   getStatus(): SchedulerStatus {
     return {
       running: this.running,
       startedAt: this.startedAt?.toISOString() ?? null,
       taskCount: this.tasks.length,
       enabledTaskCount: this.tasks.filter(t => t.enabled).length,
-      recentExecutions: [], // records are loaded on demand
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt.getTime()) / 1000) : null,
     };
   }

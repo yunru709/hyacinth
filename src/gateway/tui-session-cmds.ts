@@ -101,18 +101,20 @@ export function createSessionCmds(deps: TuiSessionCmdDeps) {
       return;
     }
     if (sub === 'list') {
-      // 经协议层 session.list 读取（与 WebUI 同路径），本地按当前模式过滤渲染
+      // 经协议层 session.list 读取（与 WebUI 同路径）。
+      // ⚠️ C-13（2026-10-22 修复）：这里曾**再本地过滤一次**且把模式**写死成 'normal'**。
+      // 服务端已按当前模式过滤（session.ts 的 listByMode），本地这层是纯叠加错误：
+      // 在陪伴模式下会把服务端返回的 companion 会话全部筛掉 ⇒ 列表恒空。
+      // 真源只有一个：协议返回什么就渲染什么。
       const res = (await protocolSend('session.list')) as
         | { sessions: { id: string; createdAt: string; updatedAt: string; type?: string }[] }
         | null
         | undefined;
       const sessions = res?.sessions ?? [];
-      const modeType = 'normal';
-      const filtered = sessions.filter(s => (s.type ?? 'normal') === modeType);
-      if (filtered.length === 0) {
-        chatLog.addSystem(theme.dim(`No ${modeType} sessions found`));
+      if (sessions.length === 0) {
+        chatLog.addSystem(theme.dim('No sessions found (current mode)'));
       } else {
-        for (const s of filtered) {
+        for (const s of sessions) {
           const isCurrent = s.id === path.basename(getSessionDir());
           const marker = isCurrent ? theme.success(' ← current') : '';
           const typeLabel = s.type ? theme.dim(` [${s.type}]`) : '';
@@ -124,7 +126,7 @@ export function createSessionCmds(deps: TuiSessionCmdDeps) {
           );
         }
         chatLog.addSystem(theme.dim('─'.repeat(60)));
-        chatLog.addSystem(theme.dim('加载会话: /session <完整ID>/load   例如: /session ' + (filtered[0]?.id ?? '') + '/load'));
+        chatLog.addSystem(theme.dim('加载会话: /session <完整ID>/load   例如: /session ' + (sessions[0]?.id ?? '') + '/load'));
       }
     } else if (sub === 'new') {
       chatLog.addSystem(theme.warning('请使用 hyacinth start 启动新会话（当前会话需要退出）'));

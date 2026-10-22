@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import type { MCPConfig } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 
@@ -112,8 +112,53 @@ export class MCPInstallManager {
     }
   }
 
+  /**
+   * 校验「包名[+版本]」规格，拒绝任何 shell 元字符。
+   *
+   * ⚠️ C-20/N-04（2026-10-22 修复）：原先把 pkgSpec 直接插进 shell 字符串
+   * （`npm install ${pkgSpec}`、`"${pip}" install ${pkgSpec}`，无引号无转义）
+   * ⇒ mcp.json 的 package 字段可注入任意命令。
+   *
+   * 为什么不能"改成 execFileSync 就完事"：本机实测 Windows 上 execFileSync 跑不了 npm
+   * （`npm` → ENOENT、`npm.cmd` → EINVAL —— Node 不允许无 shell 启动 .cmd/.bat）。
+   * ⇒ npm 分支改用 **node 直接执行 npm-cli.js**（纯参数数组，不经过 shell）；
+   *   pip 分支是绝对路径的真实 .exe，可直接 execFileSync。
+   * 两条路径都再加一层白名单校验兜底（字符集刻意不含 `; & | $ \` > < " ' 空格 括号`）。
+   */
+  private assertSafePkgSpec(kind: 'npm' | 'python', spec: string): void {
+    const npmRe = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9.^~*+-]+)?$/;
+    const pipRe = /^[A-Za-z0-9][A-Za-z0-9._-]*([=!~]=?[A-Za-z0-9.*+-]+)?$/;
+    const re = kind === 'npm' ? npmRe : pipRe;
+    if (!re.test(spec)) {
+      throw new Error(
+        `[mcp] 非法的 ${kind} 包规格 "${spec}"：只允许「包名[@版本]」，且不含 shell 元字符`,
+      );
+    }
+  }
+
+  /** 定位 npm-cli.js（用 node 直接执行，避开 Windows 的 .cmd 限制与 shell 拼接） */
+  private resolveNpmCli(): string | null {
+    const candidates = [
+      path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ];
+    return candidates.find((c) => fs.existsSync(c)) ?? null;
+  }
+
   private installNpm(packageName: string, version: string, dir: string): void {
     const pkgSpec = version === 'latest' ? packageName : `${packageName}@${version}`;
+    this.assertSafePkgSpec('npm', pkgSpec);
+
+    const npmCli = this.resolveNpmCli();
+    if (npmCli) {
+      const run = (args: string[]) =>
+        execFileSync(process.execPath, [npmCli, ...args], { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+      run(['init', '-y']);
+      run(['install', pkgSpec, '--no-audit', '--no-fund']);
+      return;
+    }
+    // 兜底：找不到 npm-cli.js（罕见）⇒ 仍走 shell，但规格已被白名单校验
+    logger.warn(`npm-cli.js not found next to ${process.execPath}, falling back to shell exec`);
     execSync('npm init -y', { cwd: dir, stdio: 'pipe', timeout: 60_000 });
     execSync(`npm install ${pkgSpec} --no-audit --no-fund`, { cwd: dir, stdio: 'pipe', timeout: 120_000 });
   }
@@ -123,7 +168,9 @@ export class MCPInstallManager {
     const isWin = process.platform === 'win32';
     const pip = isWin ? path.join(dir, 'venv', 'Scripts', 'pip.exe') : path.join(dir, 'venv', 'bin', 'pip');
     const pkgSpec = version === 'latest' ? packageName : `${packageName}==${version}`;
-    execSync(`"${pip}" install ${pkgSpec}`, { cwd: dir, stdio: 'pipe', timeout: 120_000 });
+    this.assertSafePkgSpec('python', pkgSpec);
+    // pip 是绝对路径的真实可执行文件 ⇒ execFileSync 直接传参，不经过 shell
+    execFileSync(pip, ['install', pkgSpec], { cwd: dir, stdio: 'pipe', timeout: 120_000 });
   }
 
   private getEntryCommand(name: string): { command: string; args?: string[] } | null {

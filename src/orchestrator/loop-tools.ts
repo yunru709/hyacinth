@@ -102,6 +102,28 @@ export interface ToolExecContext {
   isToolAllowedByBundle?: (name: string) => boolean;
 }
 
+/**
+ * 风暴抑制的**硬编码**豁免名单：只读/搜索类工具天然可重复调用，抑制它们纯属误伤。
+ *
+ * ⚠️ C-07（2026-10-22 核实）：两条执行路径（批量 / 流内）此前**不一致** ——
+ *   · 批量路径只依赖 LoopGuard 内部的 isMutating 豁免 ⇒ read/glob/grep 会被抑制；
+ *   · 流内路径另有本常量豁免，且**完全不读** `repair.storm.stormExemptTools` 配置。
+ *   ⇒ 同一串重复 read：走批量被抑制、走流内不被抑制（行为随 provider 是否分批而变）；
+ *   ⇒ 用户配置的豁免项对流内路径形同虚设。
+ * 修法：两条路径统一走 `isStormExempt()`，硬编码与配置都生效。
+ */
+const STORM_EXEMPT_ALWAYS = ['read', 'glob', 'grep'];
+
+/** 统一的风暴豁免判定（批量 / 流内两条路径必须用同一个，别再各自内联） */
+export function isStormExempt(
+  name: string,
+  configExempt: readonly string[] | undefined,
+): boolean {
+  return isMutating(name)
+    || STORM_EXEMPT_ALWAYS.includes(name)
+    || (configExempt?.includes(name) ?? false);
+}
+
 /** Check if a bash command matches any allowedCommands glob pattern */
 export function checkCommandAllowed(ctx: ToolExecContext, command?: string): boolean {
   if (!command) return false;
@@ -271,11 +293,27 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
   const stormEnabled = ctx.configCenter
     ? (ctx.configCenter.get('repair.storm.enabled') as boolean)
     : true;
+  const stormExemptTools = ctx.configCenter
+    ? (ctx.configCenter.get('repair.storm.stormExemptTools') as string[])
+    : undefined;
 
   let executableCalls: ToolCall[] = permittedCalls;
 
   if (stormEnabled !== false) {
-    const { suppressed, reflections } = ctx.loopGuard.checkToolCalls(permittedCalls);
+    // ⚠️ C-07：豁免项（硬编码 read/glob/grep + 配置 stormExemptTools）必须在**这一层**过滤掉。
+    // 不能指望 LoopGuard 内部处理 —— 它只认 isMutating 与自己那份 exemptTools，
+    // 而流内路径用的是另一套判定 ⇒ 同一串重复 read 走批量被抑制、走流内不被抑制。
+    //
+    // ⚠️ C-07 修正（2026-10-22 复核）：`isStormExempt()` 内含 `isMutating`，直接拿它过滤会把
+    //    write/edit/bash 也挡在 ToolGuard 之外 —— 而 ToolGuard 对 mutating 的语义恰恰是
+    //    **清空重复计数窗口**（loop-guard.ts 的 `this.window = []`）。挡在外面 = 写操作不再
+    //    重置计数 ⇒ 一串重复 read 在写过之后会更早被抑制（行为回归）。更阴的是
+    //    loop-guard.test.ts 那条「write clears the window」因绕过本层过滤而**仍然全绿**。
+    //    ⇒ mutating 必须放进 guard：进去后走 clear 分支，且 `continue` 永不抑制。
+    const checkable = permittedCalls.filter(
+      (tc) => isMutating(tc.name) || !isStormExempt(tc.name, stormExemptTools),
+    );
+    const { suppressed, reflections } = ctx.loopGuard.checkToolCalls(checkable);
     const suppressedCalls: ToolCall[] = [];
     executableCalls = [];
 
@@ -564,9 +602,14 @@ export async function runToolInline(
   const stormEnabled = ctx.configCenter
     ? (ctx.configCenter.get('repair.storm.enabled') as boolean)
     : true;
+  const stormExemptToolsInline = ctx.configCenter
+    ? (ctx.configCenter.get('repair.storm.stormExemptTools') as string[])
+    : undefined;
 
-  const STORM_EXEMPT = ['read', 'glob', 'grep'];
-  if (stormEnabled !== false && !isMutating(name) && !STORM_EXEMPT.includes(name) && !isFlowTool(name)) {
+  // ⚠️ C-07：与批量路径统一判定（硬编码 read/glob/grep + 配置 `stormExemptTools` 都生效），
+  // 并额外保留 flow 工具豁免（流工具是"推进流程"的，重复调用属正常）。
+  // 此前这里用硬编码 STORM_EXEMPT 且**完全不读配置** ⇒ 用户配的豁免项对流内路径无效。
+  if (stormEnabled !== false && !isStormExempt(name, stormExemptToolsInline) && !isFlowTool(name)) {
     const { suppressed } = ctx.loopGuard.checkToolCalls([{ id, name, input }]);
     if (suppressed.has(id)) {
       const stormMsg = `[Storm suppressed] ${ToolGuard.reflectionPrompt({ id, name, input })}`;

@@ -250,9 +250,25 @@ describe('context 阶段（builtin:layered-composer）', () => {
     const slot: SlotSpec = {
       id: 'context',
       impl: CONTEXT_STAGE_ID,
-      requires: { reads: ['history', 'userInput', 'tools'], writes: ['messages', 'zoneBreakdown'] },
+      // ⚠️ 不能写 'tools'（C-09）：TurnState 无该字段，工具来自 ctx.require('toolRegistry') 服务。
+      //    此前这里与模块 reads **两边同写 'tools'** ⇒ 两边同错 ⇒ 契约校验恒通过，
+      //    等于这个用例在保护一个不存在的字段。现在读的是真实字段集。
+      requires: { reads: ['history', 'userInput'], writes: ['messages', 'zoneBreakdown'] },
     };
     expect(checkContract(slot, stage)).toEqual([]);
+  });
+
+  it('契约：声明了 TurnState 不存在的字段时必须被 checkContract 抓住（C-09 回归）', () => {
+    // 防止「两边同错即通过」再次发生：槽位要求一个真实不存在的字段 ⇒ 必须报 missing-reads。
+    const slot: SlotSpec = {
+      id: 'context',
+      impl: CONTEXT_STAGE_ID,
+      requires: { reads: ['history', 'tools'], writes: ['messages', 'zoneBreakdown'] },
+    };
+    const issues = checkContract(slot, stage);
+    expect(issues.length).toBe(1);
+    expect(issues[0]?.kind).toBe('missing-reads');
+    expect(issues[0]?.fields).toEqual(['tools']);
   });
 });
 

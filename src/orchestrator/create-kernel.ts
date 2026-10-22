@@ -27,7 +27,11 @@ const logger = createLogger('kernel');
 export const DEFAULT_PIPELINE_SLOTS: SlotSpec[] = [
   { id: 'input', impl: INPUT_STAGE_ID, enabled: true, requires: { reads: ['history', 'userInput'], writes: ['userInput'] } },
   { id: 'bypass', impl: BYPASS_STAGE_ID, enabled: true, requires: { reads: ['history', 'userInput'], writes: ['userInput', 'bypassInjections'] } },
-  { id: 'context', impl: CONTEXT_STAGE_ID, enabled: true, requires: { reads: ['history', 'userInput', 'tools'], writes: ['messages', 'zoneBreakdown'] } },
+  // ⚠️ context 槽位的 reads 里**不能**写 'tools'：TurnState 没有该字段（只有 toolDefinitions，
+  //    且 context 阶段是**写**它的）。工具来自 ctx.require('toolRegistry') 服务，不进 TurnState 契约。
+  //    历史 bug（C-09）：此处与 stages/context.ts 的 reads **两边同写 'tools'**，而 checkContract
+  //    只做集合包含比较 ⇒ 两边同错即通过 ⇒ 契约校验对「键名拼错」结构性失效。
+  { id: 'context', impl: CONTEXT_STAGE_ID, enabled: true, requires: { reads: ['history', 'userInput'], writes: ['messages', 'zoneBreakdown'] } },
   { id: 'llm', impl: LLM_STAGE_ID, enabled: true, requires: { reads: ['messages'], writes: ['streamText', 'stopReason'] } },
   { id: 'tools', impl: TOOLS_STAGE_ID, enabled: true, requires: { reads: ['toolCalls'], writes: ['toolCalled'] } },
   { id: 'finalize', impl: FINALIZE_STAGE_ID, enabled: true, requires: { reads: ['stop'], writes: ['stop', 'stopReason'] } },

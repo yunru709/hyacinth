@@ -352,7 +352,15 @@ export function mergeManifests(globalM: ExtensionManifest, projectM: ExtensionMa
   return merged;
 }
 
-/** 名单文件位置约定：全局 ~/.agent/extension-registry.json（P-Config 收敛，项目级已取消） */
+/**
+ * 名单文件位置约定：全局 ~/.agent/extension-registry.json（P-Config 收敛，项目级已取消）。
+ *
+ * ⚠️ C-10（2026-10-22 收口）：`globalPath` 与 `projectPath` **恒为同一个文件**。
+ * 保留两个字段是为了不破坏 `loadExtensionManifest` 的 `same` 守卫与既有调用方，
+ * 但**新代码请只用 `globalPath`**；`projectPath` 视为别名（`togglePluginInManifest` 仍用它，
+ * 因为语义上它写的就是"用户级那份裁决表"）。
+ * 注意：`gateway/arch-assembly.ts` 的 `listManifestPaths()` 会对这两个值去重，避免 watch 两次。
+ */
 export function manifestPaths(projectDir: string): { globalPath: string; projectPath: string } {
   return {
     globalPath: path.join(os.homedir(), '.agent', 'extension-registry.json'),

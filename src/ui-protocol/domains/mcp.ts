@@ -59,7 +59,7 @@ export interface MCPSystemLike {
   getManagers(): MCPServerManagerLike[];
   getConfigView(): Promise<MCPConfigViewLike[]>;
   setServerEnabled(name: string, enabled: boolean): Promise<string>;
-  addExternalServer(config: MCPServerConfigLike, opts?: { isHotPlug?: boolean }): Promise<void>;
+  addExternalServer(config: MCPServerConfigLike, opts?: { isHotPlug?: boolean }): Promise<boolean>;
   removeExternalServer(name: string): Promise<void>;
 }
 
@@ -167,7 +167,17 @@ export function createMCPDomain(options: MCPDomainOptions): DomainHandler {
       const cfg = (params ?? {}) as MCPServerConfigLike;
       if (!cfg.name) throw new Error('mcp.add requires "name"');
       const s = system();
-      await s.addExternalServer(cfg, { isHotPlug: true });
+      // ⚠️ 2026-10-22 复核：此前**无条件**回 `{ok:true}`。而 addServer 失败是「返回 false、
+      //    不抛错」⇒ 装不上/连不上的 server 在 WebUI 里提示"已添加 MCP 服务器 xxx"，
+      //    但列表里根本没有它。前端 `.then()` 不检查返回值，`onStatusChange` 的唯一注册点
+      //    （gateway/runtime-wiring.ts）又只写日志、不推前端 ⇒ 失败在前端完全不可见。
+      //    这里把 false 转成明确错误，前端 `.catch` 会显示"添加失败: ..."。
+      const ok = await s.addExternalServer(cfg, { isHotPlug: true });
+      if (!ok) {
+        throw new Error(
+          `MCP server "${cfg.name}" 添加失败：安装或连接未成功（详见 mcp 日志；配置未落盘，可修正后重试）`,
+        );
+      }
       return { ok: true, name: cfg.name };
     },
 

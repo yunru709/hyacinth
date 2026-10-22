@@ -1896,9 +1896,22 @@ export async function runTui(
 
     if (input === '/status') {
       const s = cfg.getAll();
+
+      // ⚠️ C-14（2026-10-22 修复）：Provider / Model 原先读 `s.provider.active`。
+      // 该字段 2026-10-02 已**退役**（无人按意图写它，默认值停在 'anthropic'，
+      // 旧格式迁移也会写它）⇒ 与下方 Model Routing（读 model.sources 真源）
+      // 可能显示两个互相矛盾的 provider。
+      // 现在两处用**同一真源**：协议 `model.sources` 的 chat 通道（真源缺失才回落旧字段）。
+      const srcRes = (await protocolSend('model.sources')) as
+        | { sources?: Record<string, string> | null }
+        | null
+        | undefined;
+      const sources = srcRes?.sources ?? null;
+      const chatProvider = (sources?.['chat'] as string | undefined) ?? String(s.provider.active);
+
       const items: [string, unknown][] = [
-        ['Provider', s.provider.active],
-        ['Model', s.provider[s.provider.active as keyof typeof s.provider] as { model?: string } | string[] | undefined],
+        ['Provider', chatProvider],
+        ['Model', s.provider[chatProvider as keyof typeof s.provider] as { model?: string } | string[] | undefined],
         ['Active Workflow', 'none'],
         ['Max Context', `${s.session.maxContext.toLocaleString()} tokens`],
         ['Max Output', s.provider.maxOutputTokens && s.provider.maxOutputTokens > 0
@@ -1924,12 +1937,7 @@ export async function runTui(
         chatLog.addSystem('  ' + theme.fg(label) + theme.dim(': ') + theme.fg(display));
       }
 
-      // 各角色模型来源经协议 model.sources 读取（不读 loop）
-      const srcRes = (await protocolSend('model.sources')) as
-        | { sources?: Record<string, string> | null }
-        | null
-        | undefined;
-      const sources = srcRes?.sources ?? null;
+      // 各角色模型来源（srcRes/sources 已在上方取过，C-14 起 Provider 行也用同一真源）
       if (sources) {
         chatLog.addSystem('');
         chatLog.addSystem(theme.accent('\u2500\u2500 Model Routing \u2500\u2500'));

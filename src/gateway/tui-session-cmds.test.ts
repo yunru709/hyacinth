@@ -40,9 +40,12 @@ function setup() {
 }
 
 describe('tui-session-cmds session/* 命令', () => {
-  it('session/list → 经协议层 session.list 读取并渲染', async () => {
+  it('session/list → 经协议层 session.list 读取并原样渲染（C-13：不再本地二次过滤）', async () => {
     const { ctl, calls, tui, protocolSend } = setup();
-    // 协议返回两个会话（normal + companion）→ 本地只渲染 normal
+    // 协议返回两个会话（normal + companion）。
+    // ⚠️ C-13（2026-10-22）：本地**不得**再按模式筛一遍 —— 服务端 listByMode 已按当前模式
+    // 过滤，这里再筛（且曾把模式写死成 'normal'）会把陪伴会话全部筛掉 ⇒ 陪伴模式下列表恒空。
+    // 本用例锁的就是「协议给什么就渲染什么」。
     protocolSend.mockImplementation(async (method: string) => {
       if (method === 'session.list') {
         return {
@@ -59,7 +62,8 @@ describe('tui-session-cmds session/* 命令', () => {
     expect(tui.requestRender).toHaveBeenCalled();
     const out = calls.join('\n');
     expect(out).toContain('sess-1');
-    expect(out).not.toContain('sess-2');
+    expect(out).toContain('sess-2');   // C-13 回归：另一个模式的会话不再被本地二次过滤掉
+    expect(out).toContain('[companion]');
   });
 
   it('session/<id>/load 不存在 → 提示 Session not found（域层 ensureExists 抛错）', async () => {

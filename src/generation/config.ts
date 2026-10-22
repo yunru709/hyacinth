@@ -19,8 +19,14 @@ import path from 'node:path';
 import os from 'node:os';
 import type { GenerationConfig, GenerationProviderConfig } from './interface.js';
 
-/** 全局配置路径：~/.agent/generation.json（项目级已取消，P-Config 收敛） */
-export function getGenerationConfigPath(cwd: string): string {
+/**
+ * 全局配置路径：~/.agent/generation.json（项目级已取消，P-Config 收敛）。
+ *
+ * ⚠️ C-10（2026-10-22 收口）：`cwd` 参数**不再参与定位**（收敛前它用于拼项目级路径）。
+ * 保留形参只为调用方兼容；改名为 `_cwd` 是明确告诉下一个读代码的人"这个值没用"。
+ * 新代码请直接用 `getGlobalGenerationConfigPath()`。
+ */
+export function getGenerationConfigPath(_cwd: string): string {
   return path.join(os.homedir(), '.agent', 'generation.json');
 }
 

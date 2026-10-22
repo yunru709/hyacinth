@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { loadConfig, saveConfig, checkForUpdate, downloadWithProgress, findExtractedDir, stageRelease, commitRelease, resolveInstallRoot, readPointer, writePointerAtomic, releaseDir, ensureSelfBuildBaseline, makeBuildId, writeRollbackRecord } from '../update/index.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
@@ -99,6 +99,31 @@ function parseValue(raw: string): unknown {
   } catch {
     return raw;
   }
+}
+
+/**
+ * 跨平台解压 zip。
+ *
+ * ⚠️ C-16（2026-10-22 修复）：`update` 的远程分支原先**硬编码** PowerShell 的
+ * `Expand-Archive`，且整段没有 `process.platform` 判断 ⇒ 在 macOS/Linux 上必然抛错
+ * （发布资产固定是 zip：update/check.ts:28、download.ts:11）。
+ *
+ * 传参用 `execFileSync` 而不是把路径拼进 shell 字符串：版本目录名含空格/
+ * 中文才不会被打断，也没有引号注入面。
+ */
+function extractZip(zipPath: string, destDir: string): void {
+  if (process.platform === 'win32') {
+    // PowerShell 5.1 的 Expand-Archive 需要单引号包路径（双引号会被 -Command 先吃掉）
+    const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    execFileSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -LiteralPath ${psQuote(zipPath)} -DestinationPath ${psQuote(destDir)} -Force`],
+      { stdio: 'pipe' },
+    );
+    return;
+  }
+  execFileSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'pipe' });
 }
 
 
@@ -1128,7 +1153,11 @@ export async function runCli(): Promise<void> {
     .action(async (pluginId: string) => {
       const fs = await import('node:fs');
       const path = await import('node:path');
-      const target = path.join(process.cwd(), '.agent', 'plugins', pluginId);
+      // ⚠️ C-15（2026-10-22 修复）：install 分支把插件装到 **homedir**/.agent/plugins
+      //    （见上方 targetRoot），uninstall 却用 process.cwd()/.agent/plugins ⇒ 目标目录
+      //    几乎永远是空的（plugins/loader.ts 只扫 homedir 与 <project>/plugins，
+      //    从没有生产代码往 cwd/.agent/plugins 写过东西）⇒ 卸载实际从未成功过。
+      const target = path.join(os.homedir(), '.agent', 'plugins', pluginId);
       if (!fs.existsSync(target)) {
         process.stderr.write(`[plugin] ❌ ${target} 不存在（builtin plugins/ 目录不受 uninstall 管理）\n`);
         process.exitCode = 1;
@@ -1239,28 +1268,37 @@ export async function runCli(): Promise<void> {
         process.stderr.write('\n');
 
         const tmpDir = path.join(os.tmpdir(), `hyacinth-update-${Date.now()}`);
-        await downloadWithProgress(downloadUrl, tmpDir, p => {
-          const bar = '█'.repeat(Math.floor(p.percent / 5)) + '░'.repeat(20 - Math.floor(p.percent / 5));
-          process.stderr.write(`\r[update] 下载: ${bar} ${p.percent}% (${(p.downloaded / 1024 / 1024).toFixed(1)}MB / ${(p.total / 1024 / 1024).toFixed(1)}MB)`);
-        });
-        process.stderr.write('\n');
+        // ⚠️ N-05：临时目录必须在**所有**路径清理。旧实现只在成功分支 rmSync，
+        //    解压/落位抛错时留下整个 release 解包（几十 MB）在 os.tmpdir()。
+        try {
+          await downloadWithProgress(downloadUrl, tmpDir, p => {
+            const bar = '█'.repeat(Math.floor(p.percent / 5)) + '░'.repeat(20 - Math.floor(p.percent / 5));
+            process.stderr.write(`\r[update] 下载: ${bar} ${p.percent}% (${(p.downloaded / 1024 / 1024).toFixed(1)}MB / ${(p.total / 1024 / 1024).toFixed(1)}MB)`);
+          });
+          process.stderr.write('\n');
 
-        process.stderr.write('[update] 解压中...\n');
-        const zipPath = path.join(tmpDir, 'release.zip');
-        execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tmpDir}' -Force"`, { stdio: 'pipe' });
+          process.stderr.write('[update] 解压中...\n');
+          const zipPath = path.join(tmpDir, 'release.zip');
+          // ⚠️ C-16：发布资产固定是 zip（update/check.ts），但解压曾**硬编码 PowerShell**
+          //    ⇒ 非 Windows 必抛错（该分支无任何 process.platform 判断）。
+          extractZip(zipPath, tmpDir);
 
-        const extractedDir = findExtractedDir(tmpDir);
-        // 远程 release 也用唯一 buildId：失败重试/同版本重投不会撞已有目录。
-        const remoteBuildId = makeBuildId(version.latest);
-        const { version: newVer, buildId: newBuildId } = stageRelease(extractedDir, installDir, {
-          currentVersion,
-          currentBuildId,
-          buildId: remoteBuildId,
-          source: 'github',
-          onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
-        });
-        fsSync.rmSync(tmpDir, { recursive: true, force: true });
-        finishUpdate(newBuildId, newVer, currentBuildId);
+          const extractedDir = findExtractedDir(tmpDir);
+          // 远程 release 也用唯一 buildId：失败重试/同版本重投不会撞已有目录。
+          const remoteBuildId = makeBuildId(version.latest);
+          const { version: newVer, buildId: newBuildId } = stageRelease(extractedDir, installDir, {
+            currentVersion,
+            currentBuildId,
+            buildId: remoteBuildId,
+            source: 'github',
+            onStatus: msg => process.stderr.write(`[update] ${msg}\n`),
+          });
+          finishUpdate(newBuildId, newVer, currentBuildId);
+        } finally {
+          try {
+            fsSync.rmSync(tmpDir, { recursive: true, force: true });
+          } catch { /* 清理失败不阻塞更新结果 */ }
+        }
 
       } else if (sourcePath) {
         // ── 本地 ──

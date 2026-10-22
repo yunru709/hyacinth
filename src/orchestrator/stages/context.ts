@@ -78,13 +78,15 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
     id: CONTEXT_STAGE_ID,
     name: 'layered-composer',
     version: '1.0.0',
-    // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明
+    // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明。
+    // ⚠️ 这里**不能**写 'tools'（C-09）：TurnState 无该字段，工具来自 ctx.require('toolRegistry') 服务。
+    //    此前这里与 create-kernel.ts / runtime/defaults.ts 三处同写 'tools' ⇒ 两边同错 ⇒ 契约校验通过。
     reads: [
       'history', 'historyWithoutLastUser', 'userInput', 'uncompressedMsgs',
       'hasPendingToolCalls', 'lastUserTextMsg', 'summary', 'impactInfo',
       'needsCompression', 'needsAggressiveCompress', 'pendingCompression',
       'compressCount', 'lastSavedSummary', 'lastContextTokens', 'activeProvider',
-      'bypassInjections', 'activePlan', 'kbQuery', 'pendingImageInjections', 'pendingMediaInjections', 'tools',
+      'bypassInjections', 'activePlan', 'kbQuery', 'pendingImageInjections', 'pendingMediaInjections',
     ],
     writes: [
       'toolDefinitions', 'messages', 'zoneBreakdown', 'summary', 'lastSavedSummary',

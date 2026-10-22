@@ -85,8 +85,30 @@ export class ManifestLoader {
       if (code === 'ENOENT') {
         this.manifest = this.generateDefaults();
       } else if (err instanceof SyntaxError) {
-        logger.warn('context-manifest.json parse error, generating defaults', { error: err.message });
-        this.manifest = this.generateDefaults();
+        // ── 语法错误：先留档，再生成默认值 ──────────────────────────────
+        // ⚠️ 旧行为是**直接覆盖**（本机那份 manifest 是逐条对账过的，覆盖后无从恢复）。
+        // 用户手工编辑 manifest 时漏个逗号就足以触发这里 ⇒ 必须留一份带时间戳的备份。
+        //
+        // 与 tool-links.ts（结构错 ⇒ 保旧）的策略差异是有意的：
+        //   manifest 缺失会让整个上下文装配失去布局 ⇒ 不能"保旧不跑"，只能生成默认值继续。
+        //   但"继续跑"不等于"有权销毁用户的文件" ⇒ 备份失败时**不写盘**，仅在内存用默认值。
+        const bakPath = `${this.manifestPath}.${Date.now()}.bak`;
+        try {
+          fs.renameSync(this.manifestPath, bakPath);
+          logger.warn('context-manifest.json parse error, backed up and generating defaults', {
+            error: err.message,
+            backup: bakPath,
+          });
+          this.manifest = this.generateDefaults();
+        } catch (bakErr) {
+          logger.error(
+            'context-manifest.json parse error AND backup failed — using defaults IN MEMORY ONLY ' +
+            '(on-disk file left untouched)',
+            err,
+            { backupError: (bakErr as Error).message },
+          );
+          this.manifest = this.generateDefaults(/* persist */ false);
+        }
       } else {
         throw err;
       }
@@ -153,8 +175,15 @@ export class ManifestLoader {
     return zone?.enabled ?? false;
   }
 
-  private generateDefaults(): ContextManifest {
+  /**
+   * 生成默认 manifest。
+   * @param persist 是否写盘。false 用于「原文件损坏且备份也失败」的场景：
+   *   此时只在内存里用默认值继续跑，**绝不覆盖用户文件**（宁可下次还得修，也不能静默销毁配置）。
+   */
+  private generateDefaults(persist = true): ContextManifest {
     const m = JSON.parse(JSON.stringify(DEFAULT_CONTEXT_MANIFEST)) as ContextManifest;
+
+    if (!persist) return m;
 
     try {
       fs.mkdirSync(path.dirname(this.manifestPath), { recursive: true });

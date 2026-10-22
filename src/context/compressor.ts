@@ -593,8 +593,9 @@ export class CompressorOrchestrator {
   private maxRounds: number;
   /** 压缩激进程度 0.0~1.0 */
   private compressDepth: number;
-  /** 压缩预算基准：当调用方传入 historyBudget 时使用该值，否则回退到 maxContextTokens */
-  #historyBudget: number | null = null;
+  // ⚠️ 这里曾有 `#historyBudget: number | null` —— 实例字段存「本次调用的参数」，
+  //    并发压缩（背景压缩 + post-turn 簇压缩）会互相覆盖/清空（C-01）。
+  //    预算现在是 compress() 的局部量 `effectiveBudget`，任何新代码**不要**再引入这类实例态。
   /** 当前压缩摘要内容（全局模式） */
   private _currentSummary: string | undefined;
   /** 各意图簇的压缩摘要（key = clusterKey/capability，方案 3.5：替代单一 _currentSummary 的分桶存储） */
@@ -650,12 +651,20 @@ export class CompressorOrchestrator {
     },
   ): Promise<CompressionResult> {
     // 方案 3.5/决策H：分簇预算 = totalBudget * 0.7（留 30% 给其他 zone）
+    //
+    // ⚠️ C-01（2026-10-22 修复）：预算必须是**本次调用的局部量**，绝不能放实例字段。
+    //    旧实现写 `this.#historyBudget`，而压缩**不是串行的**：
+    //      · context 阶段发起后台压缩但**不 await**（stages/context.ts，存入 state.pendingCompression）
+    //      · post-turn 的分簇压缩在同一用户回合内 `await maybeCompressCluster()`（loop.ts → loop-cluster.ts）
+    //    两者之间全库无锁 ⇒ 实例字段被互相覆盖：簇压缩写入 0.7×budget 后，仍在跑的背景压缩
+    //    读到的是 0.7 倍分母（=过度压缩）；先结束者把字段置 null，另一方又回落到 maxContextTokens
+    //    （=压缩力度按错的分母判定）。改成参数后并发安全，且语义一眼可见。
     const clusterKey = options?.clusterKey;
-    this.#historyBudget = clusterKey
+    const effectiveBudget = clusterKey
       ? Math.floor(historyBudget * clusterBudgetRatio())
       : historyBudget;
 
-    try {
+    // 预算已是局部量，无需 try/finally 收尾（C-01：原 finally 只是把实例字段置回 null）
     const phasesUsed: number[] = [];
     const inputMsgsLength = messages.length;
     let summary = currentSummary;
@@ -759,15 +768,16 @@ export class CompressorOrchestrator {
       // ── 收敛检查 ──
       // 0.5 是"够用就停"阈值：不必压到理想目标，只要低于 50% 即可接受。
       // 摘要失败的降级轮原则上不再依赖 targetRatio（目标未达成是已知的）。
-      if (summaryOk && this.getUsageRatio(liveMessages) <= this.targetRatio) break;
-      if (this.getUsageRatio(liveMessages) <= 0.5) break;
+      // 分母用**本次调用的** effectiveBudget（C-01）—— 不能读实例字段，否则并发压缩时用错分母。
+      if (summaryOk && this.getUsageRatio(liveMessages, effectiveBudget) <= this.targetRatio) break;
+      if (this.getUsageRatio(liveMessages, effectiveBudget) <= 0.5) break;
 
       // 未收敛 → 缩小保护区，下一轮压缩更多
       currentProtectCount = Math.max(2, Math.floor(currentProtectCount / 2));
     }
 
     // ── Phase 4: 保护区规则裁剪兜底 ──
-    if (this.getUsageRatio(liveMessages) > this.safetyThreshold) {
+    if (this.getUsageRatio(liveMessages, effectiveBudget) > this.safetyThreshold) {
       const trimmer = new ToolOutputTrimmer(2);
       liveMessages = trimmer.trimToolResults(liveMessages);
       liveMessages = trimmer.deduplicateToolResults(liveMessages);
@@ -791,9 +801,6 @@ export class CompressorOrchestrator {
       // 决策 C：仅在有被压缩消息时返回（调用方写回全量存档标记）
       compressedMessages: compressedMessages.length > 0 ? compressedMessages : undefined,
     };
-    } finally {
-      this.#historyBudget = null;
-    }
   }
 
   /** 检查消息是否超过压缩阈值的最大上下文 token */
@@ -801,14 +808,21 @@ export class CompressorOrchestrator {
     return this.getUsageRatio(messages) > this.compressThreshold;
   }
 
-  /** 获取压缩统计信息 */
-  getCompressionStats(messages: Message[]): CompressionStats {
+  /**
+   * 获取压缩统计信息。
+   *
+   * @param budget 分母。缺省 = `maxContextTokens`。
+   *   C-01 之前这里读 `#historyBudget`（实例字段），于是「压缩进行中调用本方法」会拿到
+   *   别的调用的预算。现在预算由调用方显式传入；唯一生产消费者（loop-cluster）只用
+   *   `.totalTokens`，不依赖分母。
+   */
+  getCompressionStats(messages: Message[], budget = this.maxContextTokens): CompressionStats {
     const totalTokens = this.tokenizer.countMessagesTokens(messages);
-    const budget = Math.max(1, this.#historyBudget ?? this.maxContextTokens);
+    const safeBudget = Math.max(1, budget);
     return {
       totalTokens,
-      maxTokens: budget,
-      usageRatio: totalTokens / budget,
+      maxTokens: safeBudget,
+      usageRatio: totalTokens / safeBudget,
     };
   }
 
@@ -868,11 +882,13 @@ export class CompressorOrchestrator {
 
   // ─── 私有方法 ──────────────────────────────────────────────────────
 
-  /** 获取当前使用比例 */
-  private getUsageRatio(messages: Message[]): number {
+  /**
+   * 获取当前使用比例。
+   * @param budget 分母，缺省 `maxContextTokens`（C-01：不再读实例字段，避免并发压缩互相干扰）
+   */
+  private getUsageRatio(messages: Message[], budget = this.maxContextTokens): number {
     const tokens = this.tokenizer.countMessagesTokens(messages);
-    const budget = Math.max(1, this.#historyBudget ?? this.maxContextTokens);
-    return tokens / budget;
+    return tokens / Math.max(1, budget);
   }
 
   /**

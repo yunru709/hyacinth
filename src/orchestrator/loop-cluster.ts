@@ -69,6 +69,12 @@ export async function maybeCompressCluster(
     const compressThreshold = configCenter
       ? (configCenter.get('context.compressThreshold') as number) ?? 0.75
       : 0.75;
+    // ⚠️ N-06（2026-10-22 核实，**有意保留**）两层折扣会叠加，这里把数字写明免得下次有人当 bug 改：
+    //   ① 本处预算 = maxContext × 0.75（触发线）
+    //   ② compressor.compress({clusterKey}) 内部再乘 clusterBudgetRatio()=0.7 ⇒ 实际分母 = 0.525×maxContext
+    //   ③ compress() 的"够用就停"退出条件是 usageRatio ≤ 0.5 ⇒ 单簇收敛目标 ≈ 0.5 × 0.525 ≈ 0.26×maxContext
+    //   语义：单簇只占整窗约四分之一是**期望的**（其余留给其它 zone 与保护区）。
+    //   若将来觉得压太狠，改 ②（clusterBudgetRatio）而不是动这里的触发线。
     const budget = deps.maxContextTokens * compressThreshold;
     if (tokenCount < budget) return;
 

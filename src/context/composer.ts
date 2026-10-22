@@ -180,11 +180,25 @@ export class LayeredContextComposer implements ContextComposer {
   activeConditions = new Set<string>();
   private persistentSections: SystemPromptSection[] = [];
   private cwd: string;
+  /**
+   * 本 composer 的窗口预算（token）。
+   *
+   * ⚠️ C-04/N-01（2026-10-22 核实并修复）：构造参数**曾完全不保存**（收了 `maxContextTokens`
+   * 就直接丢弃），于是 delegate-tool 传进来的子 Agent 窗口静默失效。
+   * 现在存下来并暴露 `maxContextTokens` getter，装配方据此给子 loop 配同值。
+   */
+  private readonly windowBudget: number;
 
   constructor(maxContextTokens: number = 200000) {
     this.promptBuilder = new SystemPromptBuilder();
     this.tokenCounter = new TokenCounter();
     this.cwd = process.cwd();
+    this.windowBudget = maxContextTokens;
+  }
+
+  /** 本 composer 声明的窗口预算（delegate 等装配方据此给子 loop 配同值） */
+  get maxContextTokens(): number {
+    return this.windowBudget;
   }
 
   registerSource(source: ContextSource): void {

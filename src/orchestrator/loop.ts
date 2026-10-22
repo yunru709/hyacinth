@@ -876,6 +876,14 @@ export class AgentLoop {
     this.pendingCompression = null;
     this.clusterService.setDeepCompressState({ original: null, restore: false });
     this.lastContextTokens = 0;
+    // ⚠️ C-08（2026-10-22 修复）：图片/媒体状态必须与会话态一起清。
+    // 旧实现清了上面这些却**一项也没碰 image** —— `ImageStore` 没有 clear/reset/TTL，
+    // 而 `pendingImageInjections` 只在 context 阶段消费后原地清空 ⇒ 切到新会话后，
+    // 上一个会话的 `img_001..N` 仍能被 `view_image` 命中（等于把旧图带进新会话）。
+    this.imageStore.clear();
+    this.pendingImageInjections.length = 0;
+    this.pendingMediaInjections.length = 0;
+    this.channelImages = null;
     // 会话类型跟随目标 session 的 meta.json（模式真源 = session type）。
     // meta 缺失（未物化的懒登记目录）按 normal 处理 —— 物化时写入的也是 normal；
     // 陪伴等模式目录一定有 meta（CompanionSessionManager.getOrCreate 落盘）。
