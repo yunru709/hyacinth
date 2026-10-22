@@ -37,6 +37,35 @@ export const DEFAULT_PIPELINE_SLOTS: SlotSpec[] = [
   { id: 'finalize', impl: FINALIZE_STAGE_ID, enabled: true, requires: { reads: ['stop'], writes: ['stop', 'stopReason'] } },
 ];
 
+/**
+ * 用**代码默认值**校准槽位的结构性字段 `requires`。
+ *
+ * ⚠️ 2026-10-23（2026-10-22「启动即崩」的治本修复）：
+ *   `requires` 是「槽位 ↔ 阶段模块」之间的契约声明，属**代码结构**，不该由用户配置决定。
+ *   但 `kernel.pipeline` 会被 configCenter 整份持久化进 `~/.agent/config.json`（启动时把当时
+ *   的默认值抄进去），于是**代码改了契约、配置里那份还是旧的** ⇒ startup 期
+ *   `Pipeline.assemble()` 的 fail-fast（requires ⊆ 模块声明）直接让进程起不来。
+ *   事故实况：C-09 从三处代码删掉 context 槽位的 'tools'，config.json 未同步 ⇒
+ *   `[missing-reads] context: 槽位要求读取 [tools]，但模块未声明` ⇒ 新进程 6 秒后崩。
+ *
+ * 规则（保守，不越权）：
+ *   · impl 与出厂一致 ⇒ requires 一律用出厂值（配置只剩 id/impl/enabled/顺序的发言权）。
+ *   · impl 与出厂**不同**（用户/插件换了实现）⇒ 保留配置里的 requires 原样 ——
+ *     那份契约属于那个模块，拿出厂值覆盖反而是错的。
+ *   · 配置里有、出厂没有的槽位（插件自定义）⇒ 原样保留。
+ *
+ * 注意：这里只校准数据，不削弱校验 —— 随后 `assemble()` 仍会 fail-fast 比对
+ * 「出厂 requires ⊆ 模块实际声明」，拼错键名照样抓得住（C-09 那条回归用例就是锁这个）。
+ */
+function resolveSlotContract(slots: SlotSpec[]): SlotSpec[] {
+  const defaults = new Map(DEFAULT_PIPELINE_SLOTS.map((s) => [s.id, s]));
+  return slots.map((slot) => {
+    const def = defaults.get(slot.id);
+    if (!def || def.impl !== slot.impl) return slot;
+    return { ...slot, requires: def.requires };
+  });
+}
+
 // ─── 返回类型 ──────────────────────────────────────────────────────
 
 export interface KernelComponents {
@@ -93,7 +122,8 @@ export function createKernel(options: CreateKernelOptions = {}): KernelComponent
   const pipelineSlots = configCenter?.get<SlotSpec[]>('kernel.pipeline');
   const pipeline = new Pipeline<TurnState, Record<string, unknown>, StageServiceMap>({
     modules: [],
-    spec: { slots: pipelineSlots ?? DEFAULT_PIPELINE_SLOTS },
+    // 配置只决定 id/impl/enabled/顺序；requires 一律以出厂值为准（见 resolveSlotContract）
+    spec: { slots: resolveSlotContract(pipelineSlots ?? DEFAULT_PIPELINE_SLOTS) },
     hooks: createPipelineBus(),
   });
   for (const contrib of BUILTIN_STAGE_CONTRIBUTIONS) {
