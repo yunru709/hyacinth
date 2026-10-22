@@ -706,4 +706,23 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 .msg-rich strong { font-weight: 600; }
 .msg-rich del { opacity: 0.65; }
 
+/* ── 数学公式（KaTeX）───────────────────────────────────────────────
+ * 块级公式横向溢出用滚动而非换行：矩阵/多行对齐一旦折行就彻底读不懂了。
+ * 行内公式只微调字号，颜色继承 currentColor ⇒ 明暗主题都自动跟随。
+ */
+.msg-rich .md-math-block {
+  margin: 0.75em 0;
+  padding: 0.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.msg-rich .md-math-block > .katex-display { margin: 0; }
+.msg-rich .katex { font-size: 1.06em; }
+/* KaTeX 未加载时的降级（Node 单测 / vendor 文件缺失）⇒ 原文可读、可复制 */
+.msg-rich .md-math-fallback {
+  font-size: 0.88em;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 

@@ -6,6 +6,8 @@
   <title>Hyacinth WebUI</title>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
+  <!-- KaTeX 样式必须在 app.css 之前：app.css 里的 .msg-rich 规则要能覆写它 -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <script src="/vendor/tailwind-browser.js"></script>
   <script src="/vendor/lucide.min.js"></script>
   <link rel="stylesheet" href="/app.css">
@@ -2299,6 +2301,8 @@
     </div>
   </div>
 
+  <!-- KaTeX 必须排在 markdown.js 之前：markdown.js 的 renderMath 运行时读 window.katex -->
+  <script src="/vendor/katex/katex.min.js"></script>
   <!-- markdown 渲染器：必须排在 app.js 之前（app.js 同步读 window.HyMarkdown）✓ -->
   <script src="/markdown.js"></script>
   <script src="/app.js"></script>
