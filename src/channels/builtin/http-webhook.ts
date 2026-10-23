@@ -281,6 +281,28 @@ export class HttpWebhookChannel implements ChannelHandler {
     const fastify = (await import('fastify')).default;
     this.app = fastify({ logger: false });
 
+    // ── 传输压缩（gzip / deflate）────────────────────────────────────
+    // 首屏此前要下约 860KB **未压缩**文本（theme.css 70 + app.css 46 + shell.css 46
+    // + tailwind 31 + lucide 397 + app.js 238 + markdown 27）。文本类 gzip 后通常只剩
+    // 12~20%，这里不改任何业务代码就能拿到最大的一笔。
+    //
+    // ⚠️ 必须**在注册任何路由与 @fastify/static 之前**注册：Fastify 的 hook 链在
+    //   路由注册那一刻就固定了，晚注册的 onSend 压缩钩子对已存在的路由不生效
+    //   （@fastify/compress 的 README 也点名了与 static 的顺序）。
+    // ⚠️ customTypes 是**白名单**，且传入的是完整 Content-Type（含 `; charset=`），
+    //   所以只能前置匹配、不能 `$` 收尾。白名单而不是黑名单的原因是 SSE：
+    //   `text/event-stream` 一旦被压缩，zlib 会攒缓冲，逐字流式输出会变成整段延迟
+    //   —— 那不是性能问题，是功能坏了。走白名单就从结构上排除了这种可能。
+    // ⚠️ 别把 `br` 加进 encodings：Node 的 brotli 默认参数下 CPU 开销明显高于 gzip，
+    //   而这套资源的收益差（~2KB）不值得；浏览器仍可协商 gzip。
+    const compress = (await import('@fastify/compress')).default;
+    await this.app.register(compress, {
+      global: true,
+      threshold: 1024,
+      encodings: ['gzip', 'deflate'],
+      customTypes: /^(?:text\/(?:css|html|plain|xml)|application\/(?:javascript|json|xml)|image\/svg\+xml)/,
+    });
+
     // ── 安全加固（全路由）───────────────────────────────────────────
     // --no-auth：早期测试时整个跳过（含 WS，见下）✓
     if (!noAuth) {

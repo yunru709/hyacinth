@@ -37,6 +37,16 @@ describe('markdown 渲染 — 块级', () => {
     expect(render('```\nplain\n```')).toContain('plain');
   });
 
+  it('围栏代码块：包一层带语言标签与复制按钮的容器', () => {
+    const html = render('```python\nx = 1\n```');
+    expect(html).toContain('<div class="md-code-block">');
+    expect(html).toContain('<span class="md-code-lang">python</span>');
+    expect(html).toContain('<button class="md-code-copy"');
+    // 无语言时必须落到 "code"，不能渲染成空标签（空 span 在深色底上是一条空槽）
+    const plain = render('```\nplain\n```');
+    expect(plain).toContain('<span class="md-code-lang">code</span>');
+  });
+
   it('未闭合的围栏块吃到结尾（不吞掉后续内容）', () => {
     const html = render('```\nabc');
     expect(html).toContain('abc');
@@ -87,6 +97,21 @@ describe('markdown 渲染 — 块级', () => {
   it('表格：无外框管道（GFM 允许省略首尾 |）', () => {
     const html = render('a | b\n--- | ---\n1 | 2');
     expect(html).toContain('<table class="md-table">');
+  });
+
+  it('表格：单元格里的 \\| 是字面竖线，不切列', () => {
+    const html = render('| a \\| b | c |\n| --- | --- |\n| 1 | 2 |');
+    expect(html.match(/<th[ >]/g)).toHaveLength(2);
+    expect(html).toContain('<th>a | b</th>');
+    expect(html).toContain('<th>c</th>');
+  });
+
+  it('任务列表：- [ ] / - [x] ⇒ 真 checkbox（disabled）', () => {
+    const html = render('- [ ] 待办\n- [x] 已完成');
+    expect(html).toContain('<li class="md-task"><input type="checkbox" disabled>');
+    expect(html).toContain('<li class="md-task is-done"><input type="checkbox" disabled checked>');
+    expect(html).toContain('<span>待办</span>');
+    expect(html).toContain('<span>已完成</span>');
   });
 
   it('引用块（内部再渲染）', () => {
@@ -332,5 +357,39 @@ describe('markdown 渲染 — 数学公式', () => {
   it('空公式 $$ $$ 不产生 KaTeX 调用', () => {
     const html = render('$$   $$');
     expect(html).not.toContain('katex-stub');
+  });
+
+  it('跨行空公式 $$⏎⏎$$ 也不产空块（原样保留）', () => {
+    const html = render('$$\n\n$$');
+    expect(html).not.toContain('katex-stub');
+    expect(html).not.toContain('md-math-block');
+    expect(html).toContain('$$');
+  });
+
+  it('LaTeX 分隔符 \\(…\\) 等价于行内 $…$（displayMode=false）', () => {
+    const html = render('设 \\(\\alpha + \\beta\\) 为常数');
+    expect(html).toContain('katex-stub');
+    expect(html).not.toContain('md-math-block');
+    expect(calls[0].opts.displayMode).toBe(false);
+    expect(calls[0].tex).toBe('\\alpha + \\beta');
+  });
+
+  it('LaTeX 分隔符 \\[…\\] 独占一行 ⇒ 块级', () => {
+    const html = render('\\[\nE = mc^2\n\\]');
+    expect(html.match(/md-math-block/g)).toHaveLength(1);
+    expect(calls[0].opts.displayMode).toBe(true);
+    expect(calls[0].tex).toBe('E = mc^2');
+  });
+
+  it('未闭合的 \\( 不吞内容', () => {
+    const html = render('这里 \\( 没有闭合');
+    expect(html).not.toContain('katex-stub');
+    expect(html).toContain('没有闭合');
+  });
+
+  it('转义的 \\$ 还原成字面美元符（不出反斜杠）', () => {
+    const html = render('价格 \\$5');
+    expect(html).toContain('$5');
+    expect(html).not.toContain('\\$');
   });
 });

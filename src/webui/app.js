@@ -136,6 +136,50 @@
     return html;
   }
 
+  /** 等待 KaTeX 重渲的节点 → 各自的原始文本（用于判断"是否已被更新的内容顶掉"） */
+  const mathPending = new Map();
+
+  /**
+   * 渲染 markdown，并**顺带给代码块上色、把公式从降级原文补成排版**。
+   *
+   * 为什么放在这里而不是各个调用点：着色/公式都要在 innerHTML 之后处理
+   * （一个要读 DOM 的 textContent，一个要等引擎异步到位），漏一个调用点
+   * 就是"有的块有色、有的没有"。统一走这个函数就不会漏。
+   *
+   * 两个引擎都是按需加载的：
+   *   - 代码块 ⇒ 首次遇到时注入 /vendor/hljs.min.js，加载完回扫全文档补色
+   *   - 公式   ⇒ 首次遇到时注入 KaTeX（267KB），加载完重渲那些节点
+   * 引擎缺失（被 CSP 拦 / 离线）时降级为纯文本 / `<code>` 原文 —— 不影响可读性。
+   */
+  function renderRichInto(node, text) {
+    if (!node) return;
+    node.innerHTML = renderRich(text);
+
+    const hl = window.HyHighlight;
+    if (hl && typeof hl.highlightIn === 'function') {
+      try { hl.highlightIn(node); } catch (e) { /* 着色失败不该影响正文 */ }
+    }
+
+    // 公式：KaTeX 未就绪 + 正文真有公式 ⇒ 后台加载，到位后重渲本节点。
+    // ⚠️ `!math.ready()` 这个判据不能省：ready 时 whenReady 是同步调用，
+    //    重渲又会走到这里 ⇒ 无限递归。
+    const math = window.HyMath;
+    if (math && typeof math.whenReady === 'function' && math.needs(text) && !math.ready()) {
+      mathPending.set(node, text);
+      math.whenReady(() => {
+        // 已被更新的文本顶掉（流式输出里同一节点会被反复重渲）⇒ 别再动它。
+        // 这里**不查 isConnected**：气泡是先建节点后 appendChild 的，
+        // 判定"脱离文档"会漏掉那些尚未挂载的节点（公式就永远停在原文）。
+        // 对已废弃的节点重渲一次只是白干一点活，代价远小于漏渲。
+        if (mathPending.get(node) !== text) return;
+        mathPending.delete(node);
+        renderRichInto(node, text);
+      });
+    } else {
+      mathPending.delete(node);
+    }
+  }
+
   function fmtTokens(n) {
     if (n == null) return '—';
     if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -335,6 +379,32 @@
   }
 
   /**
+   * 代码块右上角的「复制」——事件委托挂在 document 上。
+   *
+   * 为什么不用逐块绑定：代码块是 markdown 动态生成的（流式补渲、历史回放、预览栏，
+   * 都可能在你绑完之后再插入新节点），逐块绑必漏。委托只认 `.md-code-copy`，
+   * 新出现的块自动生效。
+   */
+  function bindCodeCopy() {
+    document.addEventListener('click', async (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest('.md-code-copy') : null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const block = btn.closest('.md-code-block');
+      const pre = block && block.querySelector('pre');
+      if (!pre) return;
+      const ok = await copyText(pre.textContent || '');
+      btn.textContent = ok ? '已复制' : '复制失败';
+      btn.classList.toggle('is-copied', ok);
+      setTimeout(() => {
+        btn.textContent = '复制';
+        btn.classList.remove('is-copied');
+      }, 1600);
+    });
+  }
+
+  /**
    * 剪贴板不可用时的退化：选中气泡正文，让用户自己 Ctrl+C。
    * 触发场景：非安全上下文（用 --lan 从别的机器访问 http 页面）或浏览器拒绝授权。
    */
@@ -414,7 +484,7 @@
     head.appendChild(el('span', 'msg-who', delivery ? '交付' : 'Hyacinth'));
     head.appendChild(makeCopyButton(text));
     const content = el('div', 'msg-text msg-rich');
-    content.innerHTML = renderRich(text);
+    renderRichInto(content, text);
     body.appendChild(head);
     body.appendChild(content);
     body.appendChild(el('span', 'msg-time', nowTime()));
@@ -596,6 +666,9 @@
       msgs.forEach(renderHistoryMsg);
       flushHistoryProcess(false);
       scrollChat();
+      // 档位是会话级的：切会话 = 换一套权限状态，这里顺手对齐一次
+      //（否则按钮上还写着上个会话的档位，用户会以为"设置丢了"）
+      void modeLoad();
     } catch (e) {
       // 历史加载失败静默（聊天可继续发送）
     }
@@ -620,7 +693,7 @@
   function renderProcessText() {
     processRenderTimer = null;
     if (processTextNode && processTextNode.isConnected) {
-      processTextNode.innerHTML = renderRich(processRawText);
+      renderRichInto(processTextNode, processRawText);
     }
   }
 
@@ -908,7 +981,7 @@
     if (!ml) return;
     const wrap = el('div', 'flex justify-start gap-3');
     const avatar = el('div', 'w-7 h-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0 mt-1');
-    avatar.innerHTML = '<i data-lucide="git-diff" class="w-4 h-4 text-muted-foreground"></i>';
+    avatar.innerHTML = '<i data-lucide="file-diff" class="w-4 h-4 text-muted-foreground"></i>';
     const card = el('details', 'group max-w-[90%] md:max-w-[75%] w-full rounded-xl border border-border bg-card shadow-sm overflow-hidden');
     card.open = true;
     const summary = el('summary', 'flex items-center justify-between px-3 py-2 cursor-pointer list-none hover:bg-muted/50 transition-colors');
@@ -1875,8 +1948,11 @@
 
   const pv = {
     open: false,        // 是否展开
+    max: false,         // 是否放大铺满正文区（见 pvSetMax）
+    full: false,        // 是否全屏阅读：铺满整个窗口 + 隐藏目录（见 pvSetFull）
     width: 380,         // 栏宽 px
-    treeH: 46,          // 文件树占整栏高度的百分比
+    treeH: 46,          // 竖排时：文件树占整栏高度的百分比
+    treeW: 300,         // 放大态（横排）时：右侧目录列的宽度 px
     rootName: '',       // 工作区根名（后端给）
     rootAbs: '',        // 工作区绝对路径（剥工具参数里的前缀用）
     cwd: '.',           // 当前树的根目录（相对路径）
@@ -1923,7 +1999,10 @@
 
   function pvSave() {
     try {
-      localStorage.setItem(PV_KEY, JSON.stringify({ open: pv.open, width: pv.width, treeH: pv.treeH }));
+      localStorage.setItem(PV_KEY, JSON.stringify({
+        open: pv.open, max: pv.max, full: pv.full, width: pv.width,
+        treeH: pv.treeH, treeW: pv.treeW,
+      }));
     } catch (e) { /* 隐私模式 / 配额满：布局不持久化也能用，不影响功能 */ }
   }
 
@@ -1933,7 +2012,14 @@
       if (s) {
         if (typeof s.width === 'number') pv.width = pvClamp(s.width, 280, 760);
         if (typeof s.treeH === 'number') pv.treeH = pvClamp(s.treeH, 15, 85);
+        if (typeof s.treeW === 'number') pv.treeW = pvClamp(s.treeW, 200, 560);
         if (typeof s.open === 'boolean') pv.open = s.open;
+        // 放大态也持久化：它和"关掉预览"不同，用户是主动选择用整屏读文件的，
+        // 下次打开接着用才符合预期（关栏时 pvSetOpen 会把它清掉）。
+        if (s.max === true) pv.max = true;
+        // 全屏态只在"上次也是放大态"时才恢复：full 隐含 max，单独记一个 true 而
+        // max 为 false 的话状态就不自洽了（pvApplyMode 会把它抹平）。
+        if (s.full === true && pv.max) pv.full = true;
       }
     } catch (e) { /* 坏数据：用默认值 */ }
     // ?preview=1 直接展开预览栏；?preview=<相对路径> 额外定位到那个文件。
@@ -2162,10 +2248,13 @@
   }
 
   function pvRenderMarkdown(box, d) {
+    // ⚠️ 必须**先 appendChild 再渲染**：renderRichInto 里给公式排队时要求
+    //    node.isConnected，脱链的节点会被判成"已切换会话"而永远不补公式。
     const div = el('div', 'pv-md msg-rich');
-    // markdown.js 的输出是可信 HTML（它自己做转义），与聊天正文同一条渲染路径
-    div.innerHTML = renderRich(d.content);
     box.appendChild(div);
+    // markdown.js 的输出是可信 HTML（它自己做转义），与聊天正文同一条渲染路径；
+    // 高亮与公式加载也一并在这里处理（预览栏的 .md 同样要能看公式）
+    renderRichInto(div, d.content);
     if (d.truncated) pvTruncNote(box, d);
   }
 
@@ -2238,9 +2327,81 @@
     const btn = $('#preview-toggle-btn');
     if (!dock) return;
     dock.hidden = !open;
+    // 收起时一并退出放大态：否则下次打开会莫名其妙占满整屏。
+    if (!open) pvSetMax(false);
     if (btn) btn.setAttribute('aria-pressed', open ? 'true' : 'false');
     pvSave();
     if (open && !pv.children.has(pv.cwd)) await pvLoadDir(pv.cwd);
+  }
+
+  /**
+   * 把 pv.max / pv.full 落成 DOM —— 所有改状态的入口最后都走这里，
+   * class、按钮图标、aria、分隔条方向都在这一处同步，不会各改各的。
+   *
+   * 三档：dock（窄栏竖排）→ max（铺满正文区，横排，目录在右）→ full（铺满
+   * 整个窗口，无目录）。full 隐含 max（DOM 上两个 class 同时在），所以全屏态
+   * 天然继承放大态的定位与布局，不必重复写一套。
+   */
+  function pvApplyMode() {
+    const dock = $('#preview-dock');
+    if (!dock) return;
+    // 归一化：关栏时两档都退掉；full 必须站在 max 上
+    if (!pv.open || !pv.max) pv.full = false;
+    pv.max = !!pv.max && pv.open;
+    dock.classList.toggle('is-max', pv.max);
+    dock.classList.toggle('is-full', pv.full);
+
+    const maxBtn = $('#pv-max-btn');
+    if (maxBtn) {
+      maxBtn.setAttribute('aria-pressed', pv.max ? 'true' : 'false');
+      maxBtn.title = pv.max ? '还原预览（Esc）' : '放大预览（Esc 退出）';
+      maxBtn.setAttribute('aria-label', pv.max ? '还原预览栏' : '放大预览');
+    }
+    const fullBtn = $('#pv-full-btn');
+    if (fullBtn) {
+      fullBtn.setAttribute('aria-pressed', pv.full ? 'true' : 'false');
+      fullBtn.title = pv.full ? '退出全屏（Esc）' : '全屏阅读（隐藏目录，Esc 退出）';
+      fullBtn.setAttribute('aria-label', pv.full ? '退出全屏阅读' : '全屏阅读');
+    }
+    // 分隔条换轴：竖排调树高（上下键），横排调目录列宽（左右键）
+    const sp = $('#pv-split');
+    if (sp) {
+      sp.setAttribute('aria-orientation', pv.max ? 'vertical' : 'horizontal');
+      sp.title = pv.max ? '拖动调整目录列宽度' : '拖动调整高度';
+      sp.setAttribute('aria-label',
+        pv.max ? '调整目录列宽度' : '调整文件树与预览区的高度');
+    }
+    pvSave();
+  }
+
+  /**
+   * 放大 / 还原预览栏。
+   *
+   * 只切 class（`#preview-dock.is-max` 把它变成 absolute; inset:0），
+   * **不动 --pv-w** —— 于是"退出放大"不需要记住并恢复宽度，用户之前拖出来的
+   * 宽度天然还在，也不会有"恢复时算错一次"的状态可丢。
+   *
+   * 也正因为是绝对定位而不是把 flex-basis 加到 100%：后者会把聊天列挤成 0 却
+   * 仍参与布局（composer 被推到屏幕外、消息区宽度抖动），盖上去则视觉层干净。
+   */
+  function pvSetMax(on) {
+    pv.max = !!on && pv.open;
+    if (!pv.max) pv.full = false; // 退出放大 = 连全屏一起退
+    pvApplyMode();
+  }
+
+  /**
+   * 全屏阅读 / 退出全屏：放大态之上再收掉目录，整屏只剩正文。
+   * 退出全屏回到放大态（而不是一路退回窄栏）—— 用户刚才是从放大点进来的，
+   * 按 Esc 逐级退比一键跳两级更符合预期。
+   */
+  function pvSetFull(on) {
+    if (on) {
+      if (!pv.open) return;
+      pv.max = true;
+    }
+    pv.full = !!on && pv.open && pv.max;
+    pvApplyMode();
   }
 
   /**
@@ -2297,6 +2458,323 @@
     handle.addEventListener('pointercancel', end);
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 会话模式菜单（权限档位 + 目标模式）—— 输入框下沿那颗按钮
+  // ════════════════════════════════════════════════════════════
+  // 后端真源是 mode 域（mode.get / setProfile / enterGoal / exitGoal），状态挂在 loop 上、
+  // 随 <sessionDir>/allowlist.json 持久化 ⇒「这个会话放开、那个会话收紧」成立，
+  // 切会话后打开菜单即重新拉一次（loadHistory 也会刷一遍）。
+  //
+  // 四档顺序与后端 PERMISSION_PROFILES 一致：从最克制到最放开。full 单独标红 ——
+  // 它是唯一"从此不再问"的档位，用户必须一眼看出自己正踩在它上面。
+  const MODE_DEFS = [
+    { id: 'plan', label: '计划模式', desc: '只能读，先给方案再动手', icon: 'list-tree' },
+    { id: 'confirm', label: '变更前确认', desc: '改文件 / 跑命令前先问', icon: 'check-circle-2' },
+    { id: 'auto', label: '自主模式', desc: '常规改动不问，越界才问', icon: 'zap' },
+    { id: 'full', label: '完全访问', desc: '跳过所有确认（仅本会话）', icon: 'unlock', danger: true },
+  ];
+  const modeState = { profile: 'confirm', goal: null };
+  let modeBusy = false;
+
+  const modeDef = (id) => MODE_DEFS.find((d) => d.id === id) || MODE_DEFS[1];
+
+  /** lucide 会把 <i data-lucide> 换成 svg；要换图标只能重建容器内容 */
+  function modeIcon(host, name) {
+    if (!host) return;
+    host.innerHTML = '<i data-lucide="' + name + '"></i>';
+  }
+  function modeIcons() {
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* 图标缺失不影响功能 */ } }
+  }
+
+  function modeRenderButton() {
+    const def = modeDef(modeState.profile);
+    const label = $('#mode-btn-label');
+    const btn = $('#mode-btn');
+    if (!label || !btn) return;
+    label.textContent = def.label;
+    modeIcon($('#mode-btn-ico'), def.icon);
+    btn.classList.toggle('is-danger', !!def.danger);
+    btn.title = '本会话权限：' + def.label + '（点击切换）'
+      + (modeState.goal && modeState.goal.active ? ' · 目标模式进行中' : '');
+  }
+
+  function modeRenderList() {
+    const box = $('#mode-list');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const d of MODE_DEFS) {
+      const active = modeState.profile === d.id;
+      const b = el('button', 'mode-item' + (d.danger ? ' is-danger' : '') + (active ? ' is-active' : ''));
+      b.type = 'button';
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', active ? 'true' : 'false');
+      b.dataset.profile = d.id;
+      const ico = el('span', 'mode-item-ico');
+      modeIcon(ico, d.icon);
+      const body = el('span', 'mode-item-body');
+      body.appendChild(el('span', 'mode-item-title', d.label));
+      body.appendChild(el('span', 'mode-item-desc', d.desc));
+      const chk = el('span', 'mode-item-check');
+      modeIcon(chk, 'check');
+      b.append(ico, body, chk);
+      b.addEventListener('click', () => modeSetProfile(d.id));
+      box.appendChild(b);
+    }
+  }
+
+  function modeRenderGoal() {
+    const g = modeState.goal;
+    const active = !!(g && g.active);
+    const badge = $('#mode-goal-badge');
+    const form = $('#mode-goal-form');
+    const box = $('#mode-goal-active');
+    const obj = $('#mode-goal-objective');
+    if (badge) badge.hidden = !active;
+    if (form) form.hidden = active;
+    if (box) box.hidden = !active;
+    if (active && obj) obj.textContent = g.objective || '';
+  }
+
+  function modeSetError(msg) {
+    const p = $('#mode-goal-error');
+    if (!p) return;
+    p.textContent = msg || '';
+    p.hidden = !msg;
+  }
+
+  function modeRender() {
+    modeRenderButton();
+    modeRenderList();
+    modeRenderGoal();
+    modeIcons();
+  }
+
+  /** 拉后端权威状态。失败时保持当前显示（菜单可用性优先于"显示精确"） */
+  async function modeLoad() {
+    try {
+      const r = await client.request('mode.get');
+      if (r && r.profile) {
+        modeState.profile = r.profile;
+        modeState.goal = r.goal || null;
+        modeRender();
+      }
+    } catch (e) { /* loop 还没就绪 / 断连：保持上次显示 */ }
+  }
+
+  async function modeSetProfile(id) {
+    if (modeBusy) return;
+    if (id === modeState.profile) { modeOpen(false); return; }
+    modeBusy = true;
+    modeSetError('');
+    try {
+      const r = await client.request('mode.setProfile', { profile: id });
+      if (r && r.profile) {
+        modeState.profile = r.profile;
+        modeState.goal = r.goal || modeState.goal;
+        modeRender();
+        modeOpen(false);   // 切完即收，用户意图已完成
+      }
+    } catch (e) {
+      // 失败**不关闭**：错误文案要留在菜单里（关闭后用户只会以为"点了没反应"）
+      modeSetError('切换失败：' + (e && e.message ? e.message : e));
+      modeRender();
+    } finally {
+      modeBusy = false;
+    }
+  }
+
+  async function modeEnterGoal() {
+    const inp = $('#mode-goal-input');
+    const objective = ((inp && inp.value) || '').trim();
+    if (!objective) {
+      modeSetError('先写一个目标');
+      if (inp) inp.focus();
+      return;
+    }
+    if (modeBusy) return;
+    modeBusy = true;
+    modeSetError('');
+    try {
+      const r = await client.request('mode.enterGoal', { objective });
+      if (r && r.ok) {
+        if (inp) inp.value = '';
+        await modeLoad();   // 拿后端快照（enteredAt / enteredBy 等以服务端为准）
+      } else {
+        modeSetError((r && r.error) || '进入失败');
+      }
+    } catch (e) {
+      modeSetError('进入失败：' + (e && e.message ? e.message : e));
+    } finally {
+      modeBusy = false;
+    }
+  }
+
+  async function modeExitGoal() {
+    if (modeBusy) return;
+    modeBusy = true;
+    modeSetError('');
+    try {
+      await client.request('mode.exitGoal', { reason: '用户在模式菜单里解除' });
+      await modeLoad();
+    } catch (e) {
+      modeSetError('解除失败：' + (e && e.message ? e.message : e));
+    } finally {
+      modeBusy = false;
+    }
+  }
+
+  /**
+   * 把弹层左边缘对到按钮左边缘。
+   * 为什么不在 CSS 里写死 left：输入区是 max-width 居中的，按钮的横坐标随窗口宽度变化
+   * （1440 下差 40px，窄屏差 0），写死任何值都只在某一个宽度上对齐。
+   */
+  function modePosition() {
+    const pop = $('#mode-pop');
+    const btn = $('#mode-btn');
+    const host = $('#chat-composer');
+    if (!pop || !btn || !host) return;
+    const b = btn.getBoundingClientRect();
+    const h = host.getBoundingClientRect();
+    const left = Math.round(b.left - h.left);
+    // 别让弹层从容器左边缘探出去（窄屏 + 长文案时）
+    pop.style.left = Math.max(8, left) + 'px';
+  }
+
+  function modeOpen(on) {
+    const pop = $('#mode-pop');
+    const btn = $('#mode-btn');
+    if (!pop || !btn) return;
+    const next = !!on;
+    pop.hidden = !next;
+    btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+    if (next) {
+      modeSetError('');
+      modePosition();
+      void modeLoad();  // 每次打开都对齐一次：切过会话 / TUI 改过档位都能反映出来
+    }
+  }
+
+  function bindModeMenu() {
+    const btn = $('#mode-btn');
+    const pop = $('#mode-pop');
+    if (!btn || !pop) return;
+
+    modeRender();
+    void modeLoad();
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modeOpen(pop.hidden);
+    });
+    // 弹层内部的点击不能冒到 document 上（否则刚点开就被"点外部关闭"收掉）
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { if (!pop.hidden) modeOpen(false); });
+    // rAF 再算一次：resize 回调可能落在布局完成前一帧，读到的还是旧坐标
+    //（实测在切换设备尺寸时会把弹层放到偏右 130px 的位置）
+    window.addEventListener('resize', () => {
+      if (pop.hidden) return;
+      requestAnimationFrame(modePosition);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !pop.hidden) {
+        e.stopPropagation();
+        modeOpen(false);
+      }
+    });
+
+    const start = $('#mode-goal-start');
+    if (start) start.onclick = () => modeEnterGoal();
+    const exit = $('#mode-goal-exit');
+    if (exit) exit.onclick = () => modeExitGoal();
+    const inp = $('#mode-goal-input');
+    if (inp) {
+      inp.addEventListener('keydown', (e) => {
+        // Enter 提交目标，且**不要**冒泡到全局快捷键（否则会被当成"发送消息"）
+        if (e.key === 'Enter') { e.preventDefault(); modeEnterGoal(); }
+        e.stopPropagation();
+      });
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // 显示设置（思考过程 / 工具调用 / 时间戳）—— 纯前端偏好
+  // ════════════════════════════════════════════════════════════
+  // 与模式菜单的区别：那边改的是"agent 怎么干活"（会让后端行为变化），
+  // 这边只改"这些东西给不给我看"。所以不写协议、不进 loop，只落 localStorage。
+  //
+  // 实现上只给 #message-list 加类、不删节点：流式渲染随时在插入新节点，
+  // 删掉的下一条又会补回来；class 是"当前视图口径"，新节点自动继承。
+  const VIEW_KEY = 'hyacinth.view';
+  const viewPrefs = { thinking: true, tools: true, time: true };
+
+  function viewApply() {
+    const ml = $('#message-list');
+    if (ml) {
+      ml.classList.toggle('hide-thinking', !viewPrefs.thinking);
+      ml.classList.toggle('hide-tools', !viewPrefs.tools);
+      ml.classList.toggle('hide-time', !viewPrefs.time);
+    }
+    $$('#view-pop .view-item').forEach((b) => {
+      const on = !!viewPrefs[b.dataset.view];
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+
+  function viewSave() {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(viewPrefs)); } catch (e) { /* 隐私模式：不持久化也能用 */ }
+  }
+
+  function viewLoad() {
+    try {
+      const s = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null');
+      if (!s || typeof s !== 'object') return;
+      for (const k of Object.keys(viewPrefs)) {
+        if (typeof s[k] === 'boolean') viewPrefs[k] = s[k];
+      }
+    } catch (e) { /* 坏数据：全开 */ }
+  }
+
+  function viewSetOpen(on) {
+    const pop = $('#view-pop');
+    const btn = $('#view-btn');
+    if (!pop || !btn) return;
+    pop.hidden = !on;
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+
+  function bindViewMenu() {
+    const btn = $('#view-btn');
+    const pop = $('#view-pop');
+    if (!btn || !pop) return;
+
+    viewLoad();
+    viewApply();
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewSetOpen(pop.hidden);
+    });
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { if (!pop.hidden) viewSetOpen(false); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !pop.hidden) {
+        e.stopPropagation();
+        viewSetOpen(false);
+      }
+    });
+
+    $$('#view-pop .view-item').forEach((b) => {
+      b.addEventListener('click', () => {
+        const k = b.dataset.view;
+        if (!(k in viewPrefs)) return;
+        viewPrefs[k] = !viewPrefs[k];
+        viewApply();
+        viewSave();
+      });
+    });
+  }
+
   function bindPreviewDock() {
     pvLoadPrefs();
     const dock = $('#preview-dock');
@@ -2304,7 +2782,11 @@
 
     dock.style.setProperty('--pv-w', pv.width + 'px');
     dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+    dock.style.setProperty('--pv-tree-w', pv.treeW + 'px');
     dock.hidden = !pv.open;
+    // 放大 / 全屏态要在 DOM 就绪后立刻补上（持久化过来的），否则会先闪一帧窄栏
+    if (pv.max && pv.open) pvSetMax(true);
+    if (pv.full && pv.open) pvSetFull(true);
 
     const btn = $('#preview-toggle-btn');
     if (btn) {
@@ -2313,6 +2795,24 @@
     }
     const closeBtn = $('#pv-close-btn');
     if (closeBtn) closeBtn.onclick = () => pvSetOpen(false);
+
+    // 放大 / 还原：一个按钮，图标随状态换（见 index.html 里的两个 svg）
+    const maxBtn = $('#pv-max-btn');
+    if (maxBtn) maxBtn.onclick = () => pvSetMax(!pv.max);
+
+    // 全屏 / 退出全屏：只在放大态露面（CSS 控制显隐），点了就把目录收掉
+    const fullBtn = $('#pv-full-btn');
+    if (fullBtn) fullBtn.onclick = () => pvSetFull(!pv.full);
+
+    // Esc 逐级退：全屏 → 放大 → 窄栏，一次只退一层，不顺手把整栏关掉
+    // （用户多半是想回去看聊天内容，不是要关掉预览）。
+    // 有对话框/浮层开着时不抢 Esc：那种场景 Esc 属于那一层。
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !pv.max) return;
+      if (document.querySelector('.cmd-overlay:not([hidden]), #permission-dialog:not([hidden])')) return;
+      if (e.target && e.target.closest && e.target.closest('.cmd-overlay')) return;
+      if (pv.full) pvSetFull(false); else pvSetMax(false);
+    });
     const refreshBtn = $('#pv-refresh-btn');
     if (refreshBtn) {
       refreshBtn.onclick = async () => {
@@ -2341,20 +2841,40 @@
       });
     }
 
-    // 树高：中间横条
+    // 分隔条：竖排是横条（调树高），放大态横排是竖条（调目录列宽）。
+    // 同一个 #pv-split、同一套拖拽，只是按 pv.max 换轴和换算方式。
     const sp = $('#pv-split');
     if (sp) {
+      // 目录列宽的上下限：至少够显示缩进两层的长文件名，至多留 360px 给正文
+      const treeWBounds = (total) => [
+        200, Math.min(560, Math.max(200, total - 360)),
+      ];
       pvDrag(sp, (e) => {
         const rect = dock.getBoundingClientRect();
-        pv.treeH = pvClamp(((e.clientY - rect.top) / rect.height) * 100, 15, 85);
-        dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+        if (pv.max) {
+          const [lo, hi] = treeWBounds(rect.width);
+          pv.treeW = pvClamp(rect.right - e.clientX, lo, hi);
+          dock.style.setProperty('--pv-tree-w', pv.treeW + 'px');
+        } else {
+          pv.treeH = pvClamp(((e.clientY - rect.top) / rect.height) * 100, 15, 85);
+          dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+        }
       });
       sp.addEventListener('keydown', (e) => {
-        const step = e.key === 'ArrowUp' ? -3 : e.key === 'ArrowDown' ? 3 : 0;
+        // 往左拖 = 目录变宽（目录在右，分隔条左移就是给它让地方）
+        const step = pv.max
+          ? (e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0)
+          : (e.key === 'ArrowUp' ? -3 : e.key === 'ArrowDown' ? 3 : 0);
         if (!step) return;
         e.preventDefault();
-        pv.treeH = pvClamp(pv.treeH + step, 15, 85);
-        dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+        if (pv.max) {
+          const [lo, hi] = treeWBounds(dock.getBoundingClientRect().width);
+          pv.treeW = pvClamp(pv.treeW + step, lo, hi);
+          dock.style.setProperty('--pv-tree-w', pv.treeW + 'px');
+        } else {
+          pv.treeH = pvClamp(pv.treeH + step, 15, 85);
+          dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+        }
         pvSave();
       });
     }
@@ -3301,6 +3821,9 @@
       // 主题：ui.theme（用户偏好，存全局配置）
       const theme = getByPath(cfg, 'ui.theme');
       if (typeof theme === 'string' && theme) applyTheme(theme);
+      // 代码高亮配色：ui.codeTheme（同样是用户偏好）
+      const codeTheme = getByPath(cfg, 'ui.codeTheme');
+      if (typeof codeTheme === 'string' && codeTheme) applyCodeTheme(codeTheme);
     }).catch((e) => appendMsg('error', '读取配置失败: ' + ((e && e.message) || '未知错误')));
   }
 
@@ -3321,6 +3844,12 @@
   ];
   let THEME_IDS = THEMES.map((t) => t.id);
   let THEME_GROUPS = null;
+  /**
+   * 各主题是明是暗 —— 只服务于「代码配色 = 跟随主题」：那一档要按主题的明暗
+   * 换一套代码配色，否则浅色主题配深色代码底会非常刺眼。
+   * 真源是 themes.json 的 dark 字段；目录拿不到时按"hyacinth 是暗色"兜底。
+   */
+  let THEME_DARK = new Set(['hyacinth']);
 
   /** 从 themes.json 组装卡片数据。swatches 取「底 / 面 / 主 / 强调 / 字」五格。 */
   function themeCardData(t) {
@@ -3350,6 +3879,7 @@
         if (list.length) {
           THEMES = list.map(themeCardData);
           THEME_IDS = THEMES.map((t) => t.id);
+          THEME_DARK = new Set(list.filter((t) => t.dark === true).map((t) => t.id));
           THEME_GROUPS = data.groups || null;
           ok = true;
           // 目录到齐：先给启动时"暂缓"的主题补做校验（可能修正 currentTheme），
@@ -3416,6 +3946,14 @@
    * hyacinth，还把回落值写回 localStorage —— 表现为"选了极简，重启还是黑的，
    * 点开设置页才变白"（设置页会读后端 ui.theme 再调一次 applyTheme，那时目录早到了）。
    */
+  /**
+   * 告诉 CSS 当前界面主题是明还是暗 —— 只有「代码配色 = 跟随主题」会用。
+   * 主题目录还没到手时按兜底表判（默认暗），目录到齐后 applyTheme 会再走一遍。
+   */
+  function applyCodeTone(themeId) {
+    document.documentElement.setAttribute('data-code-tone', THEME_DARK.has(themeId) ? 'dark' : 'light');
+  }
+
   function applyTheme(name) {
     // 目录未就绪 + id 不在兜底目录里 ⇒ 无法判定真假。先把属性写上去（样式照常生效），
     // 记下来等目录到齐再校；**不回落、不写 localStorage**，避免把误判结果固化。
@@ -3423,6 +3961,7 @@
       pendingThemeId = name;
       currentTheme = name;
       document.documentElement.setAttribute('data-theme', name);
+      applyCodeTone(name);
       probeUserBg(name);
       syncThemeCards(name);
       return;
@@ -3434,6 +3973,7 @@
     const id = THEME_IDS.indexOf(name) >= 0 ? name : (themeCatalogOk ? 'hyacinth' : name);
     currentTheme = id;
     document.documentElement.setAttribute('data-theme', id);
+    applyCodeTone(id);
     // 本地缓存：下次加载立即应用，避免等待后端连接造成闪烁
     try { localStorage.setItem('hyacinth.theme', id); } catch (e) { /* 隐私模式忽略 */ }
     probeUserBg(id);
@@ -3471,6 +4011,99 @@
     try { cached = localStorage.getItem('hyacinth.theme'); } catch (e) { /* ignore */ }
     if (cached && /^[a-z][a-z0-9-]{1,24}$/.test(cached)) applyTheme(cached);
     else applyTheme('hyacinth');
+  }
+
+  // ── 代码高亮配色（与界面主题正交：主题管界面，这里只管代码块）──────
+  // ⚠️ 与 src/webui/code-themes.css 是**两处真源**：CSS 里给每个 id 定义变量，
+  //    这里给每个 id 定义卡片。新增配色两边都要加，漏 CSS 那处 = 选了没变化。
+  const CODE_THEMES = [
+    { id: 'auto', name: '跟随主题' },
+    { id: 'hyacinth', name: '月光蓝' },
+    { id: 'monokai', name: 'Monokai' },
+    { id: 'dracula', name: 'Dracula' },
+    { id: 'nord', name: 'Nord' },
+    { id: 'one-dark', name: 'One Dark' },
+    { id: 'solarized-dark', name: 'Solarized Dark' },
+    { id: 'github-light', name: 'GitHub Light' },
+    { id: 'one-light', name: 'One Light' },
+    { id: 'solarized-light', name: 'Solarized Light' },
+    { id: 'xcode', name: 'Xcode' },
+  ];
+  const CODE_THEME_IDS = CODE_THEMES.map((t) => t.id);
+
+  /**
+   * 卡片预览用的示例代码（hljs 的 token 类，配色由 CSS 变量决定）。
+   * 手写而不是现跑 hljs：**设置页打开时引擎可能还没加载**（按需加载），
+   * 而且这四行是固定内容，没必要为它引入一次高亮。
+   */
+  const CODE_SAMPLE =
+    '<span class="hljs-keyword">def</span> <span class="hljs-title function_">throttle</span>'
+    + '(<span class="hljs-params">cur, limit=<span class="hljs-number">2.1</span></span>):\n'
+    + '    <span class="hljs-comment"># 频率被锁在 limit</span>\n'
+    + '    <span class="hljs-keyword">return</span> <span class="hljs-built_in">abs</span>'
+    + '(cur - limit) &lt; <span class="hljs-number">1e-6</span>';
+
+  let currentCodeTheme = 'auto';
+
+  function applyCodeTheme(id) {
+    const valid = CODE_THEME_IDS.indexOf(id) >= 0 ? id : 'auto';
+    currentCodeTheme = valid;
+    document.documentElement.setAttribute('data-code-theme', valid);
+    try { localStorage.setItem('hyacinth.codeTheme', valid); } catch (e) { /* 隐私模式忽略 */ }
+    syncCodeThemeCards(valid);
+  }
+
+  function syncCodeThemeCards(id) {
+    const grid = $('#code-theme-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.code-theme-card').forEach((card) => {
+      card.setAttribute('aria-pressed', card.dataset.id === id ? 'true' : 'false');
+    });
+  }
+
+  function renderCodeThemes() {
+    const grid = $('#code-theme-grid');
+    if (!grid || grid.dataset.rendered === '1') return;
+    grid.dataset.rendered = '1';
+    CODE_THEMES.forEach((t) => {
+      const card = el('button', 'code-theme-card');
+      card.type = 'button';
+      // 卡片自带 data-code-theme ⇒ 预览块用的是**这套配色自己的**变量，
+      // 而不是当前全局配色 —— 否则所有卡片长得一模一样，选了也没法比。
+      // 注意 data-code-theme 是"预览用哪套色"，身份另存 data-id：
+      // 「跟随主题」的预览借用 hyacinth 的色，若用同一个属性判选中态，
+      // 选中 hyacinth 时会有两张卡片同时高亮。
+      card.dataset.codeTheme = t.id === 'auto' ? 'hyacinth' : t.id;
+      card.dataset.id = t.id;
+      card.setAttribute('aria-pressed', t.id === currentCodeTheme ? 'true' : 'false');
+      card.title = t.name;
+
+      const name = el('span', 'code-theme-name');
+      name.appendChild(el('span', null, t.name));
+      name.appendChild(el('span', 'code-theme-check', '✓ 当前'));
+      card.appendChild(name);
+
+      const sample = el('pre', 'code-theme-sample');
+      sample.innerHTML = CODE_SAMPLE;
+      card.appendChild(sample);
+
+      card.onclick = () => {
+        applyCodeTheme(t.id);
+        if (connected) {
+          client.request('config.set', { path: 'ui.codeTheme', value: t.id }).catch((e) => {
+            appendMsg('error', '保存代码配色失败: ' + ((e && e.message) || '未知错误'));
+          });
+        }
+      };
+      grid.appendChild(card);
+    });
+  }
+
+  /** 启动时先用本地缓存（避免代码块先以默认色闪一下） */
+  function initCodeThemeFromCache() {
+    let cached = null;
+    try { cached = localStorage.getItem('hyacinth.codeTheme'); } catch (e) { /* ignore */ }
+    applyCodeTheme(cached && CODE_THEME_IDS.indexOf(cached) >= 0 ? cached : 'auto');
   }
 
   /** 渲染主题卡片网格 */
@@ -4855,7 +5488,10 @@
 
     // 图片附件：点选 / 粘贴 / 拖入（后端 channelImages 早已支持，此前前端是空壳）
     bindAttachments();
+    bindCodeCopy();
     bindPreviewDock();
+    bindModeMenu();
+    bindViewMenu();
     bindGlobalInteractions();
 
     // 模型视图交互（推理强度 / 添加密钥 / Ollama 刷新）
@@ -4999,6 +5635,8 @@
 
   // 主题：先按本地缓存立即应用（避免加载闪烁），再渲染选择器
   initThemeFromCache();
+  initCodeThemeFromCache();
+  renderCodeThemes();
   // 主题目录异步加载：拿不到就用手上的兜底，换肤本身不依赖它
   loadThemeCatalog();
   // ⚠️ 这里**故意不再**用 localStorage 缓存抢先跳到 #/companion（2026-10-16 移除）：

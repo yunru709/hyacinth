@@ -19,6 +19,7 @@ import { createModelDomain } from './domains/model.js';
 import { createMessageDomain, ProtocolOutputHandler } from './domains/message.js';
 import { createStateDomain } from './domains/state.js';
 import { createPermissionDomain, PendingRequestRegistry } from './domains/permission.js';
+import { createModeDomain } from './domains/mode.js';
 import { createCommandDomain } from './domains/command.js';
 import { createKbDomain } from './domains/kb.js';
 import { createProcessDomain } from './domains/process.js';
@@ -75,6 +76,8 @@ export type {
 } from './domains/state.js';
 export { createPermissionDomain, PendingRequestRegistry } from './domains/permission.js';
 export type { PermissionDomainOptions } from './domains/permission.js';
+export { createModeDomain } from './domains/mode.js';
+export type { ModeDomainOptions, ModeLoopLike, ModeSnapshot, GoalStateView } from './domains/mode.js';
 export { createKbDomain } from './domains/kb.js';
 export type { KnowledgeBaseLike, KbDomainOptions } from './domains/kb.js';
 export { createProcessDomain } from './domains/process.js';

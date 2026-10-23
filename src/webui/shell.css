@@ -28,7 +28,14 @@
   /* 尺寸节奏：4 的倍数，别处不要再写魔法数字 */
   --tb-h: 48px;
   --sb-w: 272px;
-  --content-max: 760px;
+  /* 内容列宽：曾经写死 760px，于是在 1440 下主区 1168 也要居中留出各 204px
+     的空带（1920 下是 444px），整个页面像被框在一个窄条里。
+     改成"随视口增长、但有上限"：
+       · 72vw 让列随窗口一起变宽，读长文时不会显得局促；
+       · 下限 760px 保住小窗口下的正文宽度（再窄会被 100% 挡住，不会溢出）；
+       · 上限 1120px 防止超宽屏上单行过长（1120/13.5px ≈ 83em，已是上限）；
+       · min(..., 100%) 让预览栏展开、主区被挤到 ~790px 时自动退回"占满"。 */
+  --content-max: min(clamp(760px, 72vw, 1120px), 100%);
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
@@ -56,6 +63,10 @@
   align-items: center;
   gap: 10px;
   padding: 0 10px 0 12px;
+  /* 显示设置的弹层要从顶栏里向下溢出：顶栏必须是定位祖先且有层级，
+     否则 body-area 的底色会盖在弹层上（DOM 顺序在后） */
+  position: relative;
+  z-index: 40;
   background: color-mix(in srgb, var(--hyacinth-background) 82%, transparent);
   backdrop-filter: blur(14px) saturate(1.2);
   border-bottom: 1px solid var(--hair);
@@ -118,6 +129,101 @@
 }
 .tb-icon:hover { background: var(--s2); color: var(--hyacinth-foreground); }
 .tb-icon svg { width: 16px; height: 16px; }
+
+/* ── 1.1 显示设置弹层（思考 / 工具 / 时间戳）────────────────────────
+   开关只是给 #message-list 加类，不动 DOM、不动数据 —— 关掉再打开，
+   消息还在原处，只是"看不见"。 */
+.view-wrap { position: relative; flex: 0 0 auto; }
+
+.view-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 248px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: var(--s1);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 18px 48px -20px rgba(0, 0, 0, 0.75);
+  z-index: 90;
+  -webkit-app-region: no-drag;
+}
+.view-pop[hidden] { display: none; }
+.view-pop-head {
+  padding: 5px 8px 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--hyacinth-muted-foreground);
+}
+
+.view-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.view-item:hover { background: var(--s2); }
+.view-item-body { flex: 1 1 auto; min-width: 0; }
+.view-item-title { display: block; font-size: 12px; font-weight: 550; }
+.view-item-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--hyacinth-muted-foreground);
+}
+
+/* 开关：28×16 的胶囊 + 12px 圆点。用 aria-checked 而不是另建状态类，
+   读屏念的是"开/关"，CSS 也只有一个真相源。 */
+.view-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--s3);
+  transition: background var(--t-fast) var(--ease);
+}
+.view-switch::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--hyacinth-muted-foreground);
+  transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.view-item[aria-checked="true"] .view-switch { background: var(--hyacinth-primary); }
+.view-item[aria-checked="true"] .view-switch::after {
+  transform: translateX(12px);
+  background: var(--hyacinth-primary-foreground, #fff);
+}
+
+/* ── 显示开关对消息流的作用 ─────────────────────────────────────────
+   为什么用容器 class 而不是删节点：流式渲染随时在插入新节点，
+   删掉的会被下一帧补回来；class 是"当前视图口径"，新节点自动继承。 */
+/* 光藏 .thinking-line 会留下一个空的 rail 方块（思考行是 .msg > rail + body，
+   body 空了 rail 还在）。整行一起收掉才干净。 */
+.msg-list.hide-thinking .thinking-line,
+.msg-list.hide-thinking .msg-assistant:has(.thinking-line) { display: none; }
+/* 只有思考、没有工具的块整块收掉。thinking 与 tool 混在同一个 details 里，
+   :has 是唯一可靠判据（别在 JS 里逐块数子节点，流式补渲时会算错）。 */
+.msg-list.hide-thinking .process-group:not(:has(.tool-card)) { display: none; }
+.msg-list.hide-tools .tool-card { display: none; }
+.msg-list.hide-time .msg-time { display: none; }
+/* 两个都关：过程块里已经没有任何可见内容，连标题条也别留 */
+.msg-list.hide-thinking.hide-tools .process-group { display: none; }
 
 /* 模型 chip：把"厂商"做成极小标签，避免它和模型名抢宽度 */
 .model-chip {
@@ -410,7 +516,8 @@
 .sb-foot-tag { letter-spacing: 0.08em; text-transform: uppercase; }
 
 /* ── 3. 主区与消息流 ──────────────────────────────────────────────
-   内容列固定 760px 居中：聊天行宽超过 ~90 字符后回读成本明显上升。 */
+   内容列随主区宽度增长但有上限（见第 0 节 --content-max）：写死窄列时
+   1440 下光主区两侧就各空 204px，整页像夹在中间的一条窄带。 */
 #hyacinth-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -426,10 +533,25 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 22px 24px 8px;
+  padding: 22px 24px 12px;
   scroll-behavior: smooth;
+  /* 内容不足一屏时贴底（聊天惯例）：只有两三条消息时从顶部排下来，
+     中间到输入框之间会空出一大片，看着像"页面没加载完"。
+     用 margin-top:auto 而不是 justify-content:flex-end —— 后者在内容超屏时
+     会把顶部裁掉且滚不回去（flex-end + overflow 的经典坑）。 */
+  display: flex;
+  flex-direction: column;
 }
-.msg-list > * { max-width: var(--content-max); margin-left: auto; margin-right: auto; }
+/* width:100% 不能省：flex 容器的子项一旦有 margin-left/right:auto，stretch 就失效，
+   元素会缩到内容宽（实拍：代码块从 800px 塌成 336px，长行全被折行）。 */
+.msg-list > * {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+  flex: 0 0 auto;
+}
+.msg-list > *:first-child { margin-top: auto; }
 .msg-list[hidden] { display: none; }
 
 /* ── 4. 消息单元 ──────────────────────────────────────────────────
@@ -438,7 +560,8 @@
 .msg {
   display: flex;
   gap: 10px;
-  margin-bottom: 18px;
+  /* 20px：一轮里"过程块 + 交付"是两种节奏（旁注 / 正文），间距差太小会连成一片 */
+  margin-bottom: 20px;
   animation: msg-in var(--t) var(--ease) both;
 }
 @keyframes msg-in {
@@ -464,11 +587,15 @@
 }
 .msg-user .msg-time {
   display: block;
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 10px;
   color: var(--hyacinth-muted-foreground);
   text-align: right;
 }
+/* 时间戳是"需要时能看到"的信息，不该和正文抢注意力：默认半透明，hover 整条消息才实心。
+   不改成 hover 才出现，是因为 display 切换会让消息高度跳动。 */
+.msg-time { opacity: 0.55; transition: opacity var(--t-fast) var(--ease); }
+.msg:hover .msg-time { opacity: 1; }
 
 .msg-assistant { align-items: flex-start; }
 .msg-assistant .msg-rail {
@@ -504,7 +631,15 @@
   letter-spacing: 0.02em;
   color: var(--hyacinth-muted-foreground);
 }
-.msg-assistant.is-delivery .msg-who { color: var(--hyacinth-primary); }
+/* 交付徽章做成胶囊：纯文字 + 主色的锚点太弱，长回答里读者会直接跳过"这是结论"；
+   胶囊把 2 个字的标签变成一个视觉落点，又不给整块正文上色（那会把长文压得很重）。 */
+.msg-assistant.is-delivery .msg-who {
+  color: var(--hyacinth-primary);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--tint);
+  font-size: 10.5px;
+}
 .msg-copy {
   border: 0;
   background: transparent;
@@ -591,23 +726,36 @@
 
 /* ── 6. 「过程」折叠块 ─────────────────────────────────────────────
    细竖线 + 等宽小字，视觉上是"旁注"而不是正文；默认展开但高度受限。 */
+/* ⚠️ 必须显式清掉 app.css 的整套卡片样式（虚线边框 + 卡片底色 + 10px 圆角）：
+   两处叠加后实拍是"左 2px 实线 + 其余三边虚线 + 卡片底"的三不像，而且一块 640px 宽的
+   浅色卡片会把两行 thinking 撑成页面主体，和"交付"抢重量。
+   过程是旁注，旁注的正确形态是一条竖线 + 缩进，不是卡片。 */
 .process-group {
   max-width: var(--content-max);
-  margin: 0 auto 14px;
+  margin: 0 auto 12px;
+  border: 0;
   border-left: 2px solid var(--hair);
+  border-radius: 0;
+  background: transparent;
   padding-left: 12px;
 }
+/* 折叠头做成 chip：一行淡灰小字时它是"旁注"，但整体 640px 宽的 details 会让
+   hover/点击命中的是一整条隐形长条，光标移过去像没反应。chip 把命中区收回到文字上。 */
 .process-group > summary {
   list-style: none;
   cursor: pointer;
   font-size: 10.5px;
-  letter-spacing: 0.05em;
+  /* 中文字距加 0.05em 会显得"散架"，只给西文留一点点 */
+  letter-spacing: 0.01em;
   color: var(--hyacinth-muted-foreground);
-  padding: 2px 0 4px;
+  padding: 3px 8px 3px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
   user-select: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .process-group > summary::-webkit-details-marker { display: none; }
 .process-group > summary::before {
@@ -621,9 +769,22 @@
   opacity: 0.7;
 }
 .process-group[open] > summary::before { transform: rotate(45deg); }
-.process-group > summary:hover { color: var(--hyacinth-foreground); }
+.process-group > summary:hover { color: var(--hyacinth-foreground); background: var(--s2); }
+/* app.css 给展开态 summary 画了一条通栏下边框 —— chip 化之后它只到 chip 宽度，
+   看着像半截分隔线，清掉 */
+.process-group[open] > summary { border-bottom: 0; }
+
+/* 过程区里的工具行也轻一点：白底卡片压在灰字上会把"旁注"重新变成一摞卡片 */
+.process-body .tool-card {
+  margin: 0;
+  background: transparent;
+  border-color: var(--hair);
+}
 
 .process-body {
+  /* 缩进只在 .process-group 的 padding-left 上算一次：app.css 原来还有 10px 内边距，
+     两者相加 = 22px，正文离竖线太远，竖线就失去"这是旁注"的暗示了 */
+  padding: 5px 0 3px 0;
   /* 展开也不许吞掉整屏，但 320px 太狠了：历史回放时若该回合没有 say（TUI 会话常见），
      整段正文都在这块里，320px 只能看到开头几行（实测截图确认）⇒ 放到 60vh。 */
   max-height: min(60vh, 680px);
@@ -632,17 +793,93 @@
   scrollbar-width: thin;
   scrollbar-color: var(--hair-strong) transparent;
 }
-.process-text {
-  font-size: 12px;
-  line-height: 1.65;
-  color: var(--hyacinth-muted-foreground);
+/* 过程正文是"读得下去"的灰，不是"看得见"的灰：
+   纯 muted 的 12px 长英文段落实拍会糊成一片灰墙（截图确认），
+   所以字号 +0.5、行高 +0.07，颜色往前景挪 22%。 */
+.process-text.msg-rich {
+  font-size: 12.5px;
+  line-height: 1.72;
+  color: color-mix(in srgb, var(--hyacinth-muted-foreground) 72%, var(--hyacinth-foreground));
   white-space: normal;        /* markdown 渲染后必须是 normal，pre-wrap 会多出空行 */
 }
+
+/* ── 6.1 代码块容器（语言标签 + 复制）──────────────────────────────
+   markdown.js 把每个围栏包成 .md-code-block；头行是语言名 + 复制按钮。
+   底色/边框由 code-themes.css 的 --code-* 变量提供，这里只负责结构。 */
+.msg-rich .md-code-block {
+  margin: 0 0 0.7em;
+  border: 1px solid var(--code-border, var(--hyacinth-border));
+  border-radius: 10px;
+  /* 裁掉 pre 的直角，否则头行与代码区之间会出现一条 1px 的错位 */
+  overflow: hidden;
+  background: var(--code-bg, transparent);
+}
+/* 头行已经在容器上画了边框，pre 自己的边框/外边距全部让位 */
+.msg-rich .md-code-block > .md-pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  /* 比 app.css 的 0.7em/0.85em 再松一点：代码块现在有头行，视觉上是个"面板"，
+     内边距太小会让第一行贴着分隔线 */
+  padding: 0.8em 1em;
+  font-size: 0.88em;
+  line-height: 1.62;
+}
+.msg-rich .md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 4px 11px;
+  /* 与代码底色同源：code-fg 混进 code-bg，深色主题亮一点、浅色主题深一点，
+     两种配色下都不会突兀（写死 rgba(255,255,255,.04) 在浅色主题里等于没有） */
+  background: color-mix(in srgb, var(--code-fg, currentColor) 8%, var(--code-bg, transparent));
+  border-bottom: 1px solid color-mix(in srgb, var(--code-fg, currentColor) 14%, transparent);
+}
+.msg-rich .md-code-lang {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--code-fg, currentColor) 62%, transparent);
+  user-select: none;
+}
+.msg-rich .md-code-copy {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--code-fg, currentColor) 62%, transparent);
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  /* 完全隐藏会让人不知道有这个入口；压到 0.35 常驻，hover 代码块时转实
+     （触屏没有 hover ⇒ 见下面的媒体查询，那里给 0.75） */
+  opacity: 0.35;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.msg-rich .md-code-block:hover .md-code-copy,
+.msg-rich .md-code-copy:focus-visible { opacity: 1; }
+.msg-rich .md-code-copy:hover {
+  background: color-mix(in srgb, var(--code-fg, currentColor) 14%, transparent);
+  color: var(--code-fg, var(--hyacinth-foreground));
+}
+.msg-rich .md-code-copy.is-copied { opacity: 1; color: var(--hyacinth-primary); }
+@media (hover: none) {
+  .msg-rich .md-code-copy { opacity: 0.75; }
+}
+/* 过程区里的代码块不显示头行：那一块本来就紧凑，多一行标签纯占高度 */
+.process-text .md-code-head { display: none; }
+.process-text .md-code-block > .md-pre { border-radius: 0; }
 
 /* ── 7. Composer ──────────────────────────────────────────────────
    浮动卡片：不再贴边铺满，两侧留白 + 阴影，视觉上"可以被拿起来"。 */
 .composer {
   flex: 0 0 auto;
+  /* 模式弹层的定位基准：挂在 .composer 上而不是按钮上 —— 弹层要浮在**整个输入区上方**，
+     否则 300px 高的菜单会盖住 textarea，用户边写边切档位时看不见自己写了什么。 */
+  position: relative;
   padding: 8px 24px 14px;
   background: linear-gradient(
     to bottom,
@@ -708,21 +945,223 @@
 .cbtn-stop { background: var(--s3); color: var(--hyacinth-foreground); }
 .cbtn[hidden] { display: none; }
 
-.composer-hint {
+/* 输入框下沿：左＝模式按钮，右＝操作提示。
+   内缩 15px 是因为 composer 边框到 textarea 文字正好差这一格（对齐输入文字）。 */
+.composer-foot {
   max-width: var(--content-max);
   margin: 6px auto 0;
+  padding: 0 15px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+}
+.composer-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   font-size: 10.5px;
   color: var(--hyacinth-muted-foreground);
   opacity: 0.75;
-  /* composer 边框到内部 textarea 的内缩是 15px；提示文字若只缩 4px，
-     左边缘会和输入文字错开约一格，看起来像没对齐的脚注。 */
-  padding: 0 15px;
 }
 .composer-hint .hidden { display: none; }
+
+/* ── 模式按钮 + 弹层（会话级权限 / 目标模式）────────────────────
+   按钮常驻在下沿而不是输入框内：档位是"这个会话按什么规则干活"的长效状态，
+   和一次性动作（发送 / 附件）不是一类东西。
+   弹层**向上**开 —— 它贴屏幕底边，往下开会被窗口切掉。 */
+/* 不要给这里加 position:relative —— 弹层的定位基准是 .composer（见上） */
+.mode-wrap { flex: 0 0 auto; }
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.mode-btn:hover,
+.mode-btn[aria-expanded="true"] {
+  background: var(--s3);
+  color: var(--hyacinth-foreground);
+}
+.mode-btn svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.mode-btn .mode-btn-caret { width: 11px; height: 11px; opacity: 0.55; transition: transform var(--t-fast) var(--ease); }
+.mode-btn[aria-expanded="true"] .mode-btn-caret { transform: rotate(180deg); opacity: 0.9; }
+/* 完全访问是唯一会"从此不再问"的档位：给个红色提示，别让它悄悄生效 */
+.mode-btn.is-danger { color: var(--state-error); }
+.mode-btn.is-danger:hover { background: color-mix(in srgb, var(--state-error) 12%, transparent); }
+
+.mode-pop {
+  position: absolute;
+  /* 38px = composer 左 padding 24 + foot 内缩 15，正好落在模式按钮左边缘下方 */
+  left: 38px;
+  bottom: calc(100% + 6px);
+  width: 302px;
+  max-width: calc(100vw - 40px);
+  max-height: min(430px, 64vh);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: var(--s1);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 18px 48px -20px rgba(0, 0, 0, 0.75);
+  z-index: 45;
+}
+.mode-pop[hidden] { display: none; }
+
+.mode-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 8px 7px;
+  font-size: 10.5px;
+  color: var(--hyacinth-muted-foreground);
+  letter-spacing: 0.02em;
+}
+.mode-pop-note { opacity: 0.7; }
+
+.mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.mode-item:hover { background: var(--s2); }
+.mode-item-ico {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--s2);
+  color: var(--hyacinth-muted-foreground);
+}
+.mode-item-ico svg { width: 14px; height: 14px; }
+.mode-item.is-active .mode-item-ico { background: var(--tint); color: var(--hyacinth-primary); }
+.mode-item.is-danger .mode-item-ico { color: var(--state-error); }
+.mode-item.is-danger.is-active .mode-item-ico {
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  color: var(--state-error);
+}
+.mode-item-body { flex: 1 1 auto; min-width: 0; }
+.mode-item-title { display: block; font-size: 12px; font-weight: 550; }
+.mode-item-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--hyacinth-muted-foreground);
+}
+.mode-item-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  align-self: center;
+  color: var(--hyacinth-primary);
+  opacity: 0;
+}
+.mode-item.is-active .mode-item-check { opacity: 1; }
+.mode-item.is-danger.is-active .mode-item-check { color: var(--state-error); }
+
+.mode-sep { height: 1px; margin: 6px 4px; background: var(--hair); }
+
+.mode-goal { padding: 3px 8px 6px; }
+.mode-goal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mode-goal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.mode-goal-title svg { width: 12px; height: 12px; color: var(--hyacinth-primary); }
+.mode-goal-badge {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+}
+.mode-goal-badge[hidden] { display: none; }
+.mode-goal-desc {
+  margin: 4px 0 7px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--hyacinth-muted-foreground);
+}
+.mode-goal-form { display: flex; gap: 6px; }
+.mode-goal-form[hidden] { display: none; }
+.mode-goal-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--hair-strong);
+  border-radius: 7px;
+  background: var(--s2);
+  color: var(--hyacinth-foreground);
+  font-family: inherit;
+  font-size: 11.5px;
+  outline: 0;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.mode-goal-form input:focus { border-color: var(--tint-strong); }
+.mode-goal-btn {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--hyacinth-primary);
+  color: var(--hyacinth-primary-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.mode-goal-btn:hover { opacity: 0.9; }
+.mode-goal-btn.is-quiet { background: var(--s3); color: var(--hyacinth-foreground); }
+.mode-goal-active { display: flex; align-items: flex-start; gap: 8px; }
+.mode-goal-active[hidden] { display: none; }
+.mode-goal-objective {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 48px;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--hyacinth-foreground);
+}
+.mode-goal-error {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--state-error);
+}
+.mode-goal-error[hidden] { display: none; }
 
 /* 附件预览（沿用 app.js 生成的 class 名） */
 .composer-attachments {
@@ -1061,15 +1500,18 @@
 #companion-stage[hidden] { display: none !important; }
 
 /* ── 15. 预览栏（工作区文件查看器，只读）──────────────────────────
-   右侧独立 dock：上半是文件树，下半是文件内容，中间横向分隔条可调高度比，
-   左边缘竖向分隔条可调整栏宽度。两个尺寸都由 JS 写进 CSS 变量并存
-   localStorage，所以刷新后布局不变。
+   右侧独立 dock，三档尺寸：
+     · 收起（默认）：右侧窄栏，目录在上、正文在下（竖排）
+     · 放大 is-max：铺满正文区，正文在左、目录在右（横排），中间竖条可调目录列宽
+     · 全屏 is-full：铺满整个窗口，连顶栏一起盖住，目录隐藏，只剩正文
+   各档尺寸都由 JS 写进 CSS 变量并存 localStorage，所以刷新后布局不变。
 
    为什么不用 flex-basis 百分比：拖拽时改 flex-basis 会触发整栏重排并与
    min-width 打架；改成变量后，浏览器只重算这一个元素。 */
 #preview-dock {
   --pv-w: 380px;
   --pv-tree-h: 46%;
+  --pv-tree-w: 300px; /* 放大态（横排）时右侧目录列的宽度 */
   position: relative;
   flex: 0 0 var(--pv-w);
   width: var(--pv-w);
@@ -1081,6 +1523,126 @@
 }
 /* id 选择器的 display 会压过 UA 的 [hidden] ⇒ 必须显式关（同 #companion-stage） */
 #preview-dock[hidden] { display: none; }
+
+/* 放大态：一键把整栏铺满正文区（阅读长文件时不必再手动拉宽）。
+   为什么是 position:absolute 而不是把 --pv-w 加到 100%：
+   后者会把聊天列挤成 0 宽却**仍然参与布局**（composer 被推出去、消息区抖动），
+   而且退出时得精确还原旧宽度。盖上去只是视觉层，聊天列尺寸原样不动。 */
+#preview-dock.is-max {
+  position: absolute;
+  inset: 0;
+  flex: 1 1 auto;
+  width: auto;
+  z-index: 30;
+  border-left: 0;
+}
+/* 放大态的内部排布：整块转成横排，row-reverse 把目录列推到右边。
+   为什么是"目录在右"而不是常见的"树在左"：这一栏本来就贴着窗口右缘，
+   放大时让它继续待在右边、正文往左长，目录的横向位置几乎不动 ——
+   竖排时它在右上、横排时它在右中，视线落点连续，不会出现"整棵树跳到左边"的
+   错位感。若按惯例把树放左边，放大前后树的横坐标要跨过 1000px，那个跳动很晃眼。 */
+#preview-dock.is-max .pv-body { flex-direction: row-reverse; }
+/* 目录列宽度：用 clamp 夹一次，而不是只在拖拽时算边界 —— 用户把预览拉宽到 400px
+   后要是把窗口缩到 678px，纯变量会把正文挤成 270px（实测）。clamp 让"记住的宽度"
+   在窄窗口下自动让位（正文至少留 360px），窗口一放大又原样长回来，不必改持久值。 */
+#preview-dock.is-max .pv-side {
+  --pv-tree-w-eff: clamp(200px, var(--pv-tree-w), min(560px, calc(100% - 360px)));
+  flex: 0 0 var(--pv-tree-w-eff);
+  width: var(--pv-tree-w-eff);
+  max-height: none;
+  min-height: 0;
+  border-left: 1px solid var(--hair);
+  overflow: hidden;
+}
+#preview-dock.is-max .pv-tree { max-height: none; min-height: 0; }
+#preview-dock.is-max .pv-view { min-width: 0; }
+/* 键盘焦点环收紧：分隔条只有 8px 宽，默认 offset:2 会在旁边描出一整条紫色长框，
+   在放大态 700px 高的情况下噪音太大 */
+#pv-split:focus-visible { outline-offset: -1px; }
+
+/* 分隔条顺势从横条变竖条：还是同一个 #pv-split，只是换轴（JS 里同步改
+   aria-orientation 和拖拽算法） */
+#preview-dock.is-max .pv-split {
+  width: 8px;
+  height: auto;
+  cursor: col-resize;
+}
+#preview-dock.is-max .pv-split::after {
+  left: 50%;
+  right: auto;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  height: auto;
+  transform: translateX(-50%);
+}
+/* 分界更实一点：放大后正文和目录都是大片同色面板，只有 --hair 的话几乎看不出
+   边界在哪（实拍确认过） */
+#preview-dock.is-max .pv-split::after { background: var(--hair-strong); }
+#preview-dock.is-max .pv-split:hover::after,
+#preview-dock.is-max .pv-split.is-dragging::after { width: 2px; height: auto; }
+
+/* 全屏态：连顶栏带侧栏一起盖住，目录收掉，只剩正文。
+   用 fixed 而不是 absolute —— absolute 定位基准是 .body-area，顶栏在它外面盖不到。
+   z-index 70：高于顶栏浮层，低于命令面板（80/90），全屏阅读时 Cmd+K 仍然可用。 */
+#preview-dock.is-full {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  border: 0;
+  box-shadow: none;
+}
+#preview-dock.is-full .pv-side,
+#preview-dock.is-full .pv-split { display: none; }
+/* 全屏时正文更宽，给代码留一点左右呼吸，别贴着窗口边 */
+#preview-dock.is-full .pv-code { padding-left: 20px; }
+#preview-dock.is-full .pv-md { padding-left: 28px; padding-right: 28px; }
+
+/* 铺满后左边缘没有可拖的余地：隐藏宽度拖拽条，否则它会压住内容最左 7px */
+#preview-dock.is-max .pv-resizer,
+#preview-dock.is-full .pv-resizer { display: none; }
+/* （放大态要铺满，靠的是上面那条里的 width:auto。注意别让 app.css 里
+   `#app-shell > .body-area > aside { width: 260px }` 那类"当时只有侧栏"的选择器
+   再命中这一栏 —— 已把它们收窄到 #sidebar，见 app.css 的注释。） */
+
+/* 铺满时把聊天列隐掉。它本来就被完全遮住，视觉上零变化，但**不能让它透出来**：
+   glass 这类主题的 --hyacinth-background 只有 62% 不透明度（--s1 继承这个 alpha），
+   叠上去就能透过面板读到下面的消息正文（实测"开始对话"卡片清晰可见；
+   有 backdrop-filter 的真实环境里会被糊成磨砂，但无 GPU / 不支持时就是穿帮）。
+   隐掉后透过来的只剩页面自身的背景，正是这类主题想要的磨砂观感。
+   :has() 在这里是唯一来源 —— 不再从 JS 往 .body-area 上同步第二个 class，
+   状态只有 #preview-dock.is-max 一处，不会漂移。
+   全屏态同理，而且它盖住的范围包括顶栏和侧栏（.body-area 之外），那两块也得隐。 */
+.body-area:has(> #preview-dock.is-max) > #hyacinth-main,
+.body-area:has(> #preview-dock.is-full) > #sidebar,
+#app-shell:has(#preview-dock.is-full) > header { visibility: hidden; }
+
+/* 放大 / 还原图标：两个 svg 叠在同一个按钮里，由 .is-max 决定露哪一个。
+   手画的（没有走 lucide）：一条对角杆 + 两个角括号，24 网格 / 2px 描边 / 圆端点，
+   与其余图标同语言；但它不在 lucide 的图标集里，为一个按钮重跑图标子集不划算。 */
+.pv-max-btn svg { display: none; }
+#preview-dock:not(.is-max) .pv-max-btn .pv-ico-expand { display: block; }
+#preview-dock.is-max .pv-max-btn .pv-ico-collapse { display: block; }
+/* 放大期间按钮保持高亮：让"当前是全屏阅读态"有一个常驻视觉锚点 */
+#preview-dock.is-max .pv-max-btn {
+  color: var(--hyacinth-primary);
+  background: var(--tint);
+}
+
+/* 全屏按钮：只在放大态出现（窄栏时"全屏"没有意义，先放大再说），
+   全屏态下它换成退出图标，同时把放大按钮收掉 —— 一个层级只留一颗主按钮。 */
+/* ⚠️ 带上 #preview-dock：.pv-icon 也设 display:inline-flex 且在**本条之后**出现，
+   同特异度下会被它盖掉 ⇒ 不提权就永远藏不住这颗按钮。 */
+#preview-dock .pv-full-btn { display: none; }
+#preview-dock.is-max .pv-full-btn { display: inline-flex; }
+#preview-dock.is-full .pv-max-btn { display: none; }
+.pv-full-btn svg { display: none; }
+#preview-dock:not(.is-full) .pv-full-btn .pv-ico-fs-enter { display: block; }
+#preview-dock.is-full .pv-full-btn .pv-ico-fs-exit { display: block; }
+#preview-dock.is-full .pv-full-btn {
+  color: var(--hyacinth-primary);
+  background: var(--tint);
+}
 
 .pv-head {
   flex: 0 0 auto;
@@ -1151,15 +1713,34 @@
 .pv-crumb.is-current:hover { background: transparent; }
 .pv-crumb-sep { color: var(--hyacinth-muted-foreground); opacity: 0.5; font-size: 10px; }
 
+/* 目录列 / 分隔条 / 正文列：竖排是"上中下"，放大态整块 row-reverse 成"正文 |
+   分隔 | 目录"。放在一个容器里，是为了让 flex-direction 只切换这三件套，
+   标题栏恒在最上面横跨整宽。 */
+.pv-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── 文件树 ── */
 /* 树高：跟着内容走，最多占 --pv-tree-h。
    为什么不用固定 height：目录里只有三五个文件时，固定高度会在树下面留一大片
    空白（实测 assets/ 这种浅目录很明显）。max-height 让"内容少就矮、内容多才滚"，
-   而拖拽调整的正是这个上限。 */
-.pv-tree {
+   而拖拽调整的正是这个上限。
+   这个上限挂在 .pv-side 而不是 .pv-tree 上：面包屑和树同属一列，限高要连面包屑
+   一起算，否则拖到最小时树没了、面包屑还在，比例会莫名其妙。 */
+.pv-side {
   flex: 0 0 auto;
-  max-height: var(--pv-tree-h);
+  display: flex;
+  flex-direction: column;
   min-height: 60px;
+  max-height: var(--pv-tree-h);
+  overflow: hidden;
+}
+.pv-tree {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 6px 6px 10px;
 }

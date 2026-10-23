@@ -31,6 +31,12 @@ import { UI_EVENT } from '../events.js';
 import { ImageStore, buildUserContentWithMedia, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
 import { createLoopHookBus, type LoopHookBus, type LoopHooks } from './loop-hooks.js';
 import { type ToolExecContext } from './loop-tools.js';
+import {
+  DEFAULT_PERMISSION_PROFILE,
+  PERMISSION_PROFILE_LABELS,
+  normalizePermissionProfile,
+  type PermissionProfile,
+} from './permission-profile.js';
 import { removeLastRoundFromJsonl, eraseLastToolRoundJsonl, removeTaskTriggerJsonl } from './loop-session.js';
 import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterIndexEntry } from './loop-cluster.js';
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
@@ -477,7 +483,16 @@ export class AgentLoop {
    */
   private workspaceFenceRoot?: string;
   private workspaceFenceExtraRoots: readonly string[] = [];
-  /** AOR (Absence of Restriction): skip all future permission checks for this session */
+  /**
+   * 会话级执行档位（plan / confirm / auto / full）—— 权限的唯一真源。
+   * 见 orchestrator/permission-profile.ts；持久化在 `<sessionDir>/allowlist.json`。
+   */
+  private permissionProfile: PermissionProfile = DEFAULT_PERMISSION_PROFILE;
+  /**
+   * AOR (Absence of Restriction): skip all future permission checks for this session.
+   * 2026-10-24 起它是 `permissionProfile === 'full'` 的**派生值**（保留字段是因为
+   * TUI/旧路径还在读它）；写入口统一走 setPermissionProfile。
+   */
   private unrestrictedTools = false;
   /**
    * 「AOR 由会话持久化恢复」的提示只发一次。
@@ -604,7 +619,9 @@ export class AgentLoop {
     //（明明持久化了却仍弹一次权限条 —— 偶发不确定性比慢几十微秒坏得多）。
     // ⚠️ 只认本 sessionDir ⇒ **不跨会话**（防越权的第一道闸；换会话即恢复默认）。
     // ⚠️ 不动围栏：`.git` 仍恒拒，越界写入仍走围栏判定（AOR 只免掉"弹条"这一步）。
-    this.unrestrictedTools = sessionAllowlist.isUnrestrictedSync(sessionDir);
+    // 2026-10-24：真源改为 profile（unrestricted 是它的旧写法 / 派生值）。
+    this.permissionProfile = sessionAllowlist.getProfileSync(sessionDir);
+    this.unrestrictedTools = this.permissionProfile === 'full';
     // 会话重启后回填（allowlist.json 的 allowedWriteRoots）—— 让"总是允许"跨 restart 存活。
     // 与 allowedTools 同属会话级白名单，故在同处恢复。
     void sessionAllowlist.getWriteRoots(sessionDir).then((roots) => {
@@ -898,10 +915,14 @@ export class AgentLoop {
       const persisted = await this.summaryStore.load(this.sessionDir);
       if (persisted) this.currentSummary = persisted;
     } catch {}
-    // 重载权限白名单
+    // 重载权限白名单 + 档位（档位是会话级的，切会话必须跟着换，否则"在 A 会话开的
+    // 完全访问"会顺延到 B 会话 —— 这正是 allowlist 注释里反复强调的越权路径）
     sessionAllowlist.load(this.sessionDir).then(data => {
       this.allowlistTools = new Set(data.allowedTools ?? []);
       this.allowedCommands = new Set(data.allowedCommands ?? []);
+      this.permissionProfile = data.profile;
+      this.unrestrictedTools = data.profile === 'full';
+      this.aorRestoreNotified = false;
     }).catch(() => {});
   }
 
@@ -1152,6 +1173,37 @@ export class AgentLoop {
   /** 装配方注入审查官实现（agent-assembly 构造；未注入 → 视为审查不可用） */
   setGoalReviewer(fn: (req: GoalReviewRequest) => Promise<GoalReviewResult>): void {
     this.goalReviewer = fn;
+  }
+
+  // ── 执行档位（permission profile，2026-10-24）──────────────────────
+  // 与 goal 同属"会话级模式"，所以放在一起：两者都是"这个会话按什么规则干活"，
+  // 都随 <sessionDir> 落盘，都由 UI 的模式菜单统一切换。
+
+  /** 当前档位（WebUI 模式菜单 / state 快照读取） */
+  getPermissionProfile(): PermissionProfile {
+    return this.permissionProfile;
+  }
+
+  /**
+   * 切换档位。**唯一写入口** —— 权限条的 'aor' 应答、TUI、WebUI 全走这里，
+   * 免得 profile 与 unrestrictedTools 两份状态各自漂移（历史上 AOR 就有这个毛病）。
+   *
+   * 副作用：落盘（session 级）+ 发一条 status（切到 full 用 warn 级，因为它是"从此不再问"）。
+   */
+  setPermissionProfile(profile: PermissionProfile): PermissionProfile {
+    const next = normalizePermissionProfile(profile);
+    if (next === this.permissionProfile) return next;
+    const prev = this.permissionProfile;
+    this.permissionProfile = next;
+    this.unrestrictedTools = next === 'full';
+    // 用户自己切到 full ⇒ 不必再补"你还在全放行"的恢复提示（那是给重启后失忆场景的）
+    if (next === 'full') this.aorRestoreNotified = true;
+    void sessionAllowlist.setProfile(this.sessionDir, next).catch(() => {});
+    this.outputHandler?.onStatus?.(
+      `权限档位：${PERMISSION_PROFILE_LABELS[prev]} → ${PERMISSION_PROFILE_LABELS[next]}`,
+      next === 'full' ? 'warn' : 'info',
+    );
+    return next;
   }
 
   /** 当前 goal 状态（未激活 → null）。装配侧过滤 / UI 查询用。 */
@@ -2582,21 +2634,21 @@ export class AgentLoop {
       getUnrestricted: () => {
         // AOR 由**会话级持久化**恢复 ⇒ 必须主动提示一次：重启后不再弹权限条，
         // 不说一句用户就会忘掉自己仍处于全放行 —— 这正是「越权」最容易发生的地方。
-        if (this.unrestrictedTools && !this.aorRestoreNotified) {
+        // 2026-10-24：判据改为档位（full ⇔ unrestricted），提示语义不变。
+        if (this.permissionProfile === 'full' && !this.aorRestoreNotified) {
           this.aorRestoreNotified = true;
           this.outputHandler?.onStatus?.(
-            '⚠️ 本会话仍处于 AOR（全放行）—— 由会话级持久化恢复。关闭途径：换一个会话，或删 allowlist.json 里的 unrestricted 字段后重启。',
+            '⚠️ 本会话仍处于「完全访问」—— 由会话级持久化恢复。要收紧：打开输入框下的模式菜单改回「变更前确认」。',
             'warn',
           );
         }
-        return this.unrestrictedTools;
+        return this.permissionProfile === 'full';
       },
       setUnrestricted: (v) => {
-        this.unrestrictedTools = v;
-        // 会话级持久化（2026-10-13）：同一会话重启后不必重按一遍。
-        // ⚠️ 只写本 sessionDir ⇒ **不跨会话**；`.git` 恒拒不受影响（围栏独立判定）。
-        void sessionAllowlist.setUnrestricted(this.sessionDir, v).catch(() => {});
+        // 权限条上的 'aor' 应答 = 切到 full 档（不再是独立状态，走唯一写入口）
+        this.setPermissionProfile(v ? 'full' : 'confirm');
       },
+      getPermissionProfile: () => this.permissionProfile,
       getPendingImpact: () => this.pendingImpactInfo,
       setPendingImpact: (v) => { this.pendingImpactInfo = v; },
       markMutation: () => { this.turnHadMutation = true; },

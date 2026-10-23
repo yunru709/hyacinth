@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createLogger } from '../logging/logger.js';
+import {
+  DEFAULT_PERMISSION_PROFILE,
+  normalizePermissionProfile,
+  type PermissionProfile,
+} from '../orchestrator/permission-profile.js';
 const logger = createLogger('session-allowlist');
 
 export interface SessionAllowlistData {
@@ -29,6 +34,14 @@ export interface SessionAllowlistData {
    *   · 恢复时 loop 会**主动提示一次**：重启后不再弹权限条，不提示用户就会忘掉自己还在全放行。
    */
   unrestricted: boolean;
+  /**
+   * 会话级执行档位（plan / confirm / auto / full）。
+   *
+   * 与 unrestricted 的关系：unrestricted 是它的**旧写法**。full 档 ⇒ unrestricted=true，
+   * 两者始终一起写，老代码读 unrestricted 也不会读到矛盾值。新代码一律读 profile
+   * （见 orchestrator/permission-profile.ts 的说明）。
+   */
+  profile: PermissionProfile;
 }
 
 const EMPTY_DATA: SessionAllowlistData = {
@@ -36,6 +49,7 @@ const EMPTY_DATA: SessionAllowlistData = {
   allowedCommands: [],
   allowedWriteRoots: [],
   unrestricted: false,
+  profile: DEFAULT_PERMISSION_PROFILE,
 };
 
 /** 数组字段兜底：老 allowlist.json 缺 allowedWriteRoots ⇒ 视为空（向后兼容） */
@@ -50,11 +64,18 @@ function asBool(v: unknown): boolean {
 
 /** 统一的字段解析（异步 load 与同步 loadSync 共用，避免两处漂移） */
 function parseData(parsed: Record<string, unknown>): SessionAllowlistData {
+  const unrestricted = asBool(parsed.unrestricted);
+  // 向后兼容：老文件只有 unrestricted:true（那时还没有 profile 字段）⇒ 等价于 full 档。
+  // 反过来不成立：profile='full' 而 unrestricted=false 是脏数据，下面 setProfile 会写齐。
+  const profile = parsed.profile === undefined
+    ? (unrestricted ? 'full' : DEFAULT_PERMISSION_PROFILE)
+    : normalizePermissionProfile(parsed.profile);
   return {
     allowedTools: asStringArray(parsed.allowedTools),
     allowedCommands: asStringArray(parsed.allowedCommands),
     allowedWriteRoots: asStringArray(parsed.allowedWriteRoots),
-    unrestricted: asBool(parsed.unrestricted),
+    unrestricted: unrestricted || profile === 'full',
+    profile,
   };
 }
 
@@ -127,8 +148,29 @@ export async function setUnrestricted(sessionDir: string, on: boolean): Promise<
   const data = await load(sessionDir);
   if (data.unrestricted !== on) {
     data.unrestricted = on;
+    // profile 同步：开 ⇒ full；关时只把 full 退成 confirm，不动 auto/plan
+    // （否则"取消全放行"会顺带把自主模式踩回确认档，用户视角是设置被篡改）
+    data.profile = on ? 'full' : (data.profile === 'full' ? 'confirm' : data.profile);
     await save(sessionDir, data);
   }
+}
+
+/**
+ * 写会话级执行档位。与 `unrestricted` 双写 —— 老代码读 unrestricted 时不会与 profile 矛盾。
+ * 关闭 AOR 不在这里做：full 档之外的档位都由这个函数负责。
+ */
+export async function setProfile(sessionDir: string, profile: PermissionProfile): Promise<void> {
+  const data = await load(sessionDir);
+  const next = normalizePermissionProfile(profile);
+  if (data.profile === next) return;
+  data.profile = next;
+  data.unrestricted = next === 'full';
+  await save(sessionDir, data);
+}
+
+/** 同步读档位 —— 只给 loop 构造函数用（理由同 isUnrestrictedSync） */
+export function getProfileSync(sessionDir: string): PermissionProfile {
+  return loadSync(sessionDir).profile;
 }
 
 /**

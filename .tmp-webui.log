@@ -1,0 +1,811 @@
+{"ts":"2026-10-23T19:57:40.657Z","lvl":"info","mod":"security-kernel","msg":"security kernel active","ctx":{"mode":"enforce","probes":4}}
+(node:9040) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"ts":"2026-10-23T19:57:42.264Z","lvl":"info","mod":"security-kernel","msg":"security kernel active","ctx":{"mode":"enforce","probes":4}}
+(node:632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"ts":"2026-10-23T19:57:43.964Z","lvl":"warn","mod":"provider-manager","msg":"provider.active 缺 API Key，回落到可用厂商","ctx":{"configured":"anthropic","missingEnvKey":"ANTHROPIC_API_KEY","fallback":"deepseek"}}
+{"ts":"2026-10-23T19:57:43.965Z","lvl":"info","mod":"channels","msg":"channel registered","ctx":{"id":"http-webhook","name":"HTTP Webhook"}}
+{"ts":"2026-10-23T19:57:43.991Z","lvl":"info","mod":"clawbot-plugin","msg":"auto-detected clawbot channel, registering..."}
+{"ts":"2026-10-23T19:57:43.991Z","lvl":"info","mod":"channels","msg":"channel registered","ctx":{"id":"clawbot","name":"微信 ClawBot"}}
+{"ts":"2026-10-23T19:57:43.991Z","lvl":"info","mod":"channels","msg":"starting channels","ctx":{"count":2}}
+{"ts":"2026-10-23T19:57:43.992Z","lvl":"warn","mod":"http-webhook","msg":"No HYACINTH_API_KEY set — HTTP API will reject all requests except /api/health. Set the environment variable or use --api-key."}
+{"ts":"2026-10-23T19:57:44.409Z","lvl":"info","mod":"http-webhook","msg":"WebUI static serving from C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\src\\webui"}
+{"ts":"2026-10-23T19:57:44.412Z","lvl":"info","mod":"http-webhook","msg":"HTTP API listening on 127.0.0.1:3100（只对本机）"}
+{"ts":"2026-10-23T19:57:44.433Z","lvl":"info","mod":"channels","msg":"channel started","ctx":{"id":"http-webhook"}}
+[clawbot] ClawBot channel not auto-connected (disabled) — use /clawbot login to authorize
+{"ts":"2026-10-23T19:57:44.444Z","lvl":"warn","mod":"session-service","msg":"no session found for channel \"clawbot\" — starting a new one (fail-closed, no global fallback)","ctx":{"channel":"clawbot"}}
+{"ts":"2026-10-23T19:57:44.448Z","lvl":"info","mod":"channels","msg":"registered channel loop entry for scheduled task routing","ctx":{"id":"clawbot"}}
+{"ts":"2026-10-23T19:57:44.448Z","lvl":"info","mod":"channels","msg":"channel started","ctx":{"id":"clawbot"}}
+HTTP API: http://localhost:3100
+
+WebUI 已启动：http://127.0.0.1:3100
+{"ts":"2026-10-23T19:57:44.799Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-035744-d1e800"}}
+{"ts":"2026-10-23T19:57:44.806Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:57:44.811Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:44.812Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:44.812Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.812Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.812Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.812Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.813Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.813Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.813Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:44.813Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:44.814Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.814Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.815Z","lvl":"info","mod":"command-registry","msg":"Commands reloaded: 33 builtin + 1 user = 34 total"}
+{"ts":"2026-10-23T19:57:44.821Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-035744-d1e800","channel":"webui"}}
+{"ts":"2026-10-23T19:57:44.883Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T19:57:44.884Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:57:44.925Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:44.925Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:44.926Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T19:57:44.954Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T19:57:44.955Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T19:57:44.955Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T19:57:44.955Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T19:57:44.955Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T19:57:44.959Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T19:57:44.963Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T19:57:44.970Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T19:57:44.970Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T19:57:44.970Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T19:57:44.970Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T19:57:44.972Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:57:44.972Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:57:44.972Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T19:57:44.972Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T19:57:44.972Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T19:57:44.974Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T19:57:44.974Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T19:57:44.995Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T19:57:44.995Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T19:57:44.995Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T19:57:44.995Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T19:57:45.006Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T19:57:45.010Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T19:57:45.018Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-035744-d1e800"}}
+{"ts":"2026-10-23T19:57:45.031Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T19:57:45.036Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T19:57:45.040Z","lvl":"info","mod":"manifest-loader","msg":"context-manifest.json loaded"}
+{"ts":"2026-10-23T19:57:45.043Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+{"ts":"2026-10-23T19:57:46.755Z","lvl":"info","mod":"env-collector","msg":"System environment collected","ctx":{"os":"Microsoft Windows 11 רҵ�� Insider Preview","arch":"x64","cpuModel":"13th Gen Intel(R) Core(TM) i7-13700HX","cpuCores":24,"totalMemoryGB":"31.7","gpu":"NVIDIA GeForce RTX 4070 Laptop GPU (VRAM 8.0 GB)","python":"3.13.14","nodeVersion":"v22.22.2","shell":"PowerShell 5.1.26100.9750"}}
+{"ts":"2026-10-23T19:57:47.536Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-035747-87a1dc"}}
+{"ts":"2026-10-23T19:57:47.537Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:57:47.537Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:47.537Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:47.537Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.538Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.542Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-035747-87a1dc","channel":"webui"}}
+{"ts":"2026-10-23T19:57:47.597Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T19:57:47.598Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:57:47.600Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.601Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.602Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.603Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.603Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.603Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.604Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:57:47.605Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T19:57:47.611Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T19:57:47.615Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T19:57:47.615Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T19:57:47.615Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T19:57:47.615Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T19:57:47.619Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T19:57:47.621Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T19:57:47.625Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T19:57:47.625Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T19:57:47.625Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T19:57:47.625Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T19:57:47.626Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:57:47.626Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:57:47.626Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T19:57:47.626Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T19:57:47.626Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T19:57:47.627Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T19:57:47.627Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T19:57:47.634Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T19:57:47.635Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T19:57:47.635Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T19:57:47.635Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T19:57:47.636Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T19:57:47.636Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T19:57:47.637Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-035747-87a1dc"}}
+{"ts":"2026-10-23T19:57:47.645Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T19:57:47.648Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T19:57:47.654Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+{"ts":"2026-10-23T19:58:12.298Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-035812-72be2c"}}
+{"ts":"2026-10-23T19:58:12.300Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:58:12.300Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.301Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.302Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.306Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-035812-72be2c","channel":"webui"}}
+{"ts":"2026-10-23T19:58:12.359Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T19:58:12.361Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:58:12.362Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.363Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.364Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.365Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.366Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.367Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.368Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.368Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.368Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.368Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.368Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:58:12.370Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T19:58:12.377Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T19:58:12.378Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T19:58:12.378Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T19:58:12.378Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T19:58:12.378Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T19:58:12.380Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T19:58:12.382Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T19:58:12.392Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T19:58:12.392Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T19:58:12.392Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T19:58:12.392Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T19:58:12.394Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:58:12.394Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:58:12.394Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T19:58:12.394Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T19:58:12.394Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T19:58:12.396Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T19:58:12.396Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T19:58:12.410Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T19:58:12.410Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T19:58:12.411Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T19:58:12.411Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T19:58:12.413Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T19:58:12.414Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T19:58:12.415Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-035812-72be2c"}}
+{"ts":"2026-10-23T19:58:12.434Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T19:58:12.438Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T19:58:12.447Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+{"ts":"2026-10-23T19:58:16.870Z","lvl":"warn","mod":"mcp:client:chrome-devtools","msg":"connection failed","ctx":{"error":"MCP connect timed out (30s)"}}
+{"ts":"2026-10-23T19:58:16.870Z","lvl":"warn","mod":"mcp:lifecycle:chrome-devtools","msg":"connect failed for chrome-devtools: MCP connect timed out (30s)"}
+{"ts":"2026-10-23T19:58:16.871Z","lvl":"warn","mod":"mcp:system","msg":"MCP server \"chrome-devtools\" connect failed, skipping (will retry on next reload)"}
+{"ts":"2026-10-23T19:58:18.054Z","lvl":"info","mod":"factory","msg":"MCP status: failed","ctx":{"name":"chrome-devtools"}}
+{"ts":"2026-10-23T19:58:18.055Z","lvl":"info","mod":"mcp:system","msg":"MCP status: failed","ctx":{"name":"chrome-devtools"}}
+{"ts":"2026-10-23T19:58:18.127Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T19:58:49.134Z","lvl":"warn","mod":"mcp:client:rea","msg":"connection failed","ctx":{"error":"MCP connect timed out (30s)"}}
+{"ts":"2026-10-23T19:58:49.134Z","lvl":"warn","mod":"mcp:lifecycle:rea","msg":"connect failed for rea: MCP connect timed out (30s)"}
+{"ts":"2026-10-23T19:58:49.134Z","lvl":"warn","mod":"mcp:system","msg":"MCP server \"rea\" connect failed, skipping (will retry on next reload)"}
+{"ts":"2026-10-23T19:58:49.980Z","lvl":"info","mod":"factory","msg":"MCP status: failed","ctx":{"name":"rea"}}
+{"ts":"2026-10-23T19:58:49.980Z","lvl":"info","mod":"mcp:system","msg":"MCP status: failed","ctx":{"name":"rea"}}
+{"ts":"2026-10-23T19:58:49.980Z","lvl":"info","mod":"mcp:system","msg":"MCPSystem started: 0/2 servers connected"}
+{"ts":"2026-10-23T19:59:06.049Z","lvl":"info","mod":"http-webhook","msg":"UI WS client disconnected","ctx":{"sessionId":"webui_20261024-035812-72be2c"}}
+{"ts":"2026-10-23T19:59:06.101Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-035906-cc66a9"}}
+{"ts":"2026-10-23T19:59:06.102Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:59:06.103Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.104Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.108Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-035906-cc66a9","channel":"webui"}}
+{"ts":"2026-10-23T19:59:06.172Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T19:59:06.173Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:59:06.174Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.175Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.176Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.176Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.176Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.176Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.176Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.177Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.178Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.179Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.180Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:06.181Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T19:59:06.186Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T19:59:06.186Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T19:59:06.187Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T19:59:06.187Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T19:59:06.187Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T19:59:06.189Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T19:59:06.191Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T19:59:06.196Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T19:59:06.196Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T19:59:06.196Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T19:59:06.196Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T19:59:06.197Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:59:06.197Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:59:06.197Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T19:59:06.197Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T19:59:06.197Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T19:59:06.198Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T19:59:06.198Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T19:59:06.206Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T19:59:06.206Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T19:59:06.206Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T19:59:06.206Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T19:59:06.209Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T19:59:06.209Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T19:59:06.210Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-035906-cc66a9"}}
+{"ts":"2026-10-23T19:59:06.218Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T19:59:06.222Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T19:59:06.226Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+{"ts":"2026-10-23T19:59:28.222Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T19:59:48.170Z","lvl":"info","mod":"http-webhook","msg":"UI WS client disconnected","ctx":{"sessionId":"webui_20261024-035906-cc66a9"}}
+{"ts":"2026-10-23T19:59:48.212Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-035948-2ecbf9"}}
+{"ts":"2026-10-23T19:59:48.213Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:59:48.213Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.213Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.214Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.217Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-035948-2ecbf9","channel":"webui"}}
+{"ts":"2026-10-23T19:59:48.268Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T19:59:48.269Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.270Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.271Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.272Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.273Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.274Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.275Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T19:59:48.276Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T19:59:48.282Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T19:59:48.282Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T19:59:48.282Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T19:59:48.282Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T19:59:48.282Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T19:59:48.284Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T19:59:48.285Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T19:59:48.290Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T19:59:48.290Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T19:59:48.290Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T19:59:48.290Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T19:59:48.291Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:59:48.291Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T19:59:48.291Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T19:59:48.291Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T19:59:48.291Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T19:59:48.292Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T19:59:48.292Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T19:59:48.302Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T19:59:48.302Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T19:59:48.302Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T19:59:48.302Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T19:59:48.304Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T19:59:48.304Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T19:59:48.305Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-035948-2ecbf9"}}
+{"ts":"2026-10-23T19:59:48.314Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T19:59:48.317Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T19:59:48.322Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+{"ts":"2026-10-23T20:00:45.329Z","lvl":"info","mod":"http-webhook","msg":"UI WS client disconnected","ctx":{"sessionId":"webui_20261024-035948-2ecbf9"}}
+{"ts":"2026-10-23T20:00:45.372Z","lvl":"info","mod":"http-webhook","msg":"UI WS client connected","ctx":{"sessionId":"webui_20261024-040045-2d644c"}}
+{"ts":"2026-10-23T20:00:45.373Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.374Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.377Z","lvl":"info","mod":"factory","msg":"Registered lazy session (dir deferred to first message)","ctx":{"sessionId":"webui_20261024-040045-2d644c","channel":"webui"}}
+{"ts":"2026-10-23T20:00:45.424Z","lvl":"info","mod":"mode-profile","msg":"mode profile registered","ctx":{"mode":"test","file":"C:\\Users\\74689\\.agent\\modes\\test.json"}}
+{"ts":"2026-10-23T20:00:45.425Z","lvl":"info","mod":"provider-config","msg":"Provider config loaded","ctx":{"path":"C:\\Users\\74689\\.agent\\providers.json"}}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.426Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.427Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.428Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.429Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.430Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.431Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.432Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels reloaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Read model channels config","ctx":{"path":"C:\\Users\\74689\\.agent\\model-channels.json"}}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Model channels config loaded","ctx":{"channels":["default","compression","orchestrator","narration","chat","sub-agent"],"roles":["assessment","planning","compression","sub-agent","chat","orchestrator","narration"]}}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): compression (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): orchestrator (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): narration (commandcode/deepseek/deepseek-v4.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): chat (deepseek/deepseek-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created: sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Channel provider created (with resilience): sub-agent (commandcode/minimax/minimax-m3.1-flash)"}
+{"ts":"2026-10-23T20:00:45.433Z","lvl":"info","mod":"model-channel-registry","msg":"Main provider set","ctx":{"providerType":"deepseek"}}
+{"ts":"2026-10-23T20:00:45.438Z","lvl":"info","mod":"kernel","msg":"kernel assembled","ctx":{"hooks":0,"pipeline":[{"slot":"input","impl":"builtin:input-normalize","enabled":true,"reads":["history","userInput","ephemeralInput","modeName"],"writes":["history","userInput","hasPendingToolCalls","historyWithoutLastUser","lastUserTextMsg","uncompressedMsgs","ephemeralInput"]},{"slot":"bypass","impl":"builtin:bypass-preturn","enabled":true,"reads":["userInput","history","recentToolNames","lastContextTokens","bypassInjectionsCache"],"writes":["userInput","bypassInjections","bypassInjectionsCache","intent","intentLabel"]},{"slot":"context","impl":"builtin:layered-composer","enabled":true,"reads":["history","historyWithoutLastUser","userInput","uncompressedMsgs","hasPendingToolCalls","lastUserTextMsg","summary","impactInfo","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","lastSavedSummary","lastContextTokens","activeProvider","bypassInjections","activePlan","kbQuery","pendingImageInjections","pendingMediaInjections"],"writes":["toolDefinitions","messages","zoneBreakdown","summary","lastSavedSummary","lastContextTokens","needsCompression","needsAggressiveCompress","pendingCompression","compressCount","impactInfo","uncompressedMsgs","kbQuery","userInput","activeProvider","pendingImageInjections"]},{"slot":"llm","impl":"builtin:provider-stream","enabled":true,"reads":["messages","toolDefinitions","activeProvider","turn","cacheStats","inlineToolExecuted","inlineToolResults"],"writes":["streamText","toolCalls","stopReason","cacheStats","inlineToolExecuted","inlineToolResults"]},{"slot":"tools","impl":"builtin:tool-dispatch","enabled":true,"reads":["toolCalls","turn","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"],"writes":["toolCalled","recentToolNames","activePlan","inlineToolExecuted","inlineToolResults"]},{"slot":"finalize","impl":"builtin:turn-finalize","enabled":true,"reads":["stop","toolCalled","flowStillActive","sayStatus","goalStatus"],"writes":["stop","stopReason"]}]}}
+{"ts":"2026-10-23T20:00:45.439Z","lvl":"info","mod":"plugin-host","msg":"hook bus injected"}
+{"ts":"2026-10-23T20:00:45.439Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: orchestrator (modes: normal)"}
+{"ts":"2026-10-23T20:00:45.439Z","lvl":"info","mod":"plugin-host:mod","msg":"bypass plugin activated","ctx":{"plugin":"bypass","agents":0}}
+{"ts":"2026-10-23T20:00:45.439Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: bypass"}
+{"ts":"2026-10-23T20:00:45.441Z","lvl":"info","mod":"plugins","msg":"plugins discovered","ctx":{"count":2,"ids":["companion","example-greeter"]}}
+{"ts":"2026-10-23T20:00:45.443Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:00:45.447Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:00:45.447Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:00:45.447Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:00:45.447Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:00:45.448Z","lvl":"info","mod":"plugin:example-greeter","msg":"hello tool registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:00:45.448Z","lvl":"info","mod":"plugin:example-greeter","msg":"example-greeter-friendly skill registered","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:00:45.448Z","lvl":"info","mod":"plugin:example-greeter","msg":"Plugin activated! Config:","ctx":{"args":[{}]}}
+{"ts":"2026-10-23T20:00:45.448Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: example-greeter"}
+{"ts":"2026-10-23T20:00:45.448Z","lvl":"info","mod":"plugins","msg":"activated","ctx":{"plugin":"example-greeter"}}
+{"ts":"2026-10-23T20:00:45.449Z","lvl":"info","mod":"plugin-host:mod","msg":"knowledge plugin activated","ctx":{"plugin":"knowledge","enabled":false,"zone4":false,"dir":"C:\\Users\\74689\\.agent\\knowledge"}}
+{"ts":"2026-10-23T20:00:45.449Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: knowledge"}
+{"ts":"2026-10-23T20:00:45.457Z","lvl":"info","mod":"plugin-host:mod","msg":"xref plugin activated","ctx":{"plugin":"xref"}}
+{"ts":"2026-10-23T20:00:45.457Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: xref"}
+{"ts":"2026-10-23T20:00:45.457Z","lvl":"info","mod":"plugin-host:mod","msg":"generation plugin: companion.tts disabled, idle","ctx":{"plugin":"generation"}}
+{"ts":"2026-10-23T20:00:45.457Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: generation"}
+{"ts":"2026-10-23T20:00:45.459Z","lvl":"info","mod":"hot-reload:manager","msg":"Starting hot reload watchers..."}
+{"ts":"2026-10-23T20:00:45.459Z","lvl":"info","mod":"hot-reload:manager","msg":"Hot reload watchers registered"}
+{"ts":"2026-10-23T20:00:45.460Z","lvl":"info","mod":"ui-protocol-session","msg":"UI protocol session initialized","ctx":{"sessionId":"webui_20261024-040045-2d644c"}}
+{"ts":"2026-10-23T20:00:45.468Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: docx_read (docx_read.py (python))"}
+{"ts":"2026-10-23T20:00:45.472Z","lvl":"info","mod":"hot-reload:skill-watcher","msg":"Loaded 3 skill(s) from C:\\Users\\74689\\.agent\\skills: config-manager, ui-aesthetics, visualization"}
+{"ts":"2026-10-23T20:00:45.477Z","lvl":"info","mod":"hot-reload:tool-watcher","msg":"Tool registered: xlsx_read (xlsx_read.py (python))"}
+(node:632) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 change listeners added to [StatWatcher]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+{"ts":"2026-10-23T20:02:08.967Z","lvl":"info","mod":"http-webhook","msg":"UI WS client disconnected","ctx":{"sessionId":"webui_20261024-040045-2d644c"}}
+{"ts":"2026-10-23T20:02:10.745Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.745Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.747Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.758Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.758Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.760Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.770Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.771Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.772Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.784Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.784Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.785Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.797Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.797Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.798Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.807Z","lvl":"info","mod":"plugin:companion","msg":"companion mode deactivated","ctx":{"args":[]}}
+{"ts":"2026-10-23T20:02:10.807Z","lvl":"info","mod":"plugin-host","msg":"plugin unmounted: companion"}
+{"ts":"2026-10-23T20:02:10.808Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent registered: world-engine (modes: companion)"}
+{"ts":"2026-10-23T20:02:10.870Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.870Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.870Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.870Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.870Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.882Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:10.883Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"bypass-manager","msg":"BypassAgent started: world-engine (mode: companion)"}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugin:companion","msg":"companion mode activated","ctx":{"args":[{"character":"柔柔","worldAgent":true}]}}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugin-host","msg":"plugin mounted: companion"}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"plugins","msg":"plugin reloaded from disk","ctx":{"plugin":"companion"}}
+{"ts":"2026-10-23T20:02:10.884Z","lvl":"info","mod":"hot-reload:plugins","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\Desktop\\Agent\\hyacinth\\plugins","filename":"companion"}}
+{"ts":"2026-10-23T20:02:14.828Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:14.829Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:14.830Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:14.831Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:14.843Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:14.843Z","lvl":"info","mod":"hot-reload:config","msg":"reloaded","ctx":{"path":"C:\\Users\\74689\\.agent\\config.json","filename":"config.json"}}
+{"ts":"2026-10-23T20:02:15.908Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T20:02:15.908Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T20:02:15.908Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T20:02:20.917Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"EPERM","err":"EPERM: operation not permitted, open 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp'"}}
+{"ts":"2026-10-23T20:02:20.968Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"ENOENT","err":"ENOENT: no such file or directory, rename 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp' -> 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json'"}}
+{"ts":"2026-10-23T20:02:20.969Z","lvl":"warn","mod":"world-store","msg":"世界状态落盘失败（内存状态仍有效，下次写入会重试）","ctx":{"file":"C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json","code":"ENOENT","err":"ENOENT: no such file or directory, rename 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json.tmp' -> 'C:\\Users\\74689\\.agent\\companion\\柔柔\\world\\world.json'"}}

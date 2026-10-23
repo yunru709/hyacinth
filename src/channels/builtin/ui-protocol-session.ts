@@ -37,6 +37,7 @@ import { createCommandDomain, type CommandRegistryLike, type CommandExecutor } f
 import { createMessageDomain } from '../../ui-protocol/domains/message.js';
 import { createStateDomain, type LoopLike } from '../../ui-protocol/domains/state.js';
 import { createPermissionDomain } from '../../ui-protocol/domains/permission.js';
+import { createModeDomain, type ModeLoopLike } from '../../ui-protocol/domains/mode.js';
 import { createScheduleDomain, type SchedulerLike } from '../../ui-protocol/domains/schedule.js';
 import { createKbDomain, type KnowledgeBaseLike } from '../../ui-protocol/domains/kb.js';
 import { createProcessDomain, type BackgroundRegistryLike } from '../../ui-protocol/domains/process.js';
@@ -351,6 +352,10 @@ export class UiProtocolSession {
         ?? createBackendExecutor(backend.registry, () => this.loop as unknown as LoopLike, emit),
     }));
     this.server.registerDomain('permission', createPermissionDomain({ pending: this.pending }));
+    // mode 域：会话级执行模式（权限档位 / goal）。loop 在 initialize 后才就绪 ⇒ 闭包延迟解析。
+    this.server.registerDomain('mode', createModeDomain({
+      getLoop: () => this.loop as unknown as ModeLoopLike,
+    }));
     // kb / process 域：依赖 agent 组件（knowledgeBase / backgroundRegistry），
     // 由桥接层注入闭包延迟解析（initialize 后可用）。
     this.server.registerDomain('kb', createKbDomain({

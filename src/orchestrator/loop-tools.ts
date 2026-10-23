@@ -31,6 +31,12 @@ import type { LoopHookBus } from './loop-hooks.js';
 import { runAttributed } from '../kernel/security/index.js';
 import * as sessionAllowlist from '../tools/session-allowlist.js';
 import { classifyWriteTarget } from '../tools/path-sandbox.js';
+import {
+  DEFAULT_PERMISSION_PROFILE,
+  decideGate,
+  planBlockMessage,
+  type PermissionProfile,
+} from './permission-profile.js';
 
 /**
  * 工具执行上下文：执行器所需的全部依赖 + 可变状态访问器。
@@ -83,6 +89,8 @@ export interface ToolExecContext {
   // ── 可变状态（loop 的私有字段，经访问器读写，避免共享裸字段）──
   getUnrestricted(): boolean;
   setUnrestricted(v: boolean): void;
+  /** 当前执行档位（plan/confirm/auto/full）。缺省 → 按 confirm 处理（不放开） */
+  getPermissionProfile?(): PermissionProfile;
   getPendingImpact(): string | null;
   setPendingImpact(v: string | null): void;
   /** 流内工具结果的暂存表（引用共享；loop 持有） */
@@ -223,24 +231,45 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
       ctx.approvedWriteRoots.add(path.dirname(path.resolve(ctx.workspaceFenceRoot, filePath)));
     }
 
-    if ((ctx.dangerousTools.has(tc.name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
-      // Step 0: AOR — unrestricted mode, skip all permissions
-      if (ctx.getUnrestricted()) {
-        permittedCalls.push(tc);
-        continue;
-      }
-      // Step 1: check session allowlist（越界写入不适用 —— 见上）
-      if (ctx.allowlistTools.has(tc.name) && !outsideWrite) {
-        permittedCalls.push(tc);
-        continue;
-      }
-      // Step 2: check allowedCommands glob (bash only)
-      if (tc.name === 'bash' && checkCommandAllowed(ctx, tc.input?.command as string)) {
-        permittedCalls.push(tc);
-        continue;
-      }
-      // Step 3: pop permission
-      const result = await ctx.outputHandler.onPermissionRequest(tc.name, tc.input);
+    // ── 档位闸门（2026-10-24）──────────────────────────────────────
+    // plan 硬拒 / auto 只问越界 / full 全放行 / confirm 走下面的老链路
+    //（allowlist → 命令白名单 → 弹窗）。**批量与 inline 两条路径必须同源调用
+    // decideGate 与 planBlockMessage**，否则就重演"批量拦得住、流内漏过去"的老缺陷。
+    const profile = ctx.getPermissionProfile?.() ?? DEFAULT_PERMISSION_PROFILE;
+    const gate = decideGate(profile, {
+      toolName: tc.name,
+      dangerous: ctx.dangerousTools.has(tc.name),
+      outsideWrite,
+    });
+
+    if (gate === 'block') {
+      // 计划模式：连弹窗都不给 —— 直接以 tool_result 告知模型"现在是只读的"，
+      // 这样它会改走"先讲方案"而不是反复重试同一个写操作。
+      const blocked = planBlockMessage(tc.name);
+      outcomes.push({ id: tc.id, name: tc.name, ok: false });
+      await ctx.conversationStore.append(ctx.sessionDir, {
+        role: 'user',
+        content: {
+          type: 'tool_result',
+          tool_use_id: tc.id,
+          content: blocked,
+          is_error: true,
+        } as ToolResultContent,
+      });
+      ctx.outputHandler?.onToolResult?.(blocked, true, tc.id);
+      continue;
+    }
+
+    if ((gate === 'legacy' || gate === 'ask') && ctx.outputHandler?.onPermissionRequest) {
+      // confirm 档才吃白名单：auto 档语义是"常规不问"，再走 allowlist 是多余；
+      // 而越界写入一律不吃（allowlist 记的是"这个工具别再问我"，不是"可写任意位置"）
+      const skipAsk = gate === 'legacy' && (
+        (ctx.allowlistTools.has(tc.name) && !outsideWrite)
+        || (tc.name === 'bash' && checkCommandAllowed(ctx, tc.input?.command as string))
+      );
+      // Step 3: pop permission —— 已"总是允许"的调用不弹窗
+      //（result=null 时下面每个分支都不命中，等于放行）
+      const result = skipAsk ? null : await ctx.outputHandler.onPermissionRequest(tc.name, tc.input);
       if (result === 'no') {
         // Permission denied — add error result directly to conversation
         outcomes.push({ id: tc.id, name: tc.name, ok: false });
@@ -526,51 +555,69 @@ export async function runToolInline(
     ctx.approvedWriteRoots.add(path.dirname(path.resolve(ctx.workspaceFenceRoot, inlineFilePath)));
   }
 
-  if ((ctx.dangerousTools.has(name) || outsideWrite) && ctx.outputHandler?.onPermissionRequest) {
-    // Step 0: AOR — unrestricted mode, skip all permissions
-    if (!ctx.getUnrestricted()) {
-      // Step 1: check session allowlist（越界写入不适用 —— 见批量路径注释）
-      if (ctx.allowlistTools.has(name) && !outsideWrite) {
-        // allowed, proceed
-      } else if (name === 'bash' && checkCommandAllowed(ctx, input?.command as string)) {
-        // Step 2: check allowedCommands glob
-        // allowed, proceed
-      } else {
-        // Step 3: pop permission
-        const result = await ctx.outputHandler.onPermissionRequest(name, input);
-        if (result === 'no') {
-          const deniedMsg = 'Permission denied by user';
-          ctx.outputHandler?.onToolResult?.(deniedMsg, true, id);
-          ctx.inlineToolResults.set(id, { content: deniedMsg, isError: true });
-          appendEvent(ctx.sessionDir, {
-            type: 'tool_result',
-            tool_use_id: id,
-            name,
-            content: deniedMsg,
-            timestamp: new Date().toISOString(),
-          }).catch(() => {});
-          return;
-        }
-        if (result === 'aor') {
-          ctx.setUnrestricted(true);
-          ctx.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
-        }
-        // 越界写入获批 ⇒ 记入「已批准可写根」（围栏据此放行；yes/aor=本会话，always=跨 restart）
-        // ⚠️ 必须含 'aor' —— 这是「本次才开 AOR」的那一次调用：此刻块外的 AOR 记录点已经走过去了
-        //    （setUnrestricted(true) 在 await 之后才调用）。漏掉它 = 「按一次 AOR 当次写不出去」，
-        //    用户得连按两次（2026-10-13 实测确诊：DIAGRES 打出 result="aor"）。
-        // ⚠️ 记录基准必须与 classifyWriteTarget 同源（相对 workspaceFenceRoot，**不是 process.cwd()**）—— 审计 B2。
-        if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite && ctx.workspaceFenceRoot) {
-          const dir = path.dirname(path.resolve(ctx.workspaceFenceRoot, inlineFilePath));
-          ctx.approvedWriteRoots?.add(dir);
-          if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
-        }
-        if (result === 'always') {
-          ctx.allowlistTools.add(name);
-          sessionAllowlist.addTool(ctx.sessionDir, name).catch(() => {});
-          if (name === 'bash' && input?.command) {
-            sessionAllowlist.addCommand(ctx.sessionDir, input.command as string).catch(() => {});
-          }
+  // 档位闸门：与批量路径**同源**（同一个 decideGate / planBlockMessage）。
+  // 这里漏改的后果比批量更隐蔽：流内工具照常弹窗，用户以为切了"完全访问"却没生效。
+  const inlineGate = decideGate(ctx.getPermissionProfile?.() ?? DEFAULT_PERMISSION_PROFILE, {
+    toolName: name,
+    dangerous: ctx.dangerousTools.has(name),
+    outsideWrite,
+  });
+
+  if (inlineGate === 'block') {
+    const blocked = planBlockMessage(name);
+    ctx.outputHandler?.onToolResult?.(blocked, true, id);
+    ctx.inlineToolResults.set(id, { content: blocked, isError: true });
+    appendEvent(ctx.sessionDir, {
+      type: 'tool_result',
+      tool_use_id: id,
+      name,
+      content: blocked,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+    return;
+  }
+
+  if ((inlineGate === 'legacy' || inlineGate === 'ask') && ctx.outputHandler?.onPermissionRequest) {
+    // confirm 档才吃白名单（理由同批量路径）
+    const skipAsk = inlineGate === 'legacy' && (
+      (ctx.allowlistTools.has(name) && !outsideWrite)
+      || (name === 'bash' && checkCommandAllowed(ctx, input?.command as string))
+    );
+    {
+      // Step 3: pop permission —— 已"总是允许"的调用不弹窗
+      const result = skipAsk ? null : await ctx.outputHandler.onPermissionRequest(name, input);
+      if (result === 'no') {
+        const deniedMsg = 'Permission denied by user';
+        ctx.outputHandler?.onToolResult?.(deniedMsg, true, id);
+        ctx.inlineToolResults.set(id, { content: deniedMsg, isError: true });
+        appendEvent(ctx.sessionDir, {
+          type: 'tool_result',
+          tool_use_id: id,
+          name,
+          content: deniedMsg,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
+        return;
+      }
+      if (result === 'aor') {
+        ctx.setUnrestricted(true);
+        ctx.outputHandler?.onStatus?.('AOR mode enabled — all future tool calls unrestricted', 'warn');
+      }
+      // 越界写入获批 ⇒ 记入「已批准可写根」（围栏据此放行；yes/aor=本会话，always=跨 restart）
+      // ⚠️ 必须含 'aor' —— 这是「本次才开 AOR」的那一次调用：此刻块外的 AOR 记录点已经走过去了
+      //    （setUnrestricted(true) 在 await 之后才调用）。漏掉它 = 「按一次 AOR 当次写不出去」，
+      //    用户得连按两次（2026-10-13 实测确诊：DIAGRES 打出 result="aor"）。
+      // ⚠️ 记录基准必须与 classifyWriteTarget 同源（相对 workspaceFenceRoot，**不是 process.cwd()**）—— 审计 B2。
+      if ((result === 'yes' || result === 'always' || result === 'aor') && outsideWrite && ctx.workspaceFenceRoot) {
+        const dir = path.dirname(path.resolve(ctx.workspaceFenceRoot, inlineFilePath));
+        ctx.approvedWriteRoots?.add(dir);
+        if (result === 'always') sessionAllowlist.addWriteRoot(ctx.sessionDir, dir).catch(() => {});
+      }
+      if (result === 'always') {
+        ctx.allowlistTools.add(name);
+        sessionAllowlist.addTool(ctx.sessionDir, name).catch(() => {});
+        if (name === 'bash' && input?.command) {
+          sessionAllowlist.addCommand(ctx.sessionDir, input.command as string).catch(() => {});
         }
       }
     }

@@ -104,6 +104,8 @@ export const UI_DOMAIN = {
   COMMAND: 'command',
   /** 权限应答：resolve */
   PERMISSION: 'permission',
+  /** 会话级执行模式：权限档位 get/setProfile + goal enterGoal/exitGoal */
+  MODE: 'mode',
   /** 知识库：开关 / zone4（对应 TUI /zone4） */
   KB: 'kb',
   /** 后台进程（对应 TUI /bg）：list / kill */
@@ -198,6 +200,11 @@ export const UI_METHOD = {
   COMMAND_EXECUTE: 'command.execute',
   // permission
   PERMISSION_RESOLVE: 'permission.resolve',
+  // mode（会话级执行模式）
+  MODE_GET: 'mode.get',
+  MODE_SET_PROFILE: 'mode.setProfile',
+  MODE_ENTER_GOAL: 'mode.enterGoal',
+  MODE_EXIT_GOAL: 'mode.exitGoal',
   // schedule
   SCHEDULE_LIST: 'schedule.list',
   SCHEDULE_ADD: 'schedule.add',

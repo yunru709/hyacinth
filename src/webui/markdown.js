@@ -43,6 +43,14 @@
 //
 // ⚠️ 提取顺序：**行内代码 (`) 先于行内公式 ($)**。反过来会把 `` `cost$` `` 里的
 //   内容当公式。代码块（``` 围栏）在块级解析时就整段吃掉，天然不受影响。
+//
+// ── 2026-10-23 补充：兼容 LaTeX 的 `\(…\)` / `\[…\]` 分隔符 ──────────
+// 模型常按 LaTeX 习惯输出 `\(a^2\)`、`\[E=mc^2\]`（OpenAI/Anthropic 的
+// system prompt 里就是这套写法），只认 `$` 时它们会原样露出反斜杠。
+// 两者等价：`\(…\)` = 行内、`\[…\]` = 块级。未闭合一律保留原文（同 `$$`）。
+//
+// ── 2026-10-23 补充：GFM 任务列表 `- [ ]` / `- [x]` ──────────────────
+// 之前按字面渲染成 `[ ] 待办`；agent 的计划/清单几乎都用这个语法。
 
 (function (root, factory) {
   var api = factory(root);
@@ -108,6 +116,53 @@
     return '<code class="md-math-fallback">' + escapeHtml(src) + '</code>';
   }
 
+  /**
+   * 这段文本里有没有**会被渲染成公式**的东西？
+   *
+   * 用途：KaTeX 是 272KB JS + 25KB CSS 的常驻重量级资源，整场对话没有公式时不该下。
+   * 于是渲染方在渲染前先问一句，只有真有公式才去加载引擎（见 math.js）。
+   *
+   * ⚠️ 必须先剔除代码：``` 围栏和行内 `…` 里的 `$` **不会**被当公式，
+   *   若据此加载就是白下 300KB —— 而代码块在对话里比公式常见得多。
+   *   剔除规则与块级解析保持一致（RE_FENCE / 行内代码的定界符）。
+   *
+   * ⚠️ 宁可**误报**也不能漏报：漏报 = 公式永远停在 fallback 的 `<code>` 原文，
+   *   用户看到的是一串反斜杠；误报只是多下一次脚本。所以这里不追求精确。
+   */
+  var RE_MATH_HINT = /(?:\$\$|\\\(|\\\[)|(?:^|[^\\$])\$(?![\s$])([^$\n]*?[^\s\\$])\$(?!\d)/;
+
+  /**
+   * 按行剔除围栏代码块（逻辑与块级解析的 ① 完全一致：开闭必须是同一种符号）。
+   *
+   * ⚠️ 不能用一条 `/^```[\s\S]*?^```$/gm` 正则偷懒：`[\s\S]*?` 是惰性的，
+   *    而 `m` 标志下的 `$` 能匹配**任意行尾**，于是它在开围栏后第一个换行处就
+   *    判定"已到结尾"，匹配到的只有 ``` 这三个字符 —— 围栏**内容没被剔除**，
+   *    等于这个防误报措施完全失效（实测 ` ```\n$x$\n``` ` 仍被判成有公式）。
+   */
+  function stripFences(s) {
+    var lines = String(s).split('\n');
+    var out = [];
+    var marker = null;
+    for (var i = 0; i < lines.length; i++) {
+      var f = lines[i].match(RE_FENCE);
+      if (f) {
+        var ch = f[1].charAt(0);
+        if (!marker) { marker = ch; out.push(' '); continue; }
+        if (ch === marker) { marker = null; out.push(' '); continue; }
+      }
+      out.push(marker ? ' ' : lines[i]); // 未闭合 ⇒ 吃到结尾（与渲染器一致）
+    }
+    return out.join('\n');
+  }
+
+  function needsMath(text) {
+    var s = String(text == null ? '' : text);
+    if (!s) return false;
+    // 行内代码同理：`` `cost$price` `` 里的 $ 不是公式定界符
+    s = stripFences(s).replace(/`[^`\n]*`/g, ' ');
+    return RE_MATH_HINT.test(s);
+  }
+
   // ── 行内渲染 ──────────────────────────────────────────────────────
   // 顺序有讲究：代码段先抽走（其内容不再参与其它标记）→ 公式 → 链接 → 粗体 → 斜体 → 删除线
   var PH = '\u0000'; // 行内代码占位符边界（入口已剥离输入里的 \u0000）
@@ -152,11 +207,21 @@
       return pre + PH + (store.length - 1) + PH;
     });
 
+    // ②b 行内公式 \(…\)（LaTeX 习惯写法，与 $…$ 等价）
+    //     不能跨行：跨行的 \( 多半是正文里的字面反斜杠，渲染成公式反而更糟。
+    //     前缀分组同理用来回填被正则吃掉的第一个字符。
+    s = s.replace(/(^|[^\\])\\\(([^\n]*?[^\s\\])\\\)/g, function (_m, pre, tex) {
+      store.push(renderMath(tex, false));
+      return pre + PH + (store.length - 1) + PH;
+    });
+
     // ③ 其余全部转义（占位符 \u0000N\u0000 不在转义表里，安全穿过）
     s = escapeHtml(s);
 
     // ④ 图片 ![alt](url) —— 不加载远端图片（隐私），降级为链接
-    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, function (_m, alt, url) {
+    //    URL 允许成对括号：`https://en.wikipedia.org/wiki/A_(b)` 里的 `)` 不是定界符。
+    //    旧写法 `[^)\s]+` 会在第一个 `)` 处截断，于是危险协议被拒后还会残留一个 `)`。
+    s = s.replace(/!\[([^\]]*)\]\(([^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+&quot;[^&]*&quot;)?\)/g, function (_m, alt, url) {
       var href = safeUrl(url);
       if (href == null) return alt;
       return '<a class="md-link" href="' + href + '" target="_blank" rel="noopener noreferrer">'
@@ -164,7 +229,7 @@
     });
 
     // ⑤ 链接 [text](url)
-    s = s.replace(/\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, function (_m, text, url) {
+    s = s.replace(/\[([^\]]*)\]\(([^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+&quot;[^&]*&quot;)?\)/g, function (_m, text, url) {
       var href = safeUrl(url);
       if (href == null) return text; // 协议被拒 ⇒ 只留文字
       return '<a class="md-link" href="' + href + '" target="_blank" rel="noopener noreferrer">'
@@ -188,6 +253,11 @@
     // ⑨ 删除线
     s = s.replace(/~~([^\n]+?)~~/g, '<del>$1</del>');
 
+    // ⑩ 转义美元符还原：`\$5` 要显示成 `$5`，否则公式功能一上线，
+    //    所有想写"字面美元"的地方都会多出一条反斜杠。
+    //    （store 里的代码/公式内容不在此列，它们已经是占位符了）
+    s = s.replace(/\\\$/g, '$');
+
     return restore(s, store);
   }
 
@@ -200,9 +270,34 @@
   var RE_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
   var RE_MATH_LINE = /^\u0001(\d+)\u0001$/; // 独占一行的块级公式占位符
 
+  /**
+   * 切表格行。
+   *
+   * 不能直接 `split('|')`：单元格内容里的 `\|` 是**转义的竖线**（GFM 合法写法，
+   * 例如 `| a \| b |` 想表达单元格内容 `a | b`），直接切会把一列劈成两列。
+   * 手写扫描：遇到 `\|` 收成一个字面 `|`，只对未转义的 `|` 断列。
+   *
+   * 首尾的 `|` 可省略（GFM 允许），所以断出来的空首/空尾片段要丢掉。
+   */
   function splitRow(line) {
-    var s = line.trim().replace(/^\|/, '').replace(/\|$/, '');
-    return s.split('|').map(function (c) { return c.trim(); });
+    var src = String(line == null ? '' : line).trim();
+    var cells = [];
+    var cur = '';
+    var sawPipe = false;
+    for (var i = 0; i < src.length; i++) {
+      var ch = src.charAt(i);
+      if (ch === '\\' && src.charAt(i + 1) === '|') { cur += '|'; i++; continue; }
+      if (ch === '|') { cells.push(cur); cur = ''; sawPipe = true; continue; }
+      cur += ch;
+    }
+    cells.push(cur);
+    // 行首/行尾的管道会切出一个空片段，按 GFM 丢掉（中间的空列要保留）
+    var startsPipe = src.charAt(0) === '|';
+    var endsPipe = src.charAt(src.length - 1) === '|'
+      && !(src.length >= 2 && src.charAt(src.length - 2) === '\\');
+    if (sawPipe && startsPipe && !cells[0].trim()) cells.shift();
+    if (sawPipe && endsPipe && !cells[cells.length - 1].trim()) cells.pop();
+    return cells.map(function (c) { return c.trim(); });
   }
 
   /**
@@ -264,7 +359,18 @@
           open(tag, indent);
         }
       }
-      html.push('<li>' + inline(it.text) + '</li>');
+      // GFM 任务列表：`- [ ] 待办` / `- [x] 已完成`。
+      // 渲染成真 checkbox（disabled：聊天里的勾选状态只反映 agent 的声明，不该可点）。
+      // 安全：只写死 type="checkbox"，勾选态来自 `[x]` 的布尔判断，不拼接原文。
+      var task = /^\[([ xX])\](?:\s+([\s\S]*))?$/.exec(it.text);
+      if (task) {
+        var done = task[1] !== ' ';
+        html.push('<li class="md-task' + (done ? ' is-done' : '') + '">'
+          + '<input type="checkbox" disabled' + (done ? ' checked' : '') + '>'
+          + '<span>' + inline(task[2] || '') + '</span></li>');
+      } else {
+        html.push('<li>' + inline(it.text) + '</li>');
+      }
     }
     while (stack.length) {
       html.push('</' + stack[stack.length - 1].tag + '>');
@@ -296,12 +402,12 @@
       }
       if (inFence) { out.push(line); continue; }
 
-      // 单行完整公式：$$ x $$
+      // 单行完整公式：$$ x $$ 或 \[ x \]
       // ⚠️ 空公式（`$$   $$`）必须原样保留：若渲染就会留下一个**空的 md-math-block**，
       //    在聊天气泡里表现为莫名多出一行空白。用户多半是笔误，看得见原文更好。
-      var one = line.match(/^\s*\$\$([\s\S]+?)\$\$\s*$/);
+      var one = line.match(/^\s*(?:\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\])\s*$/);
       if (one) {
-        var texOne = one[1].trim();
+        var texOne = (one[1] != null ? one[1] : (one[2] || '')).trim();
         if (texOne) {
           store.push('<div class="md-math-block">' + renderMath(texOne, true) + '</div>');
           out.push(MPH + (store.length - 1) + MPH);
@@ -311,24 +417,37 @@
         continue;
       }
 
-      // 跨行公式：本行以 $$ 开头但没在本行闭合 ⇒ 吃到闭合行
-      var open = line.match(/^\s*\$\$(.*)$/);
+      // 跨行公式：本行以 $$ / \[ 开头但没在本行闭合 ⇒ 吃到闭合行
+      var openIdx = n;
+      var open = line.match(/^\s*(?:\$\$(.*)|\\\[(.*))$/);
       if (open) {
-        var buf = [open[1]];
+        var isBracket = open[2] !== undefined; // \[ … \] 形式
+        var closer = isBracket ? '\\]' : '$$';
+        var buf = [isBracket ? open[2] : open[1]];
         var closed = false;
+        var tail = '';
         for (var j = n + 1; j < lines.length; j++) {
-          var closeAt = lines[j].indexOf('$$');
+          var closeAt = lines[j].indexOf(closer);
           if (closeAt >= 0) {
             buf.push(lines[j].slice(0, closeAt));
+            // 闭合行后面若还跟着正文，别丢掉（`$$ x $$ 后面还有字` 这种）
+            tail = lines[j].slice(closeAt + closer.length);
             n = j;
             closed = true;
             break;
           }
           buf.push(lines[j]);
         }
-        if (closed) {
-          store.push('<div class="md-math-block">' + renderMath(buf.join('\n').trim(), true) + '</div>');
+        var texMulti = buf.join('\n').trim();
+        if (closed && texMulti) {
+          store.push('<div class="md-math-block">' + renderMath(texMulti, true) + '</div>');
           out.push(MPH + (store.length - 1) + MPH);
+          if (tail.trim()) out.push(tail);
+          continue;
+        }
+        if (closed) {
+          // 跨行的空公式（$$⏎⏎$$）：与单行空公式一致 ⇒ 原文照登，不产空块
+          for (var q = openIdx; q <= n; q++) out.push(lines[q]);
           continue;
         }
         // 未闭合 ⇒ 只剩本行原样输出，**不推进 n**，后续行仍由主循环各自处理。
@@ -387,9 +506,19 @@
           buf.push(lines[i]);
           i++;
         }
-        out.push('<pre class="message-code md-pre"'
+        // 包一层 .md-code-block：头行放语言名 + 复制按钮。
+        // 为什么语言名要显示出来：同一条回复里常有 python/bash/json 混排，
+        // 只有底色没有标签时读者得靠语法猜这是哪种语言。未知语言写 "code"（不硬猜）。
+        var langLabel = lang ? escapeHtml(lang) : 'code';
+        out.push('<div class="md-code-block">'
+          + '<div class="md-code-head">'
+          + '<span class="md-code-lang">' + langLabel + '</span>'
+          + '<button class="md-code-copy" type="button" aria-label="复制代码">复制</button>'
+          + '</div>'
+          + '<pre class="message-code md-pre"'
           + (lang ? ' data-lang="' + escapeHtml(lang) + '"' : '')
-          + '><code>' + escapeHtml(buf.join('\n')) + '</code></pre>');
+          + '><code>' + escapeHtml(buf.join('\n')) + '</code></pre>'
+          + '</div>');
         continue;
       }
 
@@ -479,5 +608,11 @@
     return restoreMath(out.join('\n'), mathStore);
   }
 
-  return { render: render, escapeHtml: escapeHtml, safeUrl: safeUrl, renderMath: renderMath };
+  return {
+    render: render,
+    escapeHtml: escapeHtml,
+    safeUrl: safeUrl,
+    renderMath: renderMath,
+    needsMath: needsMath,
+  };
 });

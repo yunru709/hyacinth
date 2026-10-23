@@ -1,0 +1,430 @@
+/* ============================================================
+   code-themes.css — 代码高亮配色（与界面主题解耦，独立可选）
+   ============================================================
+
+   机制：
+     - 配色 = 一组 CSS 变量，挂在 `[data-code-theme="<id>"]` 上；
+     - 切换只改 <html> 的 data-code-theme，**不需要重新高亮**（颜色全走变量）；
+     - 同一套变量也用在设置页的配色卡片上（卡片自带 data-code-theme），
+       所以选择器刻意写成属性选择器而非 `html[...]`，才能局部生效。
+
+   颜色来源：手工取值，对标各家官方配色的主色关系
+   （关键字 / 字符串 / 数字 / 注释 / 函数 五色的相对关系），不追求像素级一致。
+
+   ⚠️ 新增配色：① 复制一份 `[data-code-theme="x"]` 变量块
+                ② 在 app.js 的 CODE_THEMES 里加一条（含 id/name/tone）
+                两处不联动，漏一处就是"选了没反应"。
+   ============================================================ */
+
+/* ── 默认（= auto 的深色分支，也是兜底）─────────────────────────────
+   挂在 html 上而不是 [data-code-theme]：JS 还没跑（属性尚未写入）时也要有值，
+   否则 `var(--code-bg)` 解析失败会让代码块背景直接失效。 */
+html {
+  --code-bg: color-mix(in srgb, var(--hyacinth-foreground) 6%, transparent);
+  --code-border: var(--hyacinth-border);
+  --code-fg: var(--hyacinth-foreground);
+
+  --code-comment: color-mix(in srgb, var(--hyacinth-foreground) 45%, transparent);
+  --code-keyword: var(--hyacinth-primary);
+  --code-string: var(--hyacinth-accent);
+  --code-number: #e8a86b;
+  --code-func: #8ab4f8;
+  --code-type: #4dd0c1;
+  --code-builtin: #c792ea;
+  --code-variable: var(--hyacinth-foreground);
+  --code-attr: #9cdcfe;
+  --code-meta: color-mix(in srgb, var(--hyacinth-foreground) 50%, transparent);
+  --code-punct: color-mix(in srgb, var(--hyacinth-foreground) 62%, transparent);
+  --code-op: color-mix(in srgb, var(--hyacinth-foreground) 72%, transparent);
+  --code-regexp: #f78c6c;
+  --code-add: #6fcf97;
+  --code-del: #f2777a;
+  --code-tag: #7ee0d0;
+  --code-literal: #e8a86b;
+}
+
+/* auto 的浅色分支：界面主题是浅色时用一套亮底配色 */
+[data-code-theme='auto'][data-code-tone='light'] {
+  --code-comment: #6a737d;
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-func: #8250df;
+  --code-type: #953800;
+  --code-builtin: #0550ae;
+  --code-variable: #953800;
+  --code-attr: #0550ae;
+  --code-meta: #6a737d;
+  --code-punct: #57606a;
+  --code-op: #24292f;
+  --code-regexp: #0a3069;
+  --code-add: #116329;
+  --code-del: #82071e;
+  --code-tag: #116329;
+  --code-literal: #0550ae;
+}
+
+/* ── hyacinth（月光蓝 · 暗）── 与默认主题同源，主色即月光蓝 ────────── */
+[data-code-theme='hyacinth'] {
+  --code-bg: #0f1219;
+  --code-border: #232936;
+  --code-fg: #d8dee9;
+  --code-comment: #59637a;
+  --code-keyword: #6ba6f0;
+  --code-string: #6fcf97;
+  --code-number: #e8a86b;
+  --code-func: #8ab4f8;
+  --code-type: #4dd0c1;
+  --code-builtin: #c792ea;
+  --code-variable: #d8dee9;
+  --code-attr: #9cdcfe;
+  --code-meta: #7f8ba3;
+  --code-punct: #8b95a8;
+  --code-op: #a7b0c0;
+  --code-regexp: #f78c6c;
+  --code-add: #6fcf97;
+  --code-del: #f2777a;
+  --code-tag: #7ee0d0;
+  --code-literal: #e8a86b;
+}
+
+/* ── Monokai（暗）─────────────────────────────────────────────────── */
+[data-code-theme='monokai'] {
+  --code-bg: #272822;
+  --code-border: #3e3d32;
+  --code-fg: #f8f8f2;
+  --code-comment: #75715e;
+  --code-keyword: #f92672;
+  --code-string: #e6db74;
+  --code-number: #ae81ff;
+  --code-func: #a6e22e;
+  --code-type: #66d9ef;
+  --code-builtin: #a6e22e;
+  --code-variable: #fd971f;
+  --code-attr: #a6e22e;
+  --code-meta: #75715e;
+  --code-punct: #cfcfc2;
+  --code-op: #f92672;
+  --code-regexp: #e6db74;
+  --code-add: #a6e22e;
+  --code-del: #f92672;
+  --code-tag: #f92672;
+  --code-literal: #ae81ff;
+}
+
+/* ── Dracula（暗）────────────────────────────────────────────────── */
+[data-code-theme='dracula'] {
+  --code-bg: #282a36;
+  --code-border: #3b3f51;
+  --code-fg: #f8f8f2;
+  --code-comment: #6272a4;
+  --code-keyword: #ff79c6;
+  --code-string: #f1fa8c;
+  --code-number: #bd93f9;
+  --code-func: #50fa7b;
+  --code-type: #8be9fd;
+  --code-builtin: #8be9fd;
+  --code-variable: #f8f8f2;
+  --code-attr: #50fa7b;
+  --code-meta: #6272a4;
+  --code-punct: #f8f8f2;
+  --code-op: #ff79c6;
+  --code-regexp: #ffb86c;
+  --code-add: #50fa7b;
+  --code-del: #ff5555;
+  --code-tag: #ff79c6;
+  --code-literal: #bd93f9;
+}
+
+/* ── Nord（暗 · 冷灰蓝）───────────────────────────────────────────── */
+[data-code-theme='nord'] {
+  --code-bg: #2e3440;
+  --code-border: #3b4252;
+  --code-fg: #d8dee9;
+  --code-comment: #616e88;
+  --code-keyword: #81a1c1;
+  --code-string: #a3be8c;
+  --code-number: #b48ead;
+  --code-func: #88c0d0;
+  --code-type: #8fbcbb;
+  --code-builtin: #81a1c1;
+  --code-variable: #d8dee9;
+  --code-attr: #8fbcbb;
+  --code-meta: #616e88;
+  --code-punct: #81a1c1;
+  --code-op: #81a1c1;
+  --code-regexp: #ebcb8b;
+  --code-add: #a3be8c;
+  --code-del: #bf616a;
+  --code-tag: #81a1c1;
+  --code-literal: #b48ead;
+}
+
+/* ── One Dark（暗 · VSCode 系）────────────────────────────────────── */
+[data-code-theme='one-dark'] {
+  --code-bg: #282c34;
+  --code-border: #3a404b;
+  --code-fg: #abb2bf;
+  --code-comment: #5c6370;
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-number: #d19a66;
+  --code-func: #61afef;
+  --code-type: #e5c07b;
+  --code-builtin: #56b6c2;
+  --code-variable: #e06c75;
+  --code-attr: #d19a66;
+  --code-meta: #5c6370;
+  --code-punct: #abb2bf;
+  --code-op: #56b6c2;
+  --code-regexp: #56b6c2;
+  --code-add: #98c379;
+  --code-del: #e06c75;
+  --code-tag: #e06c75;
+  --code-literal: #d19a66;
+}
+
+/* ── Solarized Dark（暗 · 低对比）─────────────────────────────────── */
+[data-code-theme='solarized-dark'] {
+  --code-bg: #002b36;
+  --code-border: #073642;
+  --code-fg: #93a1a1;
+  --code-comment: #586e75;
+  --code-keyword: #859900;
+  --code-string: #2aa198;
+  --code-number: #d33682;
+  --code-func: #268bd2;
+  --code-type: #b58900;
+  --code-builtin: #268bd2;
+  --code-variable: #cb4b16;
+  --code-attr: #b58900;
+  --code-meta: #586e75;
+  --code-punct: #93a1a1;
+  --code-op: #93a1a1;
+  --code-regexp: #dc322f;
+  --code-add: #859900;
+  --code-del: #dc322f;
+  --code-tag: #268bd2;
+  --code-literal: #cb4b16;
+}
+
+/* ── GitHub Light（浅）────────────────────────────────────────────── */
+[data-code-theme='github-light'] {
+  --code-bg: #f6f8fa;
+  --code-border: #d0d7de;
+  --code-fg: #24292f;
+  --code-comment: #6e7781;
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-func: #8250df;
+  --code-type: #953800;
+  --code-builtin: #0550ae;
+  --code-variable: #953800;
+  --code-attr: #0550ae;
+  --code-meta: #6e7781;
+  --code-punct: #57606a;
+  --code-op: #24292f;
+  --code-regexp: #0a3069;
+  --code-add: #116329;
+  --code-del: #82071e;
+  --code-tag: #116329;
+  --code-literal: #0550ae;
+}
+
+/* ── One Light（浅）───────────────────────────────────────────────── */
+[data-code-theme='one-light'] {
+  --code-bg: #fafafa;
+  --code-border: #e5e5e5;
+  --code-fg: #383a42;
+  --code-comment: #a0a1a7;
+  --code-keyword: #a626a4;
+  --code-string: #50a14f;
+  --code-number: #986801;
+  --code-func: #4078f2;
+  --code-type: #c18401;
+  --code-builtin: #4078f2;
+  --code-variable: #e45649;
+  --code-attr: #986801;
+  --code-meta: #a0a1a7;
+  --code-punct: #383a42;
+  --code-op: #0184bc;
+  --code-regexp: #50a14f;
+  --code-add: #50a14f;
+  --code-del: #e45649;
+  --code-tag: #e45649;
+  --code-literal: #986801;
+}
+
+/* ── Solarized Light（浅 · 米底）──────────────────────────────────── */
+[data-code-theme='solarized-light'] {
+  --code-bg: #fdf6e3;
+  --code-border: #eee8d5;
+  --code-fg: #657b83;
+  --code-comment: #93a1a1;
+  --code-keyword: #859900;
+  --code-string: #2aa198;
+  --code-number: #d33682;
+  --code-func: #268bd2;
+  --code-type: #b58900;
+  --code-builtin: #268bd2;
+  --code-variable: #cb4b16;
+  --code-attr: #b58900;
+  --code-meta: #93a1a1;
+  --code-punct: #657b83;
+  --code-op: #657b83;
+  --code-regexp: #dc322f;
+  --code-add: #859900;
+  --code-del: #dc322f;
+  --code-tag: #268bd2;
+  --code-literal: #cb4b16;
+}
+
+/* ── Xcode（浅 · 高饱和）──────────────────────────────────────────── */
+[data-code-theme='xcode'] {
+  --code-bg: #fdfdfd;
+  --code-border: #e0e0e0;
+  --code-fg: #262626;
+  --code-comment: #007400;
+  --code-keyword: #ad3da4;
+  --code-string: #d12f1b;
+  --code-number: #272ad8;
+  --code-func: #4b21b0;
+  --code-type: #3900a0;
+  --code-builtin: #3900a0;
+  --code-variable: #2a0d84;
+  --code-attr: #4b21b0;
+  --code-meta: #007400;
+  --code-punct: #262626;
+  --code-op: #262626;
+  --code-regexp: #d12f1b;
+  --code-add: #007400;
+  --code-del: #d12f1b;
+  --code-tag: #ad3da4;
+  --code-literal: #272ad8;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   代码块容器 + token 着色
+   ════════════════════════════════════════════════════════════════ */
+
+/* 容器：配色自带底色时接管背景与边框；auto 用主题自带的混入色（见变量默认值） */
+.msg-rich .md-pre {
+  background: var(--code-bg);
+  border-color: var(--code-border);
+  color: var(--code-fg);
+}
+
+/* hljs 的 token 类 → 配色变量。
+   作用域刻意不写死在 .md-pre 内：设置页的配色卡片也用同一批类名做预览。 */
+.hljs-comment,
+.hljs-quote { color: var(--code-comment); font-style: italic; }
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-formula { color: var(--code-keyword); }
+
+.hljs-string,
+.hljs-meta .hljs-string,
+.hljs-char.escape_ { color: var(--code-string); }
+
+.hljs-number,
+.hljs-selector-attr,
+.hljs-selector-pseudo { color: var(--code-number); }
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-title.function_.invoke__,
+.hljs-section { color: var(--code-func); }
+
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_.inherited__ { color: var(--code-type); }
+
+.hljs-built_in,
+.hljs-builtin-name { color: var(--code-builtin); }
+
+.hljs-variable,
+.hljs-variable.language_,
+.hljs-template-variable,
+.hljs-params { color: var(--code-variable); }
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-class,
+.hljs-selector-id { color: var(--code-attr); }
+
+.hljs-meta,
+.hljs-comment .hljs-doctag { color: var(--code-meta); }
+
+.hljs-punctuation { color: var(--code-punct); }
+.hljs-operator { color: var(--code-op); }
+.hljs-regexp { color: var(--code-regexp); }
+
+.hljs-addition { color: var(--code-add); }
+.hljs-deletion { color: var(--code-del); }
+
+.hljs-tag,
+.hljs-name,
+.hljs-selector-tag { color: var(--code-tag); }
+
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link { color: var(--code-literal); }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* ── 设置页：配色卡片 ─────────────────────────────────────────────── */
+.code-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+.code-theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--hyacinth-border);
+  border-radius: 10px;
+  background: var(--hyacinth-card, transparent);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.code-theme-card:hover { border-color: var(--hyacinth-primary); }
+.code-theme-card[aria-pressed='true'] {
+  border-color: var(--hyacinth-primary);
+  box-shadow: 0 0 0 1px var(--hyacinth-primary) inset;
+}
+.code-theme-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hyacinth-foreground);
+}
+.code-theme-check { display: none; font-size: 11px; color: var(--hyacinth-primary); }
+.code-theme-card[aria-pressed='true'] .code-theme-check { display: inline; }
+
+/* 预览：一小段真实着色的代码，比色块更能反映配色 */
+.code-theme-sample {
+  margin: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--code-border);
+  border-radius: 7px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: hidden;
+}

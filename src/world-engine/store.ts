@@ -30,6 +30,9 @@ import type {
 } from './types.js';
 import { createEmptyWorld } from './types.js';
 import { initSim } from './sim.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('world-store');
 
 /** 最近事件保留条数（防 world.json 无限膨胀） */
 const MAX_EVENTS = 30;
@@ -514,19 +517,43 @@ export class WorldStore {
     return this.persist();
   }
 
-  /** 串行持久化当前内存世界 */
+  /**
+   * 串行持久化当前内存世界。
+   *
+   * ⚠️ **落盘失败只告警，不向外抛**。原因：主要调用方 WorldTicker 的心跳是
+   * fire-and-forget（不 await 也不 catch），返回的 promise 一旦 reject 就是
+   * unhandled rejection —— Node 默认行为是**直接杀进程**。
+   * 实测：world.json.tmp 写不进去（EPERM / 被占用 / 磁盘满）时，整个 gateway
+   * 会在下一次心跳时当场退出，比"丢一拍快照"严重得多。
+   * 内存里的世界此时已经改过了，下一次心跳会自然重试落盘。
+   * 需要"写失败必须报错"的显式操作（如 `save()` 存档）不经过这里，仍会抛。
+   */
   private persist(): Promise<void> {
     const run = async () => {
       const w = this.world;
       if (!w) return;
       // 用 characterName（而非 w.meta.id）保证路径始终正确——meta.id 可能因旧数据迁移不一致
       const file = this.worldFilePath(this.characterName);
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      await this.atomicWrite(file, JSON.stringify(w, null, 2));
+      try {
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await this.atomicWrite(file, JSON.stringify(w, null, 2));
+      } catch (err) {
+        // 同类错误每拍都报会刷屏，只在**首次**和"换了个错误码"时报一次。
+        const code = (err as NodeJS.ErrnoException)?.code ?? 'UNKNOWN';
+        if (code !== this.lastPersistErrCode) {
+          logger.warn('世界状态落盘失败（内存状态仍有效，下次写入会重试）', {
+            file, code, err: err instanceof Error ? err.message : String(err),
+          });
+          this.lastPersistErrCode = code;
+        }
+      }
     };
     this.writeQueue = this.writeQueue.then(run, run);
     return this.writeQueue;
   }
+
+  /** 上一次落盘失败的错误码（用于抑制重复告警） */
+  private lastPersistErrCode: string | null = null;
 
   /** 写临时文件再 rename，保证磁盘上永远是完整文件 */
   private async atomicWrite(file: string, content: string): Promise<void> {

@@ -1703,6 +1703,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | message | chat/stop/askUserResolve；`ProtocolOutputHandler` 把 OutputHandler 回调转事件 | AgentLoop + PendingRequestRegistry + historyProvider(events.jsonl) |
 | state | get（StateSnapshot 组装 TurnInfo+路由+provider）/subscribe/unsubscribe | LoopLike + StatsManager |
 | permission | resolve；`PendingRequestRegistry`（permission + ask_user 共用请求-应答表） | loop.onPermissionRequest/onAskUser |
+| mode | get/setProfile/enterGoal/exitGoal（会话级执行档位 plan/confirm/auto/full + goal 模式） | loop.getPermissionProfile/setPermissionProfile/getGoalState/enterGoal/exitGoal |
 | command | list/execute（后端生效命令委托 executor，UI-only 标 unsupported） | CommandRegistry + 注入 executor（createBackendExecutor） |
 | kb | get/setEnabled/setZone4（双写对象开关+配置持久化） | KnowledgeBase + ConfigCenter |
 | process | list/kill | BackgroundProcessRegistry |
@@ -1744,10 +1745,24 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 ### 5.1.1 右侧预览栏（工作区文件查看器，只读）
 
-顶栏 `#preview-toggle-btn` 开合（快捷键 Ctrl/⌘+Alt+P，状态存 localStorage）。上半是按需展开的
-文件树 + 面包屑，下半渲染文件内容：文本带行号（sticky 行号列，横向滚动不跑）、Markdown 走
-`markdown.js`（与聊天正文同一渲染器）、图片与 PDF 走 `<img>` / `<iframe>`。两条分隔条可拖拽
-调整**栏宽**与**树高**，也支持方向键（分隔条带 `tabindex`）。
+顶栏 `#preview-toggle-btn` 开合（快捷键 Ctrl/⌘+Alt+P，状态存 localStorage）。渲染文件内容：文本带
+行号（sticky 行号列，横向滚动不跑）、Markdown 走 `markdown.js`（与聊天正文同一渲染器）、图片与
+PDF 走 `<img>` / `<iframe>`。
+
+**三档尺寸**，状态只有 `#preview-dock` 上的两个 class（`is-max` / `is-full`，全屏隐含放大）：
+
+| 档位 | 范围 | 目录位置 | 分隔条 |
+| --- | --- | --- | --- |
+| 窄栏（默认） | 右侧 380px（可拖 280–760） | 上，正文在下（竖排） | 横条调树高 |
+| 放大 `is-max` | 铺满 `.body-area` | **右**，正文在左（横排，目录列可拖 200–560） | 竖条调目录列宽 |
+| 全屏 `is-full` | 铺满整个视口（盖住顶栏与侧栏） | 隐藏 | — |
+
+放大态把目录留在右边是有意的：这一栏本就贴窗口右缘，目录待在右侧意味着放大前后它的横坐标几乎
+不动，正文向左延展；若按惯例把树移到左边，放大瞬间树要跨过 1000px，视觉跳动明显。布局切换只改
+`.pv-body` 的 `flex-direction`（`row-reverse`），DOM 顺序始终 `side → split → view`，Tab 顺序稳定。
+全屏用 `position: fixed`（`absolute` 的定位基准是 `.body-area`，顶栏在它外面盖不住），`z-index: 70`
+——低于命令面板（80/90），全屏阅读时 Cmd+K 仍可用。Esc 逐级退：全屏 → 放大 → 窄栏（一次一层，
+不顺手关栏）。三档状态与两个尺寸都存 localStorage。
 
 数据来自 `gateway/preview-routes.ts` 的 `/api/fs/{meta,list,read,raw}`：
 - **不豁免 API key**（与 `/api/media` 相反）。媒体端点豁免是因为 `<img src>` 设不了请求头；
@@ -1759,6 +1774,28 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 两个链接入口：`?preview=1` 展开空栏、`?preview=<相对路径>` 直接定位到某个文件。
 工具卡参数里若含路径，整张卡可点 → 自动展开预览栏并定位（绝对路径先剥掉工作区前缀）。
+
+### 5.1.2 会话执行模式（权限档位 + goal）
+
+输入框下沿的「模式」按钮（`#mode-btn`）汇总"这个会话按什么规则干活"，点开是向上浮的菜单
+（`#mode-pop`，302px，浮在整个输入区上方而不是盖住 textarea）：四档权限 + 目标模式。
+
+| 档位 | 行为 | 落点 |
+| --- | --- | --- |
+| `plan` 计划模式 | 非只读工具（write + exec，含 bash）**直接拒绝**，连弹窗都不给 | `planBlocksTool` → tool_result 错误 |
+| `confirm` 变更前确认 | 敏感工具 / 越界写入走 allowlist → 命令白名单 → 弹窗 | 原权限链，行为零变更 |
+| `auto` 自主模式 | 常规工具不问，只有**越界写入**才弹 | `decideGate` → `ask` |
+| `full` 完全访问 | 全部跳过（= 原 AOR） | `loop.getUnrestricted()` 派生自它 |
+
+真源是 loop 的 `permissionProfile`（`orchestrator/permission-profile.ts`），随
+`<sessionDir>/allowlist.json` 的 `profile` 字段持久化；老文件只有 `unrestricted:true` 时解析成
+`full`（向后兼容）。权限条上按「全部放行」等价于切到 `full` 档 —— 两套状态不再各存一份。
+批量 dispatch 与 inline 两条执行路径共用 `decideGate` + `planBlockMessage`，避免历史上
+"批量拦得住、流内漏过去"的固定缺陷。
+
+goal 模式（不达成目标不结束回合）在同一菜单里进出：`mode.enterGoal` / `mode.exitGoal` 转发
+loop 的 `enterGoal`/`exitGoal`，与 TUI 的 `/goal` 是同一批方法，不存在两套状态。
+菜单交互：Esc / 点外部关闭；切档成功即收起，失败则留在菜单里显示原因（关掉会让人以为"点了没反应"）。
 
 ### 5.2 数据流（WebUI 视角）
 浏览器加载静态资源 → JS 打开 `/ui`（或 `/desktop`）WebSocket → `WsAdapter` 接入协议服务器 → 前端发 `request`（chat/config/session/…）、收 `response` 与 `event`（message.text/thinking/state.update/companion.say 等）渲染界面。

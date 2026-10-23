@@ -2168,3 +2168,20 @@ html[data-theme='nord'] {
 
   color-scheme: dark;
 }
+
+/* ── 原生控件的配色模式（浅色主题补正）────────────────────────────────
+   @layer base 里 `html` 兜底写的是 `color-scheme: dark`。浅色主题若不覆盖，
+   浏览器把 checkbox / radio / select 下拉 / 日期框 / 原生滚动条一律按**深色**
+   渲染 —— 实测（mono 主题）任务列表里未勾选的 checkbox 是个深灰实心方块，
+   白底上看着像渲染坏了。
+   清单对应 themes.json 里 dark:false 的 8 套；本段在 GENERATED 段之外，
+   生成器只改颜色令牌，不会把它冲掉。
+   新增浅色主题时记得补进这份清单（否则原生控件会退回深色）。 */
+html[data-theme='glass'],
+html[data-theme='light'],
+html[data-theme='mono'],
+html[data-theme='paper'],
+html[data-theme='glacier'],
+html[data-theme='celadon'],
+html[data-theme='sakura'],
+html[data-theme='daylight'] { color-scheme: light; }

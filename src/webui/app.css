@@ -244,7 +244,14 @@
     #app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; }
     #app-shell > header { height: 48px; flex-shrink: 0; }
     #app-shell > .body-area { display: flex; flex: 1 1 auto; min-height: 0; }
-    #app-shell > .body-area > aside { width: 260px; flex-shrink: 0; }
+    /* ⚠️ 这些 `aside` 规则写于 body-area 里**只有侧栏**的年代。预览栏（也是 aside）
+       加进来以后，它们就开始连带作用于 #preview-dock 了 —— 其中最要命的是窄屏抽屉那条：
+       `position:fixed + transform:translateX(-100%)` 会把预览栏整个推到屏幕左边外侧
+       （实测 700px 下 dock x=-280，点开预览却什么都看不到）。
+       宽度那条也在暗暗打架：flex 布局里 flex-basis 才是主尺寸，width 被忽略；
+       一旦面板 absolute 脱离文档流（放大态），260px 就立刻变成真实宽度。
+       ⇒ 明确收窄到 #sidebar，别再用 `aside` 这种"当时刚好只有它"的选择器。 */
+    #app-shell > .body-area > #sidebar { width: 260px; flex-shrink: 0; }
     #app-shell > .body-area > main { flex: 1 1 auto; min-width: 0; }
     .model-panel { height: 100%; overflow-y: auto; }
     .provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
@@ -254,7 +261,7 @@
       .channel-provider { display: none; }
     }
     @media (max-width: 640px) {
-      #app-shell > .body-area > aside { display: none; }
+      #app-shell > .body-area > #sidebar { display: none; }
       .provider-grid { grid-template-columns: 1fr; }
     }
     /* ── 窄屏导航：侧栏变身「可开合抽屉」──────────────────────────────
@@ -267,7 +274,7 @@
     #nav-backdrop { display: none; }
     @media (max-width: 900px) {
       #nav-drawer-btn { display: inline-flex; }
-      #app-shell > .body-area > aside {
+      #app-shell > .body-area > #sidebar {
         display: flex;
         position: fixed;
         top: 48px;
@@ -279,7 +286,7 @@
         transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
       }
-      #app-shell.nav-open > .body-area > aside { transform: translateX(0); }
+      #app-shell.nav-open > .body-area > #sidebar { transform: translateX(0); }
       #app-shell.nav-open #nav-backdrop {
         display: block;
         position: fixed;
@@ -715,6 +722,27 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 .msg-rich li { margin: 0.2em 0; line-height: 1.6; }
 .msg-rich li > ul,
 .msg-rich li > ol { margin: 0.2em 0 0.1em; }
+
+/* 任务列表（GFM `- [ ]`）：markdown.js 输出 disabled checkbox。
+   负 margin 抵消 ul 的 padding-left，让勾选框与正文左缘对齐。 */
+.msg-rich li.md-task {
+  list-style: none;
+  margin-left: -1.15em;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+}
+.msg-rich li.md-task input {
+  flex: 0 0 auto;
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0.42em 0 0;
+  accent-color: var(--hyacinth-primary);
+}
+.msg-rich li.md-task.is-done > span {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
 
 .msg-rich .md-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

@@ -6,23 +6,30 @@
   <title>Hyacinth WebUI</title>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
-  <!-- KaTeX 样式必须在 app.css 之前：app.css 里的 .msg-rich 规则要能覆写它 -->
-  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <!-- KaTeX 样式**不在首屏常驻**：它和 267KB 的 katex.min.js 一起改由 math.js
+       按需注入 —— 整场对话没有公式就完全不下（公式此前会降级显示为可读原文）。
+       注入时同样插在第一个样式表之前，保持"app.css 能覆写 KaTeX"的顺序。 -->
   <!-- Tailwind：构建期已编译进 /vendor/tailwind.css（32KB 静态 CSS）。
        原先这里挂的是 /vendor/tailwind-browser.js（269KB），它在浏览器里扫 DOM 现场编译，
        代价是首屏多解析 269KB JS 后才出样式 + 每次 append 气泡都可能触发重扫。
        产物由 src/webui/tailwind.input.css 生成（见 scripts/gen-webui-css.cjs）；
        主题映射现在只有一处来源，就是那个 input.css。 -->
   <link rel="stylesheet" href="/vendor/tailwind.css">
-  <!-- lucide 是首屏最大的单个资源（388KB），但**不要**试图用 defer 换首屏：
-       实测 A/B 三发对照 FCP 为 600ms（defer）vs 608ms（同步），差异落在噪声内。
-       原因是首帧被 178KB 渲染阻塞 CSS（theme 68 + app 45 + shell 34 + tailwind 32）卡住，
-       脚本同步与否不影响这段等待。真要提速，得先削 CSS 体积（theme.css 一次装了 20 套主题）。 -->
-  <script src="/vendor/lucide.min.js"></script>
+  <!-- 图标：**裁剪版**（78 个图标 / 17KB），由 scripts/gen-icons.cjs 从官方
+       lucide.min.js（1939 个 / 388KB）里按本项目实际用到的名字裁出来。
+       运行时与官方包逐字节一致，只删了未使用的图标数据。
+       ⚠️ 新增图标：写在 data-lucide 上然后跑 `pnpm gen:icons`；漏跑会让新图标
+       静默消失，`icons.test.ts` 会拦（它跑 --check）。
+       另：defer 换首屏无效（实测 600ms vs 608ms，噪声内），不必再试。 -->
+  <script src="/vendor/lucide-subset.js"></script>
   <link rel="stylesheet" href="/app.css">
   <!-- shell.css 必须最后加载：它是 v3 外壳（顶栏/侧栏/消息流/composer）的唯一样式源，
        用语义 class + 覆盖层叠的方式接管外观；app.css 继续负责 markdown 与设置面板内部。 -->
   <link rel="stylesheet" href="/shell.css">
+  <!-- 代码高亮配色：必须在 app.css 之后（要覆写 .msg-rich .md-pre 的底色与边框）。
+       配色是独立维度（跟界面主题分开选），变量挂在 [data-code-theme] 上，
+       换配色只改属性、不需要重新高亮。 -->
+  <link rel="stylesheet" href="/code-themes.css">
 </head>
 <body class="h-screen w-screen overflow-hidden font-sans antialiased">
 <div class="h-screen w-screen overflow-hidden flex flex-col bg-background text-foreground" id="app-shell" data-viewport-mode="app-shell">
@@ -59,6 +66,41 @@
     <div id="header-online" class="online-pill" title="正在连接后端…">
       <span id="header-online-dot" style="background-color:#6b7280"></span>
       <span id="header-online-text" style="color:#9ca3af">连接中…</span>
+    </div>
+
+    <!-- 显示控制：思考过程 / 工具调用 / 时间戳。
+         纯前端偏好（localStorage），不进协议层 —— 这些只影响"怎么看"，不影响 agent 怎么干活，
+         和模式菜单（会话级权限）是两回事，所以不塞进同一个弹层。 -->
+    <div class="view-wrap">
+      <button id="view-btn" class="tb-icon" aria-label="显示设置" aria-haspopup="menu"
+              aria-expanded="false" aria-controls="view-pop"
+              title="显示：思考过程 / 工具调用 / 时间戳">
+        <i data-lucide="eye"></i>
+      </button>
+      <div id="view-pop" class="view-pop" role="menu" aria-label="显示设置" hidden>
+        <div class="view-pop-head">显示</div>
+        <button class="view-item" type="button" role="switch" aria-checked="true" data-view="thinking">
+          <span class="view-item-body">
+            <span class="view-item-title">思考过程</span>
+            <span class="view-item-desc">作答前的推理；关掉后只剩结论</span>
+          </span>
+          <span class="view-switch" aria-hidden="true"></span>
+        </button>
+        <button class="view-item" type="button" role="switch" aria-checked="true" data-view="tools">
+          <span class="view-item-body">
+            <span class="view-item-title">工具调用</span>
+            <span class="view-item-desc">读了哪个文件、跑了什么命令</span>
+          </span>
+          <span class="view-switch" aria-hidden="true"></span>
+        </button>
+        <button class="view-item" type="button" role="switch" aria-checked="true" data-view="time">
+          <span class="view-item-body">
+            <span class="view-item-title">时间戳</span>
+            <span class="view-item-desc">每条消息的时间</span>
+          </span>
+          <span class="view-switch" aria-hidden="true"></span>
+        </button>
+      </div>
     </div>
 
     <!-- 预览栏开关：右侧文件查看器（工作区只读）。aria-pressed 反映展开状态，
@@ -180,9 +222,63 @@
               </button>
             </div>
           </div>
-          <div id="composer-hint" class="composer-hint">
-            <span>Enter 发送 / Shift+Enter 换行</span>
-            <span id="composer-attach-hint" class="hidden">图片将随本条消息一起发送</span>
+          <!-- 输入框下沿：左＝会话模式（权限档位 + 目标模式），右＝操作提示。
+               为什么放在这里而不是输入框内部：档位是"这个会话按什么规则干活"的常驻状态，
+               不是一次性动作（发送/附件），塞进右侧按钮排会让人以为是"再点一下就发出去"。
+               放在下沿还能让它和"Enter 发送"这类状态文字同一行，不额外占高度。 -->
+          <div class="composer-foot">
+            <div class="mode-wrap">
+              <button id="mode-btn" class="mode-btn" type="button"
+                      aria-haspopup="menu" aria-expanded="false" aria-controls="mode-pop"
+                      title="本会话的执行模式与权限">
+                <!-- 图标放在容器里：lucide.createIcons() 会把 <i> 换成 <svg>（原节点消失），
+                     档位切换要换图标时只能重建容器内容，不能对 <i> 改属性。 -->
+                <span id="mode-btn-ico" class="mode-btn-ico"><i data-lucide="check-circle-2"></i></span>
+                <span id="mode-btn-label">变更前确认</span>
+                <i data-lucide="chevron-down" class="mode-btn-caret"></i>
+              </button>
+
+              <!-- 弹层：向上开（贴着输入框），四档权限 + 目标模式。
+                   role=menu + 每项 role=menuitemradio：读屏能把"当前档位"念出来。 -->
+              <div id="mode-pop" class="mode-pop" role="menu" aria-label="执行模式" hidden>
+                <div class="mode-pop-head">
+                  <span>本会话权限</span>
+                  <span class="mode-pop-note">随时可改</span>
+                </div>
+                <div id="mode-list" class="mode-list"></div>
+
+                <div class="mode-sep" role="separator"></div>
+
+                <div class="mode-goal">
+                  <div class="mode-goal-head">
+                    <span class="mode-goal-title">
+                      <i data-lucide="hexagon"></i>
+                      目标模式
+                    </span>
+                    <span id="mode-goal-badge" class="mode-goal-badge" hidden>进行中</span>
+                  </div>
+                  <p class="mode-goal-desc">不达成目标就不结束回合，由验收官判定是否可以收工。</p>
+
+                  <div id="mode-goal-form" class="mode-goal-form">
+                    <input id="mode-goal-input" type="text" autocomplete="off"
+                           placeholder="例如：把构建修到全绿" aria-label="目标">
+                    <button id="mode-goal-start" class="mode-goal-btn" type="button">开始</button>
+                  </div>
+
+                  <div id="mode-goal-active" class="mode-goal-active" hidden>
+                    <span id="mode-goal-objective" class="mode-goal-objective"></span>
+                    <button id="mode-goal-exit" class="mode-goal-btn is-quiet" type="button">解除</button>
+                  </div>
+
+                  <p id="mode-goal-error" class="mode-goal-error" hidden></p>
+                </div>
+              </div>
+            </div>
+
+            <div id="composer-hint" class="composer-hint">
+              <span>Enter 发送 / Shift+Enter 换行</span>
+              <span id="composer-attach-hint" class="hidden">图片将随本条消息一起发送</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1290,6 +1386,20 @@
                     <div id="theme-grid" class="theme-grid" data-dom-id="theme-grid" role="radiogroup" aria-label="主题选择"></div>
                   </div>
                 </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="braces" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">代码高亮配色</h2>
+                  </div>
+                  <div class="settings-row-stack">
+                    <div class="settings-desc">
+                      只影响聊天与预览里的代码块配色，与界面主题分开选择。保存在全局配置
+                      <code class="font-mono">ui.codeTheme</code>；「跟随主题」会随当前主题的明暗自动切换。
+                    </div>
+                    <div id="code-theme-grid" class="code-theme-grid" data-dom-id="code-theme-grid" role="radiogroup" aria-label="代码高亮配色选择"></div>
+                  </div>
+                </section>
               </div>
 
               <!-- Tools（工具包 + 工具管理） -->
@@ -1455,31 +1565,82 @@
           <button id="pv-refresh-btn" class="pv-icon" type="button" title="刷新当前目录" aria-label="刷新当前目录">
             <i data-lucide="refresh-cw"></i>
           </button>
+          <!-- 放大 / 收起：两个图标叠在同一个按钮里，由 #preview-dock.is-max 决定显示哪个。
+               为什么不走 lucide：这两个符号是手画的（见下方 path），只用两条对角杆 +
+               两个角括号，与 lucide 的 24 网格 / 2px 描边 / 圆端点对齐，但构图是自己定的；
+               走 lucide 就得把 maximize-2 加进子集并重跑 gen:icons，为一个按钮不值。 -->
+          <button id="pv-max-btn" class="pv-icon pv-max-btn" type="button"
+                  title="放大预览（Esc 退出）" aria-label="放大预览" aria-pressed="false">
+            <svg class="pv-ico-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 4 14.5 9.5" />
+              <path d="M14 4h6v6" />
+              <path d="M4 20l5.5-5.5" />
+              <path d="M10 20H4v-6" />
+            </svg>
+            <svg class="pv-ico-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 4 14.5 9.5" />
+              <path d="M20 9.5h-5.5V4" />
+              <path d="M4 20l5.5-5.5" />
+              <path d="M4 14.5h5.5V20" />
+            </svg>
+          </button>
+          <!-- 全屏阅读：只在放大态出现（目录这时已经挪到右侧，再往上一层就是"干脆
+               不要目录、整屏只剩正文"）。四角括号 vs 上一颗的两角括号 —— 两颗按钮
+               各占一种角数，14px 下也能一眼分出"铺满正文区"和"铺满整个窗口"。
+               进入 = 四角贴边（向外张），退出 = 四角内缩 6 单位（往中心收）。 -->
+          <button id="pv-full-btn" class="pv-icon pv-full-btn" type="button"
+                  title="全屏阅读（隐藏目录，Esc 退出）" aria-label="全屏阅读" aria-pressed="false">
+            <svg class="pv-ico-fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 4H4v6" />
+              <path d="M14 4h6v6" />
+              <path d="M10 20H4v-6" />
+              <path d="M14 20h6v-6" />
+            </svg>
+            <svg class="pv-ico-fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 10h6V4" />
+              <path d="M20 10h-6V4" />
+              <path d="M4 14h6v6" />
+              <path d="M20 14h-6v6" />
+            </svg>
+          </button>
           <button id="pv-close-btn" class="pv-icon" type="button" title="收起预览栏" aria-label="收起预览栏">
             <i data-lucide="panel-right-close"></i>
           </button>
         </span>
       </div>
 
-      <!-- 面包屑：既是"我在哪"，也是逐级返回的入口 -->
-      <nav class="pv-crumbs" id="pv-crumbs" aria-label="路径"></nav>
+      <!-- .pv-body：目录列 / 分隔条 / 正文列 三件套。
+           窄栏（默认）是竖排「目录在上、正文在下」，放大态整块转成横排「正文在左、
+           目录在右」—— 只靠 flex-direction 切换，DOM 顺序始终 side → split → view，
+           所以键盘 Tab 顺序跟视觉顺序一致（横向时用 row-reverse 把目录推到右边）。 -->
+      <div class="pv-body" id="pv-body">
+        <!-- 目录列：面包屑跟着树走，放大后它们一起待在右边 -->
+        <div class="pv-side" id="pv-side">
+          <!-- 面包屑：既是"我在哪"，也是逐级返回的入口 -->
+          <nav class="pv-crumbs" id="pv-crumbs" aria-label="路径"></nav>
 
-      <!-- 上半：文件树（懒加载，点目录才请求下一级） -->
-      <div class="pv-tree" id="pv-tree" role="tree" aria-label="文件树" tabindex="0"></div>
-
-      <!-- 横向分隔条：拖动调整"树 / 内容"高度比 -->
-      <div class="pv-split" id="pv-split" role="separator" aria-orientation="horizontal" tabindex="0"
-           aria-label="调整文件树与预览区的高度" title="拖动调整高度"></div>
-
-      <!-- 下半：文件内容 -->
-      <div class="pv-view" id="pv-view">
-        <div class="pv-empty" id="pv-empty">
-          <i data-lucide="file-search"></i>
-          <p class="pv-empty-title">选一个文件</p>
-          <p class="pv-empty-sub">文本 · 代码 · Markdown · 图片 · PDF</p>
+          <!-- 文件树（懒加载，点目录才请求下一级） -->
+          <div class="pv-tree" id="pv-tree" role="tree" aria-label="文件树" tabindex="0"></div>
         </div>
-        <div class="pv-meta" id="pv-meta" hidden></div>
-        <div class="pv-content" id="pv-content" hidden></div>
+
+        <!-- 分隔条：竖排时是横条（调树高），横排时是竖条（调目录列宽） -->
+        <div class="pv-split" id="pv-split" role="separator" aria-orientation="horizontal" tabindex="0"
+             aria-label="调整文件树与预览区的高度" title="拖动调整高度"></div>
+
+        <!-- 正文列 -->
+        <div class="pv-view" id="pv-view">
+          <div class="pv-empty" id="pv-empty">
+            <i data-lucide="file-search"></i>
+            <p class="pv-empty-title">选一个文件</p>
+            <p class="pv-empty-sub">文本 · 代码 · Markdown · 图片 · PDF</p>
+          </div>
+          <div class="pv-meta" id="pv-meta" hidden></div>
+          <div class="pv-content" id="pv-content" hidden></div>
+        </div>
       </div>
 
       <!-- 左边缘分隔条：拖动调整整栏宽度 -->
@@ -2364,10 +2525,13 @@
     </div>
   </div>
 
-  <!-- KaTeX 必须排在 markdown.js 之前：markdown.js 的 renderMath 运行时读 window.katex -->
-  <script src="/vendor/katex/katex.min.js"></script>
+  <!-- 公式渲染：KaTeX（267KB）改按需加载，只有正文真出现公式时才注入 -->
+  <script src="/math.js"></script>
   <!-- markdown 渲染器：必须排在 app.js 之前（app.js 同步读 window.HyMarkdown）✓ -->
   <script src="/markdown.js"></script>
+  <!-- 高亮包装层：本身只有几 KB，真正的引擎 /vendor/hljs.min.js 由它在
+       首次遇到代码块时按需注入（整场对话没有代码块就完全不下）。 -->
+  <script src="/highlight.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
