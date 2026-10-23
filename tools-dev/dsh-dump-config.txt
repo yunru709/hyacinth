@@ -1,0 +1,7 @@
+﻿cmd : error: profile "desktop" is managed exclusively by the Electron application
+所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-VmGxJf\script.ps1:9 字符: 81
++ ... ile 树）==="; cmd /c "F:\DSH\resources\runtime\cli\bin\dsh.cmd --profil ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: profile ...ron application:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

@@ -169,6 +169,12 @@
     // companion 是沉浸式全屏视图（在 app-shell 外）：切换时隐藏 shell
     const shell = $('#app-shell');
     if (shell) shell.hidden = view === 'companion';
+    // ⚠️ #companion-stage 是 position:fixed; inset:0 的全屏层（index.html 内联样式）。
+    // 离开陪伴视图时必须**显式**收起，否则它会一直盖在所有视图上面 ——
+    // 实测：切到 #/settings 后整页被它遮成一片白（截图取色 244,244,246，
+    // 而 DOM computed 背景是 #111319，两者矛盾正是因为盖了一层）。
+    const stage = $('#companion-stage');
+    if (stage && view !== 'companion') stage.hidden = true;
     // 导航高亮
     $$('[data-nav-item]').forEach((a) => {
       a.classList.toggle('nav-active', a.dataset.navItem === NAV_BY_VIEW[view]);
@@ -282,11 +288,24 @@
     if (ml) ml.scrollTop = ml.scrollHeight;
   }
 
-  function bubbleUser(text) {
-    const wrap = el('div', 'flex justify-end');
-    const b = el('div', 'max-w-[85%] md:max-w-[70%] message-bubble rounded-xl px-4 py-2.5 bg-primary text-primary-foreground shadow-sm');
-    b.appendChild(el('p', 'text-sm leading-relaxed', text));
-    b.appendChild(el('span', 'block mt-1.5 text-[10px] text-primary-foreground/70 text-right', nowTime()));
+  function bubbleUser(text, images) {
+    const wrap = el('div', 'msg msg-user');
+    const b = el('div', 'msg-bubble');
+    // 图片在前、文字在后：与「先看图再读需求」的阅读顺序一致
+    if (images && images.length) {
+      const grid = el('div', 'user-attach-grid');
+      for (const img of images) {
+        const im = document.createElement('img');
+        im.className = 'user-attach-img';
+        im.src = `data:${img.media_type};base64,${img.data}`;
+        im.alt = '附带的图片';
+        im.loading = 'lazy';
+        grid.appendChild(im);
+      }
+      b.appendChild(grid);
+    }
+    if (text) b.appendChild(el('p', 'msg-text', text));
+    b.appendChild(el('span', 'msg-time', nowTime()));
     wrap.appendChild(b);
     return wrap;
   }
@@ -321,7 +340,7 @@
    */
   function selectBubbleText(btn) {
     try {
-      const bubble = btn.closest('.message-bubble');
+      const bubble = btn.closest('.msg-bubble');
       const target = bubble && bubble.querySelector('.msg-rich');
       if (!target) return false;
       const range = document.createRange();
@@ -337,7 +356,7 @@
   /** 复制按钮：点击后原地反馈「已复制 / 已选中·Ctrl+C / 失败」，约 1.8s 后复位 */
   function makeCopyButton(raw) {
     const icon = (name) => '<i data-lucide="' + name + '" class="w-3.5 h-3.5"></i>';
-    const btn = el('button', 'delivery-copy');
+    const btn = el('button', 'msg-copy');
     btn.type = 'button';
     btn.setAttribute('aria-label', '复制这条交付内容');
     btn.title = '复制原文（markdown）';
@@ -383,61 +402,67 @@
    */
   function bubbleAssistant(text, opts) {
     const delivery = !!(opts && opts.delivery);
-    const wrap = el('div', 'flex justify-start gap-3');
-    const avatar = el('div', delivery
-      ? 'w-7 h-7 rounded-md bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0 mt-1'
-      : 'w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-1');
-    avatar.innerHTML = delivery
-      ? '<i data-lucide="send" class="w-4 h-4 text-accent"></i>'
-      : '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
-    // 全宽：flex-1 吃满剩余宽度；min-w-0 防长表格/长 URL 把 flex 子项撑破
-    const body = el('div', 'flex-1 min-w-0 space-y-2');
-    const block = el('div', delivery ? 'assistant-block is-delivery' : 'assistant-block');
-    if (delivery) {
-      const head = el('div', 'delivery-head');
-      head.appendChild(el('span', 'delivery-chip', '交付'));
-      head.appendChild(makeCopyButton(text));
-      block.appendChild(head);
-    }
-    const content = el('div', 'msg-rich');
+    // v3：助手侧不用气泡（长回答 + 表格 + 围栏，气泡会把它挤窄）。
+    // 只用「左侧图标轨 + 文档流」区分身份；交付态靠 rail 变色 + 头行文字标记。
+    const wrap = el('div', delivery ? 'msg msg-assistant is-delivery' : 'msg msg-assistant');
+    const rail = el('div', 'msg-rail');
+    rail.innerHTML = delivery
+      ? '<i data-lucide="send"></i>'
+      : '<i data-lucide="sparkles"></i>';
+    const body = el('div', 'msg-body');
+    const head = el('div', 'msg-head');
+    head.appendChild(el('span', 'msg-who', delivery ? '交付' : 'Hyacinth'));
+    head.appendChild(makeCopyButton(text));
+    const content = el('div', 'msg-text msg-rich');
     content.innerHTML = renderRich(text);
-    block.appendChild(content);
-    body.appendChild(block);
-    body.appendChild(el('span', 'block text-[10px] text-muted-foreground', nowTime()));
-    wrap.appendChild(avatar);
+    body.appendChild(head);
+    body.appendChild(content);
+    body.appendChild(el('span', 'msg-time', nowTime()));
+    wrap.appendChild(rail);
     wrap.appendChild(body);
     return wrap;
   }
 
   function bubbleThinking(text) {
-    const wrap = el('div', 'flex justify-start gap-3');
-    const avatar = el('div', 'w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-1');
-    avatar.innerHTML = '<i data-lucide="bot-message-square" class="w-4 h-4 text-primary"></i>';
-    const body = el('div', 'max-w-[90%] md:max-w-[75%]');
-    body.appendChild(el('div', 'text-xs text-muted-foreground', '💭 ' + (text || '思考中…')));
-    wrap.appendChild(avatar);
+    const wrap = el('div', 'msg msg-assistant');
+    const rail = el('div', 'msg-rail');
+    rail.innerHTML = '<i data-lucide="loader"></i>';
+    const body = el('div', 'msg-body');
+    body.appendChild(el('div', 'thinking-line', '💭 ' + (text || '思考中…')));
+    wrap.appendChild(rail);
     wrap.appendChild(body);
     return wrap;
   }
 
+  /**
+   * 工具调用 = **一行卡片**，不是大气泡。
+   * 理由：一轮里常有 10+ 次工具调用，每次占一整块会把对话切碎；
+   * 结果本身落在「过程」块里（文本），卡片只需要说明"调了什么"。
+   */
   function bubbleTool(name, detail) {
-    const wrap = el('div', 'flex justify-start gap-3');
-    const avatar = el('div', 'w-7 h-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0 mt-1');
-    avatar.innerHTML = '<i data-lucide="wrench" class="w-4 h-4 text-muted-foreground"></i>';
-    const card = el('details', 'group max-w-[90%] md:max-w-[75%] w-full rounded-xl border border-border bg-card shadow-sm overflow-hidden');
-    const summary = el('summary', 'flex items-center justify-between px-3 py-2 cursor-pointer list-none hover:bg-muted/50 transition-colors');
-    summary.innerHTML = `<div class="flex items-center gap-2.5"><i data-lucide="terminal" class="w-4 h-4 text-accent"></i><span class="text-sm font-medium">${esc(name)}</span></div><i data-lucide="chevron-right" class="w-4 h-4 text-muted-foreground group-open:rotate-90 transition-transform"></i>`;
-    card.appendChild(summary);
-    card.appendChild(el('div', 'border-t border-border px-3 py-2 text-xs text-muted-foreground', detail || ''));
-    wrap.appendChild(avatar);
-    wrap.appendChild(card);
+    const wrap = el('div', 'tool-card');
+    wrap.appendChild(el('span', 'tool-dot'));
+    wrap.appendChild(el('span', 'tool-name', name));
+    const args = el('span', 'tool-args', detail || '');
+    args.title = detail || '';
+    wrap.appendChild(args);
+    // 参数里像路径 ⇒ 整卡可点，一键在右侧预览栏打开这个文件。
+    // 猜错不致命（打开失败会提示），但猜对时省掉"复制路径→去别处翻"这一轮。
+    const p = pvPathFromDetail(detail);
+    if (p) {
+      wrap.classList.add('is-openable');
+      wrap.title = '在预览中打开：' + p;
+      wrap.tabIndex = 0;
+      wrap.onclick = () => pvRevealPath(p);
+      wrap.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pvRevealPath(p); }
+      };
+    }
     return wrap;
   }
 
   function bubbleSystem(text) {
-    const wrap = el('div', 'flex justify-center');
-    wrap.appendChild(el('div', 'text-[11px] text-muted-foreground bg-muted/50 px-3 py-1 rounded-full', text));
-    return wrap;
+    return el('div', 'msg-note', text);
   }
 
   function nowTime() {
@@ -445,12 +470,12 @@
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
-  function appendMsg(kind, text) {
+  function appendMsg(kind, text, images) {
     const ml = $('#message-list');
     if (!ml) return;
     let node;
     switch (kind) {
-      case 'user': node = bubbleUser(text); break;
+      case 'user': node = bubbleUser(text, images); break;
       case 'assistant': node = bubbleAssistant(text); break;
       case 'thinking': node = bubbleThinking(text); break;
       case 'tool': {
@@ -459,7 +484,7 @@
         node = bubbleTool(m ? m[1] : '工具', m ? m[2] : line);
         break;
       }
-      case 'error': node = bubbleSystem('⚠️ ' + text); break;
+      case 'error': { node = bubbleSystem('⚠️ ' + text); node.classList.add('is-error'); break; }
       default: node = bubbleSystem(text); break;
     }
     ml.appendChild(node);
@@ -467,25 +492,6 @@
     scrollChat();
   }
 
-  // ── 流式助手气泡（message.text 是流式事件，追加到同一气泡）──
-  let streamingAssistant = null;
-
-  function appendAssistantStream(content) {
-    const ml = $('#message-list');
-    if (!ml) return;
-    if (!streamingAssistant || !streamingAssistant.isConnected) {
-      streamingAssistant = bubbleAssistant('');
-      ml.appendChild(streamingAssistant);
-    }
-    const p = streamingAssistant.querySelector('p');
-    if (p) p.textContent += content || '';
-    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
-    scrollChat();
-  }
-
-  function resetStreaming() {
-    streamingAssistant = null;
-  }
 
   // ── 历史渲染（协议 message.history 返回 HistoryMessage[]）──
   // ── 历史回放的「过程缓冲」（与实时路径同一套折叠规则 ✓）──────────────
@@ -606,10 +612,29 @@
   //      `say` 到达时自动收起 ⇒「最终输出」醒目、「中间过程」可折叠 ✓
   let turnProcessBody = null;
   let processTextNode = null;
+  /** 过程正文的原始累积文本（渲染前）—— markdown 需要全文才能正确配对围栏 ✓ */
+  let processRawText = '';
+  let processRenderTimer = null;
+
+  /** 把累积的原始文本渲染成 markdown（节流调用，见 appendProcessText） */
+  function renderProcessText() {
+    processRenderTimer = null;
+    if (processTextNode && processTextNode.isConnected) {
+      processTextNode.innerHTML = renderRich(processRawText);
+    }
+  }
+
+  /** 立即冲刷待渲染的过程正文（收起 / 重置前调用，避免丢掉最后一小段 ✓） */
+  function flushProcessText() {
+    if (processRenderTimer) { clearTimeout(processRenderTimer); processRenderTimer = null; }
+    renderProcessText();
+  }
 
   function resetProcessGroup() {
+    flushProcessText();
     turnProcessBody = null;
     processTextNode = null;
+    processRawText = '';
   }
 
   function ensureProcessBody() {
@@ -624,6 +649,7 @@
     ml.appendChild(det);
     turnProcessBody = body;
     processTextNode = null;
+    processRawText = '';
     return body;
   }
 
@@ -639,19 +665,28 @@
     scrollChat();
   }
 
-  /** 流式文本：累积进「过程」块里的同一条（不是每条事件各起一个气泡 ✓） */
+  /**
+   * 流式文本：累积进「过程」块里的同一条（不是每条事件各起一个气泡 ✓）
+   *
+   * 走 markdown 而不是 textContent：模型中间叙述里常有 ``` 围栏 / `行内代码` / 列表，
+   * 按字面显示会看到一堆反引号 ✗。
+   * 但**不能每个 chunk 都重渲染** —— markdown 解析是 O(全文)，一个长回答每秒几十个 chunk
+   * 会把长任务的主线程占满。⇒ 累积原文，120ms 节流重渲染一次。
+   */
   function appendProcessText(content) {
     if (!content) return;
     if (!processTextNode || !processTextNode.isConnected) {
-      processTextNode = el('div', 'process-text', '');
+      processTextNode = el('div', 'process-text msg-rich', '');
       appendProcess(processTextNode);
     }
-    processTextNode.textContent += content;
+    processRawText += content;
+    if (!processRenderTimer) processRenderTimer = setTimeout(renderProcessText, 120);
     scrollChat();
   }
 
   /** 收起「过程」块（`say` 交付到达时调用 ✓） */
   function collapseProcessGroup() {
+    flushProcessText();      // 收起前先落地最后一段，否则折叠状态下看到的是旧内容 ✗
     const body = turnProcessBody;
     const det = body && body.parentElement;
     if (det && det.tagName === 'DETAILS') det.open = false;
@@ -661,11 +696,15 @@
     switch (type) {
       case 'ui.connected':
         if (payload && payload.sessionId) currentSessionId = payload.sessionId;
+        // 刚连上时还不知道这条会话叫什么（session.list 还没回来），先显示「新会话」；
+        // 不要在标题里塞 id 片段 —— `5405-505f3d` 对人不构成任何信息。
+        setSessionTitle('新会话');
         bindSlashSuggestOnce();   // 斜杠命令建议（只绑一次 ✓）
         connected = true;
         setOnline('connected');
         resetReconnect();
         loadHistory();
+        loadSidebarRecent();      // A4：连接后才有 currentSessionId ⇒ 此刻才能正确高亮当前项
         if (currentView() === 'model') loadModel();
         if (currentView() === 'sessions') loadSessions();
         if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); loadVoiceManager(); }
@@ -680,6 +719,14 @@
             updateCompanionButton();
           }
         }).catch(() => {});
+        // 主题真源在后端（ui.theme）：启动时先按 localStorage 缓存应用以避免闪烁，
+        // 连上后必须**主动**对齐一次后端值。旧实现只在 loadSettings() 里读它 ⇒
+        // localStorage 丢失（清缓存 / 换机器 / 被旧版本回落值污染）时，用户会一直
+        // 停在默认深色，直到点开设置页才"突然"变回自己的主题。
+        client.request('config.get', { path: 'ui.theme' }).then((r) => {
+          const t = r && r.value;
+          if (typeof t === 'string' && t) applyTheme(t);
+        }).catch(() => {});
         // 启动默认模式：**只问后端**（真源 = config.startup.defaultMode，不再有 localStorage
         // 缓存 —— 那条缓存已整体移除，理由见 bindUI 之前的说明段）。
         // companion → 进陪伴视图（一次性；进入后 loadCompanion 会经协议层激活后端 Router；
@@ -693,7 +740,6 @@
         }
         break;
       case 'message.turn_start':
-        resetStreaming();
         resetProcessGroup();   // 新回合 ⇒ 「过程」块另起一块 ✓
         showThinking(true);
         if (currentView() === 'companion') companionResetDialogue('…');
@@ -713,7 +759,6 @@
         //   ⇒「最终输出看不到」的根因就在这一处 ✓（TUI 走 onText 回退路，所以它显示得出来）
         //   现在：渲染成**醒目的交付气泡**，并把本回合的「过程」块自动收起 ✓
         showThinking(false);
-        resetStreaming();
         if (companionActive) break;      // 陪伴会话走 companion.say，不进主界面 ✓
         const sayText = (payload && payload.content) || '';
         if (sayText) {
@@ -742,7 +787,7 @@
         break;
       case 'message.tool_result':
         if (companionActive) break;
-        // 工具级错误通过 isError 标志醒目显示（不触发回合级 message.error，避免误 resetStreaming）
+        // 工具级错误通过 isError 标志醒目显示（不触发回合级 message.error，避免误收起过程块）
         if (payload && payload.isError) {
           appendProcess(bubbleSystem('⚠️  ↳ ' + ((payload && payload.content) || '')));
         } else {
@@ -759,7 +804,6 @@
       }
       case 'message.error':
         showThinking(false);
-        resetStreaming();
         if (currentView() === 'companion') {
           companionSetDialogue('⚠️ ' + ((payload && payload.message) || '未知错误'));
         } else {
@@ -768,7 +812,6 @@
         break;
       case 'message.interrupt':
         showThinking(false);
-        resetStreaming();
         setBusy(false);
         if (currentView() === 'companion') {
           companionSetDialogue('⏹ 已中断');
@@ -778,7 +821,6 @@
         break;
       case 'message.flush':
         showThinking(false);
-        resetStreaming();
         if (currentView() === 'companion') companionResetDialogue(companionDialogueBuf);
         break;
       case 'message.diff':
@@ -787,8 +829,10 @@
         break;
       case 'message.turn_info':
         // 回合 token 信息由 state.update 覆盖状态栏
-        resetStreaming();
         setBusy(false);
+        // A4：一轮结束 updatedAt 才变 ⇒ 只在这里刷一次；流式事件（message.text 等）不刷，
+        // 否则每个 chunk 一次 session.list，侧栏刷新成本直接乘上 token 数 ✗
+        loadSidebarRecent();
         break;
       case 'message.ask_user':
         showAskUser(payload);
@@ -1484,7 +1528,7 @@
     if (leaf === 'new') {
       client.request('session.create', { type: 'normal' })
         .then((meta) => client.request('session.switch', { sessionId: meta && meta.id ? meta.id : meta }))
-        .then(() => { appendMsg('system', '已新建会话'); loadHistory(); loadSessions(); })
+        .then(() => { appendMsg('system', '已新建会话'); loadHistory(); loadSessions(); loadSidebarRecent(); })
         .catch((e) => appendMsg('error', '新建失败: ' + (e && e.message)));
       return;
     }
@@ -1680,25 +1724,777 @@
     };
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 图片附件（粘贴 / 拖入 / 点选）
+  // 后端早就有完整通路：message.chat 的 images → loop.channelImages
+  //   → context 阶段按 inputTypes 门控注入（见 loop.ts:1614）。
+  // 此前前端只有一句「后续版本支持」的占位，能力其实是通的 ✓
+  // ════════════════════════════════════════════════════════════
+  /** 待发送图片：{ data (base64 无前缀), media_type, name } */
+  let pendingImages = [];
+  /** 单条消息的图片上限：超过这个量，请求体和前端渲染都会明显变慢 */
+  const MAX_PENDING_IMAGES = 4;
+  /** 单张上限 8MB（base64 后约 10.7MB；再大 base64 传输会卡 UI） */
+  const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+  function renderAttachments() {
+    const box = $('#composer-attachments');
+    const hint = $('#composer-attach-hint');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!pendingImages.length) {
+      box.hidden = true;
+      if (hint) hint.classList.add('hidden');
+      return;
+    }
+    box.hidden = false;
+    if (hint) hint.classList.remove('hidden');
+    pendingImages.forEach((img, idx) => {
+      const cell = el('div', 'composer-attachment');
+      const im = document.createElement('img');
+      im.src = `data:${img.media_type};base64,${img.data}`;
+      im.alt = img.name || '待发送图片';
+      cell.appendChild(im);
+      const del = el('button', 'composer-attachment-x', '×');
+      del.type = 'button';
+      del.setAttribute('aria-label', '移除图片');
+      del.onclick = () => { pendingImages.splice(idx, 1); renderAttachments(); };
+      cell.appendChild(del);
+      box.appendChild(cell);
+    });
+  }
+
+  /** 读文件 → base64（去掉 dataURL 前缀，协议只收裸 base64） */
+  function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type || '')) { resolve(null); return; }
+      if (file.size > MAX_IMAGE_BYTES) {
+        reject(new Error(`${file.name || '图片'} 超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB`));
+        return;
+      }
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error('读取图片失败'));
+      fr.onload = () => {
+        const s = String(fr.result || '');
+        const comma = s.indexOf(',');
+        if (comma < 0) { reject(new Error('图片编码失败')); return; }
+        resolve({
+          data: s.slice(comma + 1),
+          media_type: file.type || 'image/png',
+          name: file.name || '',
+        });
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  async function addImageFiles(fileList) {
+    const files = Array.from(fileList || []).filter((f) => /^image\//.test(f.type || ''));
+    if (!files.length) return;
+    const room = MAX_PENDING_IMAGES - pendingImages.length;
+    if (room <= 0) {
+      appendMsg('system', `最多 ${MAX_PENDING_IMAGES} 张图片`);
+      return;
+    }
+    for (const f of files.slice(0, room)) {
+      try {
+        const img = await readImageFile(f);
+        if (img) pendingImages.push(img);
+      } catch (e) {
+        appendMsg('error', (e && e.message) || '图片读取失败');
+      }
+    }
+    if (files.length > room) appendMsg('system', `只保留前 ${MAX_PENDING_IMAGES} 张图片`);
+    renderAttachments();
+  }
+
+  /**
+   * 全局交互：快捷键 + 回到底部。
+   * 单独一个函数而不是塞进 bindUI —— bindUI 已经有 200 行，再加会让"哪里绑了什么"更难查。
+   */
+  function bindGlobalInteractions() {
+    // Ctrl/⌘+K：聚焦会话搜索（最常见的"我要找上次那个会话"）
+    // Esc：先清搜索，再关抽屉；两层都空才让浏览器处理
+    document.addEventListener('keydown', (e) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        const box = $('#sidebar-recent');
+        if (box && box.hidden) setNavDrawer(true);   // 抽屉里也能搜
+        const s = $('#session-search');
+        if (s) { s.focus(); s.select(); }
+        return;
+      }
+      // Ctrl/⌘+Alt+P：开合右侧文件预览栏（P = Preview）
+      if (meta && e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        pvSetOpen(!pv.open);
+        return;
+      }
+      if (e.key === 'Escape') {
+        const s = $('#session-search');
+        if (s && document.activeElement === s) {
+          s.value = '';
+          renderSidebarRecent();
+          s.blur();
+          e.preventDefault();
+          return;
+        }
+        if ($('#app-shell').classList.contains('nav-open')) { setNavDrawer(false); e.preventDefault(); }
+      }
+    });
+
+    // 回到底部：长对话滚上去后浮出，点一下回到底
+    const fab = $('#scroll-fab');
+    const ml = $('#message-list');
+    if (fab && ml) {
+      const syncFab = () => {
+        const gap = ml.scrollHeight - ml.scrollTop - ml.clientHeight;
+        fab.hidden = gap < 160;
+      };
+      ml.addEventListener('scroll', syncFab, { passive: true });
+      // 新消息追加时也要重算（否则"正在底部收到新消息"时按钮不出现）
+      new MutationObserver(syncFab).observe(ml, { childList: true });
+      fab.addEventListener('click', () => {
+        ml.scrollTo({ top: ml.scrollHeight, behavior: 'smooth' });
+        fab.hidden = true;
+      });
+      syncFab();
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // 预览栏：工作区文件查看器（只读）
+  // ════════════════════════════════════════════════════════════
+  // 数据来自 /api/fs/*（src/gateway/preview-routes.ts）。越界、符号链接、
+  // 绝对路径都在服务端 fail-closed，这里**不重复做安全判断** —— 前端校验
+  // 只是装饰，绕过它只需一行 fetch。这里只负责展示和交互。
+  const PV_KEY = 'hyacinth.preview';
+  /** 行号渲染上限：几万行的日志/产物会把 DOM 撑爆，只渲染前 N 行并提示 */
+  const PV_MAX_LINES = 5000;
+
+  const pv = {
+    open: false,        // 是否展开
+    width: 380,         // 栏宽 px
+    treeH: 46,          // 文件树占整栏高度的百分比
+    rootName: '',       // 工作区根名（后端给）
+    rootAbs: '',        // 工作区绝对路径（剥工具参数里的前缀用）
+    cwd: '.',           // 当前树的根目录（相对路径）
+    showAll: false,     // 是否显示 node_modules 等依赖目录
+    expanded: new Set(),// 已展开的目录
+    children: new Map(),// path -> entries[]（目录内容缓存）
+    inflight: new Set(),// 正在请求的目录
+    current: null,      // 当前预览的文件元信息
+    token: null,        // 惰性读取的 ?token=
+    pendingPath: '',    // ?preview=<path> 待到位的文件
+  };
+
+  function pvClamp(n, lo, hi) { return Math.min(hi, Math.max(lo, n)); }
+
+  /** 钥匙从 URL 来（与 WS 同一来源）；没有就是 --no-auth 场景，不带头即可 */
+  function pvToken() {
+    if (pv.token === null) {
+      pv.token = new URLSearchParams(location.search).get('token') || '';
+    }
+    return pv.token;
+  }
+
+  async function pvGetJson(url) {
+    const headers = {};
+    const t = pvToken();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    const r = await fetch(url, { headers, cache: 'no-store' });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* 非 JSON 响应 */ }
+      throw new Error(msg);
+    }
+    return r.json();
+  }
+
+  /**
+   * 图片/PDF 用 <img src> / <iframe src> 加载 —— 这两处浏览器**无法设置请求头**，
+   * 所以钥匙只能走 ?token=（服务端对 /api/fs/raw 特批，见 authHook）。
+   */
+  function pvRawUrl(p) {
+    const t = pvToken();
+    return '/api/fs/raw?path=' + encodeURIComponent(p) + (t ? '&token=' + encodeURIComponent(t) : '');
+  }
+
+  function pvSave() {
+    try {
+      localStorage.setItem(PV_KEY, JSON.stringify({ open: pv.open, width: pv.width, treeH: pv.treeH }));
+    } catch (e) { /* 隐私模式 / 配额满：布局不持久化也能用，不影响功能 */ }
+  }
+
+  function pvLoadPrefs() {
+    try {
+      const s = JSON.parse(localStorage.getItem(PV_KEY) || 'null');
+      if (s) {
+        if (typeof s.width === 'number') pv.width = pvClamp(s.width, 280, 760);
+        if (typeof s.treeH === 'number') pv.treeH = pvClamp(s.treeH, 15, 85);
+        if (typeof s.open === 'boolean') pv.open = s.open;
+      }
+    } catch (e) { /* 坏数据：用默认值 */ }
+    // ?preview=1 直接展开预览栏；?preview=<相对路径> 额外定位到那个文件。
+    // 除了方便生成"指向某个文件"的链接，也让无头截图能拍到展开后的样子
+    // （浏览器 profile 是干净的，localStorage 为空，否则永远拍不到这一栏）。
+    const flag = new URLSearchParams(location.search).get('preview');
+    if (flag === '1' || flag === 'open' || flag === 'true') {
+      pv.open = true;
+    } else if (flag) {
+      pv.open = true;
+      pv.pendingPath = flag;
+    }
+  }
+
+  function fmtSize(n) {
+    if (n == null) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB';
+    return (n / 1048576).toFixed(1).replace(/\.0$/, '') + ' MB';
+  }
+
+  function pvIcon(name, cls) {
+    const i = document.createElement('i');
+    i.setAttribute('data-lucide', name);
+    if (cls) i.className = cls;
+    return i;
+  }
+
+  /** 文件图标（按扩展名粗分，够用即可；不必引入完整图标映射） */
+  function pvIconFor(name, isDir, ext) {
+    if (isDir) return 'folder';
+    const e = (ext || '').toLowerCase();
+    if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg'].includes(e)) return 'image';
+    if (e === '.pdf') return 'file-text';
+    if (['.md', '.markdown'].includes(e)) return 'book-open';
+    if (['.ts', '.tsx', '.js', '.jsx', '.json', '.css', '.html', '.py', '.rs', '.go', '.java', '.c', '.cpp', '.cs', '.sh'].includes(e)) return 'file-code';
+    if (['.zip', '.tar', '.gz', '.7z', '.rar'].includes(e)) return 'package';
+    return 'file';
+  }
+
+  function pvNote(text, isError) {
+    const n = el('div', 'pv-tree-note' + (isError ? ' is-error' : ''), text);
+    $('#pv-tree').appendChild(n);
+  }
+
+  // ── 文件树 ────────────────────────────────────────────────────
+
+  async function pvLoadDir(dirPath, force) {
+    if (pv.inflight.has(dirPath)) return;
+    if (!force && pv.children.has(dirPath)) return;
+    pv.inflight.add(dirPath);
+    try {
+      const q = '?path=' + encodeURIComponent(dirPath) + (pv.showAll ? '&all=1' : '');
+      const data = await pvGetJson('/api/fs/list' + q);
+      pv.children.set(dirPath, data.entries || []);
+      pvRenderTree();
+      if (data.truncated) pvNote('这个目录条目过多，只显示了前一部分');
+    } catch (err) {
+      pv.children.set(dirPath, []);
+      pvRenderTree();
+      pvNote('读取失败：' + (err.message || String(err)), true);
+    } finally {
+      pv.inflight.delete(dirPath);
+    }
+  }
+
+  /**
+   * 渲染整棵树：扁平列表 + 缩进，而不是嵌套 <ul>。
+   * 理由：嵌套结构在"展开/收起"时要逐层维护 DOM，扁平列表只需重画一次，
+   * 缩进是纯样式（padding-left），滚动位置也更好保持。
+   */
+  function pvRenderTree() {
+    const tree = $('#pv-tree');
+    if (!tree) return;
+    tree.textContent = '';
+
+    const walk = (dirPath, depth) => {
+      const entries = pv.children.get(dirPath);
+      if (!entries) return;
+      for (const e of entries) {
+        tree.appendChild(pvRow(e, depth));
+        if (e.type === 'dir' && pv.expanded.has(e.path)) walk(e.path, depth + 1);
+      }
+    };
+    walk(pv.cwd, 0);
+
+    if (!tree.children.length) {
+      pvNote(pv.children.has(pv.cwd) ? '这个目录是空的' : '正在读取…');
+    }
+    // 依赖目录默认隐藏：给一次"显示"的入口，而不是让它凭空消失
+    if (!pv.showAll) {
+      const hint = el('button', 'pv-tree-note is-action', '已隐藏 node_modules 等依赖目录 · 显示');
+      hint.type = 'button';
+      hint.onclick = () => {
+        pv.showAll = true;
+        pv.children.clear();          // 缓存里的条目是按旧口径取的，必须重取
+        pvLoadDir(pv.cwd, true);
+      };
+      tree.appendChild(hint);
+    }
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+  }
+
+  function pvRow(entry, depth) {
+    const isDir = entry.type === 'dir';
+    // is-open 挂在行上而不是只挂箭头：lucide 替换 <i>→<svg> 时不保证保留 class，
+    // 挂在父元素上则"箭头转 90°"这条样式始终成立。
+    const isOpen = isDir && pv.expanded.has(entry.path);
+    const row = el('div', 'pv-item'
+      + (isDir ? ' is-dir' : '')
+      + (isOpen ? ' is-open' : '')
+      + (pv.current && pv.current.path === entry.path ? ' is-active' : ''));
+    row.style.paddingLeft = (8 + depth * 13) + 'px';
+    row.setAttribute('role', 'treeitem');
+    row.tabIndex = 0;
+
+    const caret = pvIcon('chevron-right', 'pv-caret');
+    if (!isDir) caret.classList.add('is-leaf');
+    row.appendChild(caret);
+
+    row.appendChild(pvIcon(pvIconFor(entry.name, isDir, extOf(entry.name)), 'pv-file-icon'));
+    row.appendChild(el('span', 'pv-name', entry.name));
+    if (!isDir) row.appendChild(el('span', 'pv-size', fmtSize(entry.size)));
+
+    row.onclick = () => pvActivate(entry);
+    row.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pvActivate(entry); }
+      else if (e.key === 'ArrowRight' && isDir && !pv.expanded.has(entry.path)) { e.preventDefault(); pvActivate(entry); }
+      else if (e.key === 'ArrowLeft' && isDir && pv.expanded.has(entry.path)) { e.preventDefault(); pvActivate(entry); }
+    };
+    return row;
+  }
+
+  function extOf(name) {
+    const i = name.lastIndexOf('.');
+    return i > 0 ? name.slice(i) : '';
+  }
+
+  async function pvActivate(entry) {
+    if (entry.type === 'dir') {
+      if (pv.expanded.has(entry.path)) {
+        pv.expanded.delete(entry.path);
+        pvRenderTree();
+      } else {
+        pv.expanded.add(entry.path);
+        pvRenderTree();
+        await pvLoadDir(entry.path);
+      }
+      return;
+    }
+    pv.current = { path: entry.path, name: entry.name };
+    pvRenderTree();
+    await pvOpenFile(entry.path);
+  }
+
+  /** 面包屑：既是"我在哪"，也是逐级返回的入口 */
+  function pvRenderCrumbs() {
+    const box = $('#pv-crumbs');
+    if (!box) return;
+    box.textContent = '';
+    const parts = pv.cwd === '.' ? [] : pv.cwd.split('/').filter(Boolean);
+    const add = (label, target, isCurrent) => {
+      if (box.children.length) box.appendChild(el('span', 'pv-crumb-sep', '/'));
+      const b = el('button', 'pv-crumb' + (isCurrent ? ' is-current' : ''), label);
+      b.type = 'button';
+      if (!isCurrent) {
+        b.onclick = async () => {
+          pv.cwd = target;
+          pv.expanded.add(target);
+          pvRenderCrumbs();
+          pvRenderTree();
+          await pvLoadDir(target);
+        };
+      }
+      box.appendChild(b);
+    };
+    add(pv.rootName || '工作区', '.', parts.length === 0);
+    let acc = '';
+    parts.forEach((p, i) => {
+      acc = acc ? acc + '/' + p : p;
+      add(p, acc, i === parts.length - 1);
+    });
+  }
+
+  // ── 内容区 ────────────────────────────────────────────────────
+
+  async function pvOpenFile(path) {
+    const content = $('#pv-content');
+    const meta = $('#pv-meta');
+    const empty = $('#pv-empty');
+    if (!content) return;
+    content.textContent = '';
+    content.hidden = false;
+    meta.hidden = false;
+    empty.hidden = true;
+    content.appendChild(el('div', 'pv-tree-note', '读取中…'));
+
+    try {
+      const data = await pvGetJson('/api/fs/read?path=' + encodeURIComponent(path));
+      pv.current = data;
+      pvRenderMeta(data);
+      content.textContent = '';
+      if (data.kind === 'markdown') pvRenderMarkdown(content, data);
+      else if (data.kind === 'image') pvRenderImage(content, data);
+      else if (data.kind === 'pdf') pvRenderPdf(content, data);
+      else if (data.binary) pvRenderBinary(content, data);
+      else pvRenderText(content, data);
+      pvRenderTree();
+    } catch (err) {
+      content.textContent = '';
+      const box = el('div', 'pv-binary', '读取失败：' + (err.message || String(err)));
+      content.appendChild(box);
+    }
+  }
+
+  function pvRenderMeta(d) {
+    const meta = $('#pv-meta');
+    if (!meta) return;
+    meta.textContent = '';
+    meta.appendChild(el('span', 'pv-meta-name', d.name));
+    if (d.lang) meta.appendChild(el('span', 'pv-badge', d.lang));
+    meta.appendChild(el('span', 'pv-badge', fmtSize(d.size)));
+    if (d.truncated) {
+      meta.appendChild(el('span', 'pv-badge is-warn', '已截断'));
+    }
+  }
+
+  function pvRenderMarkdown(box, d) {
+    const div = el('div', 'pv-md msg-rich');
+    // markdown.js 的输出是可信 HTML（它自己做转义），与聊天正文同一条渲染路径
+    div.innerHTML = renderRich(d.content);
+    box.appendChild(div);
+    if (d.truncated) pvTruncNote(box, d);
+  }
+
+  function pvRenderImage(box, d) {
+    const wrap = el('div', 'pv-image-wrap');
+    const img = document.createElement('img');
+    img.src = pvRawUrl(d.path);
+    img.alt = d.name;
+    img.onload = () => { img.title = d.name; };
+    img.onerror = () => {
+      wrap.textContent = '';
+      wrap.appendChild(el('div', 'pv-binary', '图片加载失败（可能已损坏，或格式不受支持）'));
+    };
+    wrap.appendChild(img);
+    box.appendChild(wrap);
+  }
+
+  function pvRenderPdf(box, d) {
+    const f = document.createElement('iframe');
+    f.className = 'pv-pdf';
+    f.src = pvRawUrl(d.path);
+    f.title = d.name;
+    box.appendChild(f);
+  }
+
+  function pvRenderBinary(box, d) {
+    const wrap = el('div', 'pv-binary');
+    wrap.appendChild(el('div', '', '这是二进制文件，预览栏不下发原始内容。'));
+    wrap.appendChild(el('div', '', fmtSize(d.size) + ' · ' + (d.ext || '未知类型')));
+    const a = el('a', 'pv-open-link', '在新标签页打开');
+    a.href = pvRawUrl(d.path);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    wrap.appendChild(a);
+    box.appendChild(wrap);
+  }
+
+  /**
+   * 纯文本 / 代码：行号 + 等宽，不做语法高亮。
+   * 为什么不高亮：项目里没有 highlight.js，自己按关键字正则着色会把
+   * 注释里的词、字符串里的标识符染错 —— 错着色比不着色更难读。
+   */
+  function pvRenderText(box, d) {
+    const lines = d.content.split('\n');
+    const shown = lines.slice(0, PV_MAX_LINES);
+    const wrap = el('div', 'pv-code-wrap');
+    const gutter = el('div', 'pv-gutter', shown.map((_, i) => i + 1).join('\n'));
+    const pre = el('pre', 'pv-code');
+    pre.textContent = shown.join('\n');
+    wrap.appendChild(gutter);
+    wrap.appendChild(pre);
+    box.appendChild(wrap);
+    if (lines.length > PV_MAX_LINES) {
+      pvTruncNote(box, { size: d.size, truncated: true });
+    } else if (d.truncated) {
+      pvTruncNote(box, d);
+    }
+  }
+
+  function pvTruncNote(box, d) {
+    box.appendChild(el('div', 'pv-trunc-note',
+      '只显示前一部分（原文件 ' + fmtSize(d.size) + '）。完整内容请用其它方式查看。'));
+  }
+
+  // ── 展开 / 定位 / 拖拽 ────────────────────────────────────────
+
+  async function pvSetOpen(open) {
+    pv.open = open;
+    const dock = $('#preview-dock');
+    const btn = $('#preview-toggle-btn');
+    if (!dock) return;
+    dock.hidden = !open;
+    if (btn) btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    pvSave();
+    if (open && !pv.children.has(pv.cwd)) await pvLoadDir(pv.cwd);
+  }
+
+  /**
+   * 定位到指定文件：逐级展开父目录并加载内容。
+   * 工具卡点击时走这条路径 —— 用户看到 agent 刚读了哪个文件，一键就能看原文。
+   */
+  async function pvRevealPath(path) {
+    if (!path) return false;
+    const rel = String(path).replace(/\\/g, '/').replace(/^\.\//, '');
+    if (!pv.open) await pvSetOpen(true);
+    const parts = rel.split('/').filter(Boolean);
+    let cur = '.';
+    for (let i = 0; i < parts.length - 1; i++) {
+      const next = cur === '.' ? parts[i] : cur + '/' + parts[i];
+      pv.expanded.add(cur);
+      await pvLoadDir(next);
+      cur = next;
+    }
+    pv.cwd = cur;
+    pvRenderCrumbs();
+    await pvLoadDir(cur);
+    pv.current = { path: rel, name: parts[parts.length - 1] || rel };
+    await pvOpenFile(rel);
+    // 把选中项滚进视野（树可能很长）
+    const tree = $('#pv-tree');
+    if (tree) {
+      const hit = Array.from(tree.querySelectorAll('.pv-item.is-active'))[0];
+      if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: 'nearest' });
+    }
+    return true;
+  }
+
+  /** 通用拖拽：pointer 事件 + setPointerCapture，鼠标/触屏/触控笔同一条路径 */
+  function pvDrag(handle, onMove) {
+    const dock = $('#preview-dock');
+    let active = false;
+    handle.addEventListener('pointerdown', (e) => {
+      active = true;
+      handle.setPointerCapture(e.pointerId);
+      dock.classList.add('is-resizing');
+      handle.classList.add('is-dragging');
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => { if (active) onMove(e); });
+    const end = (e) => {
+      if (!active) return;
+      active = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) { /* 已释放 */ }
+      dock.classList.remove('is-resizing');
+      handle.classList.remove('is-dragging');
+      pvSave();
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  function bindPreviewDock() {
+    pvLoadPrefs();
+    const dock = $('#preview-dock');
+    if (!dock) return;
+
+    dock.style.setProperty('--pv-w', pv.width + 'px');
+    dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+    dock.hidden = !pv.open;
+
+    const btn = $('#preview-toggle-btn');
+    if (btn) {
+      btn.setAttribute('aria-pressed', pv.open ? 'true' : 'false');
+      btn.onclick = () => pvSetOpen(!pv.open);
+    }
+    const closeBtn = $('#pv-close-btn');
+    if (closeBtn) closeBtn.onclick = () => pvSetOpen(false);
+    const refreshBtn = $('#pv-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.onclick = async () => {
+        pv.children.clear();
+        pvRenderTree();
+        await pvLoadDir(pv.cwd, true);
+      };
+    }
+
+    // 宽度：左边缘竖条。上限随窗口收窄，别把主区挤到不可用
+    const rz = $('#pv-resizer');
+    if (rz) {
+      pvDrag(rz, (e) => {
+        const rect = dock.getBoundingClientRect();
+        pv.width = pvClamp(rect.right - e.clientX, 280, Math.min(760, window.innerWidth - 420));
+        dock.style.setProperty('--pv-w', pv.width + 'px');
+      });
+      // 键盘可达（分隔条有 tabindex）：左右箭头以 24px 步进
+      rz.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0;
+        if (!step) return;
+        e.preventDefault();
+        pv.width = pvClamp(pv.width + step, 280, Math.min(760, window.innerWidth - 420));
+        dock.style.setProperty('--pv-w', pv.width + 'px');
+        pvSave();
+      });
+    }
+
+    // 树高：中间横条
+    const sp = $('#pv-split');
+    if (sp) {
+      pvDrag(sp, (e) => {
+        const rect = dock.getBoundingClientRect();
+        pv.treeH = pvClamp(((e.clientY - rect.top) / rect.height) * 100, 15, 85);
+        dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+      });
+      sp.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowUp' ? -3 : e.key === 'ArrowDown' ? 3 : 0;
+        if (!step) return;
+        e.preventDefault();
+        pv.treeH = pvClamp(pv.treeH + step, 15, 85);
+        dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
+        pvSave();
+      });
+    }
+
+    // 工作区元信息：拿不到就整栏禁用并说明原因（例如后端版本还没这个端点）
+    pvGetJson('/api/fs/meta').then((m) => {
+      pv.rootName = m.name || '工作区';
+      pv.rootAbs = m.root || '';
+      // 标题固定写"文件预览"：工作区名放面包屑第一级，两处都写会重复。
+      // 完整根路径放进 title，鼠标停一下能看到"这到底是哪个目录"。
+      const label = $('#pv-root-name');
+      if (label) label.title = m.root || '';
+      pvRenderCrumbs();
+      if (pv.pendingPath) {
+        const p = pv.pendingPath;
+        pv.pendingPath = '';
+        pvRevealPath(p);
+      } else if (pv.open) {
+        pvLoadDir(pv.cwd);
+      }
+    }).catch((err) => {
+      const label = $('#pv-root-name');
+      if (label) label.textContent = '文件预览不可用';
+      pvNote('无法读取工作区：' + (err.message || String(err)), true);
+    });
+
+    pvRenderCrumbs();
+    pvRenderTree();
+  }
+
+  /**
+   * 从工具卡的参数文本里猜一个路径。
+   * 只是"点一下试试"的便捷入口 —— 猜错了顶多打开失败并提示，不会误伤。
+   * 优先多级路径（含 / 或 \），其次带扩展名的单词。
+   */
+  function pvPathFromDetail(detail) {
+    if (!detail) return '';
+    const s = String(detail);
+    // 工具参数几乎都是 key="value" 形式 ⇒ 引号里的整体值最可信。
+    // 不要用"看起来像路径的正则"去抠引号内部：路径里可能有空格
+    // （C:\Program Files\...）、连续斜杠、中文目录名，规则越想周全越容易漏。
+    const looksPath = (v) => /[/\\]/.test(v) || /\.[A-Za-z0-9]{1,8}$/.test(v);
+
+    let p = '';
+    const quoted = /["']([^"']{2,300})["']/.exec(s);
+    if (quoted && looksPath(quoted[1])) p = quoted[1];
+
+    if (!p) {
+      // 没有引号 ⇒ 找裸路径：先要"有分隔符的"，再退到"带扩展名的单词"
+      const m = /(?:^|[\s(,=])((?:[A-Za-z]:)?[^\s"'(){},]+[/\\][^\s"'(){},]+)/.exec(s)
+        || /(?:^|[\s(,=])([\w.-]+\.[A-Za-z0-9]{1,8})\b/.exec(s);
+      p = m ? m[1] : '';
+    }
+    if (!p) return '';
+    // 折叠重复分隔符：`C://a//b` 这种（转义/拼接产物）也要认
+    p = p.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+
+    // 工具参数里通常是**绝对路径**，而预览只认工作区内相对路径。
+    // 能剥掉工作区前缀就剥（这是最常见的情况）；剥不干净就当作不可点，
+    // 而不是让用户点了之后收到一个 400。
+    if (/^[A-Za-z]:\//.test(p) || p.startsWith('/')) {
+      const root = String(pv.rootAbs || '').replace(/\\/g, '/').replace(/\/+$/, '');
+      if (root && p.toLowerCase().startsWith(root.toLowerCase() + '/')) {
+        return p.slice(root.length + 1);
+      }
+      return '';
+    }
+    return p.replace(/^\.\//, '');
+  }
+
+  function bindAttachments() {
+    const btn = $('#chat-attach-btn');
+    const input = $('#chat-file-input');
+    const composer = $('#chat-composer');
+    const ta = $('#chat-input');
+    if (btn && input) {
+      btn.onclick = () => input.click();
+      input.onchange = () => {
+        addImageFiles(input.files);
+        input.value = '';       // 同一文件连选两次也要能触发 change ✓
+      };
+    }
+    // 粘贴：只截「剪贴板里真有图片」的情况，纯文本粘贴保持默认行为 ✓
+    if (ta) {
+      ta.addEventListener('paste', (e) => {
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        const imgs = [];
+        for (const it of items) {
+          if (it.kind === 'file' && /^image\//.test(it.type || '')) {
+            const f = it.getAsFile();
+            if (f) imgs.push(f);
+          }
+        }
+        if (imgs.length) { e.preventDefault(); addImageFiles(imgs); }
+      });
+    }
+    // 拖入：只认输入区（不做"整窗任意处都能拖" —— 那会抢掉页面里其它拖拽语义，
+    // 比如未来给消息列表加"拖到此处引用文件"）
+    const dropZone = composer || document.body;
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    dropZone.addEventListener('dragover', (e) => { stop(e); dropZone.classList.add('is-drag-over'); });
+    dropZone.addEventListener('dragleave', (e) => {
+      stop(e);
+      // 只有真正离开容器才撤高亮，否则子元素间移动会闪
+      if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('is-drag-over');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      stop(e);
+      dropZone.classList.remove('is-drag-over');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) addImageFiles(files);
+    });
+  }
+
   function sendChat() {
     const input = $('#chat-input');
     if (!input) return;
     const text = input.value.trim();
-    if (!text) return;
-    appendMsg('user', text);
+    const images = pendingImages.slice();
+    if (!text && !images.length) return;
+    appendMsg('user', text, images);
     input.value = '';
+    pendingImages = [];
+    renderAttachments();
     if (!connected) {
       appendMsg('error', '尚未连接后端，无法发送');
       return;
     }
     // 斜杠命令 ⇒ 分流（此前整域闲置 ⇒ `/命令` 会被当普通消息发给模型 ✗ 已修 ✓）
-    if (text.startsWith('/')) {
+    // 带图时不走斜杠（命令不吃图，静默丢弃会让用户以为图发出去了）
+    if (!images.length && text.startsWith('/')) {
       if (cmdDropdown) cmdDropdown.hidden = true;
       runSlashCommand(text);
       return;
     }
     setBusy(true);
-    client.request('message.chat', { content: text }).catch((e) => {
+    // 只有图没有文字 ⇒ 补一句自然的最小指令（协议要求 content 为非空字符串）
+    const content = text || '请看这张图。';
+    const payload = images.length ? { content, images } : { content };
+    client.request('message.chat', payload).catch((e) => {
       setBusy(false);
       appendMsg('error', `发送失败: ${(e && e.message) || '未知错误'}`);
     });
@@ -1893,6 +2689,168 @@
     } catch (e) { /* ignore */ }
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 侧栏「最近会话」（A4）
+  // ════════════════════════════════════════════════════════════
+  // 背景：此前续聊只能走 #/sessions → 找到目标行 → 点「加载」⇒ 高频动作多两次跳转 ✗。
+  // 数据源与 #/sessions 同一处 `session.list`：协议层已按 activeRouter.name 过滤过
+  // （src/ui-protocol/domains/session.ts:126-135），前端**不再按 type 过滤**，否则
+  // 会把「按模式过滤」这件事写出第二份真相（两处不一致时前端更隐蔽 ✗）。
+  const SIDEBAR_RECENT_LIMIT = 30;
+  let sidebarRecentCache = [];
+
+  /** 相对时间：刚刚 / N 分钟前 / N 小时前 / 日期。
+   *  侧栏宽度只有 260px，复用 fmtSessionTime 的「YYYY-MM-DD HH:mm」会把标题挤没 ✗ */
+  function fmtRecentTime(iso) {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '';
+    const diff = Date.now() - t;
+    if (diff < 0) return '刚刚';                 // 时钟偏差：未来时间当作刚刚，别显示「-3 分钟前」
+    if (diff < 60 * 1000) return '刚刚';
+    if (diff < 60 * 60 * 1000) return Math.floor(diff / 60000) + ' 分钟前';
+    if (diff < 24 * 60 * 60 * 1000) return Math.floor(diff / 3600000) + ' 小时前';
+    const d = new Date(t);
+    const p = (n) => String(n).padStart(2, '0');
+    // 跨年才带上年份：同年显示 10-22 已够定位（且更短 ✓）
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return sameYear ? `${p(d.getMonth() + 1)}-${p(d.getDate())}` : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  /** 标题：SessionMeta 没有 title 字段（session.ts 只映射 id/createdAt/updatedAt/type/channel）
+   *  ⇒ 用**创建时间**当标签，而不是 id 末 16 字符。
+   *  理由：id 形如 `1023-13736-3e3b`，前缀是全天的会话共用的，末尾随机段对人没有辨识度；
+   *  时间戳每个人都能立刻对上"那是我几点开的那个"。完整 id 仍放在 title 属性里可 hover 查看。 */
+  function recentSessionTitle(s) {
+    const t = (s && s.title) || '';
+    if (t) return t;
+    const c = s && s.createdAt ? new Date(s.createdAt) : null;
+    if (c && Number.isFinite(c.getTime())) {
+      const p = (n) => String(n).padStart(2, '0');
+      const sameYear = c.getFullYear() === new Date().getFullYear();
+      const day = `${p(c.getMonth() + 1)}-${p(c.getDate())}`;
+      return `${sameYear ? day : c.getFullYear() + '-' + day} ${p(c.getHours())}:${p(c.getMinutes())}`;
+    }
+    const id = (s && s.id) || '';
+    return id.length > 16 ? id.slice(-16) : id;
+  }
+
+  /** 当前会话判定：currentSessionId 可能是会话目录绝对路径（path.basename 语义），
+   *  而 session.list 返回的是 id ⇒ 两边都按 basename 比一次，避免高亮失效 ✗ */
+  function isCurrentSession(id) {
+    if (!id) return false;
+    const base = (currentSessionId || '').split(/[\\/]/).pop();
+    return id === currentSessionId || id === base;
+  }
+
+  function renderSidebarRecent() {
+    const box = $('#sidebar-recent');
+    const list = $('#sidebar-recent-list');
+    if (!box || !list) return;
+
+    // 搜索：纯前端过滤（列表本身就是当前模式的全部会话，数量在几十条量级，
+    // 打到后端反而要新增协议方法）。空查询 = 不过滤。
+    const q = (($('#session-search') || {}).value || '').trim().toLowerCase();
+    let rows = sidebarRecentCache;
+    if (q) {
+      rows = rows.filter((s) => (recentSessionTitle(s) + ' ' + s.id).toLowerCase().includes(q));
+    }
+    // 有搜索词时不截断：用户找的就是"更早那条"，截断会让搜索显得坏掉
+    if (!q) rows = rows.slice(0, SIDEBAR_RECENT_LIMIT);
+
+    // 无会话 ⇒ 整块隐藏（不留空标题）；搜索无结果时保留框体，给一行提示
+    box.hidden = rows.length === 0 && !q;
+    list.innerHTML = '';
+    if (rows.length === 0) {
+      list.appendChild(el('div', 'sidebar-recent-empty', '没有匹配的会话'));
+      return;
+    }
+
+    // 按「今天 / 昨天 / 更早」分组：平铺一列时，8 条里有 5 条是别的日子，
+    // 时间戳要逐条读才知道新旧 —— 分组把"哪条是刚聊的"变成一眼可见。
+    let lastGroup = null;
+    for (const s of rows) {
+      const group = dayBucket(s.updatedAt);
+      if (group !== lastGroup) {
+        list.appendChild(el('div', 'recent-group-label', group));
+        lastGroup = group;
+      }
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'sidebar-recent-item' + (isCurrentSession(s.id) ? ' is-current' : '');
+      row.dataset.sessionId = s.id;
+      row.title = s.id;                       // 截断后的标题不可辨 ⇒ hover 给全 id
+      const title = document.createElement('span');
+      title.className = 'sidebar-recent-title';
+      title.textContent = recentSessionTitle(s);
+      const time = document.createElement('span');
+      time.className = 'sidebar-recent-time';
+      time.textContent = fmtRecentTime(s.updatedAt);
+      row.appendChild(title);
+      row.appendChild(time);
+      row.addEventListener('click', () => openRecentSession(s.id));
+      list.appendChild(row);
+    }
+  }
+
+  /** 会话落到哪个时间桶。跨年/跨月的边界用「自然日」比较，不用 24h 差 —— 凌晨 1 点看
+   *  23 小时前的消息，人在心理上会把它算作"昨天"，按 24h 差会错标成"今天"。 */
+  function dayBucket(iso) {
+    const t = new Date(iso || 0);
+    if (!Number.isFinite(t.getTime())) return '更早';
+    const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((startOf(new Date()) - startOf(t)) / 86400000);
+    if (days <= 0) return '今天';
+    if (days === 1) return '昨天';
+    if (days < 7) return '本周';
+    return '更早';
+  }
+
+  async function loadSidebarRecent() {
+    if (!connected) return;
+    try {
+      const res = await client.request('session.list');
+      const all = (res && res.sessions) || [];
+      // 后端不保证顺序 ⇒ 自己按 updatedAt 倒序（同 renderSessions 的默认排序，app.js:1893-1897）
+      sidebarRecentCache = all.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+      renderSidebarRecent();
+    } catch (e) {
+      // 侧栏只是辅助入口：拉取失败就保持旧内容，不往聊天区塞错误打断对话 ✗
+    }
+  }
+
+  /** 顶栏的「当前会话」名。此前整个顶部没有任何"我在哪条会话"的信息，
+   *  切完会话只能从侧栏高亮去猜。空标题时回落「新会话」。 */
+  function setSessionTitle(text) {
+    const el2 = $('#session-title');
+    if (el2) el2.textContent = text || '新会话';
+  }
+
+  /** 侧栏点击会话：恢复 → 切换后端 loop → 重拉历史 */
+  function openRecentSession(sid) {
+    if (!connected || !sid) return;
+    // 窄屏抽屉是覆盖层：不收起会盖住刚打开的历史（宽屏下该 class 无样式 ⇒ 无副作用 ✓）
+    setNavDrawer(false);
+    const applySwitch = () => {
+      currentSessionId = sid;
+      const hit = sidebarRecentCache.find((x) => x.id === sid);
+      setSessionTitle(hit ? recentSessionTitle(hit) : sid);
+      clearChat();                       // 先清空，防止旧会话历史与新历史混在一起
+      loadHistory();
+      renderSidebarRecent();             // 高亮立刻跟随，不等下一轮 session.list
+    };
+    // 只发 session.resume 不够：它只读元数据、**不切 loop**（session.ts:138-142）
+    // ⇒ 载入历史后继续发消息会写进原会话 ✗。故补一次 session.switch——
+    //   与 #/sessions 「加载」按钮的做法一致（见 bindSessionsView 里 action === 'load' 分支）。
+    client.request('session.resume', { sessionId: sid })
+      .then(() => client.request('session.switch', { sessionId: sid }).catch((e) => {
+        // resume 成功但 switch 失败：仍然给出历史（比整段失败更有用），但必须讲清后果
+        appendMsg('error', '已打开历史，但切换后端会话失败（新消息会写入原会话）: ' + ((e && e.message) || '未知错误'));
+      }))
+      .then(applySwitch)
+      .catch((e) => appendMsg('error', '切换会话失败: ' + ((e && e.message) || '未知错误')));
+  }
+
   function bindSessionsView() {
     const search = $('#sessions-search');
     const type = $('#sessions-type');
@@ -1927,6 +2885,7 @@
           return client.request('session.switch', { sessionId: sid }).then(() => {
             currentSessionId = sid;
             loadSessions();
+            loadSidebarRecent();      // A4：新建后立刻出现在「最近会话」并高亮
             clearChat();
             appendMsg('system', '新会话已创建');
           });
@@ -2352,26 +3311,63 @@
   // 这里负责：卡片渲染 / 应用 / 持久化到后端 ui.theme。
   // ════════════════════════════════════════════════════════════
 
-  const THEMES = [
-    { id: 'hyacinth', name: '夜园', desc: '夜色 · 紫只做一处信号',
-      swatches: ['#0a0c12', '#0f1219', '#8b7ae0', '#2fb3a4', '#e9edf5'] },
-    { id: 'light', name: '昼园', desc: '晨光纸面 · 冷白 ＋ 一点苔绿',
-      swatches: ['#fbfbfc', '#f2f4f7', '#1f8471', '#6b7a89', '#101a24'] },
-    { id: 'mono', name: '极简', desc: '素白 · 冷灰 · 纯结构',
-      swatches: ['#f9fafb', '#eef0f3', '#475569', '#64748b', '#0f172a'] },
-    { id: 'cyber', name: '赛博朋克', desc: '近黑 · 电子青为唯一强调 · 硬直角',
-      swatches: ['#090b10', '#0e1117', '#22c1d6', '#6d6488', '#e8ecf4'] },
-    { id: 'paper', name: '报纸', desc: '近白纸 · 墨黑 · 衬线 · 一枚朱印',
-      swatches: ['#faf8f5', '#f2efea', '#4a4438', '#9c4232', '#17150f'] },
-    { id: 'terminal', name: '终端', desc: '纯黑 · 单色荧光 · 零圆角',
-      swatches: ['#030403', '#080c08', '#35d06a', '#a08a3c', '#e4ece4'] },
-    { id: 'glacier', name: '冰川', desc: '冷白 · 钢蓝 · 中圆角',
-      swatches: ['#f9fbfd', '#edf3f9', '#2f6bbf', '#3f8f9c', '#0f1e33'] },
-    { id: 'celadon', name: '青瓷', desc: '青瓷釉面 · 温润哑光 · 器物感',
-      swatches: ['#f6f9f7', '#edf2ef', '#3f8f6f', '#8a7159', '#16211d'] },
+  /**
+   * 主题目录：**运行时读 /themes.json**，不再在这里手抄一份。
+   * 旧实现是 8 条硬编码（连 dark/glass/ink/rainy 都缺），主题从 12 套扩到 20 套后
+   * 必然对不上 —— 而且两份真源迟早分叉。这里是唯一的兜底，只在 fetch 失败时用。
+   */
+  let THEMES = [
+    { id: 'hyacinth', name: '夜园', desc: '夜色 · 月光蓝一处信号', swatches: ['#0a0c12', '#0f1219', '#6ba6f0', '#2fb3a4', '#e9edf5'] },
   ];
+  let THEME_IDS = THEMES.map((t) => t.id);
+  let THEME_GROUPS = null;
 
-  const THEME_IDS = THEMES.map((t) => t.id);
+  /** 从 themes.json 组装卡片数据。swatches 取「底 / 面 / 主 / 强调 / 字」五格。 */
+  function themeCardData(t) {
+    const p = t.palette || {};
+    const pick = (...keys) => { for (const k of keys) { if (p[k]) return p[k]; } return null; };
+    return {
+      id: t.id,
+      name: String(t.label || t.id).split('·')[0].trim(),
+      desc: t.label || '',
+      swatches: [
+        pick('neutral-50', 'neutral-0'),
+        pick('neutral-100', 'neutral-150'),
+        pick('primary-500', 'primary-400'),
+        pick('accent-500', 'accent-400'),
+        pick('neutral-900', 'neutral-800'),
+      ].filter(Boolean),
+    };
+  }
+
+  async function loadThemeCatalog() {
+    let ok = false;
+    try {
+      const r = await fetch('/themes.json', { cache: 'no-cache' });
+      if (r.ok) {
+        const data = await r.json();
+        const list = Array.isArray(data.themes) ? data.themes : [];
+        if (list.length) {
+          THEMES = list.map(themeCardData);
+          THEME_IDS = THEMES.map((t) => t.id);
+          THEME_GROUPS = data.groups || null;
+          ok = true;
+          // 目录到齐：先给启动时"暂缓"的主题补做校验（可能修正 currentTheme），
+          // 再渲染卡片，选中态才是准的。
+          settleThemeCatalog(true);
+          const grid = $('#theme-grid');
+          if (grid) { grid.dataset.rendered = ''; grid.innerHTML = ''; }
+          renderThemes();
+        }
+      }
+    } catch (e) { /* 目录读不到就用手上的兜底，不影响换肤本身 */ }
+    finally {
+      // 上面的 return / 抛错都会汇到这里：目录拿不到也必须结束"暂缓"状态，
+      // 否则页面会永久停在"目录未就绪"分支（属性设了却从不持久化、也从不被校验）。
+      // 传 false = 这次没拿到真源，不要按兜底目录去做回落判定。幂等。
+      settleThemeCatalog(ok);
+    }
+  }
   let currentTheme = 'hyacinth';
 
   // ── 用户自备背景图（assets/bg/<主题id>.webp|jpg|png）─────────────
@@ -2399,28 +3395,81 @@
     tryNext();
   }
 
-  /** 应用主题：设置 <html data-theme>，并同步选中态 */
+  /**
+   * 主题目录是否已「尘埃落定」——themes.json 到手，或已确认拿不到。
+   * 在它为 false 之前，applyTheme 绝不能按 THEME_IDS 判定"这个 id 不存在"：
+   * 那时目录里只有兜底的 1 条 hyacinth，任何真实主题都会被误判成无效。
+   */
+  let themeCatalogReady = false;
+  /** 目录**真的拿到了**（区别于"加载流程结束但没拿到"）：只有它为真，才按目录判定 id 有效性 */
+  let themeCatalogOk = false;
+  /** 目录就绪前收到的主题 id，等目录到齐再补做一次校验与持久化 */
+  let pendingThemeId = null;
+
+  /**
+   * 应用主题。
+   *
+   * 关键：theme.css 是**全量静态**的（20 套主题同在一个文件里，形如
+   * `html[data-theme='mono']`），所以只要把属性写到 <html> 上样式立即生效，
+   * **不需要等 JS 目录**。旧实现把「写属性」和「按目录校验」绑在一起，
+   * 导致启动时（目录还没 fetch 回来）任何非 hyacinth 的 id 都被静默回落成
+   * hyacinth，还把回落值写回 localStorage —— 表现为"选了极简，重启还是黑的，
+   * 点开设置页才变白"（设置页会读后端 ui.theme 再调一次 applyTheme，那时目录早到了）。
+   */
   function applyTheme(name) {
-    const id = THEME_IDS.indexOf(name) >= 0 ? name : 'hyacinth';
+    // 目录未就绪 + id 不在兜底目录里 ⇒ 无法判定真假。先把属性写上去（样式照常生效），
+    // 记下来等目录到齐再校；**不回落、不写 localStorage**，避免把误判结果固化。
+    if (!themeCatalogReady && THEME_IDS.indexOf(name) < 0) {
+      pendingThemeId = name;
+      currentTheme = name;
+      document.documentElement.setAttribute('data-theme', name);
+      probeUserBg(name);
+      syncThemeCards(name);
+      return;
+    }
+
+    // 只有目录**真的拿到了**才用它判定"id 不存在"。目录加载失败时保持用户的选择：
+    // theme.css 是独立随包发布的静态产物，即使 themes.json 取不到，属性照样可能命中
+    // 真实主题 —— 这时候按兜底目录（仅 1 条）去回落，只会把用户已选的主题打回默认。
+    const id = THEME_IDS.indexOf(name) >= 0 ? name : (themeCatalogOk ? 'hyacinth' : name);
     currentTheme = id;
     document.documentElement.setAttribute('data-theme', id);
     // 本地缓存：下次加载立即应用，避免等待后端连接造成闪烁
     try { localStorage.setItem('hyacinth.theme', id); } catch (e) { /* 隐私模式忽略 */ }
     probeUserBg(id);
-    // 同步卡片选中态
+    syncThemeCards(id);
+  }
+
+  /** 同步主题卡片选中态（grid 还没渲染时无副作用，由 renderThemes 用 currentTheme 兜住） */
+  function syncThemeCards(id) {
     const grid = $('#theme-grid');
-    if (grid) {
-      grid.querySelectorAll('.theme-card').forEach((card) => {
-        card.setAttribute('aria-pressed', card.dataset.theme === id ? 'true' : 'false');
-      });
-    }
+    if (!grid) return;
+    grid.querySelectorAll('.theme-card').forEach((card) => {
+      card.setAttribute('aria-pressed', card.dataset.theme === id ? 'true' : 'false');
+    });
+  }
+
+  /**
+   * 目录到手（或确认拿不到）后补做一次校验，把之前"暂缓"的主题定下来。
+   * 幂等：重复调用只会在第一次消费 pending，之后退化为"确认当前属性仍有效"。
+   */
+  function settleThemeCatalog(ok) {
+    themeCatalogReady = true;
+    themeCatalogOk = ok === true;
+    const pending = pendingThemeId;
+    pendingThemeId = null;
+    if (pending) { applyTheme(pending); return; }
+    // 没有待定项：确认当前属性仍有效（例如旧版本留下的、已被删掉的主题 id）。
+    // 目录没拿到时不校验 —— 见 applyTheme 里同样的理由。
+    const attr = document.documentElement.getAttribute('data-theme');
+    if (!attr || (themeCatalogOk && THEME_IDS.indexOf(attr) < 0)) applyTheme(attr || 'hyacinth');
   }
 
   /** 启动时先用本地缓存主题（避免闪烁），连上后端后再以 ui.theme 为准 */
   function initThemeFromCache() {
     let cached = null;
     try { cached = localStorage.getItem('hyacinth.theme'); } catch (e) { /* ignore */ }
-    if (cached && THEME_IDS.indexOf(cached) >= 0) applyTheme(cached);
+    if (cached && /^[a-z][a-z0-9-]{1,24}$/.test(cached)) applyTheme(cached);
     else applyTheme('hyacinth');
   }
 
@@ -2429,7 +3478,14 @@
     const grid = $('#theme-grid');
     if (!grid || grid.dataset.rendered === '1') return;
     grid.dataset.rendered = '1';
-    THEMES.forEach((t) => {
+
+    // 分组：themes.json 里有 groups 就按「暗色 / 浅色 / 特殊」分段，20 套平铺会找不到
+    // 自己在哪。没有 groups（兜底路径）就退回单段。
+    const order = ['dark', 'light', 'special'];
+    const labelOf = { dark: '暗色', light: '浅色', special: '特殊' };
+    const grouped = THEME_GROUPS && order.some((g) => Array.isArray(THEME_GROUPS[g]));
+
+    const emit = (t) => {
       const card = el('button', 'theme-card');
       card.type = 'button';
       card.dataset.theme = t.id;
@@ -2460,7 +3516,26 @@
         }
       };
       grid.appendChild(card);
-    });
+    };
+
+    if (!grouped) {
+      THEMES.forEach(emit);
+      return;
+    }
+    for (const g of order) {
+      const ids = Array.isArray(THEME_GROUPS[g]) ? THEME_GROUPS[g] : [];
+      const list = ids.map((id) => THEMES.find((t) => t.id === id)).filter(Boolean);
+      if (!list.length) continue;
+      grid.appendChild(el('div', 'theme-group-label', labelOf[g]));
+      list.forEach(emit);
+    }
+    // 兜底：groups 里漏掉的 id 也要显示，否则用户会以为主题丢了
+    const listed = new Set(order.flatMap((g) => (Array.isArray(THEME_GROUPS[g]) ? THEME_GROUPS[g] : [])));
+    const orphans = THEMES.filter((t) => !listed.has(t.id));
+    if (orphans.length) {
+      grid.appendChild(el('div', 'theme-group-label', '未分组'));
+      orphans.forEach(emit);
+    }
   }
 
   // 绑定设置视图交互：控件 change → config.set；重置按钮 → config.reset
@@ -3703,15 +4778,32 @@
   function bindUI() {
     bindToolsMCP();
     bindVoiceManager();
-    // 新会话
+    // 侧栏搜索：输入即过滤本地缓存（列表已在内存里，不打后端）
+    const sbSearch = $('#session-search');
+    if (sbSearch) {
+      sbSearch.addEventListener('input', () => renderSidebarRecent());
+      sbSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { sbSearch.value = ''; renderSidebarRecent(); sbSearch.blur(); }
+      });
+    }
+
+    // 新会话（侧栏顶部按钮，id="session-new-btn"）
+    // 必须 create 之后紧跟 switch：session.create 只建目录，loop 仍指向旧会话，
+    // 不切的话"新会话"点完，下一句话还是写进上一个会话里（与 #/sessions 的新建同款）。
     const newBtn = $('#session-new-btn');
     if (newBtn) {
       newBtn.onclick = () => {
         if (!connected) return;
         client.request('session.create', { type: 'normal' }).then((meta) => {
-          currentSessionId = (meta && meta.id) || null;
-          clearChat();
-          appendMsg('system', '新会话已创建');
+          const sid = (meta && meta.id) || null;
+          if (!sid) return;
+          return client.request('session.switch', { sessionId: sid }).then(() => {
+            currentSessionId = sid;
+            setSessionTitle('新会话');
+            clearChat();
+            appendMsg('system', '新会话已创建');
+            loadSidebarRecent();    // A4：新会话进列表 + 高亮
+          });
         }).catch((e) => appendMsg('error', '创建会话失败: ' + (e && e.message)));
       };
     }
@@ -3725,7 +4817,20 @@
     if (sendBtn) sendBtn.onclick = () => sendChat();
     const input = $('#chat-input');
     if (input) {
+      // 自动增高：单行起步，随内容长到 180px 再滚（CSS 里的 max-height 是硬上限）。
+      // 之前只有陪伴视图的输入框做了这件事，主输入框一直是固定单行 —— 写多段需求时只能看到一行。
+      const autoGrow = () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+      };
+      input.addEventListener('input', autoGrow);
       input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+          // 显式组合键：多行输入时也能直接发，不必切到行尾按 Enter
+          ev.preventDefault();
+          sendChat();
+          return;
+        }
         if (ev.key === 'Enter' && !ev.shiftKey) {
           ev.preventDefault();
           sendChat();
@@ -3748,9 +4853,10 @@
     const askSubmit = $('#askuser-submit');
     if (askSubmit) askSubmit.onclick = () => resolveAskUser();
 
-    // 附加文件：骨架占位
-    const attachBtn = $('#chat-attach-btn');
-    if (attachBtn) attachBtn.onclick = () => appendMsg('system', '附件上传将在后续版本支持');
+    // 图片附件：点选 / 粘贴 / 拖入（后端 channelImages 早已支持，此前前端是空壳）
+    bindAttachments();
+    bindPreviewDock();
+    bindGlobalInteractions();
 
     // 模型视图交互（推理强度 / 添加密钥 / Ollama 刷新）
     bindModelView();
@@ -3832,7 +4938,7 @@
     // 背景：原先首屏是一大片空区 ✗（新用户不知道该干什么 ✓）。
     // 现在：无消息 ⇒ 显示引导 + 三条建议；有消息 ⇒ 收起 ✓。
     // 触发用 **MutationObserver 一处挂钩** ⇒ 自动覆盖所有路径
-    // （appendMsg / clearChat / appendAssistantStream / renderHistoryMsg / loadHistory）✓
+    // （appendMsg / clearChat / renderHistoryMsg / loadHistory）✓
     const emptyMsgList = $('#message-list');
     const emptyPanel = $('#chat-empty');
     if (emptyMsgList && emptyPanel) {
@@ -3893,6 +4999,8 @@
 
   // 主题：先按本地缓存立即应用（避免加载闪烁），再渲染选择器
   initThemeFromCache();
+  // 主题目录异步加载：拿不到就用手上的兜底，换肤本身不依赖它
+  loadThemeCatalog();
   // ⚠️ 这里**故意不再**用 localStorage 缓存抢先跳到 #/companion（2026-10-16 移除）：
   //   那份缓存只在"本页写、本页读"时自洽；一旦配置经**别的渠道**变更
   //   （TUI `/default-mode`、直接改 config.json、另一个窗口），缓存就陈旧
@@ -3912,5 +5020,7 @@
     request: (m, p) => client.request(m, p),
     refreshState,
     emit: (type, payload) => handleEvent(type, payload),
+    // 预览栏对外入口：协议层/调试可直接定位到某个工作区文件
+    preview: { open: pvSetOpen, reveal: pvRevealPath },
   };
 })();

@@ -32,6 +32,36 @@ import { buildStateSnapshot } from './state.js';
 import { PendingRequestRegistry } from './permission.js';
 
 // ────────────────────────────────────────────────────────────
+// 入站图片校验（WebUI / 其它 UI 客户端共用）
+// ────────────────────────────────────────────────────────────
+
+/** 单张图片 base64 上限（约 6MB 原始字节）；再大 base64 会拖慢每轮序列化 */
+const MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
+const MAX_IMAGES_PER_MESSAGE = 4;
+
+export interface InboundImage {
+  data: string;
+  media_type: string;
+}
+
+/**
+ * 把协议层收到的 `images` 归一化成 loop.channelImages 认的形状。
+ * 非法项**静默丢弃**而不是整条报错：一张坏图不该让整条消息发不出去。
+ */
+export function parseInboundImages(raw: unknown): InboundImage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: InboundImage[] = [];
+  for (const item of raw.slice(0, MAX_IMAGES_PER_MESSAGE)) {
+    const it = item as { data?: unknown; media_type?: unknown };
+    if (typeof it?.data !== 'string' || typeof it?.media_type !== 'string') continue;
+    if (!it.data || it.data.length > MAX_IMAGE_BASE64_CHARS) continue;
+    if (!/^image\/[a-z0-9.+-]+$/i.test(it.media_type)) continue;
+    out.push({ data: it.data, media_type: it.media_type });
+  }
+  return out;
+}
+
+// ────────────────────────────────────────────────────────────
 // 消息域选项
 // ────────────────────────────────────────────────────────────
 
@@ -169,15 +199,29 @@ export function createMessageDomain(options: MessageDomainOptions): DomainHandle
 
   return {
     // ── message.chat ───────────────────────────────────────
+    /**
+     * `images` 与各渠道入站图片同一条通路（channels/manager.ts:194、http-webhook.ts:379
+     * 都是先赋 `loop.channelImages` 再 `run()`，由 loop.ts:1614 的 context 阶段一次性消费）。
+     * 不在这里新增图片分支 —— WebUI 只是又一个「入口」，不该有独立的图片语义 ✓
+     */
     async chat(params: unknown): Promise<{ ok: true }> {
-      const { content } = (params ?? {}) as { content?: string };
+      const { content, images } = (params ?? {}) as {
+        content?: string;
+        images?: unknown;
+      };
       if (!content || typeof content !== 'string') {
         throw new Error('message.chat requires string "content"');
       }
       if (!loop.run) {
         throw new Error('loop does not support chat (run not implemented)');
       }
+      // 校验：只接受 { data: string, media_type: string }[]；脏数据直接拒绝，
+      // 免得把一个坏图塞进 history（后续每轮都要重新序列化它）
+      const parsedImages = parseInboundImages(images);
       try {
+        if (parsedImages.length > 0) {
+          (loop as unknown as { channelImages?: typeof parsedImages }).channelImages = parsedImages;
+        }
         await loop.run(content);
       } catch (err) {
         // 回合执行出错 → 广播 message.error（前端停止 thinking 并展示错误），再上抛给协议层返回错误响应

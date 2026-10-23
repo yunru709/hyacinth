@@ -1,0 +1,48 @@
+﻿
+active scheme = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+
+===== BEFORE =====
+[before] registry MIN(AC)=100  MAX(AC)=100
+[before] powercfg MIN block:
+    电源方案 GUID: af77c3cb-cfc8-4516-8e3b-821eb82fd373  (高性能)
+      子组 GUID: 54533251-82be-4824-96c1-47b60b740d00  (处理器电源管理)
+        GUID 别名: SUB_PROCESSOR
+        电源设置 GUID: 893dee8e-2bef-41e0-89c6-b55d0929964c  (最小处理器状态)
+          GUID 别名: PROCTHROTTLEMIN
+          最小可能的设置: 0x00000000
+          最大可能的设置: 0x00000064
+          可能的设置增量: 0x00000001
+          可能的设置单位: %
+        当前交流电源设置索引: 0x00000064
+        当前直流电源设置索引: 0x00000008
+    
+[before] idle counters: processor frequency=2100  % processor performance=214.5  % processor time=19.4
+[before_1t] % Processor Performance under 1-thread load = 222.4
+[before_1t] spin iters/s = 153281250
+
+===== APPLY: PROCTHROTTLEMIN(AC) = 
+  rc=0/0
+
+===== AFTER =====
+[after] registry MIN(AC)=5  MAX(AC)=100
+[after] powercfg MIN block:
+    电源方案 GUID: af77c3cb-cfc8-4516-8e3b-821eb82fd373  (高性能)
+      子组 GUID: 54533251-82be-4824-96c1-47b60b740d00  (处理器电源管理)
+        GUID 别名: SUB_PROCESSOR
+        电源设置 GUID: 893dee8e-2bef-41e0-89c6-b55d0929964c  (最小处理器状态)
+          GUID 别名: PROCTHROTTLEMIN
+          最小可能的设置: 0x00000000
+          最大可能的设置: 0x00000064
+          可能的设置增量: 0x00000001
+          可能的设置单位: %
+        当前交流电源设置索引: 0x00000005
+        当前直流电源设置索引: 0x00000008
+    
+[after (1st)] idle counters: processor frequency=2100  % processor performance=214.2  % processor time=16
+[after (2nd)] idle counters: processor frequency=2100  % processor performance=214.5  % processor time=14
+[after_1t] % Processor Performance under 1-thread load = 223.3
+[after_1t] spin iters/s = 149668750
+[after idle again] idle counters: processor frequency=2100  % processor performance=215.5  % processor time=7.9
+
+# rollback: powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100 ; powercfg /setactive SCHEME_CURRENT
+# done

@@ -222,3 +222,115 @@ describe('markdown 渲染 — 健壮性', () => {
     expect(render('你好')).toBe('<p class="md-p">你好</p>');
   });
 });
+
+/**
+ * 数学公式（2026-10-23 新增）
+ *
+ * Node 单测环境没有 vendor 的 KaTeX ⇒ 默认走 `md-math-fallback` 降级。
+ * 这里**注入一个假 katex**，验证「调用契约」而不是 KaTeX 自己的排版结果：
+ *   - 块级必须 `displayMode: true`，行内必须 false
+ *   - **`trust` 必须为 false** ← 红线：true 会放行 \href/\htmlClass，
+ *     等于给模型输出开 HTML 透传后门
+ *   - 送进 KaTeX 的必须是**原文**（不能被 escapeHtml 先转成 &lt;）
+ */
+describe('markdown 渲染 — 数学公式', () => {
+  type Call = { tex: string; opts: Record<string, unknown> };
+  let calls: Call[] = [];
+  const g = globalThis as unknown as { katex?: unknown };
+  let saved: unknown;
+
+  beforeAll(() => {
+    saved = g.katex;
+    g.katex = {
+      renderToString(tex: string, opts: Record<string, unknown>) {
+        calls.push({ tex, opts });
+        return '<span class="katex-stub" data-display="' + String(opts.displayMode) + '"></span>';
+      },
+    };
+  });
+
+  afterAll(() => {
+    g.katex = saved;
+  });
+
+  beforeEach(() => {
+    calls = [];
+  });
+
+  it('块级 $$…$$ ⇒ md-math-block，displayMode=true', () => {
+    const html = render('$$S_t = S_{t-1}(I-\\beta k k^\\top)$$');
+    expect(html).toContain('md-math-block');
+    expect(html).toContain('katex-stub');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.displayMode).toBe(true);
+    expect(calls[0].tex).toBe('S_t = S_{t-1}(I-\\beta k k^\\top)');
+  });
+
+  it('行内 $…$ ⇒ 不包 block，displayMode=false', () => {
+    const html = render('设 $d \\times d$ 为状态维度');
+    expect(html).toContain('katex-stub');
+    expect(html).not.toContain('md-math-block');
+    expect(calls[0].opts.displayMode).toBe(false);
+    expect(calls[0].tex).toBe('d \\times d');
+  });
+
+  it('跨行块级公式整段收全（不被拆成两段）', () => {
+    const html = render('$$\na = b \\\\\nc = d\n$$');
+    expect(html.match(/md-math-block/g)).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].tex).toContain('a = b');
+    expect(calls[0].tex).toContain('c = d');
+  });
+
+  it('安全红线：trust 恒为 false，且不允许 \href 等宏获得信任', () => {
+    render('$$\\href{javascript:alert(1)}{click}$$');
+    expect(calls[0].opts.trust).toBe(false);
+    // 同时确认没有把 errorColor/strict 之类做成可被输入影响的值
+    expect(typeof calls[0].opts.strict).toBe('boolean');
+  });
+
+  it('公式源码以原文送进 KaTeX（未被 escapeHtml 污染）', () => {
+    render('$a < b \\& c$');
+    expect(calls[0].tex).toBe('a < b \\& c');
+  });
+
+  it('$ 不误伤货币：价格 $5 到 $10 保持纯文本', () => {
+    const html = render('价格 $5 到 $10 元');
+    expect(html).not.toContain('katex-stub');
+    expect(html).toContain('$5 到 $10');
+  });
+
+  it('围栏代码块里的 $$ 不被当公式', () => {
+    const html = render('```tex\n$$x^2$$\n```');
+    expect(html).not.toContain('katex-stub');
+    expect(html).toContain('$$x^2$$');
+  });
+
+  it('行内代码里的 $ 不被当公式', () => {
+    const html = render('价格是 `$5` 而已');
+    expect(html).not.toContain('katex-stub');
+    expect(html).toContain('<code class="md-code">$5</code>');
+  });
+
+  it('未闭合的 $$ 不吞内容', () => {
+    const html = render('$$\n没收尾');
+    expect(html).toContain('没收尾');
+  });
+
+  it('KaTeX 不可用时降级为 code 原文（不丢内容）', () => {
+    const keep = g.katex;
+    delete g.katex;
+    try {
+      const html = render('$$a^2+b^2$$');
+      expect(html).toContain('md-math-fallback');
+      expect(html).toContain('a^2+b^2');
+    } finally {
+      g.katex = keep;
+    }
+  });
+
+  it('空公式 $$ $$ 不产生 KaTeX 调用', () => {
+    const html = render('$$   $$');
+    expect(html).not.toContain('katex-stub');
+  });
+});

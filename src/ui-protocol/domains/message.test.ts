@@ -289,4 +289,50 @@ describe('permission / ask_user 请求-应答关联', () => {
     expect(responses.find((r) => r.id === 'x1')).toMatchObject({ ok: false });
     expect((responses.find((r) => r.id === 'x1')!.error as any).message).toContain('not found');
   });
+
+  // ── 入站图片（WebUI 附件）────────────────────────────────────
+  // 语义：图片不新增分支，走既有的 loop.channelImages 通路（与各渠道入站同一条）。
+  it('message.chat 带 images → 传给 loop.channelImages，再 run', async () => {
+    const { loop, client, responses, flush } = setup();
+    const img = { data: 'AAAA', media_type: 'image/png' };
+    let seenAtRun: unknown = null;
+    (loop as unknown as { run: (c: string) => Promise<void> }).run = async (c: string) => {
+      // run 被调用时图片必须已在 loop 上（loop 在 context 阶段一次性消费）
+      seenAtRun = (loop as unknown as { channelImages?: unknown }).channelImages;
+      (loop as unknown as { runs: string[] }).runs.push(c);
+    };
+    client.send({ kind: 'request', id: 'img1', method: 'message.chat', params: { content: '看图', images: [img] } });
+    await flush();
+    expect(responses.find((r) => r.id === 'img1')).toMatchObject({ ok: true });
+    expect(seenAtRun).toEqual([img]);
+  });
+
+  it('message.chat 的非法 images 被静默丢弃，不影响消息发送', async () => {
+    const { loop, client, responses, flush } = setup();
+    client.send({
+      kind: 'request',
+      id: 'img2',
+      method: 'message.chat',
+      params: {
+        content: '看图',
+        images: [
+          { data: 'AAAA', media_type: 'image/png' },   // 合法
+          { data: 'BBBB' },                            // 缺 media_type
+          { data: '', media_type: 'image/png' },       // 空 data
+          { data: 'CCCC', media_type: 'text/plain' },  // 非 image/*
+        ],
+      },
+    });
+    await flush();
+    expect(responses.find((r) => r.id === 'img2')).toMatchObject({ ok: true });
+    expect((loop as unknown as { channelImages?: unknown }).channelImages)
+      .toEqual([{ data: 'AAAA', media_type: 'image/png' }]);
+  });
+
+  it('message.chat 不带 images 时不写 loop.channelImages（不误清别的入口塞的图）', async () => {
+    const { loop, client, flush } = setup();
+    client.send({ kind: 'request', id: 'img3', method: 'message.chat', params: { content: '纯文本' } });
+    await flush();
+    expect((loop as unknown as { channelImages?: unknown }).channelImages).toBeUndefined();
+  });
 });

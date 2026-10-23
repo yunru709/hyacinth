@@ -1,0 +1,25 @@
+﻿
+active scheme = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+overlay AC/DC = ded574b5-45a0-4f42-8737-46345c09c238 / 
+
+===== PROBE A: current plan (as configured by the user) =====
+  plan af77c3cb-cfc8-4516-8e3b-821eb82fd373 : MIN(AC)=100  MAX(AC)=100
+  NtPowerInfo[A idle] cur=2100 max=2100 limit=2100
+  counters[A idle] processor frequency=2100  % processor performance=208.8  % of maximum frequency=88.3  % processor time=6.7
+  counters[A_1t loaded] processor frequency=2100  % processor performance=226.7  % of maximum frequency=91.7  % processor time=13.1
+  spin[A_1t] iters/s = 190306250
+
+===== PROBE B: SCHEME_BALANCED (min=5%) =====
+  setactive rc=0  now active = 381b4222-f694-41f0-9685-ff5bb260df2e
+  plan 381b4222-f694-41f0-9685-ff5bb260df2e : MIN(AC)=20  MAX(AC)=-999
+  NtPowerInfo[B idle] cur=2100 max=2100 limit=2100
+  counters[B idle] processor frequency=1974  % processor performance=103.2  % of maximum frequency=83.3  % processor time=2.2
+  counters[B_1t loaded] processor frequency=2019  % processor performance=189  % of maximum frequency=92.3  % processor time=6.9
+  spin[B_1t] iters/s = 188143750
+  1-thread spin ratio A/B = 1.011
+
+===== RESTORE original plan =====
+  restore rc=0  now active = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+  plan af77c3cb-cfc8-4516-8e3b-821eb82fd373 : MIN(AC)=100  MAX(AC)=100
+  counters[restored idle] processor frequency=2100  % processor performance=218.6  % of maximum frequency=91.3  % processor time=15.9
+# done

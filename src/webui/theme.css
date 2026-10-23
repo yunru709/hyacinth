@@ -1,5 +1,5 @@
 /*
- * Hyacinth WebUI — Theme System v2「夜花园」
+ * Hyacinth WebUI — Theme System v3「一份数据，两端共用」
  * ============================================================
  * 设计方向：整个 WebUI 是一座夜花园。
  *   默认主题「风信子 · 夜园」= 深靛夜色 + 手绘风信子花穗线稿
@@ -7,24 +7,29 @@
  *   （风信子花穗插画），但用不同的画法表达：夜园是发光线稿、
  *   昼园是水彩、雨夜是雨丝灯影、琉璃是晨雾。
  *
- * 三层令牌：
- *   1. 调色板层  --neutral-* / --primary-* / --accent-*
- *   2. 语义层    --hyacinth-*（:root 以 var() 引用调色板，自动继承）
- *   3. 设计语言层 --radius-* / --shadow-* / --font-* /
- *                 --hyacinth-bg-image / --hyacinth-surface-blur /
- *                 --hyacinth-bubble-* / --scrollbar-*
+ * 本文件现在分两段，由固定标记分开：
+ *   1. GENERATED 段 —— 纯颜色令牌（调色板 / 语义 / 状态），
+ *      由 scripts/gen-theme-css.cjs 从 src/webui/themes.json 生成。
+ *      TUI（src/ui/theme.ts）读同一份 JSON，所以两端不会各调各的色。
+ *   2. 手写段（设计语言层）—— 圆角 / 阴影 / 字体 / 背景画 / 气泡 /
+ *      滚动条 / 间距。这些是「画法」，不是「颜色」，不进 JSON：
+ *      终端里没有 8px 圆角和 SVG 花穗，放进去只会让数据变成
+ *      一半两端共用、一半只有浏览器看得懂。
  *
  * 深色主题的 neutral 色阶方向相反（0 = 最深 → 900 = 最亮），
  * --hyacinth-primary-foreground 引用 --neutral-0，两个方向都自动
  * 取到「与 primary 对比」的一端。
+ *
+ * 为什么不做运行时切换 UI：TUI 的历史消息已经是渲染好的 ANSI 字符串
+ * 躺在 pi-tui 的日志里，换主题必须重放整段历史才能改色，代价与风险
+ * 都远大于收益。启动时选定即可。
  * ============================================================
  */
 
-/* ═══════════════════════════════════════════════════════════
-   默认主题：hyacinth 夜园（深靛 + 紫罗兰 + 露青，萤光花穗）
-   ═══════════════════════════════════════════════════════════ */
+/* === GENERATED:BEGIN（由 scripts/gen-theme-css.cjs 生成，勿手改）=== */
+/* 默认（没有 data-theme 时的首屏底色）：themes.json 的 root */
 :root {
-  /* Neutral —— 夜空蓝黑（0 = 最深 → 900 = 最亮） */
+  /* Neutral */
   --neutral-0: #0a0b14;
   --neutral-50: #0f1120;
   --neutral-100: #161930;
@@ -39,19 +44,19 @@
   --neutral-800: #d6dae9;
   --neutral-900: #eceefa;
 
-  /* Primary —— 紫罗兰（风信子花色，夜底发光档） */
-  --primary-50: #221b3e;
-  --primary-100: #2c2352;
-  --primary-200: #3d306f;
-  --primary-300: #544095;
-  --primary-400: #6f55bd;
-  --primary-500: #a78bfa;
-  --primary-600: #c0a8fb;
-  --primary-700: #d4c3fc;
-  --primary-800: #e6dcfd;
-  --primary-900: #f5f0fe;
+  /* Primary */
+  --primary-50: #122132;
+  --primary-100: #172b40;
+  --primary-200: #203c5a;
+  --primary-300: #2d5479;
+  --primary-400: #3f79a8;
+  --primary-500: #6ba6f0;
+  --primary-600: #8dbdf7;
+  --primary-700: #aed2fb;
+  --primary-800: #cee4fd;
+  --primary-900: #eaf4fe;
 
-  /* Accent —— 露青（夜里发亮的点缀） */
+  /* Accent */
   --accent-50: #0a2c38;
   --accent-100: #0e3f4f;
   --accent-200: #125665;
@@ -63,7 +68,7 @@
   --accent-800: #bdf4ed;
   --accent-900: #e0faf6;
 
-  /* ── 语义层 ── */
+  /* 语义 */
   --hyacinth-background: var(--neutral-50);
   --hyacinth-foreground: var(--neutral-900);
   --hyacinth-card: var(--neutral-100);
@@ -80,6 +85,12 @@
   --hyacinth-input: var(--neutral-200);
   --hyacinth-ring: var(--accent-500);
 
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+
   /* Legacy fallback aliases */
   --background: var(--hyacinth-background);
   --foreground: var(--hyacinth-foreground);
@@ -94,66 +105,1336 @@
   --border: var(--hyacinth-border);
   --input: var(--hyacinth-input);
   --ring: var(--hyacinth-ring);
+}
+/* 深夜 · 纯净极简（dark） */
+html[data-theme='dark'] {
+  /* Neutral */
+  --neutral-0: #09090b;
+  --neutral-50: #0d0d10;
+  --neutral-100: #131318;
+  --neutral-150: #191920;
+  --neutral-200: #212129;
+  --neutral-250: #2a2a33;
+  --neutral-300: #383842;
+  --neutral-400: #52525e;
+  --neutral-500: #757581;
+  --neutral-600: #97979f;
+  --neutral-700: #b8b8bf;
+  --neutral-800: #d8d8dd;
+  --neutral-900: #eeeef1;
 
-  /* State colors（夜底提亮） */
+  /* Primary */
+  --primary-50: #1e1e2e;
+  --primary-100: #262640;
+  --primary-200: #34345a;
+  --primary-300: #46467a;
+  --primary-400: #5c5ca0;
+  --primary-500: #8f8fd6;
+  --primary-600: #a8a8e2;
+  --primary-700: #c1c1ec;
+  --primary-800: #d9d9f4;
+  --primary-900: #f0f0fa;
+
+  /* Accent */
+  --accent-50: #0d2121;
+  --accent-100: #123030;
+  --accent-200: #184343;
+  --accent-300: #1f5a5a;
+  --accent-400: #277575;
+  --accent-500: #3fbdbd;
+  --accent-600: #6cd0d0;
+  --accent-700: #98e0e0;
+  --accent-800: #bfeded;
+  --accent-900: #e0f8f8;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #4ade80;
+  --state-warning: #fbbf24;
+  --state-error: #f87171;
+  --state-info: #7cc7de;
+}
+/* 琉璃 · 晨雾花园（glass） */
+html[data-theme='glass'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #f2f6ee;
+  --neutral-100: #fdfdfb;
+  --neutral-150: #e9efe3;
+  --neutral-200: rgba(255, 255, 255, 0.55);
+  --neutral-250: rgba(255, 255, 255, 0.72);
+  --neutral-300: rgba(255, 255, 255, 0.85);
+  --neutral-400: #a3ad9c;
+  --neutral-500: #707a67;
+  --neutral-600: #545e4b;
+  --neutral-700: #3e4736;
+  --neutral-800: #2a3123;
+  --neutral-900: #1a2013;
+
+  /* Primary */
+  --primary-50: #f1eefe;
+  --primary-100: #e3dcfb;
+  --primary-200: #c9baf6;
+  --primary-300: #a98fee;
+  --primary-400: #8a67df;
+  --primary-500: #6d4ac4;
+  --primary-600: #5a3aa8;
+  --primary-700: #472d85;
+  --primary-800: #362164;
+  --primary-900: #251643;
+
+  /* Accent */
+  --accent-50: #ecf7ee;
+  --accent-100: #d0ecd6;
+  --accent-200: #a4d9b1;
+  --accent-300: #6fc086;
+  --accent-400: #43a461;
+  --accent-500: #2b8a4c;
+  --accent-600: #1f6e3b;
+  --accent-700: #18562f;
+  --accent-800: #124324;
+  --accent-900: #0b2c18;
+
+  /* 语义 */
+  --hyacinth-background: rgba(248, 250, 244, 0.62);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: rgba(255, 255, 255, 0.52);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: rgba(255, 255, 255, 0.72);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: rgba(255, 255, 255, 0.5);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: rgba(255, 255, 255, 0.75);
+  --hyacinth-input: rgba(255, 255, 255, 0.5);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #1f6e3b;
+  --state-warning: #9a6700;
+  --state-error: #c2372f;
+  --state-info: #2b6f8a;
+}
+/* 墨韵 · 水墨（ink） */
+html[data-theme='ink'] {
+  /* Neutral */
+  --neutral-0: #121212;
+  --neutral-50: #171716;
+  --neutral-100: #1d1d1b;
+  --neutral-150: #242422;
+  --neutral-200: #2d2d2a;
+  --neutral-250: #383834;
+  --neutral-300: #46463f;
+  --neutral-400: #63625a;
+  --neutral-500: #86857b;
+  --neutral-600: #a6a599;
+  --neutral-700: #c5c4b8;
+  --neutral-800: #e0dfd4;
+  --neutral-900: #f0eee4;
+
+  /* Primary */
+  --primary-50: #3a1510;
+  --primary-100: #4e1c15;
+  --primary-200: #6b261b;
+  --primary-300: #8c3423;
+  --primary-400: #b04730;
+  --primary-500: #d65a40;
+  --primary-600: #e37a63;
+  --primary-700: #ee9c88;
+  --primary-800: #f5bdb0;
+  --primary-900: #fadbd3;
+
+  /* Accent */
+  --accent-50: #33290f;
+  --accent-100: #463a15;
+  --accent-200: #5f4e1c;
+  --accent-300: #7c671f;
+  --accent-400: #9c831f;
+  --accent-500: #c9a83c;
+  --accent-600: #d8be62;
+  --accent-700: #e4d28c;
+  --accent-800: #efe3b3;
+  --accent-900: #f8f1d8;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #6ee7a0;
+  --state-warning: #e2b93b;
+  --state-error: #f07f6d;
+  --state-info: #e4d28c;
+}
+/* 雨夜 · 书房（rainy） */
+html[data-theme='rainy'] {
+  /* Neutral */
+  --neutral-0: #0a0e16;
+  --neutral-50: #0e1420;
+  --neutral-100: #141b28;
+  --neutral-150: #1a2331;
+  --neutral-200: #232e3f;
+  --neutral-250: #2d3a4d;
+  --neutral-300: #3a4a60;
+  --neutral-400: #54667f;
+  --neutral-500: #77889f;
+  --neutral-600: #98a8bd;
+  --neutral-700: #b8c5d6;
+  --neutral-800: #d6dfe9;
+  --neutral-900: #ecf0f5;
+
+  /* Primary */
+  --primary-50: #2d2410;
+  --primary-100: #3d3115;
+  --primary-200: #544319;
+  --primary-300: #705819;
+  --primary-400: #8f701d;
+  --primary-500: #d9a832;
+  --primary-600: #f6c453;
+  --primary-700: #f9d47e;
+  --primary-800: #fbe2a8;
+  --primary-900: #fdf1d4;
+
+  /* Accent */
+  --accent-50: #0c2a2c;
+  --accent-100: #103b3e;
+  --accent-200: #155053;
+  --accent-300: #1c6b6e;
+  --accent-400: #24898c;
+  --accent-500: #3fb0b3;
+  --accent-600: #64c8ca;
+  --accent-700: #8edcdf;
+  --accent-800: #b7e9ea;
+  --accent-900: #ddf5f5;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #5fd39a;
+  --state-warning: #f6c453;
+  --state-error: #f0857c;
+  --state-info: #8edcdf;
+}
+/* 夜园 · 月光蓝（hyacinth） */
+html[data-theme='hyacinth'] {
+  /* Neutral */
+  --neutral-0: #08090e;
+  --neutral-50: #0a0c12;
+  --neutral-100: #0d0f15;
+  --neutral-150: #0f1219;
+  --neutral-200: #11141d;
+  --neutral-250: #141720;
+  --neutral-300: #161a24;
+  --neutral-400: #4a515f;
+  --neutral-500: #7d8899;
+  --neutral-600: #95a0b0;
+  --neutral-700: #b1bac7;
+  --neutral-800: #cdd3de;
+  --neutral-900: #e9edf5;
+
+  /* Primary */
+  --primary-0: #0d1622;
+  --primary-50: #122132;
+  --primary-100: #172b40;
+  --primary-150: #1b334d;
+  --primary-200: #203c5a;
+  --primary-250: #264768;
+  --primary-300: #2d5479;
+  --primary-400: #3f79a8;
+  --primary-500: #6ba6f0;
+  --primary-600: #8dbdf7;
+  --primary-700: #aed2fb;
+  --primary-800: #cee4fd;
+  --primary-900: #eaf4fe;
+
+  /* Accent */
+  --accent-0: #07211f;
+  --accent-50: #092d2a;
+  --accent-100: #0b3a36;
+  --accent-150: #0d4641;
+  --accent-200: #0f524c;
+  --accent-250: #115f58;
+  --accent-300: #136b63;
+  --accent-400: #218f84;
+  --accent-500: #2fb3a4;
+  --accent-600: #6fd6c9;
+  --accent-700: #97e4da;
+  --accent-800: #bef1ea;
+  --accent-900: #e6fffb;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
   --state-success: #5eead4;
   --state-warning: #fcd34d;
   --state-error: #fda4af;
   --state-info: #93e6e0;
-
-  /* ── 设计语言层（夜园：玻璃面板 · 圆润 · 辉光 · 花穗插画）── */
-
-  /* 用户自备背景图（assets/bg/hyacinth.webp）的压暗遮罩：保证文字可读 */
-  --hyacinth-user-bg-scrim: rgba(10, 11, 20, 0.52);
-  /* 极光漂移层（Aurora UI：缓慢流动的环境光） */
-  --hyacinth-aurora:
-    radial-gradient(640px 400px at 22% 78%, rgba(111, 85, 189, 0.14), transparent 66%),
-    radial-gradient(520px 340px at 72% 16%, rgba(45, 212, 191, 0.07), transparent 64%);
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --radius-full: 9999px;
-  --hyacinth-radius-small: var(--radius-sm);
-  --hyacinth-radius-medium: var(--radius-md);
-  --hyacinth-radius-large: 14px;
-
-  --shadow-sm: 0 0 0 0 transparent;
-  --shadow-md: 0 4px 18px rgba(5, 6, 16, 0.45);
-  --shadow-lg: 0 12px 40px rgba(5, 6, 16, 0.55);
-
-  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Mono", "Consolas", monospace;
-  /* 品牌/标题：楷体 —— 伴侣产品的人文气质 */
-  --font-display: "KaiTi", "STKaiti", "BiauKai", "Palatino Linotype", "Noto Serif SC", serif;
-
-  /* 夜园背景画：右下风信子花穗线稿 + 左上萤火虫 + 月光薄雾。
-     由 app.css 铺在 #app-shell / #hyacinth-main 上（fixed 对齐视口）。
-     （SVG data-URI，手绘：花茎 / 两片叶 / 一串铃状小花 / 光点） */
-  --hyacinth-bg-image:
-    radial-gradient(900px 520px at 78% 108%, rgba(167, 139, 250, 0.16), transparent 62%),
-    radial-gradient(680px 420px at 0% 0%, rgba(45, 212, 191, 0.08), transparent 60%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900' viewBox='0 0 1440 900'%3E%3Cg fill='none' stroke='%23a99aef' stroke-opacity='0.30' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1160 900 C 1150 760 1166 620 1156 470'/%3E%3Cpath d='M1158 868 C 1096 812 1080 716 1108 640'/%3E%3Cpath d='M1160 872 C 1222 816 1238 722 1208 648'/%3E%3C/g%3E%3Cg fill='%23a78bfa' fill-opacity='0.20' stroke='%23c4b5fd' stroke-opacity='0.30'%3E%3Cellipse cx='1156' cy='462' rx='8' ry='13'/%3E%3Cellipse cx='1141' cy='481' rx='8' ry='13'/%3E%3Cellipse cx='1171' cy='483' rx='8' ry='13'/%3E%3Cellipse cx='1133' cy='503' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='505' rx='8' ry='13'/%3E%3Cellipse cx='1128' cy='526' rx='8' ry='13'/%3E%3Cellipse cx='1165' cy='528' rx='8' ry='13'/%3E%3Cellipse cx='1136' cy='548' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='550' rx='8' ry='13'/%3E%3Cellipse cx='1146' cy='568' rx='8' ry='13'/%3E%3Cellipse cx='1162' cy='585' rx='8' ry='13'/%3E%3Cellipse cx='1155' cy='443' rx='6' ry='10'/%3E%3C/g%3E%3Cg fill='%232dd4bf'%3E%3Ccircle cx='300' cy='190' r='2.4' fill-opacity='0.7'/%3E%3Ccircle cx='300' cy='190' r='9' fill-opacity='0.16'/%3E%3Ccircle cx='452' cy='330' r='1.8' fill-opacity='0.55'/%3E%3Ccircle cx='452' cy='330' r='7' fill-opacity='0.12'/%3E%3Ccircle cx='186' cy='428' r='2' fill-opacity='0.5'/%3E%3Ccircle cx='186' cy='428' r='8' fill-opacity='0.12'/%3E%3Ccircle cx='560' cy='150' r='1.6' fill-opacity='0.45'/%3E%3Ccircle cx='952' cy='238' r='2.2' fill-opacity='0.55'/%3E%3Ccircle cx='952' cy='238' r='8' fill-opacity='0.12'/%3E%3C/g%3E%3C/svg%3E");
-
-  /* 表面处理（header / aside）：默认无模糊 */
-  --hyacinth-surface-blur: none;
-
-  /* 历史气泡（assistant 侧） */
-  --hyacinth-bubble-assistant-bg: var(--neutral-150);
-  --hyacinth-bubble-assistant-border: var(--neutral-250);
-
-  /* 滚动条 */
-  --scrollbar-thumb: var(--neutral-250);
-  --scrollbar-thumb-hover: var(--neutral-300);
-
-  /* Spacing / Layout */
-  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
-  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
-  --sidebar-width: 260px;
-  --header-height: 48px;
-  --input-height: 44px;
 }
+/* 昼园 · 晨光纸面（light） */
+html[data-theme='light'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #fbfbfc;
+  --neutral-100: #f6f8fa;
+  --neutral-150: #f2f4f7;
+  --neutral-200: #edf0f4;
+  --neutral-250: #e9edf2;
+  --neutral-300: #e4e9ef;
+  --neutral-400: #a1aab5;
+  --neutral-500: #5d6b7a;
+  --neutral-600: #45525f;
+  --neutral-700: #333f4b;
+  --neutral-800: #222d38;
+  --neutral-900: #101a24;
+
+  /* Primary */
+  --primary-0: #f0faf7;
+  --primary-50: #d5ede8;
+  --primary-100: #bae1d9;
+  --primary-150: #a0d4ca;
+  --primary-200: #85c7ba;
+  --primary-250: #6abbab;
+  --primary-300: #4fae9c;
+  --primary-400: #379987;
+  --primary-500: #1f8471;
+  --primary-600: #15695a;
+  --primary-700: #105448;
+  --primary-800: #0b4036;
+  --primary-900: #062b24;
+
+  /* Accent */
+  --accent-0: #f3f6f9;
+  --accent-50: #ebeff3;
+  --accent-100: #e3e8ed;
+  --accent-150: #dbe1e8;
+  --accent-200: #d3dae2;
+  --accent-250: #cbd3dc;
+  --accent-300: #c3ccd6;
+  --accent-400: #97a3b0;
+  --accent-500: #6b7a89;
+  --accent-600: #526171;
+  --accent-700: #404f5e;
+  --accent-800: #2f3d4b;
+  --accent-900: #1d2b38;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 极简 · 素白（mono） */
+html[data-theme='mono'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #f9fafb;
+  --neutral-100: #f4f5f7;
+  --neutral-150: #eef0f3;
+  --neutral-200: #e8ebef;
+  --neutral-250: #e3e6eb;
+  --neutral-300: #dde1e7;
+  --neutral-400: #a4aab4;
+  --neutral-500: #6b7280;
+  --neutral-600: #4b5563;
+  --neutral-700: #374050;
+  --neutral-800: #232c3d;
+  --neutral-900: #0f172a;
+
+  /* Primary */
+  --primary-0: #f8fafc;
+  --primary-50: #e7ecf1;
+  --primary-100: #d7dde5;
+  --primary-150: #c6cfda;
+  --primary-200: #b5c0cf;
+  --primary-250: #a5b2c3;
+  --primary-300: #94a3b8;
+  --primary-400: #6e7c91;
+  --primary-500: #475569;
+  --primary-600: #334155;
+  --primary-700: #263143;
+  --primary-800: #182232;
+  --primary-900: #0b1220;
+
+  /* Accent */
+  --accent-0: #f1f5f9;
+  --accent-50: #ebf0f5;
+  --accent-100: #e4eaf1;
+  --accent-150: #dee5ed;
+  --accent-200: #d8e0e9;
+  --accent-250: #d1dae5;
+  --accent-300: #cbd5e1;
+  --accent-400: #98a5b6;
+  --accent-500: #64748b;
+  --accent-600: #475569;
+  --accent-700: #39465a;
+  --accent-800: #2c384a;
+  --accent-900: #1e293b;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 赛博朋克 · 电子青（cyber） */
+html[data-theme='cyber'] {
+  /* Neutral */
+  --neutral-0: #07080c;
+  --neutral-50: #090b10;
+  --neutral-100: #0c0e13;
+  --neutral-150: #0e1117;
+  --neutral-200: #10131b;
+  --neutral-250: #13161e;
+  --neutral-300: #151922;
+  --neutral-400: #4e5463;
+  --neutral-500: #868fa4;
+  --neutral-600: #98a3b5;
+  --neutral-700: #b3bbca;
+  --neutral-800: #cdd4df;
+  --neutral-900: #e8ecf4;
+
+  /* Primary */
+  --primary-0: #062a33;
+  --primary-50: #07353f;
+  --primary-100: #083f4c;
+  --primary-150: #0a4a58;
+  --primary-200: #0b5564;
+  --primary-250: #0c5f71;
+  --primary-300: #0d6a7d;
+  --primary-400: #1896aa;
+  --primary-500: #22c1d6;
+  --primary-600: #67e8f9;
+  --primary-700: #93effb;
+  --primary-800: #bef6fd;
+  --primary-900: #eafdff;
+
+  /* Accent */
+  --accent-0: #14111c;
+  --accent-50: #1a1725;
+  --accent-100: #211c2d;
+  --accent-150: #272236;
+  --accent-200: #2d283f;
+  --accent-250: #342d47;
+  --accent-300: #3a3350;
+  --accent-400: #544c6c;
+  --accent-500: #6d6488;
+  --accent-600: #8d84a8;
+  --accent-700: #a8a0bf;
+  --accent-800: #c3bdd7;
+  --accent-900: #ded9ee;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 报纸 · 墨与朱印（paper） */
+html[data-theme='paper'] {
+  /* Neutral */
+  --neutral-0: #fefdfb;
+  --neutral-50: #faf8f5;
+  --neutral-100: #f6f4ef;
+  --neutral-150: #f2efea;
+  --neutral-200: #eeeae4;
+  --neutral-250: #eae6de;
+  --neutral-300: #e6e1d8;
+  --neutral-400: #aba69b;
+  --neutral-500: #6f6a5e;
+  --neutral-600: #514c42;
+  --neutral-700: #3e3a31;
+  --neutral-800: #2a2720;
+  --neutral-900: #17150f;
+
+  /* Primary */
+  --primary-0: #f6f4ef;
+  --primary-50: #e8e5df;
+  --primary-100: #dbd7ce;
+  --primary-150: #cdc8be;
+  --primary-200: #bfb9ad;
+  --primary-250: #b2ab9d;
+  --primary-300: #a49c8c;
+  --primary-400: #777062;
+  --primary-500: #4a4438;
+  --primary-600: #332f26;
+  --primary-700: #28251d;
+  --primary-800: #1d1a14;
+  --primary-900: #12100b;
+
+  /* Accent */
+  --accent-0: #fbf1ee;
+  --accent-50: #f3ded9;
+  --accent-100: #eacbc4;
+  --accent-150: #e2b9af;
+  --accent-200: #daa699;
+  --accent-250: #d19384;
+  --accent-300: #c9806f;
+  --accent-400: #b36151;
+  --accent-500: #9c4232;
+  --accent-600: #7a3125;
+  --accent-700: #65271e;
+  --accent-800: #4f1e17;
+  --accent-900: #3a1410;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 终端 · 单色荧光（terminal） */
+html[data-theme='terminal'] {
+  /* Neutral */
+  --neutral-0: #000000;
+  --neutral-50: #030403;
+  --neutral-100: #050805;
+  --neutral-150: #080c08;
+  --neutral-200: #0b0f0a;
+  --neutral-250: #0d130d;
+  --neutral-300: #10170f;
+  --neutral-400: #485247;
+  --neutral-500: #7f8c7f;
+  --neutral-600: #a3b0a3;
+  --neutral-700: #b9c4b9;
+  --neutral-800: #ced8ce;
+  --neutral-900: #e4ece4;
+
+  /* Primary */
+  --primary-0: #06170c;
+  --primary-50: #082814;
+  --primary-100: #0a381c;
+  --primary-150: #0c4924;
+  --primary-200: #0e592c;
+  --primary-250: #106a34;
+  --primary-300: #127a3c;
+  --primary-400: #24a553;
+  --primary-500: #35d06a;
+  --primary-600: #7ef0a4;
+  --primary-700: #a1f5bd;
+  --primary-800: #c5fad7;
+  --primary-900: #e8fff0;
+
+  /* Accent */
+  --accent-0: #141005;
+  --accent-50: #231c0a;
+  --accent-100: #31290f;
+  --accent-150: #403514;
+  --accent-200: #4e4118;
+  --accent-250: #5d4e1d;
+  --accent-300: #6b5a22;
+  --accent-400: #86722f;
+  --accent-500: #a08a3c;
+  --accent-600: #c4ad5c;
+  --accent-700: #d2c07f;
+  --accent-800: #e1d3a1;
+  --accent-900: #efe6c4;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 冰川 · 冷白钢蓝（glacier） */
+html[data-theme='glacier'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #f9fbfd;
+  --neutral-100: #f3f7fb;
+  --neutral-150: #edf3f9;
+  --neutral-200: #e7eff6;
+  --neutral-250: #e1ebf4;
+  --neutral-300: #dbe7f2;
+  --neutral-400: #98a8be;
+  --neutral-500: #55698a;
+  --neutral-600: #445a75;
+  --neutral-700: #32465f;
+  --neutral-800: #213249;
+  --neutral-900: #0f1e33;
+
+  /* Primary */
+  --primary-0: #eff6ff;
+  --primary-50: #dce9f9;
+  --primary-100: #cadcf4;
+  --primary-150: #b7d0ee;
+  --primary-200: #a4c3e8;
+  --primary-250: #92b6e3;
+  --primary-300: #7fa9dd;
+  --primary-400: #578ace;
+  --primary-500: #2f6bbf;
+  --primary-600: #1f4f96;
+  --primary-700: #19417c;
+  --primary-800: #133261;
+  --primary-900: #0d2447;
+
+  /* Accent */
+  --accent-0: #f1fbfc;
+  --accent-50: #e1f2f4;
+  --accent-100: #d0e9ec;
+  --accent-150: #c0e0e5;
+  --accent-200: #b0d6dd;
+  --accent-250: #9fcdd5;
+  --accent-300: #8fc4cd;
+  --accent-400: #67aab5;
+  --accent-500: #3f8f9c;
+  --accent-600: #2c6b76;
+  --accent-700: #22565f;
+  --accent-800: #174049;
+  --accent-900: #0d2b32;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 青瓷 · 温润哑光（celadon） */
+html[data-theme='celadon'] {
+  /* Neutral */
+  --neutral-0: #fbfdfb;
+  --neutral-50: #f6f9f7;
+  --neutral-100: #f2f6f3;
+  --neutral-150: #edf2ef;
+  --neutral-200: #e8eeea;
+  --neutral-250: #e4ebe6;
+  --neutral-300: #dfe7e2;
+  --neutral-400: #9fada6;
+  --neutral-500: #5f736a;
+  --neutral-600: #475a52;
+  --neutral-700: #374740;
+  --neutral-800: #26342f;
+  --neutral-900: #16211d;
+
+  /* Primary */
+  --primary-0: #f1f8f4;
+  --primary-50: #e1efe7;
+  --primary-100: #d0e5db;
+  --primary-150: #c0dcce;
+  --primary-200: #b0d2c1;
+  --primary-250: #9fc9b5;
+  --primary-300: #8fbfa8;
+  --primary-400: #67a78c;
+  --primary-500: #3f8f6f;
+  --primary-600: #2c7057;
+  --primary-700: #215945;
+  --primary-800: #174232;
+  --primary-900: #0c2b20;
+
+  /* Accent */
+  --accent-0: #faf6f2;
+  --accent-50: #f3ece6;
+  --accent-100: #ebe2d9;
+  --accent-150: #e4d8cd;
+  --accent-200: #dccdc1;
+  --accent-250: #d5c3b4;
+  --accent-300: #cdb9a8;
+  --accent-400: #ac9581;
+  --accent-500: #8a7159;
+  --accent-600: #6b5743;
+  --accent-700: #554535;
+  --accent-800: #403226;
+  --accent-900: #2a2018;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--accent-500);
+
+  /* 状态 */
+  --state-success: #5eead4;
+  --state-warning: #fcd34d;
+  --state-error: #fda4af;
+  --state-info: #93e6e0;
+}
+/* 琥珀黄昏（amber） */
+html[data-theme='amber'] {
+  /* Neutral */
+  --neutral-0: #0b0907;
+  --neutral-50: #100d09;
+  --neutral-100: #15110c;
+  --neutral-150: #1a1510;
+  --neutral-200: #201a13;
+  --neutral-250: #282017;
+  --neutral-300: #34281c;
+  --neutral-400: #55432e;
+  --neutral-500: #95805c;
+  --neutral-600: #ab9571;
+  --neutral-700: #c4ad8b;
+  --neutral-800: #dccdb0;
+  --neutral-900: #f4e8d2;
+
+  /* Primary */
+  --primary-50: #2b1a05;
+  --primary-100: #3d2607;
+  --primary-200: #54340a;
+  --primary-300: #6e450d;
+  --primary-400: #9a6512;
+  --primary-500: #e8a33c;
+  --primary-600: #f2bd68;
+  --primary-700: #f7d194;
+  --primary-800: #fae2bd;
+  --primary-900: #fdf1dd;
+
+  /* Accent */
+  --accent-50: #2c130d;
+  --accent-100: #3d1b12;
+  --accent-200: #54251a;
+  --accent-300: #6d3122;
+  --accent-400: #94432d;
+  --accent-500: #c9653f;
+  --accent-600: #dc8763;
+  --accent-700: #e8a98a;
+  --accent-800: #f2c9b3;
+  --accent-900: #fae7da;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #9dbf6a;
+  --state-warning: #e8a33c;
+  --state-error: #e0705f;
+  --state-info: #7fb3c8;
+}
+/* 深海（abyss） */
+html[data-theme='abyss'] {
+  /* Neutral */
+  --neutral-0: #04070a;
+  --neutral-50: #070b10;
+  --neutral-100: #0a1016;
+  --neutral-150: #0d151c;
+  --neutral-200: #111b23;
+  --neutral-250: #17222c;
+  --neutral-300: #1e2d39;
+  --neutral-400: #2e4754;
+  --neutral-500: #6a8797;
+  --neutral-600: #86a1b0;
+  --neutral-700: #a6bcc7;
+  --neutral-800: #c6d5dc;
+  --neutral-900: #e2ecf0;
+
+  /* Primary */
+  --primary-50: #06231f;
+  --primary-100: #08302b;
+  --primary-200: #0b4038;
+  --primary-300: #0e5248;
+  --primary-400: #16675b;
+  --primary-500: #4fae9f;
+  --primary-600: #6bc0b2;
+  --primary-700: #8fd2c6;
+  --primary-800: #b4e2da;
+  --primary-900: #d8f2ee;
+
+  /* Accent */
+  --accent-50: #0a1a26;
+  --accent-100: #0d2434;
+  --accent-200: #123044;
+  --accent-300: #183e56;
+  --accent-400: #224f6b;
+  --accent-500: #5b8fb9;
+  --accent-600: #7ea9cb;
+  --accent-700: #a1c1da;
+  --accent-800: #c3d8e8;
+  --accent-900: #e2ecf3;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #4fae9f;
+  --state-warning: #c9a15e;
+  --state-error: #c9717b;
+  --state-info: #5b8fb9;
+}
+/* 苔原（moss） */
+html[data-theme='moss'] {
+  /* Neutral */
+  --neutral-0: #0b0f0c;
+  --neutral-50: #0f1411;
+  --neutral-100: #131a16;
+  --neutral-150: #18211b;
+  --neutral-200: #1d2821;
+  --neutral-250: #243129;
+  --neutral-300: #2d3d33;
+  --neutral-400: #3f5244;
+  --neutral-500: #768b79;
+  --neutral-600: #93a596;
+  --neutral-700: #b0bfb2;
+  --neutral-800: #ced8cf;
+  --neutral-900: #e6ece4;
+
+  /* Primary */
+  --primary-50: #1b2413;
+  --primary-100: #253017;
+  --primary-200: #33411f;
+  --primary-300: #435428;
+  --primary-400: #5a6f34;
+  --primary-500: #8fa85e;
+  --primary-600: #a7bd7c;
+  --primary-700: #bfd0a0;
+  --primary-800: #d6e2c2;
+  --primary-900: #ecf3e0;
+
+  /* Accent */
+  --accent-50: #24211a;
+  --accent-100: #332e23;
+  --accent-200: #46402f;
+  --accent-300: #5b533c;
+  --accent-400: #776c4e;
+  --accent-500: #a3916a;
+  --accent-600: #b8a886;
+  --accent-700: #cbbea2;
+  --accent-800: #ddd4bf;
+  --accent-900: #efe9dc;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #8fb573;
+  --state-warning: #c9a15e;
+  --state-error: #cf7a6a;
+  --state-info: #7d9c8b;
+}
+/* 樱花（sakura） */
+html[data-theme='sakura'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #fdf9f8;
+  --neutral-100: #fbf4f3;
+  --neutral-150: #f8efee;
+  --neutral-200: #f4e8e6;
+  --neutral-250: #efe1df;
+  --neutral-300: #e9d9d7;
+  --neutral-400: #b8a3a3;
+  --neutral-500: #7f6b6d;
+  --neutral-600: #665458;
+  --neutral-700: #4d3f44;
+  --neutral-800: #3a2f33;
+  --neutral-900: #2b2126;
+
+  /* Primary */
+  --primary-50: #fdf0f4;
+  --primary-100: #fbe0e9;
+  --primary-200: #f7c6d7;
+  --primary-300: #f0a5c0;
+  --primary-400: #e07fa5;
+  --primary-500: #b64a75;
+  --primary-600: #9c3a60;
+  --primary-700: #7f2e4e;
+  --primary-800: #63233c;
+  --primary-900: #47182a;
+
+  /* Accent */
+  --accent-50: #eef5ee;
+  --accent-100: #dcecdd;
+  --accent-200: #c0dcc3;
+  --accent-300: #a0c9a5;
+  --accent-400: #7fb287;
+  --accent-500: #5d9166;
+  --accent-600: #47774f;
+  --accent-700: #395f40;
+  --accent-800: #2b4831;
+  --accent-900: #1d3122;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #2f7d52;
+  --state-warning: #8a5a1c;
+  --state-error: #b3323f;
+  --state-info: #3a6b96;
+}
+/* 蒸汽波（vapor） */
+html[data-theme='vapor'] {
+  /* Neutral */
+  --neutral-0: #0a0612;
+  --neutral-50: #100a1b;
+  --neutral-100: #140d22;
+  --neutral-150: #19112a;
+  --neutral-200: #1f1533;
+  --neutral-250: #26193d;
+  --neutral-300: #2f1f4a;
+  --neutral-400: #443163;
+  --neutral-500: #8b79ac;
+  --neutral-600: #a394c0;
+  --neutral-700: #bfb2d5;
+  --neutral-800: #d9d0e6;
+  --neutral-900: #f0eaf8;
+
+  /* Primary */
+  --primary-50: #2c0a23;
+  --primary-100: #3d0e31;
+  --primary-200: #541241;
+  --primary-300: #6f1655;
+  --primary-400: #9c1c78;
+  --primary-500: #ff5cc8;
+  --primary-600: #ff85d7;
+  --primary-700: #ffb0e4;
+  --primary-800: #ffd2ef;
+  --primary-900: #ffeaf8;
+
+  /* Accent */
+  --accent-50: #062a2e;
+  --accent-100: #083b40;
+  --accent-200: #0b5157;
+  --accent-300: #0e6a72;
+  --accent-400: #12909c;
+  --accent-500: #35e0e8;
+  --accent-600: #6febf0;
+  --accent-700: #9cf2f5;
+  --accent-800: #c4f8fa;
+  --accent-900: #e6fdfe;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #4ee0a8;
+  --state-warning: #ffc24d;
+  --state-error: #ff5f7a;
+  --state-info: #35e0e8;
+}
+/* 高对比（contrast） */
+html[data-theme='contrast'] {
+  /* Neutral */
+  --neutral-0: #000000;
+  --neutral-50: #000000;
+  --neutral-100: #0d0d0d;
+  --neutral-150: #141414;
+  --neutral-200: #1c1c1c;
+  --neutral-250: #262626;
+  --neutral-300: #383838;
+  --neutral-400: #5c5c5c;
+  --neutral-500: #b8b8b8;
+  --neutral-600: #cccccc;
+  --neutral-700: #dedede;
+  --neutral-800: #efefef;
+  --neutral-900: #ffffff;
+
+  /* Primary */
+  --primary-50: #002228;
+  --primary-100: #003039;
+  --primary-200: #004552;
+  --primary-300: #005c6d;
+  --primary-400: #008fa8;
+  --primary-500: #00e5ff;
+  --primary-600: #4deeff;
+  --primary-700: #80f3ff;
+  --primary-800: #b3f8ff;
+  --primary-900: #e0fcff;
+
+  /* Accent */
+  --accent-50: #2a2400;
+  --accent-100: #3d3400;
+  --accent-200: #544700;
+  --accent-300: #6b5a00;
+  --accent-400: #8f7a00;
+  --accent-500: #ffd60a;
+  --accent-600: #ffdf4d;
+  --accent-700: #ffe680;
+  --accent-800: #ffefb3;
+  --accent-900: #fff8e0;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #3ddc84;
+  --state-warning: #ff9f1c;
+  --state-error: #ff5c5c;
+  --state-info: #00e5ff;
+}
+/* 日光（daylight） */
+html[data-theme='daylight'] {
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-50: #ffffff;
+  --neutral-100: #f7f8fa;
+  --neutral-150: #f2f4f7;
+  --neutral-200: #eceef2;
+  --neutral-250: #e4e7ec;
+  --neutral-300: #dcdfe6;
+  --neutral-400: #9aa2af;
+  --neutral-500: #5f6b7a;
+  --neutral-600: #48525f;
+  --neutral-700: #333c47;
+  --neutral-800: #222a33;
+  --neutral-900: #0f151c;
+
+  /* Primary */
+  --primary-50: #eef2ff;
+  --primary-100: #dde5ff;
+  --primary-200: #c0cfff;
+  --primary-300: #9aafff;
+  --primary-400: #6f8bf5;
+  --primary-500: #2f4bc0;
+  --primary-600: #243b9b;
+  --primary-700: #1b2d78;
+  --primary-800: #142157;
+  --primary-900: #0d1538;
+
+  /* Accent */
+  --accent-50: #f4f6f9;
+  --accent-100: #e9edf2;
+  --accent-200: #d6dce5;
+  --accent-300: #bcc5d2;
+  --accent-400: #929daf;
+  --accent-500: #64748b;
+  --accent-600: #4d5a6d;
+  --accent-700: #3d4757;
+  --accent-800: #2d3541;
+  --accent-900: #1e242c;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #1d7a4b;
+  --state-warning: #8a5a00;
+  --state-error: #b3261e;
+  --state-info: #2a5c8f;
+}
+/* 北境（nord） */
+html[data-theme='nord'] {
+  /* Neutral */
+  --neutral-0: #21262f;
+  --neutral-50: #2e3440;
+  --neutral-100: #343b48;
+  --neutral-150: #3b4252;
+  --neutral-200: #434c5e;
+  --neutral-250: #4c566a;
+  --neutral-300: #5c6a80;
+  --neutral-400: #6f7d93;
+  --neutral-500: #9aa8bd;
+  --neutral-600: #b3bfd0;
+  --neutral-700: #c8d1e0;
+  --neutral-800: #d8dee9;
+  --neutral-900: #eceff4;
+
+  /* Primary */
+  --primary-50: #2b3a4a;
+  --primary-100: #33475c;
+  --primary-200: #3f5a72;
+  --primary-300: #4c6f8b;
+  --primary-400: #5e81ac;
+  --primary-500: #88c0d0;
+  --primary-600: #9fcdd8;
+  --primary-700: #b6dbe4;
+  --primary-800: #cee8ee;
+  --primary-900: #e6f4f8;
+
+  /* Accent */
+  --accent-50: #33283a;
+  --accent-100: #412f49;
+  --accent-200: #523a5c;
+  --accent-300: #654670;
+  --accent-400: #8a5f96;
+  --accent-500: #b48ead;
+  --accent-600: #c7a6c1;
+  --accent-700: #d9c0d4;
+  --accent-800: #e9dae6;
+  --accent-900: #f5edf3;
+
+  /* 语义 */
+  --hyacinth-background: var(--neutral-50);
+  --hyacinth-foreground: var(--neutral-900);
+  --hyacinth-card: var(--neutral-100);
+  --hyacinth-card-foreground: var(--neutral-900);
+  --hyacinth-popover: var(--neutral-150);
+  --hyacinth-popover-foreground: var(--neutral-900);
+  --hyacinth-primary: var(--primary-500);
+  --hyacinth-primary-foreground: var(--neutral-0);
+  --hyacinth-accent: var(--accent-500);
+  --hyacinth-accent-foreground: var(--neutral-0);
+  --hyacinth-muted: var(--neutral-200);
+  --hyacinth-muted-foreground: var(--neutral-500);
+  --hyacinth-border: var(--neutral-250);
+  --hyacinth-input: var(--neutral-200);
+  --hyacinth-ring: var(--primary-500);
+
+  /* 状态 */
+  --state-success: #a3be8c;
+  --state-warning: #ebcb8b;
+  --state-error: #e0858f;
+  --state-info: #88c0d0;
+}
+/* === GENERATED:END === */
 
 /* ───────────────────────────────────────────────────────────
    Tailwind v4 CDN @theme 桥接
@@ -298,59 +1579,72 @@ button:not(:disabled), [role='button'], a, select { cursor: pointer; }
 }
 
 /* ═══════════════════════════════════════════════════════════
-   主题定义
+   设计语言层（手写，生成器不碰）
+   ───────────────────────────────────────────────────────────
+   颜色令牌在上面 GENERATED 段里；这里只放「怎么画」——
+   以下每一块都只覆盖本主题特有的形状 / 材质，颜色不在这里出现。
+   注意：这些块与上面的同名选择器是两个独立规则（CSS 允许），
+   因为拆开写才能让生成器整体替换颜色区而不碰手写区。
    ═══════════════════════════════════════════════════════════ */
 
-/* ── light（昼园 · 水彩春园）──────────────────────────────────
-   清晨的花园：暖白纸 + 叶绿墨线花穗 + 紫罗兰水彩晕染。
-   设计语言：水彩 —— 柔和渐变晕染、圆润、清新绿紫对比。
-   （不是「奶油+赤陶」的 AI 默认脸：水彩绿紫 + 花穗插画是世界观） */
+/* 默认（夜园：玻璃面板 · 圆润 · 辉光 · 花穗插画） */
+:root {
+  /* ── 设计语言层（夜园：玻璃面板 · 圆润 · 辉光 · 花穗插画）── */
 
-/* ── dark（深夜 · 纯净极简）───────────────────────────────────
-   给想要「没有任何装饰」的用户：近纯黑、无插画、无环境光，
-   只靠 1px 边框分层。克制即主题。 */
+  /* 用户自备背景图（assets/bg/hyacinth.webp）的压暗遮罩：保证文字可读 */
+  --hyacinth-user-bg-scrim: rgba(10, 11, 20, 0.52);
+  /* 极光漂移层（Aurora UI：缓慢流动的环境光） */
+  --hyacinth-aurora:
+    radial-gradient(640px 400px at 22% 78%, rgba(111, 85, 189, 0.14), transparent 66%),
+    radial-gradient(520px 340px at 72% 16%, rgba(45, 212, 191, 0.07), transparent 64%);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+  --hyacinth-radius-small: var(--radius-sm);
+  --hyacinth-radius-medium: var(--radius-md);
+  --hyacinth-radius-large: 14px;
+
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 4px 18px rgba(5, 6, 16, 0.45);
+  --shadow-lg: 0 12px 40px rgba(5, 6, 16, 0.55);
+
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Mono", "Consolas", monospace;
+  /* 品牌/标题：楷体 —— 伴侣产品的人文气质 */
+  --font-display: "KaiTi", "STKaiti", "BiauKai", "Palatino Linotype", "Noto Serif SC", serif;
+
+  /* 夜园背景画：右下风信子花穗线稿 + 左上萤火虫 + 月光薄雾。
+     由 app.css 铺在 #app-shell / #hyacinth-main 上（fixed 对齐视口）。
+     （SVG data-URI，手绘：花茎 / 两片叶 / 一串铃状小花 / 光点） */
+  --hyacinth-bg-image:
+    radial-gradient(900px 520px at 78% 108%, rgba(107, 166, 240, 0.15), transparent 62%),
+    radial-gradient(680px 420px at 0% 0%, rgba(45, 212, 191, 0.08), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='900' viewBox='0 0 1440 900'%3E%3Cg fill='none' stroke='%23a99aef' stroke-opacity='0.30' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M1160 900 C 1150 760 1166 620 1156 470'/%3E%3Cpath d='M1158 868 C 1096 812 1080 716 1108 640'/%3E%3Cpath d='M1160 872 C 1222 816 1238 722 1208 648'/%3E%3C/g%3E%3Cg fill='%23a78bfa' fill-opacity='0.20' stroke='%23c4b5fd' stroke-opacity='0.30'%3E%3Cellipse cx='1156' cy='462' rx='8' ry='13'/%3E%3Cellipse cx='1141' cy='481' rx='8' ry='13'/%3E%3Cellipse cx='1171' cy='483' rx='8' ry='13'/%3E%3Cellipse cx='1133' cy='503' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='505' rx='8' ry='13'/%3E%3Cellipse cx='1128' cy='526' rx='8' ry='13'/%3E%3Cellipse cx='1165' cy='528' rx='8' ry='13'/%3E%3Cellipse cx='1136' cy='548' rx='8' ry='13'/%3E%3Cellipse cx='1168' cy='550' rx='8' ry='13'/%3E%3Cellipse cx='1146' cy='568' rx='8' ry='13'/%3E%3Cellipse cx='1162' cy='585' rx='8' ry='13'/%3E%3Cellipse cx='1155' cy='443' rx='6' ry='10'/%3E%3C/g%3E%3Cg fill='%232dd4bf'%3E%3Ccircle cx='300' cy='190' r='2.4' fill-opacity='0.7'/%3E%3Ccircle cx='300' cy='190' r='9' fill-opacity='0.16'/%3E%3Ccircle cx='452' cy='330' r='1.8' fill-opacity='0.55'/%3E%3Ccircle cx='452' cy='330' r='7' fill-opacity='0.12'/%3E%3Ccircle cx='186' cy='428' r='2' fill-opacity='0.5'/%3E%3Ccircle cx='186' cy='428' r='8' fill-opacity='0.12'/%3E%3Ccircle cx='560' cy='150' r='1.6' fill-opacity='0.45'/%3E%3Ccircle cx='952' cy='238' r='2.2' fill-opacity='0.55'/%3E%3Ccircle cx='952' cy='238' r='8' fill-opacity='0.12'/%3E%3C/g%3E%3C/svg%3E");
+
+  /* 表面处理（header / aside）：默认无模糊 */
+  --hyacinth-surface-blur: none;
+
+  /* 历史气泡（assistant 侧） */
+  --hyacinth-bubble-assistant-bg: var(--neutral-150);
+  --hyacinth-bubble-assistant-border: var(--neutral-250);
+
+  /* 滚动条 */
+  --scrollbar-thumb: var(--neutral-250);
+  --scrollbar-thumb-hover: var(--neutral-300);
+
+  /* Spacing / Layout */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --sidebar-width: 260px;
+  --header-height: 48px;
+  --input-height: 44px;
+}
+
+/* dark（深夜 · 纯净极简） */
 html[data-theme='dark'] {
-  --neutral-0: #09090b;
-  --neutral-50: #0d0d10;
-  --neutral-100: #131318;
-  --neutral-150: #191920;
-  --neutral-200: #212129;
-  --neutral-250: #2a2a33;
-  --neutral-300: #383842;
-  --neutral-400: #52525e;
-  --neutral-500: #757581;
-  --neutral-600: #97979f;
-  --neutral-700: #b8b8bf;
-  --neutral-800: #d8d8dd;
-  --neutral-900: #eeeef1;
-
-  --primary-50: #1e1e2e;
-  --primary-100: #262640;
-  --primary-200: #34345a;
-  --primary-300: #46467a;
-  --primary-400: #5c5ca0;
-  --primary-500: #8f8fd6;
-  --primary-600: #a8a8e2;
-  --primary-700: #c1c1ec;
-  --primary-800: #d9d9f4;
-  --primary-900: #f0f0fa;
-
-  --accent-50: #0d2121;
-  --accent-100: #123030;
-  --accent-200: #184343;
-  --accent-300: #1f5a5a;
-  --accent-400: #277575;
-  --accent-500: #3fbdbd;
-  --accent-600: #6cd0d0;
-  --accent-700: #98e0e0;
-  --accent-800: #bfeded;
-  --accent-900: #e0f8f8;
-
-  --state-success: #4ade80;
-  --state-warning: #fbbf24;
-  --state-error: #f87171;
-  --state-info: #7cc7de;
-
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -379,51 +1673,8 @@ html[data-theme='dark'] {
   color-scheme: dark;
 }
 
-/* ── glass（琉璃 · 晨雾花园）──────────────────────────────────
-   花园上方的晨雾：昼园的底色 + 毛玻璃面板。
-   设计语言：通透 —— 大圆角、白纱边框、高斯模糊表面。 */
+/* glass（琉璃 · 晨雾花园） */
 html[data-theme='glass'] {
-  --neutral-0: #ffffff;
-  --neutral-50: #f2f6ee;
-  --neutral-100: #fdfdfb;
-  --neutral-150: #e9efe3;
-  --neutral-200: rgba(255, 255, 255, 0.55);
-  --neutral-250: rgba(255, 255, 255, 0.72);
-  --neutral-300: rgba(255, 255, 255, 0.85);
-  --neutral-400: #a3ad9c;
-  --neutral-500: #707a67;
-  --neutral-600: #545e4b;
-  --neutral-700: #3e4736;
-  --neutral-800: #2a3123;
-  --neutral-900: #1a2013;
-
-  --primary-50: #f1eefe;
-  --primary-100: #e3dcfb;
-  --primary-200: #c9baf6;
-  --primary-300: #a98fee;
-  --primary-400: #8a67df;
-  --primary-500: #6d4ac4;
-  --primary-600: #5a3aa8;
-  --primary-700: #472d85;
-  --primary-800: #362164;
-  --primary-900: #251643;
-
-  --accent-50: #ecf7ee;
-  --accent-100: #d0ecd6;
-  --accent-200: #a4d9b1;
-  --accent-300: #6fc086;
-  --accent-400: #43a461;
-  --accent-500: #2b8a4c;
-  --accent-600: #1f6e3b;
-  --accent-700: #18562f;
-  --accent-800: #124324;
-  --accent-900: #0b2c18;
-
-  --state-success: #1f6e3b;
-  --state-warning: #9a6700;
-  --state-error: #c2372f;
-  --state-info: #2b6f8a;
-
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 18px;
@@ -441,17 +1692,11 @@ html[data-theme='glass'] {
   --hyacinth-aurora: none;
 
   /* 晨雾：淡紫/叶绿/天青柔光 + 水彩晕染（昼园画法的玻璃版） */
-  --hyacinth-background: rgba(248, 250, 244, 0.62);
   --hyacinth-bg-image:
     radial-gradient(560px 420px at 6% 4%, rgba(201, 186, 246, 0.5), transparent 66%),
     radial-gradient(640px 460px at 88% 10%, rgba(164, 217, 177, 0.5), transparent 66%),
     radial-gradient(560px 460px at 14% 88%, rgba(165, 243, 252, 0.42), transparent 64%);
 
-  --hyacinth-card: rgba(255, 255, 255, 0.52);
-  --hyacinth-popover: rgba(255, 255, 255, 0.72);
-  --hyacinth-input: rgba(255, 255, 255, 0.5);
-  --hyacinth-border: rgba(255, 255, 255, 0.75);
-  --hyacinth-muted: rgba(255, 255, 255, 0.5);
   --hyacinth-surface-blur: blur(18px) saturate(160%);
 
   --hyacinth-bubble-assistant-bg: rgba(255, 255, 255, 0.55);
@@ -461,51 +1706,8 @@ html[data-theme='glass'] {
   --scrollbar-thumb-hover: rgba(110, 122, 95, 0.55);
 }
 
-/* ── ink（墨韵 · 水墨）────────────────────────────────────────
-   文人气质深色：玄墨底 + 宣纸白文字 + 朱砂主色 + 鎏金点缀。
-   设计语言：全衬线、近直角、无阴影、留白呼吸感。 */
+/* ink（墨韵 · 水墨） */
 html[data-theme='ink'] {
-  --neutral-0: #121212;
-  --neutral-50: #171716;
-  --neutral-100: #1d1d1b;
-  --neutral-150: #242422;
-  --neutral-200: #2d2d2a;
-  --neutral-250: #383834;
-  --neutral-300: #46463f;
-  --neutral-400: #63625a;
-  --neutral-500: #86857b;
-  --neutral-600: #a6a599;
-  --neutral-700: #c5c4b8;
-  --neutral-800: #e0dfd4;
-  --neutral-900: #f0eee4;
-
-  --primary-50: #3a1510;
-  --primary-100: #4e1c15;
-  --primary-200: #6b261b;
-  --primary-300: #8c3423;
-  --primary-400: #b04730;
-  --primary-500: #d65a40;
-  --primary-600: #e37a63;
-  --primary-700: #ee9c88;
-  --primary-800: #f5bdb0;
-  --primary-900: #fadbd3;
-
-  --accent-50: #33290f;
-  --accent-100: #463a15;
-  --accent-200: #5f4e1c;
-  --accent-300: #7c671f;
-  --accent-400: #9c831f;
-  --accent-500: #c9a83c;
-  --accent-600: #d8be62;
-  --accent-700: #e4d28c;
-  --accent-800: #efe3b3;
-  --accent-900: #f8f1d8;
-
-  --state-success: #6ee7a0;
-  --state-warning: #e2b93b;
-  --state-error: #f07f6d;
-  --state-info: #e4d28c;
-
   --radius-sm: 2px;
   --radius-md: 4px;
   --radius-lg: 6px;
@@ -543,56 +1745,10 @@ html[data-theme='ink'] {
   }
 
   color-scheme: dark;
-  --hyacinth-ring: var(--accent-500);
 }
 
-/* ── rainy（雨夜 · 书房）──────────────────────────────────────
-   产品概念画的世界：雨夜书房 —— 暖黄台灯、蓝灰雨窗、青瓷点缀。
-   设计语言：一盏灯 —— 灯下半径暖光、雨丝纹理、克制圆润。 */
+/* rainy（雨夜 · 书房） */
 html[data-theme='rainy'] {
-  --neutral-0: #0a0e16;
-  --neutral-50: #0e1420;
-  --neutral-100: #141b28;
-  --neutral-150: #1a2331;
-  --neutral-200: #232e3f;
-  --neutral-250: #2d3a4d;
-  --neutral-300: #3a4a60;
-  --neutral-400: #54667f;
-  --neutral-500: #77889f;
-  --neutral-600: #98a8bd;
-  --neutral-700: #b8c5d6;
-  --neutral-800: #d6dfe9;
-  --neutral-900: #ecf0f5;
-
-  /* Primary —— 灯火琥珀（概念画的 f6c453） */
-  --primary-50: #2d2410;
-  --primary-100: #3d3115;
-  --primary-200: #544319;
-  --primary-300: #705819;
-  --primary-400: #8f701d;
-  --primary-500: #d9a832;
-  --primary-600: #f6c453;
-  --primary-700: #f9d47e;
-  --primary-800: #fbe2a8;
-  --primary-900: #fdf1d4;
-
-  /* Accent —— 青瓷 */
-  --accent-50: #0c2a2c;
-  --accent-100: #103b3e;
-  --accent-200: #155053;
-  --accent-300: #1c6b6e;
-  --accent-400: #24898c;
-  --accent-500: #3fb0b3;
-  --accent-600: #64c8ca;
-  --accent-700: #8edcdf;
-  --accent-800: #b7e9ea;
-  --accent-900: #ddf5f5;
-
-  --state-success: #5fd39a;
-  --state-warning: #f6c453;
-  --state-error: #f0857c;
-  --state-info: #8edcdf;
-
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -624,56 +1780,10 @@ html[data-theme='rainy'] {
   --scrollbar-thumb-hover: var(--neutral-300);
 
   color-scheme: dark;
-  --hyacinth-ring: var(--primary-500);
 }
 
-/* @@themes:start @@ */
-
-/* ── hyacinth（夜园 · 夜色 · 紫只做一处信号）· 原型：Dark Luminous Control ── */
+/* hyacinth（风信子 · 夜园） */
 html[data-theme='hyacinth'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #08090e;
-  --neutral-50: #0a0c12;
-  --neutral-100: #0d0f15;
-  --neutral-150: #0f1219;
-  --neutral-200: #11141d;
-  --neutral-250: #141720;
-  --neutral-300: #161a24;
-  --neutral-400: #4a515f;
-  --neutral-500: #7d8899;
-  --neutral-600: #95a0b0;
-  --neutral-700: #b1bac7;
-  --neutral-800: #cdd3de;
-  --neutral-900: #e9edf5;
-
-  --primary-0: #16122a;
-  --primary-50: #1f1a3b;
-  --primary-100: #28214c;
-  --primary-150: #31295d;
-  --primary-200: #3a306d;
-  --primary-250: #43387e;
-  --primary-300: #4c3f8f;
-  --primary-400: #6c5db8;
-  --primary-500: #8b7ae0;
-  --primary-600: #a99cf0;
-  --primary-700: #c0b7f5;
-  --primary-800: #d8d1fa;
-  --primary-900: #efecff;
-
-  --accent-0: #07211f;
-  --accent-50: #092d2a;
-  --accent-100: #0b3a36;
-  --accent-150: #0d4641;
-  --accent-200: #0f524c;
-  --accent-250: #115f58;
-  --accent-300: #136b63;
-  --accent-400: #218f84;
-  --accent-500: #2fb3a4;
-  --accent-600: #6fd6c9;
-  --accent-700: #97e4da;
-  --accent-800: #bef1ea;
-  --accent-900: #e6fffb;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -685,55 +1795,12 @@ html[data-theme='hyacinth'] {
   --shadow-lg: 0 12px 40px rgba(5, 6, 12, 0.52);
   --hyacinth-bg-image: none;
   --hyacinth-surface-blur: none;
-  --hyacinth-aurora: radial-gradient(520px 340px at 84% 6%, rgba(139, 122, 224, 0.10), transparent 62%);
+  --hyacinth-aurora: radial-gradient(520px 340px at 84% 6%, rgba(107, 166, 240, 0.10), transparent 62%);
   --hyacinth-user-bg-scrim: rgba(8, 9, 14, 0.6);
 }
 
-/* ── light（昼园 · 晨光纸面 · 冷白 ＋ 一点苔绿）· 原型：Quiet Product Precision ── */
+/* light（昼园 · 晨光纸面） */
 html[data-theme='light'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #ffffff;
-  --neutral-50: #fbfbfc;
-  --neutral-100: #f6f8fa;
-  --neutral-150: #f2f4f7;
-  --neutral-200: #edf0f4;
-  --neutral-250: #e9edf2;
-  --neutral-300: #e4e9ef;
-  --neutral-400: #a1aab5;
-  --neutral-500: #5d6b7a;
-  --neutral-600: #45525f;
-  --neutral-700: #333f4b;
-  --neutral-800: #222d38;
-  --neutral-900: #101a24;
-
-  --primary-0: #f0faf7;
-  --primary-50: #d5ede8;
-  --primary-100: #bae1d9;
-  --primary-150: #a0d4ca;
-  --primary-200: #85c7ba;
-  --primary-250: #6abbab;
-  --primary-300: #4fae9c;
-  --primary-400: #379987;
-  --primary-500: #1f8471;
-  --primary-600: #15695a;
-  --primary-700: #105448;
-  --primary-800: #0b4036;
-  --primary-900: #062b24;
-
-  --accent-0: #f3f6f9;
-  --accent-50: #ebeff3;
-  --accent-100: #e3e8ed;
-  --accent-150: #dbe1e8;
-  --accent-200: #d3dae2;
-  --accent-250: #cbd3dc;
-  --accent-300: #c3ccd6;
-  --accent-400: #97a3b0;
-  --accent-500: #6b7a89;
-  --accent-600: #526171;
-  --accent-700: #404f5e;
-  --accent-800: #2f3d4b;
-  --accent-900: #1d2b38;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 5px;
   --radius-md: 10px;
@@ -749,51 +1816,8 @@ html[data-theme='light'] {
   --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
 }
 
-/* ── mono（极简 · 素白 · 冷灰 · 纯结构）· 原型：Quiet Product Precision ── */
+/* mono（极简 · 素白） */
 html[data-theme='mono'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #ffffff;
-  --neutral-50: #f9fafb;
-  --neutral-100: #f4f5f7;
-  --neutral-150: #eef0f3;
-  --neutral-200: #e8ebef;
-  --neutral-250: #e3e6eb;
-  --neutral-300: #dde1e7;
-  --neutral-400: #a4aab4;
-  --neutral-500: #6b7280;
-  --neutral-600: #4b5563;
-  --neutral-700: #374050;
-  --neutral-800: #232c3d;
-  --neutral-900: #0f172a;
-
-  --primary-0: #f8fafc;
-  --primary-50: #e7ecf1;
-  --primary-100: #d7dde5;
-  --primary-150: #c6cfda;
-  --primary-200: #b5c0cf;
-  --primary-250: #a5b2c3;
-  --primary-300: #94a3b8;
-  --primary-400: #6e7c91;
-  --primary-500: #475569;
-  --primary-600: #334155;
-  --primary-700: #263143;
-  --primary-800: #182232;
-  --primary-900: #0b1220;
-
-  --accent-0: #f1f5f9;
-  --accent-50: #ebf0f5;
-  --accent-100: #e4eaf1;
-  --accent-150: #dee5ed;
-  --accent-200: #d8e0e9;
-  --accent-250: #d1dae5;
-  --accent-300: #cbd5e1;
-  --accent-400: #98a5b6;
-  --accent-500: #64748b;
-  --accent-600: #475569;
-  --accent-700: #39465a;
-  --accent-800: #2c384a;
-  --accent-900: #1e293b;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 3px;
   --radius-md: 6px;
@@ -809,51 +1833,8 @@ html[data-theme='mono'] {
   --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
 }
 
-/* ── cyber（赛博朋克 · 近黑 · 电子青为唯一强调 · 硬直角）· 原型：Restrained Futuristic Interface ── */
+/* cyber（赛博朋克 · 电子青） */
 html[data-theme='cyber'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #07080c;
-  --neutral-50: #090b10;
-  --neutral-100: #0c0e13;
-  --neutral-150: #0e1117;
-  --neutral-200: #10131b;
-  --neutral-250: #13161e;
-  --neutral-300: #151922;
-  --neutral-400: #4e5463;
-  --neutral-500: #868fa4;
-  --neutral-600: #98a3b5;
-  --neutral-700: #b3bbca;
-  --neutral-800: #cdd4df;
-  --neutral-900: #e8ecf4;
-
-  --primary-0: #062a33;
-  --primary-50: #07353f;
-  --primary-100: #083f4c;
-  --primary-150: #0a4a58;
-  --primary-200: #0b5564;
-  --primary-250: #0c5f71;
-  --primary-300: #0d6a7d;
-  --primary-400: #1896aa;
-  --primary-500: #22c1d6;
-  --primary-600: #67e8f9;
-  --primary-700: #93effb;
-  --primary-800: #bef6fd;
-  --primary-900: #eafdff;
-
-  --accent-0: #14111c;
-  --accent-50: #1a1725;
-  --accent-100: #211c2d;
-  --accent-150: #272236;
-  --accent-200: #2d283f;
-  --accent-250: #342d47;
-  --accent-300: #3a3350;
-  --accent-400: #544c6c;
-  --accent-500: #6d6488;
-  --accent-600: #8d84a8;
-  --accent-700: #a8a0bf;
-  --accent-800: #c3bdd7;
-  --accent-900: #ded9ee;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -870,51 +1851,8 @@ html[data-theme='cyber'] {
   --hyacinth-user-bg-scrim: rgba(7, 8, 12, 0.66);
 }
 
-/* ── paper（报纸 · 近白纸 · 墨黑 · 衬线 · 一枚朱印）· 原型：Soft Editorial Minimalism ── */
+/* paper（报纸 · 墨与朱印） */
 html[data-theme='paper'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #fefdfb;
-  --neutral-50: #faf8f5;
-  --neutral-100: #f6f4ef;
-  --neutral-150: #f2efea;
-  --neutral-200: #eeeae4;
-  --neutral-250: #eae6de;
-  --neutral-300: #e6e1d8;
-  --neutral-400: #aba69b;
-  --neutral-500: #6f6a5e;
-  --neutral-600: #514c42;
-  --neutral-700: #3e3a31;
-  --neutral-800: #2a2720;
-  --neutral-900: #17150f;
-
-  --primary-0: #f6f4ef;
-  --primary-50: #e8e5df;
-  --primary-100: #dbd7ce;
-  --primary-150: #cdc8be;
-  --primary-200: #bfb9ad;
-  --primary-250: #b2ab9d;
-  --primary-300: #a49c8c;
-  --primary-400: #777062;
-  --primary-500: #4a4438;
-  --primary-600: #332f26;
-  --primary-700: #28251d;
-  --primary-800: #1d1a14;
-  --primary-900: #12100b;
-
-  --accent-0: #fbf1ee;
-  --accent-50: #f3ded9;
-  --accent-100: #eacbc4;
-  --accent-150: #e2b9af;
-  --accent-200: #daa699;
-  --accent-250: #d19384;
-  --accent-300: #c9806f;
-  --accent-400: #b36151;
-  --accent-500: #9c4232;
-  --accent-600: #7a3125;
-  --accent-700: #65271e;
-  --accent-800: #4f1e17;
-  --accent-900: #3a1410;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 0px;
   --radius-md: 2px;
@@ -931,51 +1869,8 @@ html[data-theme='paper'] {
   --hyacinth-user-bg-scrim: rgba(254, 253, 251, 0.55);
 }
 
-/* ── terminal（终端 · 纯黑 · 单色荧光 · 零圆角）· 原型：Crisp Enterprise Console（单色） ── */
+/* terminal（终端 · 单色荧光） */
 html[data-theme='terminal'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #000000;
-  --neutral-50: #030403;
-  --neutral-100: #050805;
-  --neutral-150: #080c08;
-  --neutral-200: #0b0f0a;
-  --neutral-250: #0d130d;
-  --neutral-300: #10170f;
-  --neutral-400: #485247;
-  --neutral-500: #7f8c7f;
-  --neutral-600: #a3b0a3;
-  --neutral-700: #b9c4b9;
-  --neutral-800: #ced8ce;
-  --neutral-900: #e4ece4;
-
-  --primary-0: #06170c;
-  --primary-50: #082814;
-  --primary-100: #0a381c;
-  --primary-150: #0c4924;
-  --primary-200: #0e592c;
-  --primary-250: #106a34;
-  --primary-300: #127a3c;
-  --primary-400: #24a553;
-  --primary-500: #35d06a;
-  --primary-600: #7ef0a4;
-  --primary-700: #a1f5bd;
-  --primary-800: #c5fad7;
-  --primary-900: #e8fff0;
-
-  --accent-0: #141005;
-  --accent-50: #231c0a;
-  --accent-100: #31290f;
-  --accent-150: #403514;
-  --accent-200: #4e4118;
-  --accent-250: #5d4e1d;
-  --accent-300: #6b5a22;
-  --accent-400: #86722f;
-  --accent-500: #a08a3c;
-  --accent-600: #c4ad5c;
-  --accent-700: #d2c07f;
-  --accent-800: #e1d3a1;
-  --accent-900: #efe6c4;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -994,51 +1889,8 @@ html[data-theme='terminal'] {
   --hyacinth-user-bg-scrim: rgba(0, 0, 0, 0.74);
 }
 
-/* ── glacier（冰川 · 冷白 · 钢蓝 · 中圆角）· 原型：Quiet Product Precision（冷亮版） ── */
+/* glacier（冰川 · 冷白钢蓝） */
 html[data-theme='glacier'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #ffffff;
-  --neutral-50: #f9fbfd;
-  --neutral-100: #f3f7fb;
-  --neutral-150: #edf3f9;
-  --neutral-200: #e7eff6;
-  --neutral-250: #e1ebf4;
-  --neutral-300: #dbe7f2;
-  --neutral-400: #98a8be;
-  --neutral-500: #55698a;
-  --neutral-600: #445a75;
-  --neutral-700: #32465f;
-  --neutral-800: #213249;
-  --neutral-900: #0f1e33;
-
-  --primary-0: #eff6ff;
-  --primary-50: #dce9f9;
-  --primary-100: #cadcf4;
-  --primary-150: #b7d0ee;
-  --primary-200: #a4c3e8;
-  --primary-250: #92b6e3;
-  --primary-300: #7fa9dd;
-  --primary-400: #578ace;
-  --primary-500: #2f6bbf;
-  --primary-600: #1f4f96;
-  --primary-700: #19417c;
-  --primary-800: #133261;
-  --primary-900: #0d2447;
-
-  --accent-0: #f1fbfc;
-  --accent-50: #e1f2f4;
-  --accent-100: #d0e9ec;
-  --accent-150: #c0e0e5;
-  --accent-200: #b0d6dd;
-  --accent-250: #9fcdd5;
-  --accent-300: #8fc4cd;
-  --accent-400: #67aab5;
-  --accent-500: #3f8f9c;
-  --accent-600: #2c6b76;
-  --accent-700: #22565f;
-  --accent-800: #174049;
-  --accent-900: #0d2b32;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 6px;
   --radius-md: 12px;
@@ -1054,51 +1906,8 @@ html[data-theme='glacier'] {
   --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
 }
 
-/* ── celadon（青瓷 · 青瓷釉面 · 温润哑光 · 器物感）· 原型：Soft Editorial Minimalism（器物变体） ── */
+/* celadon（青瓷 · 温润哑光） */
 html[data-theme='celadon'] {
-  /* 调色板（关键档锚定 ✓：0 / 300 / 500 / 600 / 900）*/
-  --neutral-0: #fbfdfb;
-  --neutral-50: #f6f9f7;
-  --neutral-100: #f2f6f3;
-  --neutral-150: #edf2ef;
-  --neutral-200: #e8eeea;
-  --neutral-250: #e4ebe6;
-  --neutral-300: #dfe7e2;
-  --neutral-400: #9fada6;
-  --neutral-500: #5f736a;
-  --neutral-600: #475a52;
-  --neutral-700: #374740;
-  --neutral-800: #26342f;
-  --neutral-900: #16211d;
-
-  --primary-0: #f1f8f4;
-  --primary-50: #e1efe7;
-  --primary-100: #d0e5db;
-  --primary-150: #c0dcce;
-  --primary-200: #b0d2c1;
-  --primary-250: #9fc9b5;
-  --primary-300: #8fbfa8;
-  --primary-400: #67a78c;
-  --primary-500: #3f8f6f;
-  --primary-600: #2c7057;
-  --primary-700: #215945;
-  --primary-800: #174232;
-  --primary-900: #0c2b20;
-
-  --accent-0: #faf6f2;
-  --accent-50: #f3ece6;
-  --accent-100: #ebe2d9;
-  --accent-150: #e4d8cd;
-  --accent-200: #dccdc1;
-  --accent-250: #d5c3b4;
-  --accent-300: #cdb9a8;
-  --accent-400: #ac9581;
-  --accent-500: #8a7159;
-  --accent-600: #6b5743;
-  --accent-700: #554535;
-  --accent-800: #403226;
-  --accent-900: #2a2018;
-
   /* 设计语言层：气质靠这几项 ＋ 亮度台阶 ✓（发光克制 ✗）*/
   --radius-sm: 8px;
   --radius-md: 14px;
@@ -1113,4 +1922,249 @@ html[data-theme='celadon'] {
   --hyacinth-aurora: none;
   --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.5);
 }
-/* @@themes:end @@ */
+
+/* ── 第二批（第二批加 8 套，共 20 套）─────────────────────────────
+   下面每块仍然只写「怎么画」，颜色一律来自上面 GENERATED 段的
+   调色板变量 —— 两段分开写，改色时不必回来动这里。
+   ─────────────────────────────────────────────────────────────── */
+
+/* amber（琥珀黄昏） */
+html[data-theme='amber'] {
+  /* 老式示波器：圆角几乎为零，边角像金属机箱；
+     背景用极淡的水平扫描线（1px / 3px 周期）而不是插画 ——
+     有纹理但没有图像，长时间盯着不会有「画」抢注意力。 */
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 6px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 2px 8px rgba(6, 4, 2, 0.55);
+  --shadow-lg: 0 10px 30px rgba(6, 4, 2, 0.62);
+
+  --font-display: "JetBrains Mono", "Cascadia Mono", "Consolas", "KaiTi", serif;
+
+  --hyacinth-user-bg-scrim: rgba(16, 13, 9, 0.64);
+  --hyacinth-aurora: none;
+
+  /* 右上台灯暖光 + 左下铜器反光 + 扫描线 */
+  --hyacinth-bg-image:
+    radial-gradient(720px 480px at 88% 6%, rgba(232, 163, 60, 0.15), transparent 62%),
+    radial-gradient(900px 560px at 6% 104%, rgba(201, 101, 63, 0.08), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(232, 163, 60, 0.035) 0px, rgba(232, 163, 60, 0.035) 1px, transparent 1px, transparent 3px);
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--neutral-250);
+  --scrollbar-thumb-hover: var(--neutral-300);
+
+  color-scheme: dark;
+}
+
+/* abyss（深海） */
+html[data-theme='abyss'] {
+  /* 深海：圆角偏大且柔和（水体没有硬边），只有两团极淡的冷光，
+     一层从天顶漏下来的青、一层从底部反上来的蓝。 */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 6px 22px rgba(2, 5, 7, 0.55);
+  --shadow-lg: 0 16px 46px rgba(2, 5, 7, 0.62);
+
+  --hyacinth-user-bg-scrim: rgba(7, 11, 16, 0.66);
+  --hyacinth-aurora:
+    radial-gradient(620px 420px at 50% -8%, rgba(79, 174, 159, 0.07), transparent 64%);
+
+  /* 深渊：无网格无纹理，只留水压下的两点冷光 */
+  --hyacinth-bg-image:
+    radial-gradient(760px 520px at 50% -12%, rgba(79, 174, 159, 0.10), transparent 62%),
+    radial-gradient(900px 620px at 10% 112%, rgba(91, 143, 185, 0.07), transparent 60%);
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--neutral-250);
+  --scrollbar-thumb-hover: var(--neutral-300);
+
+  color-scheme: dark;
+}
+
+/* moss（苔原） */
+html[data-theme='moss'] {
+  /* 苔原：中等圆角、无阴影层次（苔面是平的），
+     底色上有两团更暗的绿 —— 像苔藓的湿斑，只做明度变化不做色相跳变。 */
+  --radius-sm: 7px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 3px 14px rgba(5, 8, 6, 0.45);
+  --shadow-lg: 0 10px 32px rgba(5, 8, 6, 0.52);
+
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", Georgia, serif;
+
+  --hyacinth-user-bg-scrim: rgba(15, 20, 17, 0.6);
+  --hyacinth-aurora: none;
+
+  --hyacinth-bg-image:
+    radial-gradient(620px 420px at 12% 6%, rgba(143, 168, 94, 0.09), transparent 64%),
+    radial-gradient(700px 480px at 92% 96%, rgba(163, 145, 106, 0.06), transparent 62%);
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--neutral-250);
+  --scrollbar-thumb-hover: var(--neutral-300);
+
+  color-scheme: dark;
+}
+
+/* sakura（樱花） */
+html[data-theme='sakura'] {
+  /* 樱花：圆角最大的一套（花瓣没有直角），阴影极轻且带粉褐色 ——
+     白底上的灰阴影会显脏，用暖调阴影才和米白底同族。 */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-2xl: 30px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 4px 16px rgba(122, 88, 92, 0.09);
+  --shadow-lg: 0 12px 34px rgba(122, 88, 92, 0.12);
+
+  --hyacinth-user-bg-scrim: rgba(253, 249, 248, 0.55);
+  --hyacinth-aurora: none;
+
+  /* 左上樱粉、右上嫩叶绿，两团很淡的柔光（避免纯白死板） */
+  --hyacinth-bg-image:
+    radial-gradient(560px 380px at 6% 0%, rgba(247, 198, 215, 0.40), transparent 66%),
+    radial-gradient(620px 420px at 96% 10%, rgba(192, 220, 195, 0.28), transparent 66%);
+
+  --hyacinth-surface-blur: none;
+
+  /* 浅底上的滚动条要够沉，否则在白纸上看不见 */
+  --scrollbar-thumb: rgba(127, 107, 109, 0.35);
+  --scrollbar-thumb-hover: rgba(127, 107, 109, 0.55);
+
+  color-scheme: light;
+}
+
+/* vapor（蒸汽波） */
+html[data-theme='vapor'] {
+  /* 蒸汽波：直角 + 双向细网格（44px 一格，正好对上常见的窗口栅格），
+     品红与青各占一角做光晕；阴影用主色发光而不是黑色投影 ——
+     黑投影在深紫底上看不见，只有彩色辉光能撑起「屏幕」感。 */
+  --radius-sm: 0px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 4px;
+  --radius-2xl: 6px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 0 12px rgba(255, 92, 200, 0.22);
+  --shadow-lg: 0 0 28px rgba(53, 224, 232, 0.22);
+
+  --font-display: "JetBrains Mono", "Cascadia Mono", "Consolas", "KaiTi", serif;
+
+  --hyacinth-user-bg-scrim: rgba(16, 10, 27, 0.68);
+  --hyacinth-aurora: none;
+
+  --hyacinth-bg-image:
+    radial-gradient(680px 460px at 84% 2%, rgba(255, 92, 200, 0.16), transparent 62%),
+    radial-gradient(620px 460px at 8% 98%, rgba(53, 224, 232, 0.13), transparent 62%),
+    repeating-linear-gradient(0deg, rgba(255, 92, 200, 0.05) 0px, rgba(255, 92, 200, 0.05) 1px, transparent 1px, transparent 44px),
+    repeating-linear-gradient(90deg, rgba(53, 224, 232, 0.04) 0px, rgba(53, 224, 232, 0.04) 1px, transparent 1px, transparent 44px);
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--accent-300);
+  --scrollbar-thumb-hover: var(--accent-400);
+
+  color-scheme: dark;
+}
+
+/* contrast（高对比） */
+html[data-theme='contrast'] {
+  /* 高对比的唯一目标是「看得清」，所以装饰全部关掉：
+     零圆角（边角不消耗像素）、无背景画、无模糊，
+     边框靠 1px 亮线而不是阴影 —— 阴影在纯黑底上根本不可见。 */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.26);
+  --shadow-lg: 0 0 0 2px rgba(0, 229, 255, 0.45);
+
+  --hyacinth-user-bg-scrim: rgba(0, 0, 0, 0.72);
+  --hyacinth-aurora: none;
+
+  --hyacinth-bg-image: none;
+
+  --hyacinth-surface-blur: none;
+
+  /* 滚动条也要能看清：用中性灰而不是主色，避免「一片青」 */
+  --scrollbar-thumb: var(--neutral-400);
+  --scrollbar-thumb-hover: var(--neutral-500);
+
+  color-scheme: dark;
+}
+
+/* daylight（日光） */
+html[data-theme='daylight'] {
+  /* 日光：办公场景，装饰压到零（无背景画 / 无模糊 / 无辉光），
+     圆角小、阴影只做「一层纸叠在另一层纸上」的极浅投影。 */
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 1px 3px rgba(15, 21, 28, 0.08);
+  --shadow-lg: 0 6px 20px rgba(15, 21, 28, 0.10);
+
+  --hyacinth-user-bg-scrim: rgba(255, 255, 255, 0.62);
+  --hyacinth-aurora: none;
+
+  --hyacinth-bg-image: none;
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--neutral-300);
+  --scrollbar-thumb-hover: var(--neutral-400);
+
+  color-scheme: light;
+}
+
+/* nord（北境） */
+html[data-theme='nord'] {
+  /* 北境：Nord 的风格是「冷、静、偏方」，所以圆角小一档；
+     背景只留一丝霜青与一丝极光紫，不做插画 —— 北极光在原色板里
+     本来就只是低透明度的色块，做成光晕才不会破坏 Nord 的克制。 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 2px 10px rgba(20, 24, 31, 0.45);
+  --shadow-lg: 0 10px 30px rgba(20, 24, 31, 0.52);
+
+  --font-display: "Inter", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+
+  --hyacinth-user-bg-scrim: rgba(46, 52, 64, 0.62);
+  --hyacinth-aurora: none;
+
+  --hyacinth-bg-image:
+    radial-gradient(700px 480px at 76% -4%, rgba(136, 192, 208, 0.10), transparent 62%),
+    radial-gradient(640px 460px at 4% 104%, rgba(180, 142, 173, 0.06), transparent 62%);
+
+  --hyacinth-surface-blur: none;
+
+  --scrollbar-thumb: var(--neutral-250);
+  --scrollbar-thumb-hover: var(--neutral-300);
+
+  color-scheme: dark;
+}

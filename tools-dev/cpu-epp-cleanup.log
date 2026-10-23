@@ -1,0 +1,11 @@
+﻿
+run at 2026-10-17T22:47:33
+elevated = True
+EPP key exists before = True
+  ACSettingIndex before = 50
+powercfg /deletesetting rc = 0
+powercfg /setactive rc = 0
+EPP key exists after = True
+  ACSettingIndex after = 50
+active plan = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+# done

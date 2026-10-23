@@ -941,6 +941,9 @@ export async function runTui(
       manager,
       commandRegistry: CommandRegistry.getInstance(process.cwd()),
       listProvidersMeta: () => getProviderConfigLoader(process.cwd()).getAll(),
+      // WebUI/TUI 的"配置密钥"统一落到 ~/.agent/.env（ConfigManager.saveApiKey），
+      // 这样两边以及外部读取环境变量的地方看到的是同一把 key。
+      persistApiKey: (provider, apiKey) => new ConfigManager(process.cwd()).saveApiKey(provider, apiKey),
       listLocalModels: () => LocalModelModule.getInstance().list().map((e) => ({
         name: e.name, modelFile: e.modelFile, backend: e.backend, port: e.port,
         host: e.host, ctxSize: e.ctxSize, nGpuLayers: e.nGpuLayers, enabled: e.enabled,

@@ -354,6 +354,57 @@
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     [data-icon] { display: inline-flex; align-items: center; justify-content: center; }
+
+    /* ── 侧栏「最近会话」（A4）────────────────────────────────────────
+       侧栏是 flex column 且 nav 带 flex:1 ⇒ 这块必须自己收口（flex:0 0 auto + max-height），
+       否则会话多了会把「全部 ›」与底部版本文案顶出视口 ✗。
+       颜色只用 theme.css 的 --hyacinth-* 语义令牌，不写字面色值 ⇒ 换主题自动跟随 ✓ */
+    #sidebar-recent {
+      flex: 0 0 auto;
+      max-height: 30vh;
+      display: flex;
+      flex-direction: column;
+      padding: 2px 8px 6px;
+      /* 位于「新会话」按钮与导航之间（index.html 里在 <nav> 之前）⇒ 用下边框与导航分隔，
+         上边框会跟按钮的留白叠一起、显得脏 */
+      border-bottom: 1px solid var(--hyacinth-border);
+      margin-bottom: 6px;
+    }
+    /* [hidden] 的 UA 规则（display:none）优先级低于 #id 选择器 ⇒ 必须显式补一条，
+       否则「无会话时整块隐藏」不生效（同 #chat-empty[hidden] 那个坑，见下方说明） */
+    #sidebar-recent[hidden] { display: none; }
+    .sidebar-recent-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 4px; }
+    .sidebar-recent-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
+    .sidebar-recent-all { font-size: 11px; color: var(--hyacinth-muted-foreground); text-decoration: none; }
+    .sidebar-recent-all:hover { color: var(--hyacinth-primary); }
+    .sidebar-recent-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; }
+    .sidebar-recent-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      font-size: 12px;
+      color: var(--hyacinth-foreground);
+      text-align: left;
+      cursor: pointer;
+      transition: background-color 120ms ease, color 120ms ease;
+    }
+    .sidebar-recent-item:hover { background-color: var(--hyacinth-muted); }
+    .sidebar-recent-item.is-current { background-color: color-mix(in srgb, var(--hyacinth-primary) 12%, transparent); color: var(--hyacinth-primary); }
+    .sidebar-recent-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono, monospace);
+    }
+    .sidebar-recent-time { flex: 0 0 auto; font-size: 10px; color: var(--hyacinth-muted-foreground); white-space: nowrap; }
+    .sidebar-recent-item.is-current .sidebar-recent-time { color: var(--hyacinth-primary); }
   
 
 
@@ -375,6 +426,11 @@
         .settings-tabs-header { padding: 0 10px 12px; font-size: 14px; font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
         .settings-tab:hover { background-color: var(--hyacinth-muted); }
+        /* A5：分组标题（常用 / 行为 / 系统）—— 只是 <div>，不参与 radio 选中逻辑 ✓ */
+        .settings-group-label { margin: 10px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
+        .settings-group-label:first-of-type { margin-top: 0; }
+        /* :first-of-type 实际命中的是「设置」标题（它也是 div）⇒ 首组额外间距要靠相邻选择器消掉 */
+        .settings-tabs-header + .settings-group-label { margin-top: 0; }
         #tab-context:checked ~ .settings-frame .settings-tabs label[for="tab-context"],
         #tab-turns:checked ~ .settings-frame .settings-tabs label[for="tab-turns"],
         #tab-compress:checked ~ .settings-frame .settings-tabs label[for="tab-compress"],
@@ -631,6 +687,17 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 .msg-rich > *:first-child { margin-top: 0; }
 .msg-rich > *:last-child { margin-bottom: 0; }
 
+/* 过程正文也走 markdown（app.js appendProcessText）⇒ 复用上面的块级样式；
+   字号/配色仍按「过程」的弱化档。
+   ⚠️ 必须覆盖 .process-text 的 white-space: pre-wrap —— 否则 HTML 源码里的换行
+   会被原样保留，渲染出一堆多余空行。两个类选择器特异度更高，稳定生效。 */
+.process-text.msg-rich {
+  font-size: 12px;
+  white-space: normal;
+  color: var(--hyacinth-muted-foreground);
+}
+.process-text.msg-rich .md-pre { font-size: 11.5px; }
+
 .msg-rich .md-p { margin: 0 0 0.625em; line-height: 1.65; }
 
 .msg-rich .md-h { margin: 0.9em 0 0.45em; font-weight: 600; line-height: 1.35; }
@@ -706,4 +773,87 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 .msg-rich strong { font-weight: 600; }
 .msg-rich del { opacity: 0.65; }
 
+/* ── 数学公式（KaTeX）───────────────────────────────────────────────
+ * 块级公式横向溢出用滚动而非换行：矩阵/多行对齐一旦折行就彻底读不懂了。
+ * 行内公式只微调字号，颜色继承 currentColor ⇒ 明暗主题都自动跟随。
+ */
+.msg-rich .md-math-block {
+  margin: 0.75em 0;
+  padding: 0.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.msg-rich .md-math-block > .katex-display { margin: 0; }
+.msg-rich .katex { font-size: 1.06em; }
+/* KaTeX 未加载时的降级（Node 单测 / vendor 文件缺失）⇒ 原文可读、可复制 */
+.msg-rich .md-math-fallback {
+  font-size: 0.88em;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 
+
+/* ═══════════════════════════════════════════════════════════
+   图片附件（composer 预览 / 用户气泡缩略图 / 拖入高亮）
+   背景：后端 channelImages 通路早就有，前端此前是「后续版本支持」的占位。
+   ═══════════════════════════════════════════════════════════ */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.composer-attachment {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hyacinth-border);
+  background: var(--hyacinth-muted);
+}
+.composer-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.composer-attachment-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+.composer-attachment-x:hover { background: rgba(0, 0, 0, 0.78); }
+
+/* 用户气泡里的图片：限制最大边长，避免一张大图把整条消息顶出屏幕 */
+.user-attach-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.user-attach-img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 8px;
+  display: block;
+  object-fit: cover;
+}
+
+/* 拖拽悬停：整块输入区给一个虚线框，明确「松手就加图」 */
+#chat-composer.is-drag-over {
+  outline: 2px dashed var(--hyacinth-primary);
+  outline-offset: -6px;
+  border-radius: 10px;
+}

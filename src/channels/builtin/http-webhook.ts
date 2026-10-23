@@ -29,6 +29,7 @@ import { createLogger } from '../../logging/logger.js';
 import { getModelContextWindow } from '../../setup/model-defaults.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
 import { registerMediaRoutes, isPublicReadRoute } from '../../gateway/media-routes.js';
+import { registerPreviewRoutes } from '../../gateway/preview-routes.js';
 import { LocalModelModule } from '../../local-model/index.js';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
@@ -102,6 +103,15 @@ function authHook(apiKey: string | null) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     // /api/health、/api/media、/api/companion + WebUI 静态资源 无需认证
     if (isPublicReadRoute(req.url) || isPublicWebUIRoute(req.url)) return;
+
+    // /api/fs/raw 是唯一额外接受 ?token= 的 HTTP 端点：它被 <img src> 与
+    // <iframe> 加载，浏览器这两处**没法设置请求头**，钥匙只能走查询参数
+    // （与 WS 升级同一机制，见 checkBearerAuth 的调用方）。
+    // 仅限这一个端点 —— 文件列表/文本读取仍必须走 Authorization 头。
+    if (apiKey && req.url.startsWith('/api/fs/raw')) {
+      const q = new URL(req.url, 'http://localhost').searchParams.get('token');
+      if (q && checkBearerAuth(`Bearer ${q}`, apiKey)) return;
+    }
 
     if (!apiKey) {
       return reply.status(401).send({
@@ -298,6 +308,11 @@ export class HttpWebhookChannel implements ChannelHandler {
 
     // ── Media / Scene（WebUI 只读）──────────────────────────────
     registerMediaRoutes(this.app, this.cwd);
+
+    // ── 工作区文件预览（WebUI 右侧「预览」栏，只读）─────────────────
+    // 与 media 相反：这组端点**要钥匙**——它能读到工作区里任何文件，而 fetch
+    // 能带 Authorization 头，没有豁免的理由。路径越界在模块内 fail-closed。
+    registerPreviewRoutes(this.app, this.cwd);
 
     // 生成语音端点：重放列表 + 音频文件（IndexTTS2 等本地 TTS 产出的陪伴语音）
     {
@@ -655,12 +670,21 @@ export class HttpWebhookChannel implements ChannelHandler {
       // ⚠️ 先聚合再截取：text/thinking 是逐 token 记录的，若先截 N 条再聚合，
       // 400 条原始事件只够两三个回合，「显示更多」会因数据不足而永远不出现。
       // 读足量原始事件 → 聚合还原为完整消息 → 取末尾 limit 条。
-      // 目录优先取 loop 实时 sessionDir：陪伴 activate/deactivate 会切换
-      // 会话目录，固定用 sessionStore 记录会导致主界面读到陪伴会话历史
       const historyProvider = async (sid: string, limit?: number) => {
-        const dir =
-          (agentComponents?.loop as { sessionDir?: string } | undefined)?.sessionDir ||
-          this.sessionManager.getSessionDir(sid);
+        // 目录解析顺序（2026-10-23 修）：
+        //   1) 调用方**明确点名**的 sid —— 它能解析到真实目录就用它；
+        //   2) 退回 loop 的实时 sessionDir（陪伴 activate/deactivate 会改它）；
+        //   3) 最后才是 sessionStore 推算出来的路径。
+        //
+        // 为什么不能只信 loop.sessionDir：`loop.switchSession()` 只登记 pendingSessionDir，
+        // 真正改 sessionDir 要等**下一轮开头的 applyPendingSessionSwitch()**（loop.ts:863）。
+        // 于是"切完会话立刻拉历史"这个最常见的动作，读到的仍是**上一个**会话的目录
+        // ⇒ 侧栏点会话后正文空白（2026-10-23 用 chrome-devtools MCP 实测：switch 返回 ok，
+        //   但 message.history 恒为 0 条）。
+        const sidDir = sid ? this.sessionManager.getSessionDir(sid) : undefined;
+        const loopDir = (agentComponents?.loop as { sessionDir?: string } | undefined)?.sessionDir;
+        const dir = (sidDir && existsSync(sidDir) ? sidDir : undefined) || loopDir || sidDir;
+        if (!dir) return [];          // sid 为空且 loop 还没建目录 ⇒ 没有历史可读，别去猜 cwd
         const raw = await readRecentEvents(dir, 5000);
         const events = coalesceEvents(raw).slice(-(limit ?? 50));
         return events.map((e) => ({
@@ -709,6 +733,12 @@ export class HttpWebhookChannel implements ChannelHandler {
         manager,
         commandRegistry: CommandRegistry.getInstance(this.cwd),
         listProvidersMeta: () => getProviderConfigLoader(this.cwd).getAll(),
+        // 密钥落点与 TUI 统一：写 ~/.agent/.env（ConfigManager.saveApiKey）。
+        // 只写 model-channels.json 的话，TUI 与外部环境变量读取方都看不到 WebUI 配的 key。
+        persistApiKey: async (provider: string, apiKey: string) => {
+          const { ConfigManager } = await import('../../setup/config.js');
+          await new ConfigManager(this.cwd).saveApiKey(provider, apiKey);
+        },
         listLocalModels: () => {
           const localModel = LocalModelModule.getInstance();
           return localModel.list().map((e) => ({

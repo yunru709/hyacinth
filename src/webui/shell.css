@@ -1,0 +1,1455 @@
+/* ══════════════════════════════════════════════════════════════════
+   shell.css —— WebUI v3 外壳
+   ──────────────────────────────────────────────────────────────────
+   为什么单独一个文件，而不是继续往 app.css 里堆：
+   app.css 的 859 行是"边改边补"的产物（Tailwind 工具类 + 手写补丁 + 移动端修补），
+   同一批节点上叠了三四层规则，改一个间距要往上翻两百行确认没被覆盖。
+   这里改成**语义 class + 单一来源**：外壳的结构、间距、层级只由这个文件决定，
+   app.css 退回它原本该管的范围（markdown 正文、katex、设置面板内部）。
+
+   加载顺序：app.css → shell.css（后者赢），所以旧的 .nav-item / .process-group
+   等规则会被下面的同名选择器覆盖，不需要去删老代码。
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── 0. 派生令牌 ──────────────────────────────────────────────────
+   只从主题的语义色派生"表面层"，不新增主题变量 —— 20 套主题里任何一套
+   换上来，下面这些层级都会自动跟着走，不需要逐套维护。 */
+#app-shell {
+  /* 三级表面：s1 最贴近背景（侧栏/顶栏），s3 最突出（浮层/hover） */
+  --s1: color-mix(in srgb, var(--hyacinth-foreground) 3%, var(--hyacinth-background));
+  --s2: color-mix(in srgb, var(--hyacinth-foreground) 6%, var(--hyacinth-background));
+  --s3: color-mix(in srgb, var(--hyacinth-foreground) 10%, var(--hyacinth-background));
+  /* 发丝线：比 --hyacinth-border 更淡，用于分隔而不是描边 */
+  --hair: color-mix(in srgb, var(--hyacinth-foreground) 9%, transparent);
+  --hair-strong: color-mix(in srgb, var(--hyacinth-foreground) 16%, transparent);
+  --tint: color-mix(in srgb, var(--hyacinth-primary) 12%, transparent);
+  --tint-strong: color-mix(in srgb, var(--hyacinth-primary) 22%, transparent);
+
+  /* 尺寸节奏：4 的倍数，别处不要再写魔法数字 */
+  --tb-h: 48px;
+  --sb-w: 272px;
+  --content-max: 760px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 120ms;
+  --t: 180ms;
+
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--hyacinth-background);
+  color: var(--hyacinth-foreground);
+}
+
+/* ── 1. 顶栏 ──────────────────────────────────────────────────────
+   48px，半透明 + 背景模糊：滚动时内容从下面"透"过去，比一条实线分隔更轻。
+   降级：不支持 backdrop-filter 的浏览器退回纯 s1 底色（颜色仍对）。 */
+#topbar {
+  height: var(--tb-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 12px;
+  background: color-mix(in srgb, var(--hyacinth-background) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  border-bottom: 1px solid var(--hair);
+  -webkit-app-region: drag;      /* 桌面壳自绘标题栏可拖拽（浏览器里无副作用） */
+  user-select: none;
+}
+#topbar button,
+#topbar a,
+#topbar input { -webkit-app-region: no-drag; }
+
+#topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--hyacinth-primary);
+  flex: 0 0 auto;
+}
+#topbar .brand svg { width: 18px; height: 18px; }
+#topbar .brand-wordmark {
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+#topbar .brand-mark {
+  display: none;                 /* 窄屏才露出的陪伴入口（见 §9） */
+}
+
+.tb-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--hair-strong);
+  flex: 0 0 auto;
+}
+
+/* 当前会话名：此前整个顶部没有任何"我在哪"的信息 */
+.tb-title {
+  font-size: 13px;
+  color: var(--hyacinth-muted-foreground);
+  min-width: 0;
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-spacer { flex: 1 1 auto; }
+
+.tb-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tb-icon:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+.tb-icon svg { width: 16px; height: 16px; }
+
+/* 模型 chip：把"厂商"做成极小标签，避免它和模型名抢宽度 */
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--s2);
+  border: 1px solid var(--hair);
+  max-width: 260px;
+  min-width: 0;
+}
+.model-chip svg { width: 13px; height: 13px; color: var(--hyacinth-muted-foreground); flex: 0 0 auto; }
+.model-chip #header-model-name {
+  font-size: 12px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip .chip-tag {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+  flex: 0 0 auto;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip .chip-tag:empty { display: none; }
+
+/* 上下文计量：1px 细条 + 数字。原先是 8px 粗条，视觉重量和标题抢 */
+.ctx-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.ctx-track {
+  width: 72px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--s3);
+  overflow: hidden;
+}
+#header-context-bar {
+  height: 100%;
+  background: var(--hyacinth-primary);
+  border-radius: 999px;
+  transition: width var(--t) var(--ease);
+}
+#header-context-text {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hyacinth-muted-foreground);
+  white-space: nowrap;
+}
+
+.online-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: transparent;
+  max-width: 120px;
+}
+#header-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+#header-online-text {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 2. 侧栏 ──────────────────────────────────────────────────────
+   272px。会话列表吃满剩余高度并自己滚动，导航固定在底部 ——
+   这样"最近会话"再多也不会把导航挤走（v2 的失败点）。 */
+/* position: relative 是给窄屏下"预览栏覆盖式浮出"定位用的（见第 15 节
+   的 @media）。少了它，absolute 会退到视口，栏会盖住顶栏。 */
+.body-area { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+
+#sidebar {
+  width: var(--sb-w);
+  flex: 0 0 var(--sb-w);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  background: var(--s1);
+  border-right: 1px solid var(--hair);
+  min-height: 0;
+}
+
+.sb-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  color: var(--hyacinth-foreground);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.sb-new:hover { background: var(--s3); border-color: var(--tint-strong); }
+.sb-new svg { width: 14px; height: 14px; color: var(--hyacinth-primary); }
+
+.sb-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  border: 1px solid transparent;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.sb-search:focus-within { border-color: var(--tint-strong); }
+.sb-search svg { width: 13px; height: 13px; color: var(--hyacinth-muted-foreground); flex: 0 0 auto; }
+.sb-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-size: 12px;
+  font-family: inherit;
+}
+.sb-search input::placeholder { color: var(--hyacinth-muted-foreground); }
+.sb-search input::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.5); }
+
+/* 最近会话：唯一的滚动区 */
+#sidebar-recent {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* ⚠️ 必须显式抹掉 app.css 里的 max-height: 30vh —— 它是 id 选择器，
+     不会被 flex 覆盖，结果列表只分到 ~270px，26 条会话被切在第 5 条（实测截图）。 */
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  margin: 2px -4px 0;
+}
+#sidebar-recent[hidden] { display: none; }
+
+.sidebar-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px;
+}
+.sidebar-recent-heading {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hyacinth-muted-foreground);
+}
+.sidebar-recent-all {
+  font-size: 10.5px;
+  color: var(--hyacinth-muted-foreground);
+  text-decoration: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.sidebar-recent-all:hover { color: var(--hyacinth-primary); background: var(--s2); }
+
+.sidebar-recent-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 2px 4px;
+  /* 细滚动条：默认滚动条在 272px 侧栏里非常扎眼 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair-strong) transparent;
+}
+
+/* 时间分组标题（由 app.js 插入 .recent-group-label） */
+.recent-group-label {
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.75;
+  padding: 8px 8px 3px;
+  letter-spacing: 0.04em;
+}
+
+.sidebar-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sidebar-recent-item:hover { background: var(--s2); }
+.sidebar-recent-item.is-current {
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+  box-shadow: inset 2px 0 0 var(--hyacinth-primary);
+}
+.sidebar-recent-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-recent-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.sidebar-recent-item.is-current .sidebar-recent-time { color: var(--hyacinth-primary); opacity: 0.9; }
+
+/* 空搜索结果的占位 */
+.sidebar-recent-empty {
+  padding: 10px 8px;
+  font-size: 11.5px;
+  color: var(--hyacinth-muted-foreground);
+}
+
+/* 导航：贴底，图标 + 文字横排，比 v2 的"大按钮行"轻 */
+.sb-nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+}
+.sb-nav .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sb-nav .nav-item svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.sb-nav .nav-item:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+.sb-nav .nav-item.nav-active {
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+  font-weight: 550;
+}
+
+.sb-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px 0;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.7;
+}
+.sb-foot-tag { letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ── 3. 主区与消息流 ──────────────────────────────────────────────
+   内容列固定 760px 居中：聊天行宽超过 ~90 字符后回读成本明显上升。 */
+#hyacinth-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--hyacinth-background);
+}
+
+#chat-wrapper { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+
+.msg-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 24px 8px;
+  scroll-behavior: smooth;
+}
+.msg-list > * { max-width: var(--content-max); margin-left: auto; margin-right: auto; }
+.msg-list[hidden] { display: none; }
+
+/* ── 4. 消息单元 ──────────────────────────────────────────────────
+   用户 = 右对齐气泡；助手 = 文档流（无气泡）。理由：助手输出常常是长文 + 代码块，
+   套气泡会让左右两边都留出无意义的空白，也让代码块被迫缩窄。 */
+.msg {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  animation: msg-in var(--t) var(--ease) both;
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg { animation: none; }
+  .msg-list { scroll-behavior: auto; }
+}
+
+.msg-user { justify-content: flex-end; }
+.msg-user .msg-bubble {
+  max-width: 78%;
+  padding: 9px 13px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--tint);
+  border: 1px solid var(--tint-strong);
+  color: var(--hyacinth-foreground);
+  font-size: 13.5px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+.msg-user .msg-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  text-align: right;
+}
+
+.msg-assistant { align-items: flex-start; }
+.msg-assistant .msg-rail {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--s2);
+  border: 1px solid var(--hair);
+  color: var(--hyacinth-primary);
+}
+.msg-assistant .msg-rail svg { width: 12px; height: 12px; }
+.msg-assistant.is-delivery .msg-rail {
+  background: var(--tint);
+  border-color: var(--tint-strong);
+}
+
+.msg-body { flex: 1 1 auto; min-width: 0; }
+.msg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  min-height: 18px;
+}
+.msg-who {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--hyacinth-muted-foreground);
+}
+.msg-assistant.is-delivery .msg-who { color: var(--hyacinth-primary); }
+.msg-copy {
+  border: 0;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.msg:hover .msg-copy { opacity: 1; }
+.msg-copy:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+
+.msg-text {
+  font-size: 13.5px;
+  line-height: 1.72;
+  color: var(--hyacinth-foreground);
+  word-break: break-word;
+}
+
+/* 系统提示 / 错误 */
+.msg-system .msg-body,
+.msg-note {
+  font-size: 12px;
+  color: var(--hyacinth-muted-foreground);
+}
+.msg-note {
+  max-width: var(--content-max);
+  margin: 0 auto 12px;
+  padding: 7px 11px;
+  border-left: 2px solid var(--hair-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--s1);
+  line-height: 1.6;
+}
+.msg-note.is-error {
+  border-left-color: color-mix(in srgb, var(--state-error) 80%, transparent);
+  color: color-mix(in srgb, var(--state-error) 85%, var(--hyacinth-foreground));
+}
+
+/* ── 5. 工具调用卡 ────────────────────────────────────────────────
+   一行：状态点 + 工具名（等宽）+ 参数摘要 + 耗时。不再是一个个大气泡。 */
+.tool-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: var(--content-max);
+  margin: 0 auto 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--s1);
+  border: 1px solid var(--hair);
+  font-size: 11.5px;
+  color: var(--hyacinth-muted-foreground);
+  min-width: 0;
+}
+.tool-card .tool-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hyacinth-primary);
+  flex: 0 0 auto;
+}
+.tool-card .tool-name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hyacinth-foreground);
+  flex: 0 0 auto;
+}
+.tool-card .tool-args {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  opacity: 0.85;
+}
+.tool-card.is-error { border-color: color-mix(in srgb, var(--state-error) 40%, transparent); }
+.tool-card.is-error .tool-dot { background: var(--state-error); }
+
+/* ── 6. 「过程」折叠块 ─────────────────────────────────────────────
+   细竖线 + 等宽小字，视觉上是"旁注"而不是正文；默认展开但高度受限。 */
+.process-group {
+  max-width: var(--content-max);
+  margin: 0 auto 14px;
+  border-left: 2px solid var(--hair);
+  padding-left: 12px;
+}
+.process-group > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--hyacinth-muted-foreground);
+  padding: 2px 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.process-group > summary::-webkit-details-marker { display: none; }
+.process-group > summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--t-fast) var(--ease);
+  opacity: 0.7;
+}
+.process-group[open] > summary::before { transform: rotate(45deg); }
+.process-group > summary:hover { color: var(--hyacinth-foreground); }
+
+.process-body {
+  /* 展开也不许吞掉整屏，但 320px 太狠了：历史回放时若该回合没有 say（TUI 会话常见），
+     整段正文都在这块里，320px 只能看到开头几行（实测截图确认）⇒ 放到 60vh。 */
+  max-height: min(60vh, 680px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair-strong) transparent;
+}
+.process-text {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--hyacinth-muted-foreground);
+  white-space: normal;        /* markdown 渲染后必须是 normal，pre-wrap 会多出空行 */
+}
+
+/* ── 7. Composer ──────────────────────────────────────────────────
+   浮动卡片：不再贴边铺满，两侧留白 + 阴影，视觉上"可以被拿起来"。 */
+.composer {
+  flex: 0 0 auto;
+  padding: 8px 24px 14px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--hyacinth-background) 88%, transparent) 40%
+  );
+}
+.composer-box {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--r-lg);
+  background: var(--s2);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 6px 24px -12px rgba(0, 0, 0, 0.55);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.composer-box:focus-within {
+  border-color: var(--tint-strong);
+  box-shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--tint);
+}
+#chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  max-height: 180px;
+  padding: 3px 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+#chat-input::placeholder { color: var(--hyacinth-muted-foreground); }
+
+.composer-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.cbtn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.cbtn:hover { background: var(--s3); color: var(--hyacinth-foreground); }
+.cbtn svg { width: 15px; height: 15px; }
+.cbtn-primary {
+  background: var(--hyacinth-primary);
+  color: var(--hyacinth-primary-foreground);
+}
+.cbtn-primary:hover { background: var(--hyacinth-primary); opacity: 0.9; color: var(--hyacinth-primary-foreground); }
+.cbtn-stop { background: var(--s3); color: var(--hyacinth-foreground); }
+.cbtn[hidden] { display: none; }
+
+.composer-hint {
+  max-width: var(--content-max);
+  margin: 6px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.75;
+  /* composer 边框到内部 textarea 的内缩是 15px；提示文字若只缩 4px，
+     左边缘会和输入文字错开约一格，看起来像没对齐的脚注。 */
+  padding: 0 15px;
+}
+.composer-hint .hidden { display: none; }
+
+/* 附件预览（沿用 app.js 生成的 class 名） */
+.composer-attachments {
+  max-width: var(--content-max);
+  margin: 0 auto 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.composer-attachments[hidden] { display: none; }
+.composer-attachment {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--hair-strong);
+  background: var(--s3);
+}
+.composer-attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.composer-attachment-x {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.composer-attachment-x:hover { background: rgba(0, 0, 0, 0.82); }
+
+/* 用户气泡里的附图 */
+.user-attach-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.user-attach-img { max-width: 180px; max-height: 180px; border-radius: 8px; display: block; object-fit: cover; }
+
+/* ── 8. 空状态 ────────────────────────────────────────────────────
+   之前是一个居中的小圆标 + 三个按钮，四周全是空。现在给一个更明确的引导块。 */
+.chat-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  min-height: 0;
+}
+.chat-empty[hidden] { display: none; }
+.empty-inner {
+  max-width: 560px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.empty-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tint);
+  border: 1px solid var(--tint-strong);
+  color: var(--hyacinth-primary);
+  margin-bottom: 2px;
+}
+.empty-mark svg { width: 20px; height: 20px; }
+.empty-title { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+.empty-sub {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--hyacinth-muted-foreground);
+  margin: 0 0 8px;
+  max-width: 420px;
+}
+.empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.chat-suggestion {
+  border: 1px solid var(--hair-strong);
+  background: var(--s1);
+  color: var(--hyacinth-foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 7px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.chat-suggestion:hover { background: var(--s2); border-color: var(--tint-strong); }
+
+/* ── 9. 响应式 ────────────────────────────────────────────────────
+   ≤900px：侧栏变抽屉（app.js 用 #app-shell.nav-open 控制），顶栏瘦身。 */
+@media (max-width: 900px) {
+  #topbar #nav-drawer-btn { display: inline-flex; }
+  #topbar .brand-mark { display: inline-flex; }
+  #sidebar {
+    position: absolute;
+    z-index: 40;
+    top: var(--tb-h);
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    transition: transform var(--t) var(--ease);
+    box-shadow: 24px 0 48px -24px rgba(0, 0, 0, 0.7);
+  }
+  #app-shell.nav-open #sidebar { transform: none; }
+  #nav-backdrop {
+    position: fixed;
+    inset: var(--tb-h) 0 0 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--t) var(--ease);
+  }
+  #app-shell.nav-open #nav-backdrop { opacity: 1; pointer-events: auto; }
+  .msg-list { padding: 16px 14px 4px; }
+  .composer { padding: 6px 14px 12px; }
+  .tb-title { display: none; }
+  .ctx-meter { display: none; }
+}
+@media (min-width: 901px) {
+  #nav-drawer-btn { display: none; }
+  #nav-backdrop { display: none; }
+}
+@media (max-width: 620px) {
+  .model-chip #header-model-name { max-width: 96px; }
+  .model-chip .chip-tag { display: none; }
+  .composer-hint span:first-child { display: none; }
+  .msg-user .msg-bubble { max-width: 88%; }
+}
+
+/* ── 10. 滚动条 ──────────────────────────────────────────────────
+   WebKit 与 Firefox 各写一遍；未列出的容器保持系统默认。 */
+.msg-list::-webkit-scrollbar,
+.sidebar-recent-list::-webkit-scrollbar,
+.process-body::-webkit-scrollbar { width: 8px; }
+.msg-list::-webkit-scrollbar-thumb,
+.sidebar-recent-list::-webkit-scrollbar-thumb,
+.process-body::-webkit-scrollbar-thumb {
+  background: var(--hair-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.msg-list::-webkit-scrollbar-thumb:hover,
+.sidebar-recent-list::-webkit-scrollbar-thumb:hover,
+.process-body::-webkit-scrollbar-thumb:hover { background: var(--hyacinth-muted-foreground); background-clip: content-box; }
+.msg-list::-webkit-scrollbar-track,
+.sidebar-recent-list::-webkit-scrollbar-track,
+.process-body::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 11. 零散补充 ─────────────────────────────────────────────── */
+.msg-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.8;
+}
+.msg-assistant .msg-time { margin-left: 0; }
+
+.thinking-line {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--hyacinth-muted-foreground);
+}
+
+/* 主题网格里的分组标题：#theme-grid 是 grid，标题要横跨整行 */
+.theme-group-label {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hyacinth-muted-foreground);
+  padding: 10px 2px 2px;
+}
+.theme-group-label:first-child { padding-top: 0; }
+
+/* 导航项：旧 app.css 给 .nav-item 留了一层 border/outline 与伪元素（v2 的"左侧色条"），
+   在 v3 里表现为高亮块两侧各多一条竖线 ⇒ 这里一次性抹掉，高亮只靠底色。 */
+.sb-nav .nav-item,
+.sb-nav .nav-item.nav-active {
+  border: 0;
+  outline: 0;
+}
+.sb-nav .nav-item::before,
+.sb-nav .nav-item::after { content: none; display: none; }
+
+/* 列表底部留一点余量，最后一行不会紧贴导航分隔线 */
+.sidebar-recent-list { padding-bottom: 8px; }
+
+/* ── 12. 设置面板对齐 v3 ────────────────────────────────────────
+   设置页内部仍是 v2 的结构。这里用 v3 的表面令牌把卡片/输入框统一到外壳语言；
+   选择器带 .settings-panel 前缀提高特异度，避免和 app.css 的 .settings-card
+   打架时靠 !important 取巧。
+
+   注：v2 的 .settings-toggle 用 --hyacinth-muted（≈neutral-200）画关闭态轨道，
+   与卡片 --s1 只差 2~3 个亮度级，深色主题下整条轨道等于消失，只剩一颗浮空的
+   圆点。改用「前景色叠透明度」构造轨道，方向随主题自动反转，20 套主题通用。 */
+.settings-panel .settings-card {
+  background-color: var(--s1);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-md, 12px);
+  box-shadow: none;
+}
+.settings-panel .settings-card-header {
+  color: var(--hyacinth-foreground);
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+}
+.settings-panel .settings-row { border-bottom-color: transparent; }
+.settings-panel .settings-row + .settings-row { border-top-color: var(--hair); }
+.settings-panel .settings-input,
+.settings-panel select.settings-input {
+  background-color: var(--s2);
+  border-color: var(--hair-strong);
+  border-radius: var(--r-sm, 8px);
+}
+.settings-panel .settings-input:focus {
+  border-color: var(--tint-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--tint);
+}
+/* 分组标题（常用/行为/系统）与左侧 tab 列表 */
+.settings-group-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hyacinth-muted-foreground);
+  padding: 10px 10px 3px;
+  opacity: 0.85;
+}
+.settings-tabs-header { border-bottom-color: var(--hair); }
+
+/* 开关：关闭态必须有可辨认的轨道。
+   app.css 用 --hyacinth-muted 铺轨道，压在 --s1 卡片上几乎同色 ⇒ 只剩一颗浮空圆点，
+   无法判断「这是关，还是坏了」。轨道改为前景色 16% 叠加 + 1px 内描边，
+   深色主题得到比卡片亮一档的灰槽，浅色主题得到比卡片深一档的灰槽。 */
+.settings-panel .settings-toggle {
+  background-color: color-mix(in srgb, var(--hyacinth-foreground) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hyacinth-foreground) 12%, transparent);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.settings-panel .settings-toggle::after {
+  background-color: var(--hyacinth-muted-foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+.settings-panel .settings-toggle:hover {
+  background-color: color-mix(in srgb, var(--hyacinth-foreground) 24%, transparent);
+}
+.settings-panel .settings-toggle:checked {
+  background-color: var(--hyacinth-primary);
+  box-shadow: none;
+}
+.settings-panel .settings-toggle:checked::after {
+  background-color: var(--hyacinth-primary-foreground);
+  box-shadow: none;
+}
+
+/* 容器宽度与内边距改在 index.html 的内嵌 <style> 里（它加载在 shell.css 之后，
+   同优先级的规则一律盖掉本文件，连 @media 内的也一样），此处不再重复定义。 */
+
+/* ── 13. 交互反馈 ───────────────────────────────────────────────
+   三件事：键盘可达（focus-visible）、按下有回应（:active）、长对话能回到底（FAB）。 */
+
+/* 只在键盘导航时画焦点环：鼠标点击不画，避免每次点按钮都闪一圈 */
+#app-shell :focus { outline: none; }
+#app-shell :focus-visible {
+  outline: 2px solid var(--hyacinth-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm, 8px);
+}
+
+/* 按下反馈：统一 0.97 缩放 + 亮度变化。160ms 以上会被感知成"卡" */
+.sb-new:active,
+.tb-icon:active,
+.cbtn:active,
+.chat-suggestion:active,
+.sidebar-recent-item:active,
+.sb-nav .nav-item:active {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+.cbtn-primary:active { filter: brightness(0.92); }
+
+/* 回到底部：贴消息区右下角，避开 composer */
+.scroll-fab {
+  position: absolute;
+  right: 24px;
+  bottom: 104px;
+  z-index: 20;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--hair-strong);
+  background: var(--s2);
+  color: var(--hyacinth-foreground);
+  cursor: pointer;
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.7);
+  transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.scroll-fab:hover { background: var(--s3); }
+.scroll-fab:active { transform: scale(0.94); }
+.scroll-fab[hidden] { display: none; }
+.scroll-fab svg { width: 16px; height: 16px; }
+
+/* 主输入框：单行时不出现多余内边距 */
+#chat-input { overflow-y: auto; }
+
+/* 有内容可滚时的边缘暗示：顶部一条渐隐，提示"上面还有" */
+.msg-list {
+  background-image: linear-gradient(to bottom, color-mix(in srgb, var(--hyacinth-background) 92%, transparent), transparent 18px);
+  background-repeat: no-repeat;
+  background-attachment: local;
+}
+
+/* ── 14. 陪伴舞台的显隐 ──────────────────────────────────────────
+   #companion-stage 是 position:fixed; inset:0 的全屏层，选择器是 **id**，
+   它的 `display:flex` 会压过 UA 的 `[hidden]{display:none}` ⇒ JS 里设了 hidden 也不生效，
+   于是离开陪伴视图后这层一直盖在上面（实测：切到 #/settings 整页变白，
+   像素取样 244,244,246，而卡片 computed 背景是 #111319 —— 矛盾就是这层造成的）。
+   必须用同特异度的 [hidden] 规则显式关掉。 */
+#companion-stage[hidden] { display: none !important; }
+
+/* ── 15. 预览栏（工作区文件查看器，只读）──────────────────────────
+   右侧独立 dock：上半是文件树，下半是文件内容，中间横向分隔条可调高度比，
+   左边缘竖向分隔条可调整栏宽度。两个尺寸都由 JS 写进 CSS 变量并存
+   localStorage，所以刷新后布局不变。
+
+   为什么不用 flex-basis 百分比：拖拽时改 flex-basis 会触发整栏重排并与
+   min-width 打架；改成变量后，浏览器只重算这一个元素。 */
+#preview-dock {
+  --pv-w: 380px;
+  --pv-tree-h: 46%;
+  position: relative;
+  flex: 0 0 var(--pv-w);
+  width: var(--pv-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--s1);
+  border-left: 1px solid var(--hair);
+}
+/* id 选择器的 display 会压过 UA 的 [hidden] ⇒ 必须显式关（同 #companion-stage） */
+#preview-dock[hidden] { display: none; }
+
+.pv-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--hair);
+}
+.pv-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hyacinth-foreground);
+}
+.pv-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-title svg { width: 14px; height: 14px; color: var(--hyacinth-primary); flex: 0 0 auto; }
+.pv-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+
+.pv-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.pv-icon:hover { background: var(--s3); color: var(--hyacinth-foreground); }
+.pv-icon svg { width: 14px; height: 14px; }
+
+/* 面包屑：单行横向滚动，末尾一级是当前目录 */
+.pv-crumbs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--hair);
+  white-space: nowrap;
+}
+.pv-crumbs::-webkit-scrollbar { height: 0; }
+.pv-crumb {
+  border: 0;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 2px 5px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.pv-crumb:hover { color: var(--hyacinth-foreground); background: var(--s2); }
+.pv-crumb.is-current { color: var(--hyacinth-foreground); font-weight: 600; cursor: default; }
+.pv-crumb.is-current:hover { background: transparent; }
+.pv-crumb-sep { color: var(--hyacinth-muted-foreground); opacity: 0.5; font-size: 10px; }
+
+/* ── 文件树 ── */
+/* 树高：跟着内容走，最多占 --pv-tree-h。
+   为什么不用固定 height：目录里只有三五个文件时，固定高度会在树下面留一大片
+   空白（实测 assets/ 这种浅目录很明显）。max-height 让"内容少就矮、内容多才滚"，
+   而拖拽调整的正是这个上限。 */
+.pv-tree {
+  flex: 0 0 auto;
+  max-height: var(--pv-tree-h);
+  min-height: 60px;
+  overflow: auto;
+  padding: 6px 6px 10px;
+}
+.pv-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.pv-item:hover { background: var(--s2); }
+.pv-item.is-active { background: var(--tint); color: var(--hyacinth-foreground); }
+.pv-item.is-dir { font-weight: 550; }
+/* lucide 会把 <i data-lucide> 换成 <svg>；是否保留原 class 取决于版本，
+   所以尺寸用 nth-of-type 兜底（第 1 个 svg = 折叠箭头，第 2 个 = 文件图标），
+   颜色再叠加 class —— 两条都能命中时结果一致，不会打架。 */
+.pv-item > svg:nth-of-type(1) {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--hyacinth-muted-foreground);
+  transition: transform var(--t-fast) var(--ease);
+}
+.pv-item > svg:nth-of-type(1).is-open,
+.pv-item.is-open > svg:nth-of-type(1) { transform: rotate(90deg); }
+.pv-item > svg:nth-of-type(1).is-leaf { visibility: hidden; }
+.pv-item > svg:nth-of-type(2) {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--hyacinth-muted-foreground);
+}
+.pv-item.is-dir > svg:nth-of-type(2) { color: var(--hyacinth-primary); }
+.pv-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-size {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.pv-tree-note {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  line-height: 1.6;
+}
+.pv-tree-note.is-error { color: var(--hyacinth-destructive, #e05252); }
+.pv-tree-note.is-action {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.pv-tree-note.is-action:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+
+/* 工具卡：参数里含路径时整卡可点（点开右侧预览栏定位到该文件） */
+.tool-card.is-openable {
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.tool-card.is-openable:hover {
+  background: var(--tint);
+  border-color: var(--tint-strong);
+}
+.tool-card.is-openable:hover .tool-args { color: var(--hyacinth-primary); }
+
+/* 横向分隔条（树 / 内容）：命中区 8px，可见线只有 1px */
+.pv-split {
+  flex: 0 0 auto;
+  height: 8px;
+  cursor: row-resize;
+  position: relative;
+  background: transparent;
+  transition: background var(--t-fast) var(--ease);
+}
+.pv-split::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--hair);
+}
+.pv-split:hover::after, .pv-split.is-dragging::after {
+  height: 2px;
+  background: var(--hyacinth-primary);
+}
+
+/* ── 内容区 ── */
+.pv-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pv-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px;
+  color: var(--hyacinth-muted-foreground);
+  text-align: center;
+}
+.pv-empty[hidden] { display: none; }
+.pv-empty > svg { width: 26px; height: 26px; opacity: 0.55; }
+.pv-empty-title { font-size: 12.5px; font-weight: 550; margin: 0; }
+.pv-empty-sub { font-size: 11px; opacity: 0.75; margin: 0; }
+
+.pv-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+}
+.pv-meta[hidden] { display: none; }
+.pv-meta-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hyacinth-foreground);
+  font-weight: 550;
+  font-size: 11.5px;
+}
+.pv-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--s3);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.pv-badge.is-warn { background: var(--tint-strong); color: var(--hyacinth-foreground); }
+
+.pv-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.pv-content[hidden] { display: none; }
+
+/* 代码/文本：行号用 sticky 固定在左侧，横向滚动时不会跟着跑掉 */
+.pv-code-wrap { display: flex; align-items: flex-start; min-height: 100%; }
+.pv-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 10px 8px 24px 12px;
+  text-align: right;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.6;
+  background: var(--s1);
+  user-select: none;
+  white-space: pre;
+}
+.pv-code {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 10px 16px 24px 4px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--hyacinth-foreground);
+  white-space: pre;
+  tab-size: 2;
+}
+.pv-trunc-note {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  background: var(--s2);
+  border-top: 1px solid var(--hair);
+}
+
+/* Markdown 预览：复用聊天的 markdown 排版（.msg-rich 定义在第 4 节） */
+.pv-md { padding: 14px 16px 28px; font-size: 12.5px; }
+.pv-md > :first-child { margin-top: 0; }
+.pv-md > :last-child { margin-bottom: 0; }
+.pv-md pre { overflow-x: auto; }
+.pv-md table { display: block; overflow-x: auto; max-width: 100%; }
+
+/* 图片：居中、不放大、按栏宽收缩 */
+.pv-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  min-height: 100px;
+}
+.pv-image-wrap img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+}
+.pv-pdf {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border: 0;
+  background: #fff;
+}
+.pv-binary {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--hyacinth-muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.pv-binary a, .pv-open-link {
+  color: var(--hyacinth-primary);
+  text-decoration: none;
+}
+.pv-binary a:hover, .pv-open-link:hover { text-decoration: underline; }
+
+/* 左边缘竖向分隔条（整栏宽度） */
+.pv-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 2;
+  transition: background var(--t-fast) var(--ease);
+}
+.pv-resizer::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background var(--t-fast) var(--ease);
+}
+.pv-resizer:hover::after, .pv-resizer.is-dragging::after { background: var(--hyacinth-primary); width: 2px; }
+
+/* 拖拽进行中：禁掉全局文本选中，否则拖到一半会选满一片文字 */
+#preview-dock.is-resizing { user-select: none; }
+#preview-dock.is-resizing .pv-tree, #preview-dock.is-resizing .pv-content { pointer-events: none; }
+
+/* 顶栏开关的"开"态：主色高亮，让"栏是开着的"一眼可见 */
+#preview-toggle-btn[aria-pressed="true"] {
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+}
+
+/* 窄屏：预览栏覆盖式浮在内容上，不再挤压主区（主区本来就不够宽了） */
+@media (max-width: 900px) {
+  #preview-dock {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+    box-shadow: -12px 0 32px color-mix(in srgb, var(--hyacinth-background) 60%, transparent);
+  }
+}

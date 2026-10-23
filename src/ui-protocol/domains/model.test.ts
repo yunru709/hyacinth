@@ -119,6 +119,8 @@ function setup(
   getActiveProvider?: () => ProviderView | null,
   listLocalModels?: () => import('../types.js').LocalModelEntry[],
   localModelOps?: import('./model.js').LocalModelOpsLike,
+  persistApiKey?: (provider: string, apiKey: string) => void | Promise<void>,
+  providersMeta?: ProviderMetaLike[],
 ) {
   const registry = new MockRegistry();
   const manager = new MockManager();
@@ -129,12 +131,13 @@ function setup(
   const domain = createModelDomain({
     registry,
     manager,
-    listProvidersMeta: () => PROVIDERS_META,
+    listProvidersMeta: () => providersMeta ?? PROVIDERS_META,
     listLocalModels,
     localModelOps,
     emit: (type, payload) => server.broadcast(type, payload),
     getLoop,
     getActiveProvider,
+    persistApiKey,
   });
   server.registerDomain('model', domain);
   server.attach(serverAdp);
@@ -509,5 +512,85 @@ describe('模型域', () => {
     const resp = responses.find((r) => r.id === 'scan1');
     expect(resp).toMatchObject({ ok: true });
     expect((resp!.result as { models: unknown[] }).models).toHaveLength(1);
+  });
+});
+
+// ── 密钥来源：.env（TUI）与 channel.apiKey（WebUI）必须互相可见 ──
+// 历史缺陷：configured 只看 process.env[envKey]，于是
+//   · WebUI 里配过密钥（写 model-channels.json）→ 卡片仍显示"未配置密钥"
+//   · 用户在 TUI 配好 → WebUI 显示未配置（若 .env 未加载）
+describe('密钥判定（两处落点）', () => {
+  const META = (id: string, envKey: string): ProviderMetaLike[] => [
+    { id, name: id, defaultModel: `${id}-1`, envKey },
+  ];
+
+  it('channel 里存了 apiKey ⇒ 判为已配置（WebUI 写入路径）', async () => {
+    const envKey = 'HYACINTH_TEST_CHANNEL_KEY';
+    delete process.env[envKey];
+    const { client, responses, flush, registry } = setup(
+      undefined, undefined, undefined, undefined, undefined, META('probe', envKey),
+    );
+    registry.upsertChannel('probe', { provider: 'probe', apiKey: 'sk-from-channel' });
+
+    client.send({ kind: 'request', id: 'k1', method: 'model.listProviders' });
+    await flush();
+    const providers = (responses[0].result as { providers: Array<Record<string, unknown>> }).providers;
+    const probe = providers.find((p) => p.type === 'probe');
+    expect(probe).toMatchObject({ configured: true, status: 'configured' });
+  });
+
+  it('环境变量有值 ⇒ 判为已配置（.env 加载后的 TUI 路径）', async () => {
+    const envKey = 'HYACINTH_TEST_ENV_KEY';
+    process.env[envKey] = 'sk-from-env';
+    try {
+      const { client, responses, flush } = setup(
+        undefined, undefined, undefined, undefined, undefined, META('probe2', envKey),
+      );
+      client.send({ kind: 'request', id: 'k2', method: 'model.listProviders' });
+      await flush();
+      const providers = (responses[0].result as { providers: Array<Record<string, unknown>> }).providers;
+      expect(providers.find((p) => p.type === 'probe2')).toMatchObject({ configured: true });
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it('两处都没有 ⇒ 未配置', async () => {
+    const envKey = 'HYACINTH_TEST_NONE_KEY';
+    delete process.env[envKey];
+    const { client, responses, flush } = setup(
+      undefined, undefined, undefined, undefined, undefined, META('probe3', envKey),
+    );
+    client.send({ kind: 'request', id: 'k3', method: 'model.listProviders' });
+    await flush();
+    const providers = (responses[0].result as { providers: Array<Record<string, unknown>> }).providers;
+    expect(providers.find((p) => p.type === 'probe3')).toMatchObject({ configured: false, status: 'unconfigured' });
+  });
+
+  it('upsertChannel 带 apiKey ⇒ 同步写 .env（persistApiKey 回调），使 TUI 也可见', async () => {
+    const calls: Array<[string, string]> = [];
+    const { client, responses, flush } = setup(
+      undefined, undefined, undefined, undefined, (p, k) => { calls.push([p, k]); },
+    );
+    client.send({
+      kind: 'request', id: 'u1', method: 'model.upsertChannel',
+      params: { name: 'probe', provider: 'probe', apiKey: 'sk-new' },
+    });
+    await flush();
+    expect(responses.find((r) => r.id === 'u1')).toMatchObject({ ok: true });
+    expect(calls).toEqual([['probe', 'sk-new']]);
+  });
+
+  it('upsertChannel 不带 apiKey ⇒ 不碰 .env', async () => {
+    const calls: Array<[string, string]> = [];
+    const { client, flush } = setup(
+      undefined, undefined, undefined, undefined, (p, k) => { calls.push([p, k]); },
+    );
+    client.send({
+      kind: 'request', id: 'u2', method: 'model.upsertChannel',
+      params: { name: 'probe', provider: 'probe', model: 'probe-2' },
+    });
+    await flush();
+    expect(calls).toEqual([]);
   });
 });

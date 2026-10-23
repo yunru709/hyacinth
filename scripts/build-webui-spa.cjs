@@ -48,12 +48,6 @@ function extractStyles(html) {
   return styles;
 }
 
-// ── 提取 text/tailwindcss 配置块（Tailwind 浏览器运行时消费）───────────
-function extractTailwindConfig(html) {
-  const m = html.match(/<style type="text\/tailwindcss">([\s\S]*?)<\/style>/);
-  return m ? m[1].trim() : '';
-}
-
 // ── 提取 semantic-token-fallback（CSS 变量 → 工具类映射，防 Tailwind 未生成时白屏）──
 function extractSemanticFallback(html) {
   const m = html.match(/<style[^>]*id="semantic-token-fallback"[^>]*>([\s\S]*?)<\/style>/);
@@ -106,7 +100,6 @@ function main() {
   }
 
   // 4. 生成 index.html（../assets/ → assets/，因 assets 已复制到 webui 根下）
-  const tailwindCfg = extractTailwindConfig(indexHtml);
   const spa = `<!DOCTYPE html>
 <html lang="zh-CN" class="dark">
 <head>
@@ -115,12 +108,10 @@ function main() {
   <title>Hyacinth WebUI</title>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
-  <script src="/vendor/tailwind-browser.js"></script>
+  <link rel="stylesheet" href="/vendor/tailwind.css">
   <script src="/vendor/lucide.min.js"></script>
   <link rel="stylesheet" href="/app.css">
-  <style type="text/tailwindcss">
-${tailwindCfg}
-  </style>
+  <!-- Tailwind 已在构建期编译进 /vendor/tailwind.css，主题映射见 src/webui/tailwind.input.css -->
 </head>
 <body class="h-screen w-screen overflow-hidden font-sans antialiased">
 ${shell}

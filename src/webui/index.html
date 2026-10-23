@@ -6,122 +6,127 @@
   <title>Hyacinth WebUI</title>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
-  <script src="/vendor/tailwind-browser.js"></script>
+  <!-- KaTeX 样式必须在 app.css 之前：app.css 里的 .msg-rich 规则要能覆写它 -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <!-- Tailwind：构建期已编译进 /vendor/tailwind.css（32KB 静态 CSS）。
+       原先这里挂的是 /vendor/tailwind-browser.js（269KB），它在浏览器里扫 DOM 现场编译，
+       代价是首屏多解析 269KB JS 后才出样式 + 每次 append 气泡都可能触发重扫。
+       产物由 src/webui/tailwind.input.css 生成（见 scripts/gen-webui-css.cjs）；
+       主题映射现在只有一处来源，就是那个 input.css。 -->
+  <link rel="stylesheet" href="/vendor/tailwind.css">
+  <!-- lucide 是首屏最大的单个资源（388KB），但**不要**试图用 defer 换首屏：
+       实测 A/B 三发对照 FCP 为 600ms（defer）vs 608ms（同步），差异落在噪声内。
+       原因是首帧被 178KB 渲染阻塞 CSS（theme 68 + app 45 + shell 34 + tailwind 32）卡住，
+       脚本同步与否不影响这段等待。真要提速，得先削 CSS 体积（theme.css 一次装了 20 套主题）。 -->
   <script src="/vendor/lucide.min.js"></script>
   <link rel="stylesheet" href="/app.css">
-  <style type="text/tailwindcss">
-@theme inline {
-    --color-background: var(--hyacinth-background);
-    --color-foreground: var(--hyacinth-foreground);
-    --color-card: var(--hyacinth-card);
-    --color-card-foreground: var(--hyacinth-card-foreground);
-    --color-popover: var(--hyacinth-popover);
-    --color-popover-foreground: var(--hyacinth-popover-foreground);
-    --color-primary: var(--hyacinth-primary);
-    --color-primary-foreground: var(--hyacinth-primary-foreground);
-    --color-muted: var(--hyacinth-muted);
-    --color-muted-foreground: var(--hyacinth-muted-foreground);
-    --color-border: var(--hyacinth-border);
-    --color-input: var(--hyacinth-input);
-    --color-ring: var(--hyacinth-ring);
-    --radius-sm: var(--radius-sm);
-    --radius-md: var(--radius-md);
-    --radius-lg: var(--radius-lg);
-    --radius-xl: var(--radius-xl);
-    --radius-2xl: var(--radius-2xl);
-    --radius-full: var(--radius-full);
-  }
-  @layer base {
-    body { background: var(--hyacinth-background); color: var(--hyacinth-foreground); }
-    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
-    th { @apply whitespace-nowrap; }
-  }
-  </style>
+  <!-- shell.css 必须最后加载：它是 v3 外壳（顶栏/侧栏/消息流/composer）的唯一样式源，
+       用语义 class + 覆盖层叠的方式接管外观；app.css 继续负责 markdown 与设置面板内部。 -->
+  <link rel="stylesheet" href="/shell.css">
 </head>
 <body class="h-screen w-screen overflow-hidden font-sans antialiased">
 <div class="h-screen w-screen overflow-hidden flex flex-col bg-background text-foreground" id="app-shell" data-viewport-mode="app-shell">
-  <!-- Header -->
-  <header data-nav-key="header" class="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-3 gap-3">
-    <div class="flex items-center gap-3 min-w-0">
-      <!-- 窄屏导航菜单键（≤900px 才显示；宽屏由 CSS 隐藏 ✓） -->
-      <button id="nav-drawer-btn" class="p-1.5 -ml-1 shrink-0 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" aria-label="打开导航" aria-expanded="false">
-        <i data-lucide="menu" class="w-5 h-5"></i>
-      </button>
-      <a href="#/companion" data-dom-id="companion-entry" class="companion-entry-btn" aria-label="陪伴模式">
-        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-      </a>
-      <div class="flex items-center gap-2 text-primary">
-        <i data-lucide="hexagon" class="w-5 h-5"></i>
-        <span class="font-semibold text-sm tracking-tight brand-wordmark">Hyacinth</span>
-      </div>
-      <div class="h-5 w-px bg-border"></div>
-      <div class="flex items-center gap-2 px-2 py-1 rounded-md bg-muted border border-border">
-        <i data-lucide="cpu" class="w-3.5 h-3.5 text-muted-foreground"></i>
-        <span id="header-model-name" class="text-xs font-medium truncate max-w-[180px]">—</span>
-        <span id="header-model-provider" class="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary"></span>
-      </div>
+  <!-- Header（v3：语义化 class，样式在 shell.css；不再依赖 Tailwind 工具类） -->
+  <header id="topbar" data-nav-key="header">
+    <!-- 窄屏导航菜单键（≤900px 才显示；宽屏由 CSS 隐藏 ✓） -->
+    <button id="nav-drawer-btn" class="tb-icon" aria-label="打开导航" aria-expanded="false">
+      <i data-lucide="menu"></i>
+    </button>
+    <a href="#/companion" data-dom-id="companion-entry" class="brand-mark" aria-label="陪伴模式">
+      <i data-lucide="sparkles"></i>
+    </a>
+    <div class="brand">
+      <i data-lucide="hexagon"></i>
+      <span class="brand-wordmark">Hyacinth</span>
+    </div>
+    <div class="tb-sep"></div>
+    <!-- 当前会话名：由 app.js 在切换/新建时写入（此前没有任何地方显示"我在哪个会话"） -->
+    <div class="tb-title" id="session-title">新会话</div>
+
+    <div class="tb-spacer"></div>
+
+    <div class="model-chip" title="当前模型">
+      <i data-lucide="cpu"></i>
+      <span id="header-model-name">—</span>
+      <span id="header-model-provider" class="chip-tag"></span>
     </div>
 
-    <div class="hidden md:flex items-center gap-3 flex-1 justify-center max-w-xl">
-      <span class="text-xs text-muted-foreground whitespace-nowrap">Context</span>
-      <div class="flex-1 h-2 bg-muted rounded-full overflow-hidden border border-border">
-        <div id="header-context-bar" class="h-full bg-primary" style="width: 0%"></div>
-      </div>
-      <span id="header-context-text" class="text-xs font-mono text-muted-foreground whitespace-nowrap">— / —</span>
+    <div class="ctx-meter" title="上下文占用">
+      <div class="ctx-track"><div id="header-context-bar" style="width: 0%"></div></div>
+      <span id="header-context-text">— / —</span>
     </div>
 
-    <div class="flex items-center gap-2">
-      <div id="header-online" class="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border bg-muted cursor-default" title="正在连接后端…">
-        <span id="header-online-dot" class="w-2 h-2 rounded-full shrink-0" style="background-color:#6b7280"></span>
-        <span id="header-online-text" class="text-xs" style="color:#9ca3af">连接中…</span>
-      </div>
-      <button class="p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors" aria-label="Settings">
-        <i data-lucide="settings" class="w-4 h-4"></i>
-      </button>
+    <div id="header-online" class="online-pill" title="正在连接后端…">
+      <span id="header-online-dot" style="background-color:#6b7280"></span>
+      <span id="header-online-text" style="color:#9ca3af">连接中…</span>
     </div>
+
+    <!-- 预览栏开关：右侧文件查看器（工作区只读）。aria-pressed 反映展开状态，
+         键盘/读屏用户才能知道当前是开是关。 -->
+    <button id="preview-toggle-btn" class="tb-icon" aria-label="切换文件预览栏" aria-pressed="false" title="文件预览（Ctrl+Alt+P）">
+      <i data-lucide="panel-right"></i>
+    </button>
+
+    <button class="tb-icon" aria-label="Settings">
+      <i data-lucide="settings"></i>
+    </button>
   </header>
 
   <!-- Body area -->
   <div class="body-area flex flex-1 overflow-hidden">
     <!-- 窄屏导航遮罩：点击关闭抽屉（宽屏恒为 display:none ✓） -->
     <div id="nav-backdrop"></div>
-    <!-- Sidebar -->
-    <aside data-nav-key="sidebar" class="w-[260px] shrink-0 border-r border-border bg-card flex flex-col">
-      <div class="p-3">
-        <button class="w-full flex items-center justify-center gap-2 h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-600 transition-colors">
-          <i data-lucide="plus" class="w-4 h-4"></i>
-          <span>新会话</span>
-        </button>
+    <!-- Sidebar（v3：语义化 class，样式见 shell.css） -->
+    <aside id="sidebar" data-nav-key="sidebar">
+      <!-- id 必须留：app.js 的 bindUI 用 #session-new-btn 绑「新建会话」，
+           此前这个按钮根本没有 id ⇒ 点击毫无反应（死按钮） -->
+      <button id="session-new-btn" class="sb-new">
+        <i data-lucide="plus"></i>
+        <span>新会话</span>
+      </button>
+
+      <!-- 会话搜索：只看当前模式（协议层已过滤），纯前端过滤列表，不打后端 -->
+      <div class="sb-search">
+        <i data-lucide="search"></i>
+        <input id="session-search" type="search" placeholder="搜索会话" autocomplete="off" aria-label="搜索会话">
       </div>
 
-      <nav class="flex-1 px-2 space-y-1 overflow-y-auto no-scrollbar">
-        <a href="#/chat" data-dom-id="nav-chat" data-nav-item="chat" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
-          <i data-lucide="message-square" class="w-4 h-4 text-muted-foreground"></i>
-          <span class="font-medium">主界面</span>
+      <!-- 最近会话：列表为空时整块隐藏（app.js renderSidebarRecent 控制）。
+           ⚠️ 必须在最长的那个滚动区里：会话多时只有这里该滚动，导航要始终可见。 -->
+      <div id="sidebar-recent" class="sidebar-recent" hidden aria-label="最近会话">
+        <div class="sidebar-recent-head">
+          <span class="sidebar-recent-heading">最近</span>
+          <a href="#/sessions" class="sidebar-recent-all">全部</a>
+        </div>
+        <div id="sidebar-recent-list" class="sidebar-recent-list"></div>
+      </div>
+
+      <nav class="sb-nav">
+        <a href="#/chat" data-dom-id="nav-chat" data-nav-item="chat" class="nav-item">
+          <i data-lucide="message-square"></i>
+          <span>主界面</span>
         </a>
-        <a href="#/model" data-dom-id="nav-models" data-nav-item="models" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
-          <i data-lucide="cpu" class="w-4 h-4 text-muted-foreground"></i>
-          <span class="font-medium">模型选择</span>
+        <a href="#/model" data-dom-id="nav-models" data-nav-item="models" class="nav-item">
+          <i data-lucide="cpu"></i>
+          <span>模型选择</span>
         </a>
-        <a href="#/sessions" data-dom-id="nav-sessions" data-nav-item="sessions" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
-          <i data-lucide="folder-clock" class="w-4 h-4 text-muted-foreground"></i>
-          <span class="font-medium">会话管理</span>
+        <a href="#/sessions" data-dom-id="nav-sessions" data-nav-item="sessions" class="nav-item">
+          <i data-lucide="folder-clock"></i>
+          <span>会话管理</span>
         </a>
-        <a href="#/schedule" data-dom-id="nav-schedule" data-nav-item="schedule" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
-          <i data-lucide="calendar-clock" class="w-4 h-4"></i>
+        <a href="#/schedule" data-dom-id="nav-schedule" data-nav-item="schedule" class="nav-item">
+          <i data-lucide="calendar-clock"></i>
           <span>定时任务</span>
         </a>
-        <a href="#/settings" data-dom-id="nav-settings" data-nav-item="settings" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-sm text-foreground hover:bg-muted transition-colors">
-          <i data-lucide="sliders-horizontal" class="w-4 h-4 text-muted-foreground"></i>
-          <span class="font-medium">设置</span>
+        <a href="#/settings" data-dom-id="nav-settings" data-nav-item="settings" class="nav-item">
+          <i data-lucide="sliders-horizontal"></i>
+          <span>设置</span>
         </a>
       </nav>
 
-      <div class="p-3 border-t border-border">
-        <div class="flex items-center justify-between text-xs text-muted-foreground">
-          <span id="sidebar-version">Hyacinth</span>
-          <span class="font-mono">WebUI</span>
-        </div>
+      <div class="sb-foot">
+        <span id="sidebar-version">Hyacinth</span>
+        <span class="sb-foot-tag">WebUI</span>
       </div>
     </aside>
 
@@ -131,49 +136,53 @@
       <section data-view="chat" class="view-section h-full">
       <div id="chat-wrapper" class="h-full flex flex-col min-w-0">
         <!-- Message canvas（无消息时收起，让位给下面的空状态 ✓） -->
-        <div id="message-list" class="flex-1 overflow-y-auto px-4 py-5 space-y-5" data-scroll-region="primary" hidden></div>
+        <div id="message-list" class="msg-list" data-scroll-region="primary" hidden></div>
+
+        <!-- 回到底部：消息流滚上去之后才出现，避免长对话里手动拉半天 -->
+        <button id="scroll-fab" class="scroll-fab" hidden aria-label="回到底部" title="回到底部">
+          <i data-lucide="arrow-down"></i>
+        </button>
 
         <!-- 空状态（首屏引导）：尚无消息时显示 —— 原先这里是一大片空区 ✗
              app.js 用 MutationObserver 盯 message-list 子节点自动切换 ✓ -->
-        <div id="chat-empty" class="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-10 text-center">
-          <div class="flex flex-col items-center gap-3">
-            <div class="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-              <i data-lucide="hexagon" class="w-6 h-6 text-primary"></i>
+        <div id="chat-empty" class="chat-empty">
+          <div class="empty-inner">
+            <div class="empty-mark"><i data-lucide="hexagon"></i></div>
+            <h2 class="empty-title">开始对话</h2>
+            <p class="empty-sub">直接输入问题，或从下面挑一个开始。也可以粘贴 / 拖入图片。</p>
+            <div class="empty-actions">
+              <button type="button" class="chat-suggestion" data-prompt="你能帮我做什么？">你能帮我做什么？</button>
+              <button type="button" class="chat-suggestion" data-prompt="介绍一下这个项目">介绍一下这个项目</button>
+              <button type="button" class="chat-suggestion" data-prompt="帮我写一段脚本">帮我写一段脚本</button>
             </div>
-            <h2 class="text-lg font-semibold text-foreground">开始对话</h2>
-            <p class="text-sm text-muted-foreground max-w-md leading-relaxed">
-              直接输入你的问题即可；也可以从下面挑一个开始。
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center justify-center gap-2 max-w-2xl">
-            <button type="button" class="chat-suggestion" data-prompt="你能帮我做什么？">你能帮我做什么？</button>
-            <button type="button" class="chat-suggestion" data-prompt="介绍一下这个项目">介绍一下这个项目</button>
-            <button type="button" class="chat-suggestion" data-prompt="帮我写一段脚本">帮我写一段脚本</button>
           </div>
         </div>
 
-        <!-- Composer -->
-        <div id="chat-composer" class="shrink-0 border-t border-border bg-card p-3">
-          <div class="flex items-end gap-2 rounded-lg border border-border bg-background p-2 focus-within:ring-1 focus-within:ring-primary transition-shadow">
+        <!-- Composer（v3：浮动卡片 + 渐变遮罩，视觉上从"页脚"变成"悬浮输入"） -->
+        <div id="chat-composer" class="composer">
+          <!-- 待发送图片预览（有图才显示；app.js renderAttachments 维护） -->
+          <div id="composer-attachments" class="composer-attachments" hidden></div>
+          <div class="composer-box">
             <textarea
-              class="flex-1 min-h-[40px] max-h-[160px] resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground outline-none"
-              id="chat-input" placeholder="输入消息…"
+              id="chat-input" placeholder="输入消息…（可粘贴 / 拖入图片）"
               rows="1"
               aria-label="消息输入"></textarea>
-            <div class="flex items-center gap-1 pb-1">
-              <button class="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" aria-label="附加文件">
+            <div class="composer-actions">
+              <input type="file" id="chat-file-input" accept="image/*" multiple hidden>
+              <button id="chat-attach-btn" class="cbtn" aria-label="添加图片" title="添加图片（也可直接粘贴或拖入）">
                 <i data-lucide="paperclip" class="w-4 h-4"></i>
               </button>
-              <button id="chat-send-btn" class="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity" aria-label="发送">
+              <button id="chat-send-btn" class="cbtn cbtn-primary" aria-label="发送">
                 <i data-lucide="send-horizontal" class="w-4 h-4"></i>
               </button>
-              <button id="chat-stop-btn" class="p-1.5 rounded-md bg-muted text-muted-foreground hover:bg-muted/70 transition-opacity" aria-label="停止" hidden>
+              <button id="chat-stop-btn" class="cbtn cbtn-stop" aria-label="停止" hidden>
                 <i data-lucide="square" class="w-4 h-4"></i>
               </button>
             </div>
           </div>
-          <div id="composer-hint" class="mt-2 flex items-center justify-between text-xs text-muted-foreground px-1">
+          <div id="composer-hint" class="composer-hint">
             <span>Enter 发送 / Shift+Enter 换行</span>
+            <span id="composer-attach-hint" class="hidden">图片将随本条消息一起发送</span>
           </div>
         </div>
       </div>
@@ -404,8 +413,12 @@
         #tab-tools:checked ~ .settings-frame .settings-tabs label[for="tab-tools"],
         #tab-mcp:checked ~ .settings-frame .settings-tabs label[for="tab-mcp"] { background-color: var(--primary-100); color: var(--hyacinth-primary); border-right: 2px solid var(--hyacinth-primary); }
         .settings-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background-color: var(--hyacinth-background); }
-        .settings-scroll { flex: 1; overflow: auto; padding: 24px; }
-        .settings-panel { display: none; flex-direction: column; gap: 20px; max-width: 760px; }
+        .settings-scroll { flex: 1; overflow: auto; padding: 28px 32px 40px; }
+        .settings-panel { display: none; flex-direction: column; gap: 20px; max-width: min(880px, 100%); }
+        @media (max-width: 1100px) {
+          .settings-scroll { padding: 20px 18px 32px; }
+          .settings-tabs { width: 156px; }
+        }
         #panel-context { display: flex; }
         #tab-turns:checked ~ .settings-frame .settings-content #panel-context,
         #tab-compress:checked ~ .settings-frame .settings-content #panel-context,
@@ -529,10 +542,24 @@
         <div class="settings-frame">
           <nav class="settings-tabs" aria-label="设置分类">
             <div class="settings-tabs-header">设置</div>
+            <!-- A5：11 个 tab 平铺一长条 ⇒ 认知负荷高。按「常用 / 行为 / 系统」分三段。
+                 分组标题必须是 div 而**不能**是 label[for]：label 会变成第 12 个可选 tab，
+                 且 for 指向同一个 radio 会抢走它的点击语义（radio+label 的选中逻辑见 index.html:402-435）。
+                 id / for / data-dom-id 全部原样保留，只调整了展示顺序。 -->
+            <div class="settings-group-label">常用</div>
+            <label for="tab-model" class="settings-tab" data-dom-id="label-model">
+              <i data-lucide="cpu" class="w-4 h-4"></i>
+              <span>模型</span>
+            </label>
             <label for="tab-context" class="settings-tab" data-dom-id="label-context">
               <i data-lucide="layers" class="w-4 h-4"></i>
               <span>上下文</span>
             </label>
+            <label for="tab-appearance" class="settings-tab" data-dom-id="label-appearance">
+              <i data-lucide="palette" class="w-4 h-4"></i>
+              <span>外观</span>
+            </label>
+            <div class="settings-group-label">行为</div>
             <label for="tab-turns" class="settings-tab" data-dom-id="label-turns">
               <i data-lucide="repeat" class="w-4 h-4"></i>
               <span>轮次</span>
@@ -549,18 +576,11 @@
               <i data-lucide="heart" class="w-4 h-4"></i>
               <span>陪伴模式</span>
             </label>
-            <label for="tab-model" class="settings-tab" data-dom-id="label-model">
-              <i data-lucide="cpu" class="w-4 h-4"></i>
-              <span>模型</span>
-            </label>
             <label for="tab-repair" class="settings-tab" data-dom-id="label-repair">
               <i data-lucide="wrench" class="w-4 h-4"></i>
               <span>高级</span>
             </label>
-            <label for="tab-appearance" class="settings-tab" data-dom-id="label-appearance">
-              <i data-lucide="palette" class="w-4 h-4"></i>
-              <span>外观</span>
-            </label>
+            <div class="settings-group-label">系统</div>
             <label for="tab-tools" class="settings-tab" data-dom-id="label-tools">
               <i data-lucide="blocks" class="w-4 h-4"></i>
               <span>工具</span>
@@ -1421,6 +1441,51 @@
       </div>
     </section>
     </main>
+
+    <!-- ── 预览栏（工作区文件查看器，只读）─────────────────────────────
+         后端是 /api/fs/*（registerPreviewRoutes），路径越界在服务端 fail-closed；
+         这里只负责展示。默认收起，展开状态与宽度存 localStorage。 -->
+    <aside id="preview-dock" hidden aria-label="文件预览">
+      <div class="pv-head">
+        <span class="pv-title" title="工作区根目录">
+          <i data-lucide="folder-open"></i>
+          <span id="pv-root-name">文件预览</span>
+        </span>
+        <span class="pv-head-actions">
+          <button id="pv-refresh-btn" class="pv-icon" type="button" title="刷新当前目录" aria-label="刷新当前目录">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+          <button id="pv-close-btn" class="pv-icon" type="button" title="收起预览栏" aria-label="收起预览栏">
+            <i data-lucide="panel-right-close"></i>
+          </button>
+        </span>
+      </div>
+
+      <!-- 面包屑：既是"我在哪"，也是逐级返回的入口 -->
+      <nav class="pv-crumbs" id="pv-crumbs" aria-label="路径"></nav>
+
+      <!-- 上半：文件树（懒加载，点目录才请求下一级） -->
+      <div class="pv-tree" id="pv-tree" role="tree" aria-label="文件树" tabindex="0"></div>
+
+      <!-- 横向分隔条：拖动调整"树 / 内容"高度比 -->
+      <div class="pv-split" id="pv-split" role="separator" aria-orientation="horizontal" tabindex="0"
+           aria-label="调整文件树与预览区的高度" title="拖动调整高度"></div>
+
+      <!-- 下半：文件内容 -->
+      <div class="pv-view" id="pv-view">
+        <div class="pv-empty" id="pv-empty">
+          <i data-lucide="file-search"></i>
+          <p class="pv-empty-title">选一个文件</p>
+          <p class="pv-empty-sub">文本 · 代码 · Markdown · 图片 · PDF</p>
+        </div>
+        <div class="pv-meta" id="pv-meta" hidden></div>
+        <div class="pv-content" id="pv-content" hidden></div>
+      </div>
+
+      <!-- 左边缘分隔条：拖动调整整栏宽度 -->
+      <div class="pv-resizer" id="pv-resizer" role="separator" aria-orientation="vertical" tabindex="0"
+           aria-label="调整预览栏宽度" title="拖动调整宽度"></div>
+    </aside>
   </div>
 </div>
   <section data-view="companion" class="view-section companion-view" hidden>
@@ -2299,6 +2364,8 @@
     </div>
   </div>
 
+  <!-- KaTeX 必须排在 markdown.js 之前：markdown.js 的 renderMath 运行时读 window.katex -->
+  <script src="/vendor/katex/katex.min.js"></script>
   <!-- markdown 渲染器：必须排在 app.js 之前（app.js 同步读 window.HyMarkdown）✓ -->
   <script src="/markdown.js"></script>
   <script src="/app.js"></script>

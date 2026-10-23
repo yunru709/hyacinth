@@ -1,0 +1,33 @@
+﻿# run 2026-10-18T16:52:12
+== OS / build ==
+  Microsoft Windows 11 Pro Insider Preview   build=26340   boot=10/17/2026 20:54:54
+  UBR=9750  DisplayVersion=26H2  BuildLab=26100.ge_release_flt.260716-1700
+  Windows.old exists = True
+  old ntoskrnl = 10.0.26100.9549 (WinBuild.160101.0800)
+== 电源方案（含本会话改过的那两处）==
+  active plan = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+  MIN(AC) = 5
+  MAX(AC) = 100
+  EPP(我写的惰性值)(AC) = 50
+== 症状读数 ==
+  NtPI cpu0 : cur=2100 max=2100 limit=2100
+  NtPI cpu16: cur=2100 max=2100 limit=2100
+  processor frequency = 2100
+  % processor performance = 186.3
+== 最近服务/更新事件 ==
+  10/17/2026 16:38:33 [2] Package Microsoft-Windows-FodMetadataServicing-Desktop-Metadata was successfully changed to the
+  10/17/2026 16:38:33 [2] Package KB5127842 was successfully changed to the Installed state.
+  10/17/2026 16:38:32 [2] Package KB5127694 was successfully changed to the Installed state.
+  10/17/2026 16:34:22 [4] A reboot is necessary before package KB5127694 can be changed to the Installed state.
+  10/17/2026 12:44:28 [4] A reboot is necessary before package Microsoft-Windows-FodMetadataServicing-Desktop-Metadata ca
+  10/17/2026 12:44:28 [4] A reboot is necessary before package KB5127842 can be changed to the Installed state.
+  10/17/2026 12:37:29 [1] Initiating changes for package Microsoft-Windows-FodMetadataServicing-Desktop-Metadata. Current
+  10/17/2026 12:37:29 [1] Initiating changes for package KB5127842. Current state is Staged. Target state is Installed. C
+  10/17/2026 12:37:24 [2] Package KB5127842 was successfully changed to the Staged state.
+  10/17/2026 12:35:07 [1] Initiating changes for package KB5127842. Current state is Absent. Target state is Staged. Clie
+  KB5127842  installed 10/17/2026 00:00:00
+  KB5127694  installed 10/17/2026 00:00:00
+  KB5127837  installed 10/16/2026 00:00:00
+  KB5122776  installed 10/11/2026 00:00:00
+  KB5127774  installed 10/11/2026 00:00:00
+# done

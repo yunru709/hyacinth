@@ -1,0 +1,15 @@
+﻿
+run at 2026-10-17T22:43:33
+elevated = True
+key = HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\af77c3cb-cfc8-4516-8e3b-821eb82fd373\54533251-82be-4824-96c1-47b60b740d00\36687f9e-e3a5-4dbf-b1dc-15eb381c6863
+exists before = True
+  ACSettingIndex = 50
+  DCSettingIndex = 
+  REMOVE ACSettingIndex FAILED: 不允许所请求的注册表访问权。
+  REMOVE DCSettingIndex FAILED: 不允许所请求的注册表访问权。
+  props left = [ACSettingIndex]
+exists after = True
+  remaining props = [ACSettingIndex]
+powercfg /setactive af77c3cb-cfc8-4516-8e3b-821eb82fd373 rc=0
+active plan now = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+# done

@@ -1,0 +1,18 @@
+﻿
+active plan = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+== window 1: MIN=5 ==
+  [set MIN] 5 rc=0/0 readback=5
+  [MIN5-a] processor frequency=2100  % processor performance=200.7  % processor time=10.3  | per-core med=151 max=222
+== window 2: MIN=20 ==
+  [set MIN] 20 rc=0/0 readback=20
+  [MIN20-a] processor frequency=2100  % processor performance=201.2  % processor time=23.5  | per-core med=170 max=225
+== window 3: MIN=5 ==
+  [set MIN] 5 rc=0/0 readback=5
+  [MIN5-b] processor frequency=2100  % processor performance=203.5  % processor time=20.7  | per-core med=169 max=226
+== window 4: MIN=20 ==
+  [set MIN] 20 rc=0/0 readback=20
+  [MIN20-b] processor frequency=2100  % processor performance=195.6  % processor time=10.7  | per-core med=149 max=227
+== restore MIN=5 (the user-approved value) ==
+  [set MIN] 5 rc=0/0 readback=5
+  [restored MIN5] processor frequency=2100  % processor performance=200.1  % processor time=8.2  | per-core med=202 max=231
+# done

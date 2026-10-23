@@ -1,0 +1,12 @@
+﻿
+> hyacinth-ai@0.9.61 verify:layers C:\Users\74689\Desktop\Agent\hyacinth
+> node scripts/verify-layers.mjs
+
+✅ verify:layers 通过
+   · 规则 1 内核层：kernel/ 共 16 个文件，零越层依赖
+   · 规则 2 业务核心：扫描 404 个业务文件，零 UI 适配层运行时依赖
+   · 规则 3 装配层：gateway/agent-assembly.ts, gateway/factory.ts 直接 new 业务类 2 个，全部在白名单内
+   · 规则 4 监督层：扫描 469 个业务文件，仅契约叶（supervisor/protocol）可被依赖
+   · 规则 5 UI 直连：扫描 82 个 UI 侧文件，业务核心直连 0 处 + 白名单 stale 0 条
+   · 规则 7 模式硬编码：扫描 62 个泛化层文件，模式名比较 0 处
+LAYERS_EXIT=0

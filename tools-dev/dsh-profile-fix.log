@@ -1,0 +1,49 @@
+﻿=== 1) 备份 profile 元数据 ===
+  backup: package.json -> package.json.bak-20261019-151246
+  backup: pnpm-lock.yaml -> pnpm-lock.yaml.bak-20261019-151246
+  backup: pnpm-workspace.yaml -> pnpm-workspace.yaml.bak-20261019-151246
+=== 2) 杀掉 app 实例 ===
+  kill 2836
+  kill 24056
+  kill 27696
+  kill 33760
+  kill 36112
+=== 3) 从 package.json 摘掉 dsh-computer-use（写后自检）===
+  已写回
+  JSON parse OK; deps = @dsh-pet/bridge, @local/windows-mcp, @mars-sea/dsh-commandcode-provider
+  dsh-computer-use 仍在? False
+=== 4) 用 app 自带 pnpm 重算依赖树 ===
+✓ Lockfile passes supply-chain policies (verified 1d ago)
+Progress: resolved 1, reused 0, downloaded 0, added 0
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+
+Packages: +1 -7
++-------
+Progress: resolved 2, reused 7, downloaded 0, added 1, done
+Done in 416ms using pnpm v11.7.0
+
+   ╭──────────────────────────────────────────╮
+   │                                          │
+   │   Update available! 11.7.0 → 12.14.0.    │
+   │   Changelog: https://pnpm.io/v/12.14.0   │
+   │     To update, run: pnpm self-update     │
+   │                                          │
+   ╰──────────────────────────────────────────╯
+
+pnpm exit = 0
+=== 5) 结果核对 ===
+  node_modules\@deepseek-ai = False
+  node_modules\dsh-computer-use = False
+  node_modules\@dsh-pet = True
+  node_modules\@local = True
+  node_modules\@mars-sea = True
+  node_modules\@standard-schema = True
+  --- node_modules 顶层 ---
+.pnpm
+@deepseek-ai.aside-20261019-150843
+@dsh-pet
+@local
+@mars-sea
+@standard-schema
+.modules.yaml
+.pnpm-workspace-state-v1.json

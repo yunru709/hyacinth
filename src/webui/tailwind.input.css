@@ -1,0 +1,56 @@
+/* WebUI 的 Tailwind 输入文件（唯一来源）
+ * ───────────────────────────────────────────────────────────
+ * 产物：src/webui/vendor/tailwind.css（构建期编译，约 32KB 静态 CSS）
+ * 生成：node scripts/gen-webui-css.cjs
+ *
+ * 为什么不再用浏览器运行时（原先的 /vendor/tailwind-browser.js，269KB）：
+ *   1) 首屏要先下载并解析 269KB JS，然后才扫 DOM 现场编译 ⇒ 出现一段无样式内容；
+ *   2) 每次 append 聊天气泡都可能触发重新扫描/生成；
+ *   3) 样式是运行时算出来的，构建期没有任何东西可以校验它到底覆盖了哪些类。
+ * 编译成静态 CSS 后这三条一起消失：一份 <link> 阻塞式样式表，首帧就是最终样式。
+ *
+ * 改这里的 @theme / @layer base 后必须重新跑生成脚本，否则不生效。
+ * 注意 index.html 里那份 `type="text/tailwindcss"` 的旧副本已删除 —— 别再加回去。
+ */
+
+/* source(none)：关掉 v4 的自动内容探测。
+   不写这个的话，它会扫描 CSS 文件所在目录的整棵树 —— 也就是把 vendor/ 里的
+   lucide.min.js、katex 的 CSS、甚至自己的产物 tailwind.css 全都当候选扫一遍，
+   产物从 32KB 涨到 85KB，而且里面混进一堆页面根本不用的类，且随 vendor 更新漂移。
+   关掉之后类名来源只有下面三条 @source，产物可复现。 */
+@import "tailwindcss" source(none);
+
+/* 扫描范围：只有这三个文件会产出类名。新增会写类的文件时必须在这里补 @source，
+   否则那个文件里的类不会被编译进产物（Tailwind 只生成"看见过"的类）。
+   路径相对于本文件。 */
+@source "./index.html";
+@source "./app.js";
+@source "./markdown.js";
+
+@theme inline {
+  --color-background: var(--hyacinth-background);
+  --color-foreground: var(--hyacinth-foreground);
+  --color-card: var(--hyacinth-card);
+  --color-card-foreground: var(--hyacinth-card-foreground);
+  --color-popover: var(--hyacinth-popover);
+  --color-popover-foreground: var(--hyacinth-popover-foreground);
+  --color-primary: var(--hyacinth-primary);
+  --color-primary-foreground: var(--hyacinth-primary-foreground);
+  --color-muted: var(--hyacinth-muted);
+  --color-muted-foreground: var(--hyacinth-muted-foreground);
+  --color-border: var(--hyacinth-border);
+  --color-input: var(--hyacinth-input);
+  --color-ring: var(--hyacinth-ring);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-full: var(--radius-full);
+}
+
+@layer base {
+  body { background: var(--hyacinth-background); color: var(--hyacinth-foreground); }
+  td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+  th { @apply whitespace-nowrap; }
+}

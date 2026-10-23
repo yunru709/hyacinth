@@ -102,6 +102,12 @@ export interface UiProtocolSessionBackend {
   configureLocalModel?: (config: { ollamaUrl?: string }) => void;
   /** 本地模型写操作（model.local* 用；对应 LocalModelModule 的 start/stop/switch/register/unregister/scan）。可选。 */
   localModelOps?: LocalModelOpsLike;
+  /**
+   * 把 provider 的 API Key 落进 `~/.agent/.env`（对应 ConfigManager.saveApiKey）。
+   * 可选：装配侧不传时，model.upsertChannel 只写 channel（旧行为）。
+   * 传了才能让「WebUI 配置密钥」与「TUI 配置密钥」落在同一处、彼此可见。
+   */
+  persistApiKey?: (provider: string, apiKey: string) => void | Promise<void>;
   /** 会话统计提供者（state.stats 用；对应 StatsManager.get(sessionDir)，可选）。 */
   statsProvider?: (sessionId: string) => Promise<unknown>;
   /** 动态获取知识库（kb 域用；对应 AgentComponents.knowledgeBase，可选）。 */
@@ -432,6 +438,8 @@ export class UiProtocolSession {
       listLocalModels: backend.listLocalModels,
       configureLocalModel: backend.configureLocalModel,
       localModelOps: backend.localModelOps,
+      // 密钥落点统一：WebUI 配的 apiKey 也写进 ~/.agent/.env（与 TUI 同源）
+      persistApiKey: backend.persistApiKey,
       emit: (type, payload) => this.server.broadcast(type, payload),
       // 配置中心：model.switch 是 provider 选择唯一的写入口，由它把
       // provider.active / provider.<name>.model / provider.routeMode 落盘

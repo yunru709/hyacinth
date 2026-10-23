@@ -1,0 +1,61 @@
+﻿
+# time: 2026-10-17T22:16:22
+OS: Microsoft Windows 11 专业版 Insider Preview  build 26340.
+CPU: 13th Gen Intel(R) Core(TM) i7-13700HX  cores=16 lps=24
+Win32_Processor: MaxClockSpeed=2100 CurrentClockSpeed=2100
+
+== Hypervisor / VBS ==
+VBS status (0=off,1=configured,2=running): 2
+SecurityServicesRunning: 0
+SecurityServicesConfigured: 0
+Win32_ComputerSystem.HypervisorPresent: True
+
+
+== Power ==
+电源方案 GUID: af77c3cb-cfc8-4516-8e3b-821eb82fd373  (高性能)
+SUB_PROCESSOR dump -> C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\powercfg-subprocessor.txt
+
+== CallNtPowerInformation(ProcessorInformation) ==
+cpus reported = 24
+cpu0: cur=2100 max=2100 limit=2100 idle=3/3  cpu1: cur=2100 max=2100 limit=2100 idle=3/3  cpu2: cur=2100 max=2100 limit=2100 idle=3/3  cpu3: cur=2100 max=2100 limit=2100 idle=3/3  cpu4: cur=2100 max=2100 limit=2100 idle=3/3  cpu5: cur=2100 max=2100 limit=2100 idle=3/3  cpu6: cur=2100 max=2100 limit=2100 idle=3/3  cpu7: cur=2100 max=2100 limit=2100 idle=3/3  cpu8: cur=2100 max=2100 limit=2100 idle=2/3  cpu9: cur=2100 max=2100 limit=2100 idle=3/3  cpu10: cur=2100 max=2100 limit=2100 idle=3/3  cpu11: cur=2100 max=2100 limit=2100 idle=1/3  cpu12: cur=2100 max=2100 limit=2100 idle=3/3  cpu13: cur=2100 max=2100 limit=2100 idle=3/3  cpu14: cur=2100 max=2100 limit=2100 idle=3/3  cpu15: cur=2100 max=2100 limit=2100 idle=3/3  cpu16: cur=2100 max=2100 limit=2100 idle=3/3  cpu17: cur=2100 max=2100 limit=2100 idle=3/3  cpu18: cur=2100 max=2100 limit=2100 idle=3/3  cpu19: cur=2100 max=2100 limit=2100 idle=3/3  cpu20: cur=2100 max=2100 limit=2100 idle=3/3  cpu21: cur=2100 max=2100 limit=2100 idle=3/3  cpu22: cur=2100 max=2100 limit=2100 idle=3/3  cpu23: cur=2100 max=2100 limit=2100 idle=3/3
+
+
+== PHASE 1: idle baseline ==
+--- idle ---
+\\孑遗\processor information(_total)\processor frequency = 2,100.0
+\\孑遗\processor information(_total)\% processor performance = 211.7
+\\孑遗\processor information(_total)\% of maximum frequency = 92.0
+\\孑遗\processor information(_total)\% processor time = 3.9
+  top per-core %Perf: 0,17=253 0,20=246 0,21=244 0,19=244 0,16=243 0,20=242 0,19=242 0,22=239
+  NtPowerInfo cur(MHz): 2100,2100,2100,2100,2100,2100 ...
+  (idle %ProcessorTime = 9.1)
+
+== PHASE 2: 1 busy thread ==
+--- 1 thread ---
+\\孑遗\processor information(_total)\processor frequency = 2,100.0
+\\孑遗\processor information(_total)\% processor performance = 224.6
+\\孑遗\processor information(_total)\% of maximum frequency = 90.5
+\\孑遗\processor information(_total)\% processor time = 7.8
+  top per-core %Perf: 0,23=247 0,17=247 0,22=247 0,22=247 0,16=246 0,21=246 0,18=246 0,16=246
+  NtPowerInfo cur(MHz): 2100,2100,2100,2100,2100,2100 ...
+  spin[t1] threads=1 iters/thread=1797800000 total=1797800000
+
+== PHASE 3: 24 busy threads ==
+--- 24 threads ---
+\\孑遗\processor information(_total)\processor frequency = 2,100.0
+\\孑遗\processor information(_total)\% processor performance = 240.4
+\\孑遗\processor information(_total)\% of maximum frequency = 98.0
+\\孑遗\processor information(_total)\% processor time = 36.4
+  top per-core %Perf: 0,16=247 0,21=247 0,22=247 0,20=247 0,19=247 0,18=247 0,23=247 0,17=247
+  NtPowerInfo cur(MHz): 2100,2100,2100,2100,2100,2100 ...
+  spin[t24] threads=24 iters/thread=905068750 total=21721650000
+
+== PHASE 4: back to idle ==
+--- idle again ---
+\\孑遗\processor information(_total)\processor frequency = 2,100.0
+\\孑遗\processor information(_total)\% processor performance = 229.1
+\\孑遗\processor information(_total)\% of maximum frequency = 92.5
+\\孑遗\processor information(_total)\% processor time = 4.7
+  top per-core %Perf: 0,17=247 0,23=247 0,22=247 0,18=247 0,18=247 0,19=247 0,22=247 0,21=247
+  NtPowerInfo cur(MHz): 2100,2100,2100,2100,2100,2100 ...
+# done

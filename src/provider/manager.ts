@@ -11,7 +11,10 @@ import type { ProbeConfig } from './probe.js';
 import { ConfigManager } from '../setup/config.js';
 import { getProviderConfigLoader } from './config.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
+import { createLogger } from '../logging/logger.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
+
+const logger = createLogger('provider-manager');
 
 export interface ProviderManagerOptions {
   /** Override retry configuration */
@@ -281,17 +284,54 @@ export class ProviderManager {
 
     // 确定最终配置（兼容旧格式字符串和新格式对象）
     const rawProvider = agentConfig.provider;
-    const providerType = (overrides?.type ??
+    let providerType = (overrides?.type ??
       (typeof rawProvider === 'string'
         ? rawProvider
         : (rawProvider as Record<string, unknown>)?.active)) as ProviderType;
+
+    // ── 显式配置缺 key ⇒ 回落，而不是让进程崩掉 ────────────────────
+    //
+    // 现场：config.json 里 `provider.active` 常是历史残留（如 anthropic），而
+    // `~/.agent/.env` 里只配了 deepseek / 火山 / commandcode 的密钥。原来的行为是
+    // 拿空 key 去 new AnthropicProvider → 构造函数 throw → **整个进程退出**，
+    // 现象是"webui 根本起不来"，报错只说缺某个 key，完全看不出是配置残留。
+    // （TUI 之所以还能跑，是因为它走通道注册表，主 provider 只在兜底时才用到。）
+    //
+    // 处理：回落到"环境变量里确实有密钥"的第一个在线厂商，并把 model 一并换成它的
+    // 默认值 —— 否则会出现 provider=deepseek、model=claude-sonnet-5 的错配，
+    // 请求必然 404，比直接报错更难排查。
+    const metaOf = (t: string) => {
+      try { return getProviderConfigLoader().getProvider(t); } catch { return undefined; }
+    };
+    let fallbackDefaultModel: string | undefined;
+    if (!overrides?.apiKey && !overrides?.type) {
+      const envName = configManager.getApiKeyEnvName(providerType);
+      // envName 为空 = 这个 provider 不需要 key（local / ollama）
+      if (envName && !process.env[envName]) {
+        const alt = ProviderManager.getAvailableProviders()
+          .find((t) => t !== providerType && !!configManager.getApiKeyEnvName(t) && !!process.env[configManager.getApiKeyEnvName(t)!]);
+        if (alt) {
+          logger.warn('provider.active 缺 API Key，回落到可用厂商', {
+            configured: providerType,
+            missingEnvKey: envName,
+            fallback: alt,
+          });
+          providerType = alt;
+          fallbackDefaultModel = metaOf(alt)?.defaultModel;
+        }
+        // 没有可用候选：保持原样，让工厂抛出带厂商名的错误（调用方仍需知道"一个都没配"）
+      }
+    }
 
     // 优先读取 provider.<type>.model，再回退到顶层 model 字段（旧格式）
     const providerSection = typeof rawProvider === 'object' && rawProvider !== null
       ? ((rawProvider as Record<string, unknown>)[providerType] as Record<string, unknown> | undefined)
       : undefined;
     const providerModel = typeof providerSection?.model === 'string' ? providerSection.model : undefined;
-    const model = overrides?.model ?? providerModel ?? agentConfig.model;
+    // model 的优先级：显式 override > 回落厂商的默认模型 > provider.<type>.model > 顶层 model
+    // （fallbackDefaultModel 必须排在 providerModel 前：回落时 providerSection 取到的是
+    //  新厂商的 section，它的 model 可能为空字符串，会把默认模型盖成空）
+    const model = overrides?.model ?? fallbackDefaultModel ?? providerModel ?? agentConfig.model;
 
     // userId：优先从配置读取（provider.<type>.userId > provider.userId），用于 KVCache 隔离
     const providerUserId = typeof providerSection?.userId === 'string' ? providerSection.userId : undefined;

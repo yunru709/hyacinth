@@ -123,6 +123,17 @@ export interface ModelDomainOptions {
   /** 本地模型写操作（model.local* 用；对应 LocalModelModule 的 start/stop/switch/register/unregister/scan）。可选。 */
   localModelOps?: LocalModelOpsLike;
   /**
+   * 把 provider 的 API Key 落进 `~/.agent/.env`（对应 ConfigManager.saveApiKey）。
+   *
+   * 为什么需要：密钥历史上存在**两个**落点 ——
+   *   · TUI 侧：`ConfigManager.saveApiKey()` → `~/.agent/.env`（envKey=值）
+   *   · WebUI 侧：`model.upsertChannel({apiKey})` → `model-channels.json` 的 channel.apiKey
+   * 两边互不可见，于是"在 TUI 配好了，WebUI 显示未配置"（反之亦然）。
+   * 协议层不直接依赖 setup/config（分层：ui-protocol 可独立测试），故用回调注入。
+   * 可选：缺省时只写 channel（保持旧行为）。
+   */
+  persistApiKey?: (provider: string, apiKey: string) => void | Promise<void>;
+  /**
    * 配置中心（唯一真相源的写入端）。
    *
    * model.switch 是 provider 选择**唯一**的写入口：应用运行时后，由它把
@@ -156,7 +167,7 @@ export interface LocalModelOpsLike {
 // ────────────────────────────────────────────────────────────
 
 export function createModelDomain(options: ModelDomainOptions): DomainHandler {
-  const { registry, manager, listProvidersMeta = () => [], listLocalModels = () => [], emit, getLoop, getActiveProvider, configureLocalModel, localModelOps, configCenter } = options;
+  const { registry, manager, listProvidersMeta = () => [], listLocalModels = () => [], emit, getLoop, getActiveProvider, configureLocalModel, localModelOps, configCenter, persistApiKey } = options;
 
   /** 当前活跃 provider 类型 + 模型 */
   const currentActive = (): { provider: string; model: string } => ({
@@ -194,10 +205,20 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
     listProviders: (): { providers: ProviderSummary[] } => {
       const { provider } = currentActive();
       const metas = listProvidersMeta();
+      // 密钥有两个落点（见 ModelDomainOptions.persistApiKey 的说明）：环境变量（TUI 的
+      // ~/.agent/.env）与 channel 配置自身的 apiKey（WebUI 旧写入路径、以及"临时通道"）。
+      // 只查前者会让 WebUI 里配过密钥的厂商一直显示"未配置密钥"——明明能跑。
+      const channelKeyed = new Set<string>();
+      try {
+        for (const c of registry.listChannels()) {
+          if (typeof c.apiKey === 'string' && c.apiKey.trim() && c.provider) channelKeyed.add(c.provider);
+        }
+      } catch { /* registry 未就绪：只按环境变量判定 */ }
       const providers: ProviderSummary[] = metas.map((m) => {
         const isLocal = m.id === 'local' || m.id === 'ollama';
-        // 密钥是否配置：本地 provider 无 envKey 视为已就绪；在线 provider 检查 envKey 对应环境变量非空
-        const configured = !m.envKey || !!process.env[m.envKey];
+        // 密钥是否配置：本地 provider 无 envKey 视为已就绪；在线 provider 看
+        // 「channel 里存了 apiKey」或「envKey 对应的环境变量非空」任一成立。
+        const configured = channelKeyed.has(m.id) || !m.envKey || !!process.env[m.envKey];
         // 就绪状态（协议层派生，前端只做映射展示）：
         // active=当前启用 > local=本地 > configured=已配密钥 > unconfigured=未配密钥
         const status = m.id === provider
@@ -328,6 +349,14 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
       const { name, ...config } = (params ?? {}) as { name: string } & ChannelConfigLike;
       if (!name) throw new Error('model.upsertChannel requires "name"');
       registry.upsertChannel(name, config);
+      // 密钥同时落一份到 ~/.agent/.env（与 TUI 的 ConfigManager.saveApiKey 同一落点）。
+      // 只写 channel 的话，TUI / 环境变量读取方都看不到这把 key —— 两套 UI 的
+      // "已配置"状态会长期打架（用户在 TUI 配好了，WebUI 说没配，反之亦然）。
+      if (config.apiKey && config.provider) {
+        try {
+          await persistApiKey?.(config.provider, config.apiKey);
+        } catch { /* 写 .env 失败不影响通道本身：channel 里已存了 apiKey，实例化照常可用 */ }
+      }
       emit?.(UI_EVENT.MODEL_CHANGE, { action: 'upsertChannel', name });
       return { ok: true, name };
     },

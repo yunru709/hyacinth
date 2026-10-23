@@ -1,0 +1,33 @@
+﻿
+active scheme = af77c3cb-cfc8-4516-8e3b-821eb82fd373   balanced = 381b4222-f694-41f0-9685-ff5bb260df2e
+EPP key preexisting in active plan = False  (false => we created it, must remove on restore)
+
+== 1) A: 高性能 as-is (min=5, max=100) ==
+  [A1] processor frequency=2100  % processor performance=213.2  % processor time=19.2   | per-core %Perf median=205 max=247
+== 2) B: SCHEME_BALANCED ==
+  [set plan] 381b4222-f694-41f0-9685-ff5bb260df2e rc=0
+  [B1] processor frequency=2064  % processor performance=184.3  % processor time=8.3   | per-core %Perf median=157 max=225
+== 3) A again ==
+  [set plan] af77c3cb-cfc8-4516-8e3b-821eb82fd373 rc=0
+  [A2] processor frequency=2100  % processor performance=216  % processor time=12.8   | per-core %Perf median=198 max=247
+== 4) B again ==
+  [set plan] 381b4222-f694-41f0-9685-ff5bb260df2e rc=0
+  [B2] processor frequency=1983  % processor performance=187.7  % processor time=7.8   | per-core %Perf median=133 max=220
+== 5) A + EPP=100 (max efficiency) ==
+  [set plan] af77c3cb-cfc8-4516-8e3b-821eb82fd373 rc=0
+  [set EPP] 100 rc=0/0
+  [A+EPP100] processor frequency=2100  % processor performance=198.1  % processor time=17.7   | per-core %Perf median=156 max=228
+== 6) B again (repeat) ==
+  [set plan] 381b4222-f694-41f0-9685-ff5bb260df2e rc=0
+  [B3] processor frequency=1992  % processor performance=183.9  % processor time=8.2   | per-core %Perf median=158 max=217
+== 7) A + EPP=50 (balanced EPP) ==
+  [set plan] af77c3cb-cfc8-4516-8e3b-821eb82fd373 rc=0
+  [set EPP] 50 rc=0/0
+  [A+EPP50] processor frequency=2100  % processor performance=196.2  % processor time=13.3   | per-core %Perf median=189 max=233
+
+== restore ==
+  [clear EPP] key exists now = True
+  [set plan] af77c3cb-cfc8-4516-8e3b-821eb82fd373 rc=0
+  now active = af77c3cb-cfc8-4516-8e3b-821eb82fd373   EPP key exists = True
+  [restored] processor frequency=2100  % processor performance=201.4  % processor time=13.6   | per-core %Perf median=162 max=221
+# done

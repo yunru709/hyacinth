@@ -1,0 +1,30 @@
+﻿
+== 1) EPP state in the active plan (this session created it) ==
+  EPP key exists = True
+  props: ACSettingIndex
+    ACSettingIndex = 50
+    DCSettingIndex = 
+    REMOVED ACSettingIndex
+    remaining props: ACSettingIndex
+  after cleanup: key exists = True
+
+== 2) schemes available ==
+  
+  现有电源使用方案 (* Active)
+  -----------------------------------
+  电源方案 GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (平衡)
+  电源方案 GUID: af77c3cb-cfc8-4516-8e3b-821eb82fd373  (高性能) *
+
+== 3) effective-setting counts: active plan=28  balanced=28 ==
+
+== 4) DIFF (only settings whose effective AC value differs) ==
+  setting GUID                             name                                 active balanced
+  29f6c1db-86da-48c5-9fdb-f2b67b1f44da     (unknown)                                 0      900
+  3619c3f2-afb2-4afc-b0e9-e7fef372de36     (unknown)                                 2        1
+  3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e     (unknown)                                 0      300
+  6738e2c4-e8a5-4a42-b16a-e040e769756e     (unknown)                              1800     1200
+  893dee8e-2bef-41e0-89c6-b55d0929964c     PROCTHROTTLEMIN 最小处理器状态                   5       20
+  9d7815a6-7ee4-497e-8888-515a05f02364     (unknown)                                 0    10800
+  aded5e82-b909-4619-9949-f5d71dac0bcb     (unknown)                                50       75
+  total differing settings: 7
+# done

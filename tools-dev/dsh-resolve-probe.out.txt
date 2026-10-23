@@ -1,0 +1,12 @@
+﻿=== anchor install  (F:/DSH/resources/app.asar/dsh/package.json)
+  @deepseek-ai/dsh-tools  ->  F:\DSH\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-tools  @0.2.0-rc.2
+  @deepseek-ai/dsh-base  ->  F:\DSH\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-base  @0.2.0-rc.2
+  @deepseek-ai/dsh-web-app  ->  F:\DSH\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-web-app  @0.2.0-rc.2
+  @deepseek-ai/dsh-agent-loop  ->  F:\DSH\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-agent-loop  @0.2.0-rc.2
+  @deepseek-ai/dsh-mcp-resources  ->  F:\DSH\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-mcp-resources  @0.2.0-rc.2
+=== anchor profile  (C:/Users/74689/.dsh/profiles/desktop/package.json)
+  @deepseek-ai/dsh-tools  ->  C:\Users\74689\.dsh\profiles\desktop\node_modules\@deepseek-ai\dsh-tools  @0.1.2-rc.1
+  @deepseek-ai/dsh-base  ->  C:\Users\74689\.dsh\profiles\node_modules\@deepseek-ai\dsh-base  @0.1.5-rc.2
+  @deepseek-ai/dsh-web-app  ->  C:\Users\74689\.dsh\profiles\node_modules\@deepseek-ai\dsh-web-app  @0.1.5-rc.2
+  @deepseek-ai/dsh-agent-loop  ->  C:\Users\74689\.dsh\profiles\node_modules\@deepseek-ai\dsh-agent-loop  @0.1.5-rc.2
+  @deepseek-ai/dsh-mcp-resources  ->  (none)

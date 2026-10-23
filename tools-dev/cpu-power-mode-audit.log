@@ -1,0 +1,37 @@
+﻿
+active scheme = af77c3cb-cfc8-4516-8e3b-821eb82fd373
+active overlay = ded574b5-45a0-4f42-8737-46345c09c238
+
+== overlaylist ==
+
+== what each scheme/overlay carries under SUB_PROCESSOR ==
+  --- ACTIVE PLAN (高性能) [af77c3cb-cfc8-4516-8e3b-821eb82fd373] ---
+      893dee8e-2bef-41e0-89c6-b55d0929964c  AC=5   PROCTHROTTLEMIN (最小处理器状态)
+      bc5038f7-23e0-4960-96da-33abaf5935ec  AC=100   PROCTHROTTLEMAX (最大处理器状态)
+  --- ACTIVE OVERLAY (最佳性能?) [ded574b5-45a0-4f42-8737-46345c09c238] ---
+      (no SUB_PROCESSOR key => nothing overridden)
+  --- overlay 最佳能效? [961cc777-2547-4f9d-8174-7d86181b8a7a] ---
+      (no SUB_PROCESSOR key => nothing overridden)
+  --- overlay 平衡? [00000000-0000-0000-0000-000000000000] ---
+      (no SUB_PROCESSOR key => nothing overridden)
+  --- SCHEME_BALANCED [381b4222-f694-41f0-9685-ff5bb260df2e] ---
+      893dee8e-2bef-41e0-89c6-b55d0929964c  AC=20   PROCTHROTTLEMIN (最小处理器状态)
+
+===== measurement: with the user's current overlay =====
+[orig overlay] idle: processor frequency=2100  % processor performance=211.8  % processor time=12.3
+[orig overlay (2nd)] idle: processor frequency=2100  % processor performance=216.3  % processor time=8.5
+
+===== try overlay 00000000-0000-0000-0000-000000000000 =====
+  rc=1  now active overlay = ded574b5-45a0-4f42-8737-46345c09c238
+[overlay 00000000-0000-0000-0000-000000000000] idle: processor frequency=2100  % processor performance=215.5  % processor time=17.1
+[overlay 00000000-0000-0000-0000-000000000000 (2nd)] idle: processor frequency=2100  % processor performance=215.4  % processor time=12.5
+
+===== try overlay 961cc777-2547-4f9d-8174-7d86181b8a7a =====
+  rc=1  now active overlay = ded574b5-45a0-4f42-8737-46345c09c238
+[overlay 961cc777-2547-4f9d-8174-7d86181b8a7a] idle: processor frequency=2100  % processor performance=215.8  % processor time=12.4
+[overlay 961cc777-2547-4f9d-8174-7d86181b8a7a (2nd)] idle: processor frequency=2100  % processor performance=216.7  % processor time=11.9
+
+===== restore original overlay =====
+  rc=1  now active overlay = ded574b5-45a0-4f42-8737-46345c09c238
+[restored] idle: processor frequency=2100  % processor performance=214.9  % processor time=21.4
+# done

@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc && node scripts/clean-stale.cjs && node scripts/copy-prompts.cjs && node scripts/copy-webui.cjs && node scripts/clean-tests.cjs && node scripts/clean-maps.cjs && node scripts/copy-grammars.cjs",
     "dev": "tsc --watch",
+    "gen:theme": "node scripts/gen-theme-css.cjs",
     "start": "node dist/index.js",
     "start:win": "chcp 65001 > nul && node dist/index.js",
     "test": "vitest run",
@@ -19,7 +20,8 @@
     "setup:llamacpp": "powershell -ExecutionPolicy Bypass -File scripts/setup-llamacpp.ps1",
     "webui": "node dist/index.js webui",
     "desktop:build": "powershell -ExecutionPolicy Bypass -File scripts/desktop-build.ps1",
-    "desktop": "powershell -ExecutionPolicy Bypass -File scripts/desktop-build.ps1 -SkipBuild -Launch"
+    "desktop": "powershell -ExecutionPolicy Bypass -File scripts/desktop-build.ps1 -SkipBuild -Launch",
+    "gen:webui-css": "node scripts/gen-webui-css.cjs"
   },
   "keywords": [
     "ai",
@@ -60,8 +62,11 @@
     "typescript": "^6.0.3"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "4.3.1",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
+    "katex": "^0.19.0",
+    "tailwindcss": "4.3.1",
     "tree-sitter-c": "0.23.4",
     "tree-sitter-cli": "0.27.0",
     "tree-sitter-cpp": "0.23.4",

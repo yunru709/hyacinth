@@ -1730,14 +1730,41 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 纯静态前端资源，无后端逻辑，被 `http-webhook.ts` 通过 @fastify/static（`webuiRoot`）托管，通过 `/ui` 或 `/desktop` WebSocket 端点连接 ui-protocol 协议层。
 
 文件：
-- `index.html`（117KB）：单页入口，`<div id="app-shell">` 承载全部 UI，引入 `/theme.css`、`/app.css`、`/app.js`，加载 vendor 的 tailwind-browser.js 与 lucide.min.js；内含 tailwind `@theme inline` 主题变量（hyacinth-* 色彩变量）与 Telegram 兼容样式。
+- `index.html`（117KB）：单页入口，`<div id="app-shell">` 承载全部 UI，引入 `/theme.css`、`/vendor/tailwind.css`、`/app.css`、`/shell.css`、`/app.js`，并加载 vendor 的 lucide.min.js。
 - `app.js`（135KB）：前端应用逻辑（JS/客户端渲染，对接 ui-protocol WS 协议：发起 request、接收 event、渲染聊天/设置/陪伴等界面）。
 - `app.css`（23KB）+ `theme.css`（28KB）：应用样式与主题 CSS 变量。
-- `vendor/`：第三方前端库（tailwind-browser.js、lucide.min.js 图标库）。
+- `vendor/`：第三方前端库（`tailwind.css` 构建期产物、lucide.min.js 图标库）。
+  Tailwind 不再用浏览器运行时（原 `vendor/tailwind-browser.js`，269KB，已删除）：类名与主题映射由
+  `src/webui/tailwind.input.css` 在构建期编译成约 31KB 静态 CSS，入口 `node scripts/gen-webui-css.cjs`
+  （即 `pnpm gen:webui-css`）。该 input 用 `@import "tailwindcss" source(none)` 关掉自动探测，
+  类名来源只有三条显式 `@source`（index.html / app.js / markdown.js），产物可复现。
 - `assets/`：静态资源——concept-art.svg（favicon）、rainy-study.svg、sample-audio.wav、video-poster.svg、`bg/`（主题背景图目录，README 说明按主题文件名放图即可自动作为最上层背景，2560×1440 横版、中央 60% 低对比构图）。
+- `shell.css`：v3 外壳样式的**唯一来源**（顶栏 / 侧栏 / 消息流 / composer / 设置面板对齐 / 预览栏）。
+  `app.css` 退回它原本该管的范围（markdown 正文、katex、设置页内部），重叠处由 `shell.css` 覆盖。
+
+### 5.1.1 右侧预览栏（工作区文件查看器，只读）
+
+顶栏 `#preview-toggle-btn` 开合（快捷键 Ctrl/⌘+Alt+P，状态存 localStorage）。上半是按需展开的
+文件树 + 面包屑，下半渲染文件内容：文本带行号（sticky 行号列，横向滚动不跑）、Markdown 走
+`markdown.js`（与聊天正文同一渲染器）、图片与 PDF 走 `<img>` / `<iframe>`。两条分隔条可拖拽
+调整**栏宽**与**树高**，也支持方向键（分隔条带 `tabindex`）。
+
+数据来自 `gateway/preview-routes.ts` 的 `/api/fs/{meta,list,read,raw}`：
+- **不豁免 API key**（与 `/api/media` 相反）。媒体端点豁免是因为 `<img src>` 设不了请求头；
+  而本组是 fetch 调用，且能读到工作区里任何文件（源码、配置、可能含密钥的 .env），没理由放宽。
+- 唯一例外是 `/api/fs/raw`：它被 `<img>`/`<iframe>` 加载，因此额外接受 `?token=`（与 WS 升级同一机制）。
+- 路径安全 fail-closed 三层：拒绝绝对路径（Windows 上 `path.resolve` 遇到第二个绝对路径会整体丢弃前一个）、
+  `realpath` 比对防符号链接逃逸、`.git` 硬排除且 `node_modules` 默认隐藏（`?all=1` 才列）。
+- 只读是硬边界：没有写/删/移动，改文件仍必须走 agent 工具（带审批）。
+
+两个链接入口：`?preview=1` 展开空栏、`?preview=<相对路径>` 直接定位到某个文件。
+工具卡参数里若含路径，整张卡可点 → 自动展开预览栏并定位（绝对路径先剥掉工作区前缀）。
 
 ### 5.2 数据流（WebUI 视角）
 浏览器加载静态资源 → JS 打开 `/ui`（或 `/desktop`）WebSocket → `WsAdapter` 接入协议服务器 → 前端发 `request`（chat/config/session/…）、收 `response` 与 `event`（message.text/thinking/state.update/companion.say 等）渲染界面。
+
+除 WS 协议外还有两条 **HTTP 直连**（不经协议层）：`/api/media`（陪伴场景图/语音）与 `/api/fs/*`（预览栏）。
+理由相同：它们要的是"文件字节"或"目录条目"这类一次性读取，用事件流表达反而绕远。
 
 ---
 
