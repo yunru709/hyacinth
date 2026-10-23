@@ -171,22 +171,33 @@ export const MODEL_CATALOG: Record<string, ModelCatalogEntry[]> = {
     { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'opencode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0.14, output: 0.28, cacheRead: 0.028 }, status: 'available', reasoning: true },
   ],
   commandcode: [
-    // 2026-10-21 新增（孑遗告知「免费」+ 当日对 api.commandcode.ai 实测）：
-    //   ① 1M 上下文、tool calling 正常（实测返回 tool_calls）、**带图 400 ⇒ 无视觉**；
-    //   ② **思考关不掉** —— 发 `reasoning_effort:'off'` 直接 400（"Only models that can turn
-    //      thinking off accept it."）⇒ 必须声明 `thinkingStyle: 'effort-required'`，
-    //      否则任何 thinking:false 的通道（压缩/编排/子 Agent）切到它都会当场崩。
-    //   ③ `:free` 是同一模型的免费档（同 context/maxTokens），付费档不写 cost 免得编价格。
+    // 2026-10-23 对账更新：裸调 `GET /provider/v1/models` 拿到 92 条权威清单，
+    // 逐条核对后发现本地目录里有一半模型在上游**已不存在**。
+    //   ① **免费档会整体下线**（403 "The free X window has ended"）⇒ 通道配置**不要长期押注
+    //      `:free`**：minimax-m3.1-flash:free 就是这么没的，compression/sub-agent 两条通道
+    //      当场集体 403（2026-10-23 事故）。
+    //   ② 本轮从目录移除（上游已无这些 id）：minimax-m3.1-flash:free / space-bunny-alpha /
+    //      pixel-canary / ling-3.0-flash-sante:free / ling-3.1-flash:free。
+    //      上游现存的免费档只剩 glyph-cluster:free / beam:free / laguna-s-2.1-free。
+    //   ③ 2026-10-21 的「思考关不掉」结论对 minimax 仍成立（2026-10-23 复测：发
+    //      `reasoning_effort:'off'` 直接 400 "Only models that can turn thinking off accept it."）
+    //      ⇒ 声明 `thinkingStyle:'effort-required'`，否则任何 thinking:false 的通道切到它当场崩。
+    //      语义提醒：这类模型**恒定思考**，`thinking:false` 只表示"我们关不掉"，
+    //      不表示"它不思考" ⇒ 省的思考 token 一分也省不到（实测 2 token 的答案烧 29 reasoning token）。
+    //   ④ **思考字段因模型而异**：minimax 用 `reasoning_content`（我们解析得到）；
+    //      glyph-cluster 用 `reasoning_details`、beam 用 `reasoning` ⇒ **当前 compatible.ts
+    //      只读 reasoning_content，这两个免费档的思考内容不会显示**（模型照烧 token）。
+    //   ⑤ 付费档不写 cost 免得编价格。
     { id: 'minimax/minimax-m3.1-flash', name: 'MiniMax M3.1 Flash', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
-    { id: 'minimax/minimax-m3.1-flash:free', name: 'MiniMax M3.1 Flash (free)', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 131072, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
     { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 384000, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: true, inputTypes: ['text', 'image'] }, cost: { input: 0.3, output: 1.2, cacheRead: 0.006 }, status: 'available', reasoning: true },
-    // 以下 5 个为免费/隐身模型，**上游可用性不稳定**（曾出现 403 下线）：
-    // 保留在目录里供选择，失效时用户自行覆盖 —— 移除它们反而会让人以为"没这功能"。
-    { id: 'stealth/space-bunny-alpha', name: 'Space Bunny Alpha (free)', provider: 'commandcode', contextWindow: 1000000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
-    { id: 'stealth/pixel-canary', name: 'Pixel Canary (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
-    { id: 'poolside/laguna-s-2.1-free', name: 'Laguna S 2.1 (free)', provider: 'commandcode', contextWindow: 256000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
-    { id: 'inclusionai/ling-3.0-flash-sante:free', name: 'Ling 3.0 Flash Sante (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
-    { id: 'inclusionai/ling-3.1-flash:free', name: 'Ling 3.1 Flash (free)', provider: 'commandcode', contextWindow: 262144, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: false, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available' },
+    // 免费档：上游常在，但**随时可能整体下线**，别当稳定依赖用。
+    // thinkingStyle 均为 2026-10-23 实测（三者发 'off' 全部 400）。
+    { id: 'stealth/glyph-cluster:free', name: 'Glyph Cluster (free)', provider: 'commandcode', contextWindow: 256000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
+    { id: 'reflection/beam:free', name: 'Beam (free)', provider: 'commandcode', contextWindow: 1048576, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
+    // ⚠️ laguna 原先被标成 thinking:false 且**未声明 style** ⇒ 落 provider 级 'effort'
+    //    ⇒ 任何 thinking:false 通道切过来都会发 'off' ⇒ 400。2026-10-23 实测 'off' 400
+    //    （A/B 档当时 429 上游不可用，故 thinking 能力未正面验证，但"拒 off"已足以判定它恒定思考）。
+    { id: 'poolside/laguna-s-2.1-free', name: 'Laguna S 2.1 (free)', provider: 'commandcode', contextWindow: 256000, maxOutputTokens: 32768, capabilities: { streaming: true, toolCalling: true, thinking: true, vision: false, inputTypes: ['text'] }, cost: { input: 0, output: 0, cacheRead: 0 }, status: 'available', reasoning: true, thinkingStyle: 'effort-required' },
   ],
 };
 
