@@ -138,7 +138,9 @@ class SayVoiceBroadcast {
         voice,
         speed: opts.speed,
       };
+      this.deps.logger.info?.(`[debug-sayvoice] ready event dispatching: ${wav.length}B wav, event=${UI_EVENT.SAY_VOICE}`);
       notify(UI_EVENT.SAY_VOICE, payload);
+      this.deps.logger.info?.('[debug-sayvoice] notify() returned (fire-and-forget emit done)');
     } catch (err) {
       // 失败不重试不升级：交付正文本身已完整到达（message.say），语音是增强
       this.deps.logger.warn('say-voice: broadcast failed', { error: err instanceof Error ? err.message : String(err) });
