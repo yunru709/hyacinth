@@ -18,3 +18,4 @@ r 'CUDAExecutionProvider' is not in available provider names.Available providers
 Provider'
   warnings.warn(
 2026-10-25 06:04:50,920 INFO use wetext frontend
+[cosyvoice] model ready
