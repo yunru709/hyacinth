@@ -6399,8 +6399,10 @@
     } catch (e) { /* 播放失败静默 */ }
   }
 
-  // ── say 语音播报（say-voice 插件事件）：交付正文的朗读结果 ──
-  // 自动播放 + 在最后一个交付块下挂可重放的播放条；失败只提示不干扰文字交付。
+  // ── say 语音播报（say-voice 插件事件）：交付正文的朗读 ──
+  // 只出声，不留控件：say 的语义是 agent「说话」，消息流里不该出现媒体播放条
+  // （那是"音频文件"的语义，且播放条在事件驱动下常停在 0:00/0:00 的坏态）。
+  // 新一句直接打断上一句（说话不会排队等上一句播完）。
   let sayVoiceAudio = null;
   function handleSayVoice(payload) {
     if (!payload) return;
@@ -6410,25 +6412,10 @@
     }
     if (!payload.audioWavBase64) return;
     try {
-      const url = 'data:audio/wav;base64,' + payload.audioWavBase64;
       if (sayVoiceAudio) sayVoiceAudio.pause();
-      const audio = new Audio(url);
+      const audio = new Audio('data:audio/wav;base64,' + payload.audioWavBase64);
       sayVoiceAudio = audio;
-      void audio.play().catch(() => { /* 自动播放被拦截：交付块下的播放条仍可手动播 */ });
-      const ml = $('#message-list');
-      const deliveries = ml ? ml.querySelectorAll('.msg.is-delivery') : [];
-      const target = deliveries.length ? deliveries[deliveries.length - 1] : null;
-      const body = target ? target.querySelector('.msg-body') : null;
-      if (body && !body.querySelector('.say-voice-player')) {
-        const holder = el('div', 'say-voice-player');
-        holder.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:8px';
-        const a = document.createElement('audio');
-        a.controls = true;
-        a.src = url;
-        a.style.cssText = 'max-width:340px;height:32px';
-        holder.appendChild(a);
-        body.appendChild(holder);
-      }
+      void audio.play().catch(() => { /* 自动播放被拦截：静默，文字交付不受影响 */ });
     } catch (e) { /* 播放失败静默：文字交付不受影响 */ }
   }
 
