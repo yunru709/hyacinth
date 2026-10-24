@@ -308,6 +308,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             wav = synthesize(text, voice, speed)
         except Exception as e:
+            # 完整 traceback 打到 stdout（Node 侧收进日志）。只回一行 str(e) 时挂死点
+            # 无从定位 —— 2026-10-25 实况：六个不同长度用例返回同一句
+            # "padded input size per channel: (3), kernel size: (4)"，光看这行根本
+            # 分不清是文本侧（text_encoder）还是参考音侧（flow/hift）短了。
+            import traceback
+            print(f"[cosyvoice] tts failed ({len(text)} chars, voice={voice or '-'}): {e}", flush=True)
+            traceback.print_exc()
             self.send_response(500)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
