@@ -1132,7 +1132,7 @@ export class AgentLoop {
     content: string,
     voice?: import('../tools/say.js').SayVoiceOptions,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    // goal 模式下 say 是「宣布完成/结束回合」的逃逸口：工具过滤只是第一道门，
+    // goal 模式下 say / deliver 都是「宣布完成/结束回合」的逃逸口：工具过滤只是第一道门，
     // 这里再兜一层 —— 同批 enter_goal+say、plan_execute 内部裸执行 say 都能绕过过滤。
     if (this.goalState?.active) {
       return {
@@ -1141,69 +1141,102 @@ export class AgentLoop {
       };
     }
     const text = (content ?? '').trim();
-    if (!text) {
-      this.sayFailureCount++;
-      // 连续 3 次空内容即中止：say 失败时 toolCalled 仍为 true 会重置
-      // idleTurnCount，空转兜底失效，只能靠 maxTurns —— 故此处独立设限。
-      if (this.sayFailureCount >= 3) {
-        this.sayStatus = 'aborted';
-        return {
-          ok: false,
-          error: `say 连续 ${this.sayFailureCount} 次内容为空。本回合已结束，请在下一条消息里重新汇报。`,
-        };
-      }
-      return {
-        ok: false,
-        error: 'say 的 content 不能为空：请把要交付用户的结论正文写进 content 后重新调用。',
-      };
-    }
-
-    // 暂存正文：落盘与屏显延后到 takeSayStatus()（tool_result 落盘之后）
-    this.sayPendingContent = text;
-    this.sayPendingVoice = voice;
-    this.sayStatus = 'submitted';
+    if (!text) return this.noteOutputFailure('say');
+    // say = 「说话」：只排队等落盘 + 播报，**不置回合结束标志**（2026-10-25 拆分）。
+    // 说完还能继续调用别的工具接着干活 —— 这也是它与 deliver 的唯一分界线。
+    this.pendingOutputs.push({ kind: 'say', content: text, voice });
     return { ok: true };
   }
 
   /**
-   * 消费 say 状态（预填进 TurnState；消费即重置，供每回合独立判定）。
+   * deliver 工具提交入口：校验 → 排队交付正文 → **置回合结束标志**。
+   * 落盘 / 屏显与 say 共用 takeSayStatus()（同样延后到 tool_result 之后，
+   * 理由见该方法注释：否则历史尾部停在 user(tool_result)，下一条用户消息
+   * 就构成"连续 user"、被严格厂商整请求拒绝）。
+   *
+   * 与 say 的差异只有两点：① 置 sayStatus='submitted' ⇒ finalize 判停；
+   * ② 不触发语音播报（长文念出来没人听，交付物是给人读的）。
+   */
+  async submitDeliver(
+    content: string,
+    title?: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.goalState?.active) {
+      return {
+        ok: false,
+        error: 'goal 模式下不能使用 deliver。请继续工作，达成后调用 finish_goal 提交 evidence 与 conclusion；需要中止请用 exit_goal。',
+      };
+    }
+    const text = (content ?? '').trim();
+    if (!text) return this.noteOutputFailure('deliver');
+    this.pendingOutputs.push({ kind: 'deliver', content: text, title });
+    this.sayStatus = 'submitted';   // 全场唯一置停的入口
+    return { ok: true };
+  }
+
+  /**
+   * 空内容统一失败计数（say / deliver 共用）。
+   * 为什么要独立设限：工具调用失败时 toolCalled 仍为 true，会重置 idleTurnCount
+   * 使空转兜底失效，只能靠 maxTurns —— 故此处独立设 3 次上限，超限强制收尾。
+   */
+  private noteOutputFailure(tool: 'say' | 'deliver'): { ok: false; error: string } {
+    this.sayFailureCount++;
+    if (this.sayFailureCount >= 3) {
+      this.sayStatus = 'aborted';
+      return {
+        ok: false,
+        error: `${tool} 连续 ${this.sayFailureCount} 次内容为空。本回合已结束，请在下一条消息里重新汇报。`,
+      };
+    }
+    return {
+      ok: false,
+      error: `${tool} 的 content 不能为空：请把要输出的正文写进 content 后重新调用。`,
+    };
+  }
+
+  /**
+   * 消费本回合输出队列（预填进 TurnState；消费即重置，供每回合独立判定）。
    *
    * 顺序要点：本方法在工具执行（含 tool_result 落盘）之后、finalize 之前被调用，
-   * 因此交付正文的落盘与屏显放在这里 —— 历史才会以 assistant 文本收尾，
+   * 因此正文的落盘与屏显放在这里 —— 历史才会以 assistant 文本收尾，
    * 而不是停在 user(tool_result)（否则用户下一条消息构成"连续 user"）。
+   *
+   * 返回值只表达 deliver 的结局：say「说话」不参与判停（2026-10-25）。
    */
   private async takeSayStatus(): Promise<'submitted' | 'aborted' | undefined> {
     const status = this.sayStatus;
-    const pending = this.sayPendingContent;
-    const pendingVoice = this.sayPendingVoice;
+    const pending = this.pendingOutputs;
     this.sayStatus = null;
-    this.sayPendingContent = null;
-    this.sayPendingVoice = undefined;
+    this.pendingOutputs = [];
     this.sayFailureCount = 0;
 
-    if (status === 'submitted' && pending) {
+    // 按调用顺序逐条落盘：一次回合内可能说了好几句、最后交付一次。
+    // 每条都 append 成独立 assistant 消息（顺序即我说话的顺序）。
+    for (const item of pending) {
       try {
         await this.conversationStore.append(this.sessionDir, {
           role: 'assistant',
-          content: [{ type: 'text', text: pending }],
+          content: [{ type: 'text', text: item.content }],
         });
       } catch (err) {
-        // 落盘失败不阻断交付（屏显仍应发生），但记下便于排查
+        // 落盘失败不阻断输出（屏显仍应发生），但记下便于排查
         this.logger?.warn?.('takeSayStatus: append assistant message failed', {
           error: (err as Error).message,
         });
       }
-      // 走专用通道（onSay）：UI 可据此把"交付"与普通输出分开渲染；
+      // 走专用通道（onSay）：UI 可据此把「说/交付」与流式文本分开渲染；
       // 未实现 onSay 的渠道回退 onText，保持兼容。
-      if (this.outputHandler?.onSay) this.outputHandler.onSay(pending);
-      else this.outputHandler?.onText?.(pending);
-      // 语音播报钩子（say-voice 插件）：交付正文落屏后触发，fire-and-forget——
-      // 实现方串行排队（忙时留最新）+ 失败静默，绝不阻塞/打断回合收尾。
-      this.sayVoice?.onSayDelivered(
-        pending,
-        pendingVoice ?? {},
-        (type, payload) => this.emitUiEvent(type, payload),
-      );
+      if (this.outputHandler?.onSay) this.outputHandler.onSay(item.content);
+      else this.outputHandler?.onText?.(item.content);
+      // 只有 say 说话才播报；deliver 交付不朗读（2026-10-25）。
+      // 语音能力由 say-voice 插件注入：串行排队 + 失败静默，绝不阻塞回合收尾。
+      if (item.kind === 'say') {
+        this.sayVoice?.onSayDelivered(
+          item.content,
+          item.voice ?? {},
+          (type, payload) => this.emitUiEvent(type, payload),
+        );
+      }
     }
 
     return status ?? undefined;
