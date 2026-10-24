@@ -714,6 +714,26 @@ public sealed class MainForm : Form
             // 只会暴露内部地址、没有半点用处（2026-10-24 用户要求去掉）。
             _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
 
+            // 麦克风权限（语音输入，stt 契约域）：WebView2 默认对所有权限请求弹
+            // 系统级对话框或直接拒绝；这里放行 **仅限本机 origin** 的 AudioCapture
+            // —— 语音只在内存转写（本地模型），不落盘不上传，自动同意没有泄密面。
+            // 其余权限种类维持默认行为（不拦截不加白）。
+            _web.CoreWebView2.PermissionRequested += (_, e) =>
+            {
+                if (e.Kind != CoreWebView2PermissionKind.AudioCapture) return;
+                try
+                {
+                    var origin = new Uri(e.Uri);
+                    var host = origin.Host;
+                    if (host is "127.0.0.1" or "localhost" or "::1")
+                    {
+                        e.Handled = true;
+                        e.State = CoreWebView2PermissionState.Allow;
+                    }
+                }
+                catch { /* origin 解析失败：维持默认行为 */ }
+            };
+
             await EnsureBackendAsync();
             _web.Source = new Uri(BaseUrl);
         }

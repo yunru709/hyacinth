@@ -56,5 +56,10 @@ if (fs.existsSync(DIST_PROMPTS)) {
 
 cp(SRC_PROMPTS, DIST_PROMPTS);
 cp('src/tools/builtin', path.join(os.homedir(), '.agent', 'tools'));
+// TTS 推理胶水（python 资产，tsc 不编译）：src/tts/engines → dist/tts/engines。
+// 漏拷的实况（2026-10-24 ✗）：serve 的 tts.start 报「推理脚本缺失」——
+// dist 里从来没有 server.py，此前从未真正跑通过服务启动路径。
+cp('src/tts/engines', 'dist/tts/engines');
 console.log('Builtin Python tools copied to ~/.agent/tools');
 console.log('Prompts copied to dist/prompts');
+console.log('TTS engine scripts copied to dist/tts/engines');

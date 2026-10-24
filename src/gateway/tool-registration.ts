@@ -98,9 +98,11 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
   // 交付结论工具（say）：把最终结论交给用户并结束回合。
   // loop.submitSay 负责落 assistant 文本 + 屏显（不只留工具形态），
   // finalize 在 toolCalled 之前据 sayStatus 判停（stopReason 'say_submitted'）。
+  // 语音参数（voice/speed/emotion/broadcast）随 submit 透传 → loop.sayVoice
+  // 钩子（say-voice 插件装配；未装配时 loop 侧安全忽略）。
   {
     const { createSayTool } = await import('../tools/say.js');
-    toolRegistry.register(createSayTool((content) => loop.submitSay(content)));
+    toolRegistry.register(createSayTool((content, voice) => loop.submitSay(content, voice)));
   }
 
   // ── goal 模式工具（2026-10-10）─────────────────────────────────────

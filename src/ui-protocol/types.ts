@@ -132,6 +132,10 @@ export const UI_DOMAIN = {
   SCHEDULE: 'schedule',
   /** 文件预览（WebUI「预览」栏数据面）：meta / list / read / browse / setRoot / rawUrl */
   PREVIEW: 'preview',
+  /** 语音转文字（本地 SenseVoice）：状态/模型下载/转写（16kHz WAV base64） */
+  STT: 'stt',
+  /** 语音合成（本地 Fun-CosyVoice3）：环境/模型（base|rl）/服务启停/合成 */
+  TTS: 'tts',
   /** 协议元信息（P5-3）：版本/能力协商 get */
   META: 'meta',
 } as const;
@@ -280,6 +284,20 @@ export const UI_METHOD = {
   PREVIEW_BROWSE: 'preview.browse',
   PREVIEW_SET_ROOT: 'preview.setRoot',
   PREVIEW_RAW_URL: 'preview.rawUrl',
+  // stt（语音转文字；音频 16kHz WAV base64 直传，模型下载/删除走域 + 进度事件）
+  STT_STATUS: 'stt.status',
+  STT_DOWNLOAD: 'stt.download',
+  STT_REMOVE: 'stt.remove',
+  STT_TRANSCRIBE: 'stt.transcribe',
+  // tts（语音合成；本地 python 推理服务，模型 base|rl 增量下载）
+  TTS_STATUS: 'tts.status',
+  TTS_DETECT_PYTHON: 'tts.detectPython',
+  TTS_SET_PYTHON_PATH: 'tts.setPythonPath',
+  TTS_DOWNLOAD: 'tts.download',
+  TTS_START: 'tts.start',
+  TTS_STOP: 'tts.stop',
+  TTS_SYNTHESIZE: 'tts.synthesize',
+  TTS_SET_SAY_BROADCAST: 'tts.setSayBroadcast',
   // meta（P5-3 版本/能力协商）
   META_GET: 'meta.get',
 } as const;

@@ -228,6 +228,9 @@
               <button id="chat-attach-btn" class="cbtn" aria-label="添加图片" title="添加图片（也可直接粘贴或拖入）">
                 <i data-lucide="paperclip" class="w-4 h-4"></i>
               </button>
+              <button id="stt-btn" class="cbtn stt-btn" type="button" aria-label="语音输入" title="语音输入（点击开始，再点结束并转写）">
+                <i data-lucide="mic" class="w-4 h-4"></i>
+              </button>
               <button id="chat-send-btn" class="cbtn cbtn-primary" aria-label="发送">
                 <i data-lucide="send-horizontal" class="w-4 h-4"></i>
               </button>
@@ -554,44 +557,11 @@
         .settings-tabs-header { padding: 0 10px 12px; font-size: 14px; font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
         .settings-tab:hover { background-color: var(--hyacinth-muted); }
-        #tab-context:checked ~ .settings-frame .settings-tabs label[for="tab-context"],
-        #tab-turns:checked ~ .settings-frame .settings-tabs label[for="tab-turns"],
-        #tab-compress:checked ~ .settings-frame .settings-tabs label[for="tab-compress"],
-        #tab-modes:checked ~ .settings-frame .settings-tabs label[for="tab-modes"],
-        #tab-companion:checked ~ .settings-frame .settings-tabs label[for="tab-companion"],
-        #tab-model:checked ~ .settings-frame .settings-tabs label[for="tab-model"],
-        #tab-repair:checked ~ .settings-frame .settings-tabs label[for="tab-repair"],
-        #tab-appearance:checked ~ .settings-frame .settings-tabs label[for="tab-appearance"],
-        #tab-tools:checked ~ .settings-frame .settings-tabs label[for="tab-tools"],
-        #tab-mcp:checked ~ .settings-frame .settings-tabs label[for="tab-mcp"] { background-color: var(--primary-100); color: var(--hyacinth-primary); border-right: 2px solid var(--hyacinth-primary); }
-        .settings-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background-color: var(--hyacinth-background); }
-        .settings-scroll { flex: 1; overflow: auto; padding: 28px 32px 40px; }
-        .settings-panel { display: none; flex-direction: column; gap: 20px; max-width: min(880px, 100%); }
-        @media (max-width: 1100px) {
-          .settings-scroll { padding: 20px 18px 32px; }
-          .settings-tabs { width: 156px; }
-        }
-        #panel-context { display: flex; }
-        #tab-turns:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-compress:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-modes:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-companion:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-model:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-repair:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-appearance:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-tools:checked ~ .settings-frame .settings-content #panel-context,
-        #tab-mcp:checked ~ .settings-frame .settings-content #panel-context { display: none; }
-        #tab-system:checked ~ .settings-frame .settings-content #panel-context { display: none; }
-        #tab-turns:checked ~ .settings-frame .settings-content #panel-turns,
-        #tab-compress:checked ~ .settings-frame .settings-content #panel-compress,
-        #tab-modes:checked ~ .settings-frame .settings-content #panel-modes,
-        #tab-companion:checked ~ .settings-frame .settings-content #panel-companion,
-        #tab-model:checked ~ .settings-frame .settings-content #panel-model,
-        #tab-repair:checked ~ .settings-frame .settings-content #panel-repair,
-        #tab-appearance:checked ~ .settings-frame .settings-content #panel-appearance,
-        #tab-tools:checked ~ .settings-frame .settings-content #panel-tools,
-        #tab-mcp:checked ~ .settings-frame .settings-content #panel-mcp { display: flex; }
-        #tab-system:checked ~ .settings-frame .settings-content #panel-system { display: flex; }
+        /* tab 高亮与 panel 显隐由 bindSettingsPanelSwitch() 统一驱动（JS 单点）：
+           label 选中态加 .is-active；panel 按 panel-<name> 命名约定显隐。
+           此前这里是两套人工维护的 CSS 长链（每加一个 tab 要改 15+ 行），
+           语音 tab 就漏过 panel-context 的隐藏链 —— 结构性问题，删链根治。 */
+        .settings-tab.is-active { background-color: var(--primary-100); color: var(--hyacinth-primary); border-right: 2px solid var(--hyacinth-primary); }
 
         /* 主题选择卡片 */
         .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
@@ -690,6 +660,7 @@
         <input type="radio" name="settings-tab" id="tab-tools" class="settings-tab-radio" data-dom-id="tab-tools" aria-label="工具">
         <input type="radio" name="settings-tab" id="tab-mcp" class="settings-tab-radio" data-dom-id="tab-mcp" aria-label="MCP">
         <input type="radio" name="settings-tab" id="tab-system" class="settings-tab-radio" data-dom-id="tab-system" aria-label="系统">
+        <input type="radio" name="settings-tab" id="tab-voice" class="settings-tab-radio" data-dom-id="tab-voice" aria-label="语音">
 
         <div class="settings-frame">
           <nav class="settings-tabs" aria-label="设置分类">
@@ -727,6 +698,10 @@
             <label for="tab-companion" class="settings-tab" data-dom-id="label-companion">
               <i data-lucide="heart" class="w-4 h-4"></i>
               <span>陪伴模式</span>
+            </label>
+            <label for="tab-voice" class="settings-tab" data-dom-id="label-voice">
+              <i data-lucide="mic" class="w-4 h-4"></i>
+              <span>语音</span>
             </label>
             <label for="tab-repair" class="settings-tab" data-dom-id="label-repair">
               <i data-lucide="wrench" class="w-4 h-4"></i>
@@ -1514,6 +1489,74 @@
               </div>
 
               <!-- MCP 管理 -->
+              <div class="settings-panel" id="panel-voice" data-dom-id="panel-voice" role="tabpanel" aria-labelledby="label-voice">
+                <div class="settings-card">
+                  <div class="settings-card-header"><i data-lucide="folder-down" class="w-4 h-4"></i><span>模型存储位置</span><span id="models-root-now" data-dom-id="models-root-now" class="settings-desc" style="margin-left:auto">—</span></div>
+                  <div class="settings-row">
+                    <div style="min-width:0;flex:1 1 auto">
+                      <div class="settings-label">下载源（语音识别 / 语音合成共用）</div>
+                      <div class="settings-desc">auto = hf-mirror 优先、失败逐源尝试（默认）；锁定镜像源可稳定走高速线路。源失败时仍会回落其它源。</div>
+                    </div>
+                    <select id="models-mirror" class="settings-input" data-dom-id="models-mirror" aria-label="模型下载源">
+                      <option value="">auto（逐源尝试）</option>
+                      <option value="hf-mirror">hf-mirror（国内镜像）</option>
+                      <option value="huggingface">HuggingFace（官方）</option>
+                    </select>
+                  </div>
+                  <div class="settings-row">
+                    <div style="min-width:0;flex:1 1 auto">
+                      <div class="settings-label">下载目录（语音识别 / 语音合成共用）</div>
+                      <div class="settings-desc">默认在 C 盘用户目录 —— 大模型建议改到数据盘。留空 = 默认 ~/.agent/models；环境变量 HYACINTH_MODELS_DIR 优先于此。修改只对之后的下载生效，已下载文件需手动移动到新目录。</div>
+                      <div style="display:flex;gap:8px;margin-top:6px">
+                        <input id="models-root-input" class="settings-input" data-dom-id="models-root-input" placeholder="如 D:\hyacinth-models（留空恢复默认）" style="flex:1 1 auto;min-width:0" />
+                        <button id="models-root-save" class="settings-input" data-dom-id="models-root-save" style="cursor:pointer;font-family:inherit;flex:0 0 auto">保存</button>
+                        <button id="models-root-open" class="settings-input" data-dom-id="models-root-open" style="cursor:pointer;font-family:inherit;flex:0 0 auto">打开目录</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-card">
+                  <div class="settings-card-header"><i data-lucide="mic" class="w-4 h-4"></i><span>语音输入</span></div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">启用语音输入</div>
+                      <div class="settings-desc">输入框发送键左侧的麦克风按钮；录音在本地转写（不上传、不落盘），文本插入输入框光标处，可编辑后再发送</div>
+                    </div>
+                    <input type="checkbox" id="stt-enabled-toggle" class="settings-toggle" data-dom-id="stt-enabled-toggle" aria-label="启用语音输入" />
+                  </div>
+                </div>
+                <div class="settings-card">
+                  <div class="settings-card-header"><i data-lucide="hard-drive" class="w-4 h-4"></i><span>语音模型</span><span id="stt-model-state" class="settings-desc" style="margin-left:auto">—</span></div>
+                  <div class="settings-row">
+                    <div style="min-width:0">
+                      <div class="settings-label">SenseVoiceSmall（int8）</div>
+                      <div class="settings-desc">中文识别 · 本地推理 · Apache-2.0 · 约 230MB · 源码不携带模型，按需下载</div>
+                      <div class="settings-desc" id="stt-model-dir" data-dom-id="stt-model-dir" style="opacity:0.7;word-break:break-all">—</div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex:0 0 auto">
+                      <button id="stt-model-download" class="settings-input" data-dom-id="stt-model-download" style="cursor:pointer;font-family:inherit">下载</button>
+                      <button id="stt-model-remove" class="settings-input" data-dom-id="stt-model-remove" style="cursor:pointer;font-family:inherit">删除</button>
+                    </div>
+                  </div>
+                  <div class="settings-row" id="stt-model-progress-row" hidden>
+                    <div style="flex:1 1 auto">
+                      <div style="height:6px;border-radius:3px;background:var(--hyacinth-muted);overflow:hidden">
+                        <div id="stt-model-progress-bar" style="height:100%;width:0%;background:var(--hyacinth-primary);transition:width 300ms ease"></div>
+                      </div>
+                      <div class="settings-desc" id="stt-model-progress-text" style="margin-top:4px">—</div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">运行时（sherpa-onnx）</div>
+                      <div class="settings-desc" id="stt-runtime-desc" data-dom-id="stt-runtime-desc">—</div>
+                    </div>
+                  </div>
+                </div>
+                <!-- 语音 tab 的「say 语音播报」与「语音合成（Fun-CosyVoice3）」两张卡
+                     由 say-voice 插件贡献（uiCards → webui 渲染器注册表动态挂载到本面板）：
+                     插件停用即卡片消失 —— UI 的变更依靠插件，不再硬编码在这里。 -->
+              </div>
               <div class="settings-panel" id="panel-system" data-dom-id="panel-system" role="tabpanel" aria-labelledby="label-system">
                 <div class="settings-card">
                   <div class="settings-card-header"><i data-lucide="gauge" class="w-4 h-4"></i><span>运行状态</span></div>

@@ -32,6 +32,8 @@ import { createMCPDomain } from './domains/mcp.js';
 import { createPluginDomain } from './domains/plugin.js';
 import { createCompanionDomain } from './domains/companion.js';
 import { createPreviewDomain } from './domains/preview.js';
+import { createSttDomain } from './domains/stt.js';
+import { createTtsDomain } from './domains/tts.js';
 
 // ────────────────────────────────────────────────────────────
 // 再导出（供外部集成与扩展）
@@ -116,3 +118,7 @@ export type {
 } from './domains/command.js';
 export { createPreviewDomain } from './domains/preview.js';
 export type { PreviewServiceLike, PreviewDomainOptions } from './domains/preview.js';
+export { createSttDomain } from './domains/stt.js';
+export type { SttEngineLike, SttDomainOptions } from './domains/stt.js';
+export { createTtsDomain } from './domains/tts.js';
+export type { TtsServiceLike, TtsDomainOptions } from './domains/tts.js';

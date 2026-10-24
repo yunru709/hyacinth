@@ -4,10 +4,10 @@
  * 行数收尾（P6 之后）第一步样板：把 factory 内联的插件贡献批整体外移，
  * factory 只留一次调用 + 结果解构 —— 装配逻辑不再住在装配中心里。
  *
- * knowledge/xref/generation 三个 host.mount 挂载点迁入贡献声明：先后关系由
+ * knowledge/xref/generation/say-voice 四个 host.mount 挂载点迁入贡献声明：先后关系由
  * needs/provides 声明 + 拓扑校验承载（缺依赖/环在解析期 fail-fast，而非注释）；
  * 生命周期仍走 PluginHost.mount（卸载回滚零损失）。TTS 句柄写回
- * loop.modeVoice（类 3 共享引用）在此批内完成。
+ * loop.modeVoice / loop.sayVoice（类 3 共享引用）在此批内完成。
  */
 
 import { AssemblyRunner } from './assembly-runner.js';
@@ -15,6 +15,8 @@ import { createKnowledgePlugin } from '../plugins/knowledge-plugin.js';
 import type { KnowledgeApi } from '../plugins/knowledge-plugin.js';
 import { createGenerationPlugin, GENERATION_API_KEY } from '../plugins/generation-plugin.js';
 import type { GenerationApi } from '../plugins/generation-plugin.js';
+import { createSayVoicePlugin, SAY_VOICE_API_KEY } from '../plugins/say-voice-plugin.js';
+import type { SayVoiceApi } from '../plugins/say-voice-plugin.js';
 import { createXrefPlugin } from '../plugins/xref-plugin.js';
 import type { PluginManager } from '../plugins/index.js';
 import type { LayeredContextComposer } from '../context/composer.js';
@@ -95,6 +97,31 @@ export async function runPluginContributions(
           if (genApi?.tts) (loop as AgentLoop).modeVoice = genApi.tts;
         } catch (err) {
           deps.logger.error('generation plugin mount failed', err instanceof Error ? err : new Error(String(err)));
+        }
+      },
+    },
+    {
+      id: 'sayVoicePlugin',
+      needs: ['pluginManager', 'configCenter', 'loop'],
+      mount: async ({ pluginManager, configCenter, loop }) => {
+        // say 交付语音播报（say-voice 插件）：引擎/播报队列装配在插件 activate 内，
+        // 回填 loop.sayVoice —— 与 generation.api → loop.modeVoice 同一模式。
+        // 挂载失败降级 idle（say 照常交付文字，语音参数安全忽略）。
+        const pm = pluginManager as PluginManager;
+        try {
+          await pm.getHost().mount(createSayVoicePlugin({
+            configCenter: configCenter as RuntimeConfigCenter,
+          }));
+          const api = pm.getHost().get(SAY_VOICE_API_KEY) as
+            | (SayVoiceApi & { onSayDelivered: (t: string, o: unknown, n: (type: string, payload?: unknown) => void) => void })
+            | undefined;
+          if (api) {
+            (loop as AgentLoop).sayVoice = {
+              onSayDelivered: (text, opts, notify) => api.onSayDelivered(text, opts, notify),
+            };
+          }
+        } catch (err) {
+          deps.logger.error('say-voice plugin mount failed', err instanceof Error ? err : new Error(String(err)));
         }
       },
     },

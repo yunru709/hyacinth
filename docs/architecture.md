@@ -200,9 +200,9 @@ input → bypass → context → llm → tools → finalize
 
 基于 `@earendil-works/pi-tui` 的可复用组件（不负责渲染主循环，渲染在 gateway/tui）：`CommandRegistry`（内置斜杠命令 + commands.json 热重载）、`ChatLog`（流式/工具状态缓存）、消息/Markdown/Diff/工具卡片组件、`OSC8` 超链接、主题与终端净化。
 
-### 6.3 UI 契约层（`ui-protocol/`，52 文件）
+### 6.3 UI 契约层（`ui-protocol/`，55 文件）
 
-**TUI/WebUI/桌面端共享的统一双向 RPC+事件协议**（传输中立/形态中立）：`UiRequest/UiResponse/UiEvent`（方法命名空间 `<domain>.<action>`）。`UiProtocolServer` 路由 + `UIAdapter`（InProc 本地 / `WsAdapter` WebSocket ping/pong）+ 21 个业务域工厂（config/session/model/message/state/permission/command/kb/process/orchestrator/context/tool/bundle/mcp/plugin/supervisor/companion/schedule/arch/mode/preview/meta）。`src/events.ts` 是跨层中立事件契约（业务核心与 UI 共享、零依赖）。
+**TUI/WebUI/桌面端共享的统一双向 RPC+事件协议**（传输中立/形态中立）：`UiRequest/UiResponse/UiEvent`（方法命名空间 `<domain>.<action>`）。`UiProtocolServer` 路由 + `UIAdapter`（InProc 本地 / `WsAdapter` WebSocket ping/pong）+ 23 个业务域工厂（config/session/model/message/state/permission/command/kb/process/orchestrator/context/tool/bundle/mcp/plugin/supervisor/companion/schedule/arch/mode/preview/stt/tts/meta）。`src/events.ts` 是跨层中立事件契约（业务核心与 UI 共享、零依赖）。
 
 **URL 签发模式**：字节流（图片/语音/场景图/预览原始文件）塞不进 JSON RPC，由契约层在应答里签发 HTTP 地址（`preview.read` 的 `url`、`companion.voiceList` 的 `url`、`companion.scene` 的 `imageUrl`）——消费端不硬编码任何后端路径，新 UI 只依赖契约方法面即可重建。数据面（JSON）全部走域方法，HTTP 只保留"搬字节"的端点。
 
@@ -399,7 +399,7 @@ P-F 热重载+返回。
 - `context-chain-contributions.ts`：P-B 批。压缩链拓扑：TokenCounter→StructuredSummarizer→CompressorOrchestrator，加 LayeredContextComposer。
 - `orchestrator-contributions.ts`：P-B 批。planStore、LLMOrchestrator（needs provider/planStore/sessionDir/modelRouter）、providerRouter（注册 main/local）、agentRegistry、toolExecutor（needs toolRegistry）、backgroundRegistry。
 - `plugin-manager-contribution.ts`：PluginManager 创建（needs toolRegistry/skillRegistry/contextComposer/mcpSystem/cwd）；loadAll/setHooks 留 factory。
-- `plugin-contributions.ts`：P-D 批。knowledge/xref/generation 三个插件 host.mount 挂载点，先后由 needs/provides 承载；knowledge 故障降级；generation 把 TTS 句柄回填 `loop.modeVoice`（模式语音钩子槽位）。
+- `plugin-contributions.ts`：P-D 批。knowledge/xref/generation/say-voice 四个插件 host.mount 挂载点，先后由 needs/provides 承载；knowledge 故障降级；generation 把 TTS 句柄回填 `loop.modeVoice`（模式语音钩子槽位）；say-voice（2026-10-24）把播报句柄回填 `loop.sayVoice`（say 交付语音钩子，与 modeVoice 同语义的第二个语音面——sayVoice 管 say 工具交付、modeVoice 管陪伴台词）。say 工具本身保持**内置**（loop 生命周期耦合，不插件化），语音参数（voice/speed/emotion/broadcast）经 submitSay 透传、钩子未装配时安全忽略；插件贡献 `uiCards`（设置卡声明）经 PluginHost.list() → plugin 域透传给 webui 渲染器注册表 —— UI 插件化最小闭环：插件决定「出现什么/挂哪里」，渲染器本体留在前端（不注入任意 HTML）。
 - `runtime-contributions.ts`：P-E 批（增量多批首个消费者）。ToolBundleRegistry（needs cwd）、HotReloadManager（needs 11 个依赖，依赖面最大）。
 
 ### 2.6 接线 `*-wiring.ts` / 引导家族
@@ -1452,7 +1452,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 │  └─ 插件渠道：飞书 feishu、微信 ClawBot                            │
 ├──────────────────────────────────────────────────────────────┤
 │  src/ui-protocol/  前端协议层（连接任意 UI 形态的统一双向协议）    │
-│  ── UiProtocolServer 路由 + 传输适配器 + 21 个业务域              │
+│  ── UiProtocolServer 路由 + 传输适配器 + 23 个业务域              │
 ├──────────────────────────────────────────────────────────────┤
 │  src/ui/  TUI 组件库（斜杠命令、聊天日志、Markdown/Diff/主题）    │
 ├──────────────────────────────────────────────────────────────┤
@@ -1670,7 +1670,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 - 消息模型：`UiRequest{kind,id,method,params}`（UI→后端）、`UiResponse{kind,id,ok,result|error}`（后端→UI）、`UiEvent{kind,type,payload}`（后端→UI 推送）。`method` 命名空间 `<domain>.<action>`。
 - 目标是让 **TUI 本地（InProc）、WebUI / 桌面端 / 远程 TUI（WebSocket）、未来渠道**共享同一套协议与后端能力；`UiWsSession`（WS 端）与 `UiProtocolSession`（进程内）复用同一装配链路。
 
-结构：`index.ts`（统一出口）、`server.ts`（路由）、`adapter.ts`（UIAdapter 接口 + InProc 实现）、`transport/ws.ts`（WS 传输适配器）、`types.ts`（协议类型/常量）、`domains/`（21 个业务域）、`util/zip.ts`（最小 zip）、另有跨层中立事件契约 `src/events.ts`（types.ts 仅 re-export）。
+结构：`index.ts`（统一出口）、`server.ts`（路由）、`adapter.ts`（UIAdapter 接口 + InProc 实现）、`transport/ws.ts`（WS 传输适配器）、`types.ts`（协议类型/常量）、`domains/`（23 个业务域）、`util/zip.ts`（最小 zip）、另有跨层中立事件契约 `src/events.ts`（types.ts 仅 re-export）。
 
 ### 4.2 server.ts —— `UiProtocolServer`（核心路由）
 - `registerDomain(domain, handler)`：注册领域处理器。关键设计：**注册时用 `Object.keys(handler)` 快照方法表**（`methodTables`），只收录可枚举属性→冻结"协议方法面"契约；后挂的、不可枚举的生命周期方法（如 `config.dispose`）不进方法面，既不可被远程调用也不上报能力清单。
@@ -1694,7 +1694,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 ### 4.6 events.ts —— 跨层中立事件契约（src/ 顶层）
 `UI_EVENT` 定义后端→UI 推送事件：`ui.connected/ui.error`、`message.*`（text/thinking/tool_use/tool_result/diff/status/error/turn_start/turn_info/flush/interrupt/ask_user）、`state.update`、`config.change`、`model.change`、`session.change`、`permission.request`、`companion.say`、`companion.voice`。设计动因（P5-6）：事件是业务与 UI 共享契约，产生者既有协议层也有业务核心（companion.say 由 AgentLoop、companion.voice 由 TTS），独立成层避免 AgentLoop 反向依赖 UI 适配层；本层与 src/types.ts 平级、保持零依赖。
 
-### 4.7 domains/ —— 21 个业务域工厂
+### 4.7 domains/ —— 23 个业务域工厂
 每个域导出 `createXxxDomain(options): DomainHandler`，通过"结构化小接口"（真实后端类结构兼容）依赖后端能力，可独立测试、可替换实现。职责概览：
 
 | 域 | 主要方法 | 依赖的后端（桥接层注入） |
@@ -1726,7 +1726,9 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | plugin | list（内核插件挂载状态，B-4） | loop.pluginHost.list() |
 | companion | get/activate/deactivate/voices/voiceBind/voiceRegister/…. 切换流程与 companion_mode 工具对齐（委托 loop.syncRouter(mode)，模式真源 = session type） | RouterSwitcherLike(getRouter/syncRouter) + CompanionSessionManager + VoiceLibrary/VoiceGenStore/SayHistoryStore/SceneReader（全部注入，协议层零业务依赖） |
 | schedule | list/（写操作可选） | HeartbeatScheduler（loop.getScheduler） |
-| preview | meta/list/read/browse/setRoot/rawUrl（文件预览数据面；read 结果带**签发的 url**，browse/setRoot 仅限回环连接） | gateway/preview-service（与 HTTP 路由共享同一实例；未装配时方法报错，TUI 不传） |
+| preview | meta/list/read/browse/setRoot/rawUrl（文件预览数据面；read 结果带**签发的 url**，browse/setRoot 仅限回环连接；docx 走 mammoth 语义 HTML） | gateway/preview-service（与 HTTP 路由共享同一实例；未装配时方法报错，TUI 不传） |
+| stt | status/download/remove/transcribe（语音转文字：本地 SenseVoiceSmall 经 sherpa-onnx；音频 16kHz WAV base64 直传，模型下载进度走 stt.model_progress 事件） | stt 单例引擎（进程级，多会话复用；模型落 ~/.agent/models/stt/，hf-mirror 直链下载） |
+| tts | status/detectPython/setPythonPath/download/start/stop/synthesize（语音合成：本地 Fun-CosyVoice3 python 推理服务；模型 base\|rl 增量下载，环境外来按需安装） | tts 单例服务（模型目录 ~/.agent/models/tts/cosyvoice3/ + python 子进程 server.py，127.0.0.1 仅本机） |
 | meta（内建） | get（版本/能力协商） | 协议服务器自身 |
 
 工具域还提供 `util/zip.ts` 的 `buildZip`（session.export 用，纯 Node deflate + 标准 ZIP 结构，零第三方依赖）。

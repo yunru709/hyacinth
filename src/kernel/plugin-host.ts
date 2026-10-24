@@ -80,11 +80,32 @@ export interface PluginContext<S extends ServiceMap = ServiceMap, M extends Reco
   aroundHook<K extends keyof M>(name: K, handler: Interceptor<M[K]>): Disposable;
 }
 
+/**
+ * 插件贡献的 UI 卡片（UI 插件化最小闭环，2026-10-24）：
+ * slot 决定挂载点（webui 侧的槽位名），kind 决定渲染器（webui 持有
+ * 渲染器注册表 —— 插件声明「出现什么」，webui 保留「怎么渲染」，
+ * 插件不注入任意 HTML）。内核只做簿记，不理解任何 slot/kind 语义。
+ */
+export interface PluginUiCard {
+  /** 渲染器键：webui 内置渲染器注册表的键名 */
+  kind: string;
+  /** 挂载槽位（如 'settings.voice' = 设置页语音 tab 面板） */
+  slot: string;
+  /** 卡片标题（缺省由渲染器给出） */
+  title?: string;
+  /** 图标名（lucide） */
+  icon?: string;
+  /** 同槽位排序（小者靠前） */
+  order?: number;
+}
+
 /** 插件定义 */
 export interface HyPlugin<S extends ServiceMap = ServiceMap, M extends Record<string, unknown> = Record<string, unknown>> {
   id: string;
   /** 依赖的插件 ID —— mount 时校验，缺失直接报错而非运行时 undefined */
   deps?: string[];
+  /** UI 卡片贡献：list() 透传给 UI（插件卸载即卡片消失） */
+  uiCards?: PluginUiCard[];
   /** 激活：注册工具 / 服务 / 钩子。返回值会自动纳入生命周期管理 */
   activate(ctx: PluginContext<S, M>, config: unknown): void | Promise<void>;
   /** 停用：DisposableStore 释放之外的额外清理（可选） */
@@ -272,8 +293,8 @@ export class PluginHost<
     return !!entry && entry.state === 'mounted';
   }
 
-  /** 已挂载插件概览（诊断 / UI 状态展示用） */
-  list(): Array<{ id: string; state: PluginState; error?: string; deps: string[] }> {
+  /** 已挂载插件概览（诊断 / UI 状态展示用；uiCards 随定义透传给 UI 插件层） */
+  list(): Array<{ id: string; state: PluginState; error?: string; deps: string[]; uiCards?: PluginUiCard[] }> {
     return [...this.plugins.values()]
       .sort((a, b) => a.seq - b.seq)
       .map((e) => ({
@@ -281,6 +302,7 @@ export class PluginHost<
         state: e.state,
         ...(e.error ? { error: e.error } : {}),
         deps: e.plugin.deps ?? [],
+        ...(e.plugin.uiCards?.length ? { uiCards: e.plugin.uiCards } : {}),
       }));
   }
 

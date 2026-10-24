@@ -2456,3 +2456,25 @@
     box-shadow: -12px 0 32px color-mix(in srgb, var(--hyacinth-background) 60%, transparent);
   }
 }
+
+/* ── 语音输入按钮（stt 域）────────────────────────────────────
+   三态：idle（普通 cbtn）/ recording（红底脉冲，录音进行中）/ busy（转写或
+   模型下载中，图标半透明呼吸）。红色只在录音态出现 —— "正在占用麦克风"是
+   需要一眼可见的状态。 */
+.stt-btn.is-recording {
+  background: var(--state-error);
+  border-color: var(--state-error);
+  color: #fff;
+  animation: stt-pulse 1.2s ease-in-out infinite;
+}
+.stt-btn.is-recording:hover { background: var(--state-error); }
+.stt-btn.is-busy { opacity: 0.75; }
+.stt-btn.is-busy svg { animation: stt-breathe 1.4s ease-in-out infinite; }
+@keyframes stt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-error) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--state-error) 12%, transparent); }
+}
+@keyframes stt-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}

@@ -24,6 +24,17 @@ import type { DomainHandler } from '../server.js';
 // 结构化接口（真实 PluginHost.list() 条目 / PluginManager 映射条目兼容）
 // ────────────────────────────────────────────────────────────
 
+/** 插件贡献的 UI 卡片（UI 插件化：卡片出现/消失随插件挂载状态） */
+export interface PluginUiCardLike {
+  /** 渲染器键（UI 侧渲染器注册表键名，如 'say-voice-tts'） */
+  kind: string;
+  /** 挂载槽位（如 'settings.voice'） */
+  slot: string;
+  title?: string;
+  icon?: string;
+  order?: number;
+}
+
 /** 内核插件挂载状态（对应 PluginHost.list() 条目） */
 export interface PluginStatusLike {
   /** 插件 id */
@@ -34,6 +45,8 @@ export interface PluginStatusLike {
   error?: string;
   /** 依赖的插件 id */
   deps: string[];
+  /** UI 卡片贡献（有声明才有此字段）；error 态插件不贡献 UI */
+  uiCards?: PluginUiCardLike[];
 }
 
 /** 目录插件清单条目（装配侧从 PluginInstance 映射而来） */

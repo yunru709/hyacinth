@@ -126,9 +126,25 @@ export function getDefaultConfig(): FullConfig {
     },
     skills: { disabled: [] },
     models: {
+      /** 模型存储根目录（空 = ~/.agent/models；STT/TTS 共用，换盘用它） */
+      root: '',
+      /** 下载源偏好：'' = auto（hf-mirror 优先逐源尝试）；'hf-mirror' / 'huggingface' 锁定 */
+      mirror: '',
       assessment: { source: 'main' },
       planning: { source: 'main' },
       compression: { source: 'main' },
+    },
+    stt: {
+      /** 语音输入（麦克风按钮）：默认关，用户在设置页打开 */
+      enabled: false,
+    },
+    voice: {
+      say: {
+        /** say 语音播报总开关（say-voice 插件）：默认关，模型就绪后由用户打开 */
+        broadcast: false,
+        /** 默认音色 id（空 = 引擎默认） */
+        voice: '',
+      },
     },
     local: {
       baseUrl: localCfg.baseUrl,

@@ -353,6 +353,8 @@ export class AgentLoop {
   private sayFailureCount = 0;
   /** say 待落盘的交付正文（延后到 tool_result 之后落盘，见 takeSayStatus 注释） */
   private sayPendingContent: string | null = null;
+  /** say 随附的语音选项（与 sayPendingContent 同生命周期：submit 暂存、takeSayStatus 消费） */
+  private sayPendingVoice: import('../tools/say.js').SayVoiceOptions | undefined;
   // ── goal 模式（2026-10-10：只改出口 —— 不达成目标不退出 LOOP）────────────
   /** goal 状态（session 级，落 <sessionDir>/goal.json，跨 restart 存活） */
   private goalState: GoalState | null = null;
@@ -417,6 +419,18 @@ export class AgentLoop {
       character: string,
       notify: (type: string, payload?: unknown) => void,
       overrides?: { voice?: string; voiceId?: string; tone?: string; sayId?: string },
+    ): void;
+  };
+  /**
+   * say 语音播报钩子（say-voice 插件装配；与 modeVoice 同语义的第二个语音面）。
+   * takeSayStatus 屏显后调用：实现方自行排队（忙时留最新）与降级，绝不阻塞回合。
+   * 未装配（插件停用）= 无语音能力，say 照常交付文字，语音参数安全忽略。
+   */
+  sayVoice?: {
+    onSayDelivered(
+      text: string,
+      opts: import('../tools/say.js').SayVoiceOptions,
+      notify: (type: string, payload?: unknown) => void,
     ): void;
   };
 
@@ -1107,7 +1121,10 @@ export class AgentLoop {
    *   - 历史尾部以 assistant 文本收尾（延后落盘后成立），避免"连续 user 消息"
    * 返回 ok=false 时由工具层抛错 → is_error → loop 自动续轮让模型重写。
    */
-  async submitSay(content: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  async submitSay(
+    content: string,
+    voice?: import('../tools/say.js').SayVoiceOptions,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     // goal 模式下 say 是「宣布完成/结束回合」的逃逸口：工具过滤只是第一道门，
     // 这里再兜一层 —— 同批 enter_goal+say、plan_execute 内部裸执行 say 都能绕过过滤。
     if (this.goalState?.active) {
@@ -1136,6 +1153,7 @@ export class AgentLoop {
 
     // 暂存正文：落盘与屏显延后到 takeSayStatus()（tool_result 落盘之后）
     this.sayPendingContent = text;
+    this.sayPendingVoice = voice;
     this.sayStatus = 'submitted';
     return { ok: true };
   }
@@ -1150,8 +1168,10 @@ export class AgentLoop {
   private async takeSayStatus(): Promise<'submitted' | 'aborted' | undefined> {
     const status = this.sayStatus;
     const pending = this.sayPendingContent;
+    const pendingVoice = this.sayPendingVoice;
     this.sayStatus = null;
     this.sayPendingContent = null;
+    this.sayPendingVoice = undefined;
     this.sayFailureCount = 0;
 
     if (status === 'submitted' && pending) {
@@ -1170,6 +1190,13 @@ export class AgentLoop {
       // 未实现 onSay 的渠道回退 onText，保持兼容。
       if (this.outputHandler?.onSay) this.outputHandler.onSay(pending);
       else this.outputHandler?.onText?.(pending);
+      // 语音播报钩子（say-voice 插件）：交付正文落屏后触发，fire-and-forget——
+      // 实现方串行排队（忙时留最新）+ 失败静默，绝不阻塞/打断回合收尾。
+      this.sayVoice?.onSayDelivered(
+        pending,
+        pendingVoice ?? {},
+        (type, payload) => this.emitUiEvent(type, payload),
+      );
     }
 
     return status ?? undefined;

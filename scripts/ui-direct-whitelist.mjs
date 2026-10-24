@@ -28,7 +28,8 @@
 export const UI_DIRECT_ALLOWED = new Map([
   ['channels/auto-detect.ts', new Set(['setup'])],
   ['channels/builtin/http-webhook.ts', new Set(['context', 'gateway', 'local-model', 'prompts', 'runtime', 'setup'])],
-  ['channels/builtin/ui-protocol-session.ts', new Set(['companion', 'generation', 'hot-reload'])],
+  // stt/tts：进程级单例引擎服务（模型/识别器只初始化一次），与 companion 音色库同一注入模式
+  ['channels/builtin/ui-protocol-session.ts', new Set(['companion', 'generation', 'hot-reload', 'stt', 'tts'])],
   ['gateway/agent-assembly.ts', new Set(['agents', 'dependency', 'evolution', 'memory', 'orchestrator', 'provider', 'skills', 'supervisor', 'tools'])],
   ['gateway/arch-assembly.ts', new Set(['context', 'supervisor'])],
   ['gateway/base-contributions.ts', new Set(['evolution', 'machine', 'rollback'])],

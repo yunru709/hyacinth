@@ -768,6 +768,29 @@
 
   function handleEvent(type, payload) {
     switch (type) {
+      case 'stt.model_progress': {
+        // 模型下载进度（语音输入首次使用时触发）：按钮 title 实时反馈。
+        // done 后提示"再点一次麦克风重试"—— 原始录音在转写失败时已丢弃，不自动重录。
+        const btn = $('#stt-btn');
+        if (!btn) return;
+        const p = payload || {};
+        if (p.phase === 'downloading') {
+          btn.title = `语音模型下载中 ${p.percent || 0}%（${p.speed || ''}）`;
+          sttBtnSet('transcribing', `正在下载语音模型 ${p.percent || 0}%…`);
+          if (currentView() === 'settings') loadVoiceSettings();   // 设置页进度条同步
+        } else if (p.phase === 'done') {
+          sttState.modelDownloading = false;
+          sttBtnSet('idle');
+          if (currentView() === 'settings') loadVoiceSettings();
+          appendMsg('status', '语音模型下载完成 —— 再点一次麦克风即可语音输入');
+        } else if (p.phase === 'error') {
+          sttState.modelDownloading = false;
+          sttBtnSet('idle');
+          if (currentView() === 'settings') loadVoiceSettings();
+          appendMsg('error', '语音模型下载失败：' + (p.message || '未知错误'));
+        }
+        return;
+      }
       case 'ui.connected':
         if (payload && payload.sessionId) currentSessionId = payload.sessionId;
         // 刚连上时还不知道这条会话叫什么（session.list 还没回来），先显示「新会话」；
@@ -949,6 +972,9 @@
         break;
       case 'companion.voice':
         handleCompanionVoice(payload);
+        break;
+      case 'tts.say_voice':
+        handleSayVoice(payload);
         break;
       case 'companion.scene':
         // 场景图更新推送：后端监视 scene.json 落盘后广播 ⇒ 即时刷新，无需轮询
@@ -3361,6 +3387,688 @@
     }
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 语音输入（stt 契约域：本地 SenseVoice 转写）
+  // ════════════════════════════════════════════════════════════
+  // 交互：点击麦克风开始录音，再点结束 → 前端解码/重采样成 16kHz 单声道
+  // PCM WAV（后端零解码依赖）→ stt.transcribe → 文本插入输入框**光标处**
+  // （不直接发送，用户可改后回车）。录音频是"私彩"数据：只在内存里走一圈，
+  // 转写完即弃（契约层不落盘）。
+  const sttState = {
+    phase: 'idle',        // idle | recording | transcribing
+    recorder: null,
+    stream: null,
+    chunks: [],
+    startedAt: 0,
+    timer: null,
+    sharedCtx: null,      // 16kHz AudioContext（复用，避免每次开关创建）
+    modelDownloading: false,
+  };
+
+  function sttBtnSet(phase, hint) {
+    sttState.phase = phase;
+    const btn = $('#stt-btn');
+    if (!btn) return;
+    btn.classList.toggle('is-recording', phase === 'recording');
+    btn.classList.toggle('is-busy', phase === 'transcribing');
+    const tips = {
+      idle: '语音输入（点击开始，再点结束并转写）',
+      recording: '录音中… 点击结束并转写',
+      transcribing: hint || '转写中…',
+    };
+    btn.title = tips[phase] || tips.idle;
+    btn.setAttribute('aria-label', tips[phase] || tips.idle);
+  }
+
+  /** 解码录音 blob → 16kHz 单声道 Float32（AudioContext 指定采样率即完成重采样） */
+  async function sttDecodeTo16k(blob) {
+    sttState.sharedCtx ??= new AudioContext({ sampleRate: 16000 });
+    const buf = await blob.arrayBuffer();
+    const audio = await sttState.sharedCtx.decodeAudioData(buf);
+    // 多声道混到单声道
+    const ch = audio.numberOfChannels;
+    const out = new Float32Array(audio.length);
+    for (let c = 0; c < ch; c++) {
+      const data = audio.getChannelData(c);
+      for (let i = 0; i < data.length; i++) out[i] += data[i] / ch;
+    }
+    return { samples: out, sampleRate: audio.sampleRate };
+  }
+
+  /** Float32 → 16bit PCM WAV（服务端 stt/wav.ts 只认这个） */
+  function sttEncodeWav(samples, sampleRate) {
+    const data = new DataView(new ArrayBuffer(samples.length * 2));
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.max(-1, Math.min(1, samples[i]));
+      data.setInt16(i * 2, v < 0 ? v * 32768 : v * 32767, true);
+    }
+    const header = new ArrayBuffer(44);
+    const h = new DataView(header);
+    const str = (off, s) => { for (let i = 0; i < s.length; i++) h.setUint8(off + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); h.setUint32(4, 36 + data.byteLength, true); str(8, 'WAVE');
+    str(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+    h.setUint32(24, sampleRate, true); h.setUint32(28, sampleRate * 2, true);
+    h.setUint16(32, 2, true); h.setUint16(34, 16, true);
+    str(36, 'data'); h.setUint32(40, data.byteLength, true);
+    return new Blob([header, data], { type: 'audio/wav' });
+  }
+
+  /** 把转写文本插入输入框**光标处**（前接一个空格避免粘连），保持焦点与光标在插入尾部 */
+  function sttInsertText(text) {
+    const ta = $('#chat-input');
+    if (!ta) return;
+    const s = ta.selectionStart ?? ta.value.length;
+    const e = ta.selectionEnd ?? s;
+    const prefix = s > 0 && !/[\s\n]$/.test(ta.value.slice(0, s)) ? ' ' : '';
+    ta.setRangeText(prefix + text, s, e, 'end');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.focus();
+    ta.setSelectionRange(s + (prefix + text).length, s + (prefix + text).length);
+  }
+
+  function sttCleanup() {
+    try { sttState.recorder?.state !== 'inactive' && sttState.recorder?.stop(); } catch (e) { /* ignore */ }
+    sttState.stream?.getTracks().forEach((t) => t.stop());
+    sttState.stream = null;
+    sttState.recorder = null;
+    sttState.chunks = [];
+    if (sttState.timer) { clearInterval(sttState.timer); sttState.timer = null; }
+  }
+
+  async function sttToggle() {
+    const btn = $('#stt-btn');
+    if (!btn || sttState.phase === 'transcribing') return;
+
+    // 设置页开关联动：stt.enabled=false 时按钮只提示（状态即时查，不依赖事件）
+    try {
+      const cfg = await client.request('config.get', { path: 'stt.enabled' });
+      if (cfg && cfg.value === false) {
+        btn.title = '语音输入已在设置中禁用（设置 → 语音）';
+        appendMsg('status', '语音输入已在设置中禁用 —— 设置 → 语音 可重新开启');
+        return;
+      }
+    } catch (e) { /* config 查询失败不拦输入（默认启用） */ }
+
+    if (sttState.phase === 'idle') {
+      try {
+        sttState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        const why = err && err.name === 'NotAllowedError'
+          ? '麦克风权限被拒绝 —— 请在浏览器/系统设置里放行本站点'
+          : `无法访问麦克风：${(err && err.message) || err}`;
+        sttBtnSet('idle');
+        btn.title = why;
+        appendMsg('error', '语音输入不可用：' + why);
+        return;
+      }
+      sttState.chunks = [];
+      sttState.recorder = new MediaRecorder(sttState.stream);
+      sttState.recorder.ondataavailable = (e) => { if (e.data.size) sttState.chunks.push(e.data); };
+      sttState.recorder.onstop = () => { void sttFinishRecording(); };
+      sttState.recorder.start();
+      sttState.startedAt = Date.now();
+      sttBtnSet('recording');
+      sttState.timer = setInterval(() => {
+        const s = Math.floor((Date.now() - sttState.startedAt) / 1000);
+        btn.title = `录音中 ${s}s… 点击结束并转写`;
+      }, 500);
+      return;
+    }
+
+    // recording → 停止并转写（onstop 回调接管）
+    if (sttState.phase === 'recording') {
+      const elapsed = Date.now() - sttState.startedAt;
+      if (elapsed < 400) {
+        // 误触保护：过短按不出有效语音，直接放弃
+        sttCleanup();
+        sttBtnSet('idle');
+        return;
+      }
+      sttBtnSet('transcribing');
+      sttState.recorder?.stop();
+      sttState.stream?.getTracks().forEach((t) => t.stop());
+    }
+  }
+
+  async function sttFinishRecording() {
+    const blob = new Blob(sttState.chunks, { type: sttState.chunks[0]?.type || 'audio/webm' });
+    sttState.chunks = [];
+    if (sttState.timer) { clearInterval(sttState.timer); sttState.timer = null; }
+    try {
+      const { samples, sampleRate } = await sttDecodeTo16k(blob);
+      const wav = sttEncodeWav(samples, sampleRate);
+      const b64 = await new Promise((res) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result).split(',')[1]);
+        fr.readAsDataURL(wav);
+      });
+      const result = await client.request('stt.transcribe', { audioWavBase64: b64 });
+      if (result && result.text) sttInsertText(result.text);
+      else appendMsg('error', '语音转写结果为空');
+      sttBtnSet('idle');
+    } catch (err) {
+      const msg = String((err && err.message) || err);
+      sttBtnSet('idle');
+      // 模型未下载：自动触发下载，进度经 stt.model_progress 事件反映在按钮 title
+      if (/未下载|模型未就绪/.test(msg)) {
+        sttBtnSet('transcribing', '正在下载语音模型…');
+        sttState.modelDownloading = true;
+        try { await client.request('stt.download'); } catch (e) { /* 事件里看错误 */ }
+      } else {
+        appendMsg('error', '语音转写失败：' + msg);
+      }
+    }
+  }
+
+  function bindSttButton() {
+    const btn = $('#stt-btn');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); void sttToggle(); });
+  }
+
+  // ── 设置页「语音」分区（stt.status + config stt.enabled）──────────
+  // 布局：启用开关卡 + 模型管理卡（状态/进度/下载/删除）。模型不入源码仓库，
+  // 这里是它的生命周期管理面（下载/释放），麦克风按钮读 stt.enabled 联动。
+
+  let voiceSettingsBound = false;
+
+  async function loadVoiceSettings() {
+    const stateEl = $('#stt-model-state');
+    if (!stateEl) return;
+    let st = null;
+    try { st = await client.request('stt.status'); } catch (e) { st = null; }
+    let enabled = true;
+    try {
+      const r = await client.request('config.get', { path: 'stt.enabled' });
+      enabled = r ? r.value !== false : true;   // 键不存在视为启用（默认开）
+    } catch (e) { /* 默认启用 */ }
+    const toggle = $('#stt-enabled-toggle');
+    if (toggle) toggle.checked = enabled;
+
+    const dirEl = $('#stt-model-dir');
+    if (dirEl) dirEl.textContent = st ? st.modelDir : '—';
+    const rtEl = $('#stt-runtime-desc');
+    if (rtEl) {
+      rtEl.textContent = st
+        ? (st.runtimeAvailable
+          ? '已就绪（sherpa-onnx，本地推理）'
+          : `不可用：${st.lastError || '未安装'} —— 执行 pnpm add sherpa-onnx-node 后重启`)
+        : '—';
+    }
+
+    const downloadBtn = $('#stt-model-download');
+    const removeBtn = $('#stt-model-remove');
+    const progressRow = $('#stt-model-progress-row');
+    const progressBar = $('#stt-model-progress-bar');
+    const progressText = $('#stt-model-progress-text');
+
+    if (!st) {
+      stateEl.textContent = '不可用';
+      if (downloadBtn) downloadBtn.disabled = true;
+      if (removeBtn) removeBtn.disabled = true;
+      return;
+    }
+
+    if (st.downloading) {
+      // ⚠️ 下载态**无论有无 progress 数据**都要显示进度行并继续轮询 ——
+      // 点击"下载"后引擎先置 downloading、首个进度回调要等 500ms 节流窗口，
+      // 这段窗口 progress 是 undefined；若只在"有数据"时才轮询，轮询链在这里
+      // 断裂，进度条永远出不来（实测踩过）。
+      stateEl.textContent = '下载中…';
+      if (progressRow) progressRow.hidden = false;
+      const p = st.downloadProgress;
+      if (progressBar) progressBar.style.width = (p?.percent || 0) + '%';
+      if (progressText) {
+        progressText.textContent = p
+          ? `${p.file} · ${p.percent}% · ${(p.received / 1048576).toFixed(1)}/${(p.total / 1048576).toFixed(1)} MB · ${p.speed}`
+          : '准备中…';
+      }
+      if (downloadBtn) downloadBtn.disabled = true;
+      if (removeBtn) removeBtn.disabled = true;
+      setTimeout(() => { if (currentView() === 'settings') loadVoiceSettings(); }, 800);
+      return;
+    }
+
+    if (progressRow) progressRow.hidden = true;
+    if (st.modelReady) {
+      stateEl.textContent = '已就绪';
+      if (downloadBtn) downloadBtn.disabled = true;
+      if (removeBtn) removeBtn.disabled = false;
+    } else {
+      stateEl.textContent = st.runtimeAvailable ? '未下载' : '不可用';
+      if (downloadBtn) downloadBtn.disabled = !st.runtimeAvailable;
+      if (removeBtn) removeBtn.disabled = true;
+      if (st.lastError && progressText) {
+        if (progressRow) progressRow.hidden = false;
+        if (progressBar) progressBar.style.width = '0%';
+        progressText.textContent = '上次错误：' + st.lastError;
+      }
+    }
+  }
+
+  function bindVoiceSettingsOnce() {
+    if (voiceSettingsBound) return;
+    voiceSettingsBound = true;
+    const toggle = $('#stt-enabled-toggle');
+    if (toggle) toggle.addEventListener('change', async () => {
+      try {
+        await client.request('config.set', { path: 'stt.enabled', value: toggle.checked });
+      } catch (e) {
+        appendMsg('error', '保存语音输入开关失败：' + ((e && e.message) || e));
+        toggle.checked = !toggle.checked;
+      }
+    });
+    const download = $('#stt-model-download');
+    if (download) download.addEventListener('click', async () => {
+      download.disabled = true;
+      try { await client.request('stt.download'); } catch (e) {
+        appendMsg('error', '触发模型下载失败：' + ((e && e.message) || e));
+        download.disabled = false;
+      }
+      void loadVoiceSettings();
+    });
+    const remove = $('#stt-model-remove');
+    if (remove) remove.addEventListener('click', async () => {
+      if (!window.confirm('删除已下载的语音模型（约 230MB）？删除后可随时重新下载。')) return;
+      remove.disabled = true;
+      try { await client.request('stt.remove'); } catch (e) {
+        appendMsg('error', '删除语音模型失败：' + ((e && e.message) || e));
+      }
+      void loadVoiceSettings();
+    });
+    const radio = $('#tab-voice');
+    if (radio) radio.addEventListener('change', () => { if (radio.checked) void loadVoiceSettings(); });
+  }
+
+  // ── 设置页「语音合成」（tts 契约域：CosyVoice3 环境/模型/服务）────────
+  // python 环境与 torch/cosyvoice 包是外来环境（源码不携带），这里只做
+  // 检测/指引；模型 base|rl 按需增量下载；推理服务按需启停；试听走合成。
+  // 卡片本体由 say-voice 插件贡献（buildTtsCard，见插件贡献卡区），此处只剩数据面。
+
+  /** 模型存储位置卡（生效目录显示 + config models.root 读写） */
+  let modelsRootLoaded = false;
+  async function loadModelsRoot() {
+    const nowEl = $('#models-root-now');
+    if (!nowEl) return;
+    let dir = null;
+    // stt.status.modelDir 已是解析后的生效目录（env > config > 默认）
+    try { const s = await client.request('stt.status'); dir = s && s.modelDir; } catch (e) { /* 下略 */ }
+    if (!dir) { try { const t = await client.request('tts.status'); dir = t && t.model && t.model.modelDir; } catch (e) { /* ignore */ } }
+    nowEl.textContent = dir || '—';
+    const input = $('#models-root-input');
+    if (input && document.activeElement !== input && !modelsRootLoaded) {
+      modelsRootLoaded = true;
+      try {
+        const r = await client.request('config.get', { path: 'models.root' });
+        if (r && typeof r.value === 'string') input.value = r.value;
+      } catch (e) { /* 默认空 */ }
+    }
+    // 下载源（models.mirror：''=auto | hf-mirror | huggingface）
+    const mirrorSel = $('#models-mirror');
+    if (mirrorSel && document.activeElement !== mirrorSel) {
+      try {
+        const r = await client.request('config.get', { path: 'models.mirror' });
+        mirrorSel.value = (r && typeof r.value === 'string') ? r.value : '';
+      } catch (e) { mirrorSel.value = ''; }
+    }
+  }
+
+  function bindModelsRootOnce() {
+    const save = $('#models-root-save');
+    if (!save) return;
+    save.addEventListener('click', async () => {
+      const input = $('#models-root-input');
+      if (!input) return;
+      const v = input.value.trim();
+      try {
+        await client.request('config.set', { path: 'models.root', value: v });
+        modelsRootLoaded = false;
+        await loadModelsRoot();
+        appendMsg('status', v ? '模型存储位置已保存：' + v + '（对之后的下载生效）' : '已恢复默认位置（~/.agent/models）');
+      } catch (e) {
+        appendMsg('error', '保存模型位置失败：' + ((e && e.message) || e));
+      }
+    });
+    // 下载源切换：写 models.mirror，即时生效（下次下载按新源排序）
+    const mirrorSel = $('#models-mirror');
+    if (mirrorSel) mirrorSel.addEventListener('change', async () => {
+      try {
+        await client.request('config.set', { path: 'models.mirror', value: mirrorSel.value });
+        appendMsg('status', '下载源已切换：' + (mirrorSel.value || 'auto（逐源尝试）'));
+      } catch (e) {
+        appendMsg('error', '保存下载源失败：' + ((e && e.message) || e));
+      }
+      void loadVoiceSettings();
+      void loadTtsSettings();
+    });
+    const open = $('#models-root-open');
+    if (open) open.addEventListener('click', () => {
+      // WebUI 无 shell 能力：把生效路径复制到剪贴板（资源管理器直达由桌面壳/本地用户完成）
+      const nowEl = $('#models-root-now');
+      if (!nowEl || !nowEl.textContent || nowEl.textContent === '—') return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(nowEl.textContent)
+          .then(() => appendMsg('status', '路径已复制：' + nowEl.textContent))
+          .catch(() => appendMsg('status', '路径：' + nowEl.textContent));
+      } else {
+        appendMsg('status', '路径：' + nowEl.textContent);
+      }
+    });
+  }
+
+  async function loadTtsSettings() {
+    const stateEl = $('#tts-service-state');
+    if (!stateEl) return;
+    let st = null;
+    try { st = await client.request('tts.status'); } catch (e) { st = null; }
+    if (!st) {
+      stateEl.textContent = '不可用';
+      return;
+    }
+    const m = st.model || {};
+    // variant 下拉（不回写触发下载 —— 下载点按钮）
+    const variantSel = $('#tts-variant');
+    if (variantSel && document.activeElement !== variantSel) variantSel.value = m.variant || 'rl';
+    // 模型状态
+    const descEl = $('#tts-model-desc');
+    if (descEl) {
+      if (m.downloading && m.downloadProgress) {
+        descEl.textContent = `下载中 ${m.downloadProgress.file} · ${m.downloadProgress.percent}%`;
+      } else {
+        descEl.textContent = m.ready
+          ? `已就绪（variant=${m.variant}）`
+          : `未就绪 —— 缺 ${m.missingFiles.length} 个文件（${(m.missingFiles[0] || '')}${m.missingFiles.length > 1 ? ' 等' : ''}）`;
+      }
+    }
+    const dlBtn = $('#tts-model-download');
+    // 下载按钮：模型与 python 依赖都就绪才禁用 —— 「一键就绪」两阶段，
+    // 模型齐但依赖缺时按钮保留（点它自动补依赖：克隆仓库 + pip 裁剪集）
+    if (dlBtn) dlBtn.disabled = !!m.downloading || (m.ready && st.python?.cosyvoiceInstalled === true);
+    const progressRow = $('#tts-progress-row');
+    // ⚠️ 下载态无论有无 progress 数据都显示进度行并继续轮询（同 loadVoiceSettings：
+    //    点击后的首个进度回调要等节流窗口，progress undefined 时断裂轮询 = 永不显示）
+    if (m.downloading) {
+      if (progressRow) progressRow.hidden = false;
+      const p = m.downloadProgress;
+      const bar = $('#tts-progress-bar');
+      if (bar) bar.style.width = (p?.stage === 'model' ? (p?.percent || 0) : 0) + '%';
+      const text = $('#tts-progress-text');
+      if (text) {
+        text.textContent = !p
+          ? '准备中…'
+          : (p.stage === 'deps'
+            ? `依赖安装：${p.file}`
+            : `${p.file} · ${p.percent}% · ${((p.received || 0) / 1048576).toFixed(1)}/${((p.total || 0) / 1048576).toFixed(1)} MB · ${p.speed || ''}`);
+      }
+      setTimeout(() => { if (currentView() === 'settings') loadTtsSettings(); }, 800);
+    } else if (progressRow) {
+      progressRow.hidden = true;
+      if (st.downloadError) {
+        if (progressRow) progressRow.hidden = false;
+        const text = $('#tts-progress-text');
+        if (text) text.textContent = '上次错误：' + st.downloadError;
+      }
+    }
+    // python 环境（无缓存时显示未检测，不自动探测 —— 探测要起子进程）
+    const py = st.python;
+    const pyDesc = $('#tts-python-desc');
+    if (pyDesc) {
+      pyDesc.textContent = py
+        ? (py.pythonAvailable
+          ? `python ${py.pythonVersion || ''} · cosyvoice 包：${py.cosyvoiceInstalled === true ? '已安装' : py.cosyvoiceInstalled === false ? '未安装（点上方「下载」自动配置依赖）' : '未检测'}`
+          : `未检测到 python —— ${py.hint}`)
+        : '未检测（点「检测」）';
+    }
+    const pathInput = $('#tts-python-path');
+    if (pathInput && py && py.pythonPath && py.pythonPath !== 'python' && document.activeElement !== pathInput) {
+      pathInput.value = py.pythonPath;
+    }
+    // 服务状态
+    const svc = st.service || {};
+    stateEl.textContent = svc.running ? '运行中' : '未运行';
+    const svcDesc = $('#tts-service-desc');
+    if (svcDesc) {
+      svcDesc.textContent = svc.running
+        ? `运行中（127.0.0.1:${svc.port}）`
+        : `未运行${svc.lastError ? ' —— 上次错误：' + svc.lastError : ' —— 启动含模型加载，可能需要 1~2 分钟'}`;
+    }
+    const startBtn = $('#tts-start-btn');
+    if (startBtn) startBtn.disabled = !m.ready || !!svc.running;
+    const stopBtn = $('#tts-stop-btn');
+    if (stopBtn) stopBtn.disabled = !svc.running;
+    const testBtn = $('#tts-test-btn');
+    if (testBtn) testBtn.disabled = !svc.running;
+  }
+
+  // ── 插件贡献卡（UI 插件化，2026-10-24）──────────────────────────
+  // 插件声明 uiCards（kind=渲染器键，slot=挂载槽位），webui 持有渲染器注册表：
+  // 插件决定「出现什么/挂哪里/何时消失」（卸载即无此卡），渲染器本体留在前端
+  // —— 插件不注入任意 HTML。卡片 DOM 每次进 tab 重建（data-plugin-card 标记
+  // 先行移除，幂等），事件绑定随新 DOM 重新执行。
+
+  /** say-voice-broadcast：say 交付的语音播报开关 + 默认音色 */
+  function buildSayBroadcastCard() {
+    const card = el('div', 'settings-card');
+    card.innerHTML =
+      '<div class="settings-card-header"><i data-lucide="volume-2" class="w-4 h-4"></i><span>say 语音播报</span></div>' +
+      '<div class="settings-row">' +
+      '  <div>' +
+      '    <div class="settings-label">播报交付内容</div>' +
+      '    <div class="settings-desc">开启后，say 工具交付的结论自动朗读（模型在模型未就绪时会播报失败并提示）。LLM 可在 say 里用 voice/speed/broadcast 参数逐次覆盖</div>' +
+      '  </div>' +
+      '  <input type="checkbox" id="say-broadcast-toggle" class="settings-toggle" aria-label="启用 say 语音播报" />' +
+      '</div>' +
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">默认音色</div>' +
+      '    <div class="settings-desc">音色 = 模型目录 prompts/ 下的参考音对（&lt;名字&gt;.wav + .txt），放入文件即出现在此列表</div>' +
+      '  </div>' +
+      '  <select id="say-broadcast-voice" class="settings-input" aria-label="默认音色"></select>' +
+      '</div>';
+    return card;
+  }
+
+  function bindSayBroadcastCard() {
+    const toggle = $('#say-broadcast-toggle');
+    if (toggle) toggle.addEventListener('change', async () => {
+      try {
+        await client.request('tts.setSayBroadcast', { broadcast: toggle.checked });
+      } catch (e) {
+        appendMsg('error', '保存播报开关失败：' + ((e && e.message) || e));
+        toggle.checked = !toggle.checked;
+      }
+    });
+    const voiceSel = $('#say-broadcast-voice');
+    if (voiceSel) voiceSel.addEventListener('change', async () => {
+      try {
+        await client.request('tts.setSayBroadcast', { voice: voiceSel.value });
+      } catch (e) {
+        appendMsg('error', '保存默认音色失败：' + ((e && e.message) || e));
+      }
+    });
+  }
+
+  async function loadSayBroadcastCard() {
+    const toggle = $('#say-broadcast-toggle');
+    const voiceSel = $('#say-broadcast-voice');
+    if (!toggle && !voiceSel) return;
+    let st = null;
+    try { st = await client.request('tts.status'); } catch (e) { st = null; }
+    if (!st) return;
+    const say = st.say || {};
+    if (toggle) toggle.checked = say.broadcast === true;
+    if (voiceSel) {
+      const voices = Array.isArray(st.voices) ? st.voices : [];
+      const cur = say.voice || '';
+      voiceSel.innerHTML = '';
+      for (const v of voices) {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = v.label || v.id;
+        if (v.id === cur) opt.selected = true;
+        voiceSel.appendChild(opt);
+      }
+      if (!voices.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'default';
+        voiceSel.appendChild(opt);
+      }
+    }
+  }
+
+  /** say-voice-tts：TTS 引擎管理（模型下载/python 环境/推理服务启停/试听）—— 原设置页硬编码卡迁入 */
+  function buildTtsCard() {
+    const card = el('div', 'settings-card');
+    card.innerHTML =
+      '<div class="settings-card-header"><i data-lucide="speech" class="w-4 h-4"></i><span>语音合成（Fun-CosyVoice3）</span><span id="tts-service-state" data-dom-id="tts-service-state" class="settings-desc" style="margin-left:auto">未运行</span></div>' +
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">模型版本</div>' +
+      '    <div class="settings-desc">base 与 rl 只差一个 LLM 权重（共用其余约 2.6GB，增量下载）；rl 为强化学习对齐版，效果更自然</div>' +
+      '  </div>' +
+      '  <select id="tts-variant" class="settings-input" data-dom-id="tts-variant" aria-label="模型版本">' +
+      '    <option value="rl">rl（推荐）</option>' +
+      '    <option value="base">base</option>' +
+      '  </select>' +
+      '</div>' +
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">模型文件</div>' +
+      '    <div class="settings-desc" id="tts-model-desc" data-dom-id="tts-model-desc">—</div>' +
+      '  </div>' +
+      '  <button id="tts-model-download" class="settings-input" data-dom-id="tts-model-download" style="cursor:pointer;font-family:inherit;flex:0 0 auto">下载</button>' +
+      '</div>' +
+      '<div class="settings-row" id="tts-progress-row" hidden>' +
+      '  <div style="flex:1 1 auto">' +
+      '    <div style="height:6px;border-radius:3px;background:var(--hyacinth-muted);overflow:hidden">' +
+      '      <div id="tts-progress-bar" style="height:100%;width:0%;background:var(--hyacinth-primary);transition:width 300ms ease"></div>' +
+      '    </div>' +
+      '    <div class="settings-desc" id="tts-progress-text" style="margin-top:4px">—</div>' +
+      '  </div>' +
+      '</div>' +
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">python 环境（外来环境，按需安装）</div>' +
+      '    <div class="settings-desc" id="tts-python-desc" data-dom-id="tts-python-desc">未检测 —— 需要 python 3.10+ 与 torch；cosyvoice 依赖点「下载」自动配置</div>' +
+      '    <div style="display:flex;gap:8px;margin-top:6px">' +
+      '      <input id="tts-python-path" class="settings-input" data-dom-id="tts-python-path" placeholder="python 路径（如 C:\\Python310\\python.exe，留空用 PATH）" style="flex:1 1 auto;min-width:0" />' +
+      '      <button id="tts-python-detect" class="settings-input" data-dom-id="tts-python-detect" style="cursor:pointer;font-family:inherit;flex:0 0 auto">检测</button>' +
+      '    </div>' +
+      '  </div>' +
+      '</div>' +
+      '<div class="settings-row">' +
+      '  <div>' +
+      '    <div class="settings-label">推理服务（127.0.0.1，仅本机）</div>' +
+      '    <div class="settings-desc" id="tts-service-desc" data-dom-id="tts-service-desc">未运行 —— 冷启动含模型加载，可能需要 1~2 分钟</div>' +
+      '  </div>' +
+      '  <div style="display:flex;gap:8px;flex:0 0 auto">' +
+      '    <button id="tts-start-btn" class="settings-input" data-dom-id="tts-start-btn" style="cursor:pointer;font-family:inherit">启动</button>' +
+      '    <button id="tts-stop-btn" class="settings-input" data-dom-id="tts-stop-btn" style="cursor:pointer;font-family:inherit">停止</button>' +
+      '    <button id="tts-test-btn" class="settings-input" data-dom-id="tts-test-btn" style="cursor:pointer;font-family:inherit">试听</button>' +
+      '  </div>' +
+      '</div>';
+    return card;
+  }
+
+  function bindTtsCard() {
+    const download = $('#tts-model-download');
+    if (download) download.addEventListener('click', async () => {
+      download.disabled = true;
+      const variant = $('#tts-variant')?.value || 'rl';
+      try { await client.request('tts.download', { variant }); } catch (e) {
+        appendMsg('error', '触发模型下载失败：' + ((e && e.message) || e));
+      }
+      void loadTtsSettings();
+    });
+    const variantSel = $('#tts-variant');
+    if (variantSel) variantSel.addEventListener('change', () => { void loadTtsSettings(); });
+    const detect = $('#tts-python-detect');
+    if (detect) detect.addEventListener('click', async () => {
+      detect.disabled = true;
+      const pyDesc = $('#tts-python-desc');
+      if (pyDesc) pyDesc.textContent = '检测中…';
+      const pathInput = $('#tts-python-path');
+      const p = pathInput && pathInput.value.trim();
+      try {
+        if (p) await client.request('tts.setPythonPath', { pythonPath: p });
+        await client.request('tts.detectPython');
+      } catch (e) {
+        if (pyDesc) pyDesc.textContent = '检测失败：' + ((e && e.message) || e);
+      }
+      detect.disabled = false;
+      void loadTtsSettings();
+    });
+    const start = $('#tts-start-btn');
+    if (start) start.addEventListener('click', async () => {
+      start.disabled = true;
+      const svcDesc = $('#tts-service-desc');
+      if (svcDesc) svcDesc.textContent = '启动中…（含模型加载）';
+      try { await client.request('tts.start'); } catch (e) {
+        appendMsg('error', 'TTS 服务启动失败：' + ((e && e.message) || e));
+      }
+      void loadTtsSettings();
+    });
+    const stop = $('#tts-stop-btn');
+    if (stop) stop.addEventListener('click', async () => {
+      try { await client.request('tts.stop'); } catch (e) { /* ignore */ }
+      void loadTtsSettings();
+    });
+    const test = $('#tts-test-btn');
+    if (test) test.addEventListener('click', async () => {
+      test.disabled = true;
+      try {
+        const r = await client.request('tts.synthesize', { text: '你好，我是风信子，很高兴为你朗读这段话。' });
+        const audio = new Audio('data:audio/wav;base64,' + r.audioWavBase64);
+        audio.play().catch(() => appendMsg('error', '音频播放失败（浏览器自动播放策略）'));
+      } catch (e) {
+        appendMsg('error', '试听合成失败：' + ((e && e.message) || e));
+      }
+      test.disabled = false;
+    });
+  }
+
+  /** 渲染器注册表：kind → 构建器 + 绑定器 + 数据加载器（新插件卡在此登记渲染器） */
+  const pluginCardRenderers = {
+    'say-voice-broadcast': { build: buildSayBroadcastCard, bind: bindSayBroadcastCard, load: loadSayBroadcastCard },
+    'say-voice-tts': { build: buildTtsCard, bind: bindTtsCard, load: loadTtsSettings },
+  };
+
+  /**
+   * 挂载插件贡献卡到指定槽位（进 tab 时调用，幂等：先移除旧卡再重建）。
+   * 槽位 → 容器：settings.voice = #panel-voice（语音 tab 面板）。
+   */
+  async function mountPluginCards(slot) {
+    const panel = slot === 'settings.voice' ? $('#panel-voice') : null;
+    if (!panel) return;
+    let plugins = null;
+    try { plugins = await client.request('plugin.list'); } catch (e) { plugins = null; }
+    panel.querySelectorAll('[data-plugin-card]').forEach((n) => n.remove());
+    if (!Array.isArray(plugins)) return;
+    const cards = [];
+    for (const p of plugins) {
+      if (!p || p.state !== 'mounted' || !Array.isArray(p.uiCards)) continue;
+      for (const c of p.uiCards) {
+        if (c && c.slot === slot && pluginCardRenderers[c.kind]) cards.push({ ...c, pluginId: p.id });
+      }
+    }
+    cards.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    for (const c of cards) {
+      const node = pluginCardRenderers[c.kind].build();
+      node.setAttribute('data-plugin-card', c.pluginId + ':' + c.kind);
+      panel.appendChild(node);
+    }
+    for (const c of cards) {
+      try { pluginCardRenderers[c.kind].bind(); } catch (e) { /* 绑定失败不阻断其它卡 */ }
+    }
+    if (cards.length) {
+      if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+      for (const c of cards) {
+        try { void pluginCardRenderers[c.kind].load(); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
   function bindModelPicker() {
     const btn = $('#model-pick-btn');
     const pop = $('#model-pop');
@@ -4769,6 +5477,9 @@
 
   function loadSettings() {
     if (!connected) return;
+    loadVoiceSettings();   // 语音分区（status/config 独立拉取，进设置页即刷新）
+    loadTtsSettings();     // 语音合成（tts.status 独立拉取）
+    loadModelsRoot();      // 模型存储位置（stt/tts 共用的生效目录）
     client.request('config.getAll').then(async (cfg) => {
       if (!cfg) return;
       SETTINGS_MAP.forEach(([domId, path, type]) => applySettingValue(domId, path, type, cfg));
@@ -5682,6 +6393,39 @@
     } catch (e) { /* 播放失败静默 */ }
   }
 
+  // ── say 语音播报（say-voice 插件事件）：交付正文的朗读结果 ──
+  // 自动播放 + 在最后一个交付块下挂可重放的播放条；失败只提示不干扰文字交付。
+  let sayVoiceAudio = null;
+  function handleSayVoice(payload) {
+    if (!payload) return;
+    if (payload.state === 'error') {
+      appendMsg('status', '🔇 语音播报失败：' + (payload.message || '未知原因'));
+      return;
+    }
+    if (!payload.audioWavBase64) return;
+    try {
+      const url = 'data:audio/wav;base64,' + payload.audioWavBase64;
+      if (sayVoiceAudio) sayVoiceAudio.pause();
+      const audio = new Audio(url);
+      sayVoiceAudio = audio;
+      void audio.play().catch(() => { /* 自动播放被拦截：交付块下的播放条仍可手动播 */ });
+      const ml = $('#message-list');
+      const deliveries = ml ? ml.querySelectorAll('.msg.is-delivery') : [];
+      const target = deliveries.length ? deliveries[deliveries.length - 1] : null;
+      const body = target ? target.querySelector('.msg-body') : null;
+      if (body && !body.querySelector('.say-voice-player')) {
+        const holder = el('div', 'say-voice-player');
+        holder.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:8px';
+        const a = document.createElement('audio');
+        a.controls = true;
+        a.src = url;
+        a.style.cssText = 'max-width:340px;height:32px';
+        holder.appendChild(a);
+        body.appendChild(holder);
+      }
+    } catch (e) { /* 播放失败静默：文字交付不受影响 */ }
+  }
+
   // 陪伴表达：companion.say 事件 → 对话框（speak=台词，think=心声弱显示）
   function handleCompanionSay(payload) {
     if (!payload || currentView() !== 'companion') return;
@@ -6407,9 +7151,49 @@
   // ════════════════════════════════════════════════════════════
   // UI 事件绑定
   // ════════════════════════════════════════════════════════════
+  /** 设置页 tab → panel 的 **JS 强制互斥**（兜底）。
+   *  互斥显隐原本全靠 index.html 里手写的 CSS 长链（每个新 tab 要在 N 条隐藏
+   *  规则里各加一行）—— 2026-10-24 语音 tab 就漏了 panel-context 那条，切走后
+   *  语音合成卡残留在其它 tab 末尾。现在切 tab 时由 JS 显式接管 panel 显隐
+   *  （inline style 特异性最高，覆盖任何 CSS 遗漏/时序），CSS 规则降级为
+   *  无 JS 时的回退。新增 tab 不再需要维护隐藏链。 */
+  /** 设置页 tab → panel 显隐与 label 高亮的**唯一驱动**。
+   *  此前是 index.html 里两套人工维护的 CSS 长链（每加一个 tab 要改 15+ 行，
+   *  语音 tab 就漏了 panel-context 的隐藏链，切走后内容残留到其它 tab 末尾），
+   *  现已删除 —— 长链按「panel-<name> / label[for=tab-<name>]」命名约定收敛为
+   *  这里的单点逻辑；CSS 只保留一条 .is-active 高亮规则和 .settings-panel 初始
+   *  隐藏（无 JS 时不闪烁）。新增 tab 零 CSS 维护。 */
+  function applySettingsTab(radio) {
+    const target = 'panel-' + radio.id.replace(/^tab-/, '');
+    $$('.settings-panel').forEach((p) => {
+      p.style.display = p.id === target ? 'flex' : 'none';
+    });
+    $$('.settings-tab').forEach((l) => {
+      l.classList.toggle('is-active', l.getAttribute('for') === radio.id);
+    });
+    // 每次切 tab 重置滚动位置（长 panel 切短 panel 时避免"内容看起来在下面"）
+    const scroller = $('.settings-scroll');
+    if (scroller) scroller.scrollTop = 0;
+    // 分区数据加载钩子（切到某 tab 时刷新该分区的动态状态）
+    if (radio.id === 'tab-voice') { void mountPluginCards('settings.voice'); void loadVoiceSettings(); void loadTtsSettings(); }
+  }
+
+  function bindSettingsPanelSwitch() {
+    const radios = $$('input[name="settings-tab"]');
+    radios.forEach((radio) => {
+      radio.addEventListener('change', () => {
+        if (radio.checked) applySettingsTab(radio);
+      });
+    });
+    // 初始同步：按页面加载时的 checked radio 应用一次（恢复上次的 tab）
+    const initial = radios.find((r) => r.checked) || radios[0];
+    if (initial) applySettingsTab(initial);
+  }
+
   function bindUI() {
     bindToolsMCP();
     bindVoiceManager();
+    bindSettingsPanelSwitch();
     // 侧栏搜索：输入即过滤本地缓存（列表已在内存里，不打后端）
     const sbSearch = $('#session-search');
     if (sbSearch) {
@@ -6492,6 +7276,9 @@
     bindModeMenu();
     bindViewMenu();
     bindModelPicker();
+    bindSttButton();
+    bindModelsRootOnce();
+    // TTS/播报两张卡由 say-voice 插件贡献：进语音 tab 时 mountPluginCards 动态挂载并绑定
     bindGlobalInteractions();
 
     // 模型视图交互（推理强度 / 添加密钥 / Ollama 刷新）

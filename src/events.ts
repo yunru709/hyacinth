@@ -83,6 +83,18 @@ export const UI_EVENT = {
    * 前端据此刷新陪伴背景，替代此前的 15s 轮询（2026-10-16）。
    */
   COMPANION_SCENE: 'companion.scene',
+  // stt 域事件（模型下载进度；转写本身是同步 RPC 不走事件）
+  STT_MODEL_PROGRESS: 'stt.model_progress',
+  // tts 域事件（模型下载进度；合成本身是同步 RPC 不走事件）
+  TTS_MODEL_PROGRESS: 'tts.model_progress',
+  /**
+   * say 语音播报（say-voice 插件）：say 交付正文的朗读结果。
+   * 前缀 tts：播报语义与配置面（tts.setSayBroadcast / tts.status 的 say 节）
+   * 都归 tts 域，事件同源。ready 时 audioWavBase64 内联 WAV（data URI 直接
+   * 可播），error 时附失败原因；与 message.say（文字交付）配对 —— 前端在
+   * 交付块下挂播放器。
+   */
+  SAY_VOICE: 'tts.say_voice',
 } as const;
 
 // ── companion 事件载荷 ───────────────────────────────────────
@@ -129,5 +141,25 @@ export interface CompanionVoiceEvent {
   /** 台词预览（前 60 字） */
   textPreview?: string;
   /** error 时的失败信息 */
+  message?: string;
+}
+
+/**
+ * say.voice 事件载荷（say 交付正文的语音播报；say-voice 插件产生）。
+ * 合成走本地引擎（CosyVoice3），WAV 体量小（一段话约数百 KB），
+ * base64 内联即可，不落盘、不建媒体路由。
+ */
+export interface SayVoiceEvent {
+  /** ready=可播放 / error=合成失败 */
+  state: 'ready' | 'error';
+  /** WAV 音频（base64；state=ready 时有值）。前端 data:audio/wav;base64, 直接播 */
+  audioWavBase64?: string;
+  /** 交付正文预览（前 60 字；与 message.say 文字配对定位交付块） */
+  textPreview?: string;
+  /** 实际使用的音色 id */
+  voice?: string;
+  /** 实际使用的语速 */
+  speed?: number;
+  /** error 时的失败原因（如模型未下载 / python 环境缺失） */
   message?: string;
 }

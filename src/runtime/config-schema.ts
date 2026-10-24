@@ -217,9 +217,37 @@ export interface FullConfig {
   };
 
   models: {
+    /**
+     * 模型存储根目录（STT/TTS 等下载模型共用）。空 = ~/.agent/models。
+     * 换盘场景：设为如 D:\hyacinth-models；环境变量 HYACINTH_MODELS_DIR 优先于此。
+     * 只影响之后的下载与查找，已下载文件不自动迁移。
+     */
+    root: string;
+    /**
+     * 下载源偏好。'' = auto（hf-mirror 优先、逐源尝试）；可选 'hf-mirror'（国内
+     * 镜像锁定）或 'huggingface'（官方源锁定）。锁定的源失败时仍回落其它源。
+     */
+    mirror: string;
     assessment: { source: 'main' | 'local'; model?: string };
     planning: { source: 'main' | 'local'; model?: string };
     compression: { source: 'main' | 'local'; model?: string };
+  };
+
+  /** 语音输入（STT）。配置中心是封闭 schema：新键必须先在此登记才能 set。 */
+  stt: {
+    /** 启用输入框麦克风按钮（录音本地转写，不上传不落盘） */
+    enabled: boolean;
+  };
+
+  /** 语音交付（say-voice 插件每回合现读的配置节） */
+  voice: {
+    /** say 工具交付的语音播报 */
+    say: {
+      /** 总开关（默认 false：TTS 模型/环境就绪后由用户打开） */
+      broadcast: boolean;
+      /** 默认音色 id（空 = 引擎默认音色；say 的 voice 参数可覆盖） */
+      voice: string;
+    };
   };
 
   local: {

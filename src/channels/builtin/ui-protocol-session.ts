@@ -53,6 +53,10 @@ import { readSnapshot, formatLinksSection } from '../../utils/reference-analysis
 import { createMCPDomain, type MCPSystemLike } from '../../ui-protocol/domains/mcp.js';
 import { createCompanionDomain, type SceneReaderLike, type CompanionSceneMeta } from '../../ui-protocol/domains/companion.js';
 import { createPreviewDomain, type PreviewServiceLike } from '../../ui-protocol/domains/preview.js';
+import { createSttDomain } from '../../ui-protocol/domains/stt.js';
+import { createTtsDomain } from '../../ui-protocol/domains/tts.js';
+import { getSttService } from '../../stt/index.js';
+import { getTtsService, listVoices } from '../../tts/cosyvoice.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
 import { getSayHistoryStore } from '../../companion/say-history.js';
@@ -153,9 +157,16 @@ export interface UiProtocolSessionBackend {
   /** 场景图 URL 构造器（scene.imageUrl 用；缺省 /api/companion/:character/scene.png，可选）。 */
   makeSceneUrl?: (character: string) => string;
   /**
+   * STT 引擎（stt 域用）：进程级单例（getSttService），模型/识别器只初始化一次。
+   * 可选：缺省即单例，预留多引擎/测试注入位。
+   */
+  getSttEngine?: () => import('../../ui-protocol/domains/stt.js').SttEngineLike | null;
+  /** TTS 服务（tts 域用）：CosyVoice3 单例（模型下载/python 服务/合成）。 */
+  getTtsService?: () => import('../../ui-protocol/domains/tts.js').TtsServiceLike | null;
+  /**
    * 目录插件管理面（plugin.listDirectory/activate/deactivate/reload 用）：装配侧把
-   * PluginManager 映射成窄形状注入（manifest 字段拍平 + 管理方法直通，形状见
-   * PluginManagerLike）。可选：未注入时目录插件查询返回空、写操作报错（fail-closed）。
+   * PluginManager 映射成窄形状注入（manifest 字段拍平 + PluginManager 方法直通）。
+   * 可选：未注入时目录插件查询返回空、写操作报错（fail-closed）。
    */
   getDirectoryPlugins?: () => import('../../ui-protocol/domains/plugin.js').PluginManagerLike | null;
   /**
@@ -419,6 +430,44 @@ export class UiProtocolSession {
       // 目录插件管理面（PluginManager 映射）：initialize 后 agentComponents 就绪，
       // 闭包延迟解析；未接入的通道（如 TUI 未传）查询返回空、写操作报错。
       getDirectoryManager: () => backend.getDirectoryPlugins?.() ?? null,
+    }));
+    // stt 域（语音转文字）：引擎是进程级单例（模型/识别器只初始化一次，多会话
+    // 复用），与 getVoiceLibrary 同一注入模式 —— backend 可选覆盖，缺省用单例。
+    this.server.registerDomain('stt', createSttDomain({
+      getEngine: () => backend.getSttEngine?.() ?? getSttService(),
+      getMirrorPref: () => {
+        try { const v = backend.configCenter?.get('models.mirror'); return typeof v === 'string' ? v : undefined; } catch { return undefined; }
+      },
+      emit: (type, payload) => this.server.broadcast(type, payload),
+    }));
+    // tts 域（语音合成）：CosyVoice3 本地推理服务（python 子进程），同为进程级单例；
+    // 下载源偏好与 stt 共用 config models.mirror（经 getMirrorPref 同步到引擎）。
+    // voices（音色目录）与 say（播报配置 voice.say.*）服务 say-voice 插件的 UI 面。
+    this.server.registerDomain('tts', createTtsDomain({
+      getService: () => backend.getTtsService?.() ?? getTtsService(),
+      getMirrorPref: () => {
+        try { const v = backend.configCenter?.get('models.mirror'); return typeof v === 'string' ? v : undefined; } catch { return undefined; }
+      },
+      getVoices: () => listVoices(),
+      getSayConfig: () => {
+        try {
+          const cc = backend.configCenter;
+          return {
+            broadcast: cc?.get<boolean>('voice.say.broadcast') === true,
+            voice: typeof cc?.get<string>('voice.say.voice') === 'string' ? cc.get<string>('voice.say.voice')! : '',
+          };
+        } catch { return { broadcast: false, voice: '' }; }
+      },
+      setSayConfig: (cfg) => {
+        const cc = backend.configCenter;
+        if (!cc) throw new Error('config center not available');
+        if (typeof cfg.broadcast === 'boolean') cc.set('voice.say.broadcast', cfg.broadcast);
+        if (typeof cfg.voice === 'string') cc.set('voice.say.voice', cfg.voice);
+        // 与 config 域 set 同语义：写后持久化（fire-and-forget，失败留痕不阻断）
+        const save = (cc as { save?: () => Promise<void> }).save;
+        if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.say persist failed:', err));
+      },
+      emit: (type, payload) => this.server.broadcast(type, payload),
     }));
     // supervisor 域（S5 可观测面）：uptime/guardian/lastRestart 来自 supervisor/protocol
     // 契约叶；plugins 复用 plugin 域数据源；watchers/git 由 backend 可选注入。
