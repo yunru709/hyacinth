@@ -50,6 +50,50 @@ def _patch_wetext_offline():
         return False
 
 
+def _patch_token_ratio():
+    """生成长度约束可调（2026-10-25 实测发现「合成时长不可控」后加）。
+
+    上游 `cosyvoice/llm/llm.py` 的 Qwen2LM.inference 里有：
+        min_len = 文本token数 * min_token_text_ratio   # 默认 2
+        max_len = 文本token数 * max_token_text_ratio   # 默认 20
+    模型只能在 [2N, 20N] 个 speech token 之间随机停（1 token ≈ 40 ms 音频）。
+    默认 20 相当于允许「每个字说 0.8 秒」（正常中文 ≈ 0.25 s/字 ≈ 6 token），
+    太宽 ⇒ 同一句话连测三次能给出 0.32 / 0.72 / 4.80 秒，差 15 倍。
+    更严重的是短文本（3 字）时 min_len 太小，模型秒吐 EOS，flow 卷积核
+    比输入还长 ⇒ HTTP 500「Kernel size (4) can't be greater than actual input size」。
+
+    这里用环境变量覆盖，**不改第三方仓库源码**（升级不丢）：
+        COSYVOICE_MAX_TOKEN_RATIO / COSYVOICE_MIN_TOKEN_RATIO
+    不设 = 保持上游默认，行为零变化。
+    """
+    max_r = os.environ.get('COSYVOICE_MAX_TOKEN_RATIO')
+    min_r = os.environ.get('COSYVOICE_MIN_TOKEN_RATIO')
+    if not max_r and not min_r:
+        return
+    try:
+        from cosyvoice.llm import llm as _llm
+    except Exception as e:  # noqa: BLE001 — patch 失败不该阻断服务
+        print(f'[cosyvoice] token-ratio patch skipped: {e}', flush=True)
+        return
+    overrides = {}
+    if max_r:
+        overrides['max_token_text_ratio'] = float(max_r)
+    if min_r:
+        overrides['min_token_text_ratio'] = float(min_r)
+
+    import functools
+    orig = _llm.Qwen2LM.inference
+
+    @functools.wraps(orig)
+    def patched(self, *args, **kwargs):
+        for k, v in overrides.items():
+            kwargs.setdefault(k, v)
+        return orig(self, *args, **kwargs)
+
+    _llm.Qwen2LM.inference = patched
+    print(f'[cosyvoice] token-ratio patched: {overrides}', flush=True)
+
+
 def load_model():
     """加载 CosyVoice3（选择 base / rl 的 LLM 权重）。"""
     global _MODEL
@@ -59,6 +103,7 @@ def load_model():
     from cosyvoice.cli.cosyvoice import CosyVoice3  # 官方生态
 
     _patch_wetext_offline()
+    _patch_token_ratio()
     print(f"[cosyvoice] loading model from {_ARGS.model_dir} (variant={_ARGS.variant}) ...", flush=True)
     # 官方构造写死载 llm.pt（base 权重）。rl-only 下载场景（llm.pt 缺、llm.rl.pt
     # 在）：先把 rl 权重硬链为 llm.pt（同盘零拷贝）让构造直接载 rl，构造完成后
