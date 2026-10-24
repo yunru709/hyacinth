@@ -261,23 +261,31 @@ export class CosyVoiceService {
     if (!fs.existsSync(script)) throw new Error(`推理脚本缺失：${script}`);
 
     logger.info(`启动 CosyVoice3 推理服务（variant=${this.variant}）`);
+    // 就绪信号走 stdout 标记而非 HTTP 轮询：serve 进程内 http.get 探测实测会
+    // 无故挂起（无 error/无 timeout/永不 settle，2026-10-24 实况 ✗），而 python
+    // 侧 'model ready' 必然经 stdout 到达 —— 零额外连接、无挂起面。
+    let readyFromStdout = false;
     this.proc = spawn(this.pythonPath, [script, '--model-dir', COSYVOICE_DIR(), '--variant', this.variant, '--port', String(COSYVOICE_PORT)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       // PYTHONPATH 前置 CosyVoice 仓库根（~/.agent/envs/CosyVoice）：官方非 pip 包，
       // 依赖装好后靠仓库根 import —— spawn 与探测/安装共用同一环境合成。
       env: cosyvoicePythonEnv(),
     });
-    this.proc.stdout?.on('data', (d) => logger.info(`[cosyvoice] ${String(d).trim()}`));
+    this.proc.stdout?.on('data', (d) => {
+      const t = String(d);
+      if (t.includes('model ready')) readyFromStdout = true;
+      logger.info(`[cosyvoice] ${t.trim()}`);
+    });
     this.proc.stderr?.on('data', (d) => logger.warn(`[cosyvoice] ${String(d).trim()}`));
     this.proc.on('exit', (code) => {
       logger.warn(`CosyVoice3 推理服务退出（code=${code}）`);
       this.proc = null;
     });
 
-    // 健康检查：模型加载可能要数十秒（torch 初始化 + 权重载入）
+    // 等待就绪：模型加载可能要数十秒（torch 初始化 + 权重载入）
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
-      if (await this.health()) {
+      if (readyFromStdout) {
         logger.info(`CosyVoice3 推理服务就绪（:${COSYVOICE_PORT}）`);
         this.lastServiceError = null;
         return;
@@ -308,9 +316,19 @@ export class CosyVoiceService {
 
   /** 合成语音 → WAV Buffer（推理服务返回 audio/wav）。speed 原生透传（0.5~2）。 */
   async synthesize(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number } = {}): Promise<Buffer> {
-    if (!(await this.health())) {
+    // 注意不做 health 预检直接 POST：health() 的 http.get 在 serve 进程内会
+    // 无故挂起（见 start() 注释）。未就绪时 POST 立刻 ECONNREFUSED → 走 start()
+    // 拉起重试一次；就绪时省一次往返。
+    try {
+      return await this.postTts(text, opts);
+    } catch {
       await this.start();
+      return await this.postTts(text, opts);
     }
+    return await this.postTts(text, opts);
+  }
+
+  private postTts(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number }): Promise<Buffer> {
     const payload = JSON.stringify({ text, variant: opts.variant ?? this.variant, voice: opts.voice ?? '', speed: opts.speed ?? 1 });
     return new Promise((resolve, reject) => {
       const req = http.request({
