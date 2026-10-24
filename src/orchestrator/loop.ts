@@ -1192,11 +1192,6 @@ export class AgentLoop {
       else this.outputHandler?.onText?.(pending);
       // 语音播报钩子（say-voice 插件）：交付正文落屏后触发，fire-and-forget——
       // 实现方串行排队（忙时留最新）+ 失败静默，绝不阻塞/打断回合收尾。
-      // TODO(debug-sayvoice): 临时诊断日志，链路验证后移除
-      this.logger?.info('say-voice hook dispatch', {
-        hooked: !!this.sayVoice,
-        voiceOpts: pendingVoice ?? {},
-      });
       this.sayVoice?.onSayDelivered(
         pending,
         pendingVoice ?? {},

@@ -56,9 +56,17 @@ export function parseSayVoiceOptions(args: Record<string, unknown>): SayVoiceOpt
 }
 
 /**
- * 创建 say 工具。submit 由 AgentLoop 提供（按实例注入，非全局单例）。
+ * 语音侧状态提示器（装配层注入；返回文案或 null）。
+ * 交付本身永远成功（ok），但「用户开了播报而语音不可用」时，tool_result
+ * 里带明示（服务未启用/模型未就绪）—— 模型与历史可见，不触发续轮重试。
  */
-export function createSayTool(submit: SaySubmitFn): Tool {
+export type SayVoiceNoticeFn = (opts: SayVoiceOptions) => string | null;
+
+/**
+ * 创建 say 工具。submit 由 AgentLoop 提供（按实例注入，非全局单例）；
+ * voiceNotice 可选（装配层按 TTS 状态注入）。
+ */
+export function createSayTool(submit: SaySubmitFn, voiceNotice?: SayVoiceNoticeFn): Tool {
   return {
     name: 'say',
     description:
@@ -109,8 +117,9 @@ export function createSayTool(submit: SaySubmitFn): Tool {
       }
       // 最小返回值：Tool.execute 必须返回 string，且 tool_result 不可缺失
       // （缺失会被严格厂商判为孤儿 tool_use、整请求拒绝），所以只能精简不能删。
-      // 内容越短，UI 与历史里的噪音越小。
-      return 'ok';
+      // 语音侧不可用（用户开了播报但服务/模型没就绪）时附带明示 —— 交付不受影响。
+      const notice = voiceNotice?.(parseSayVoiceOptions(args)) ?? null;
+      return notice ? `ok（语音播报：${notice}）` : 'ok';
     },
   };
 }

@@ -36,6 +36,23 @@ describe('say 工具', () => {
     expect(submit).toHaveBeenCalledWith('', {});
   });
 
+  it('语音侧提示：voiceNotice 返回文案时 ok 附带明示（交付不受影响）', async () => {
+    const submit = vi.fn().mockReturnValue({ ok: true });
+    const tool = createSayTool(submit, (opts) =>
+      opts.broadcast === false ? null : '未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型');
+    const out = await tool.execute({ content: '结论' });
+    expect(out).toBe('ok（语音播报：未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型）');
+    // broadcast:false（本次不朗读）→ 无提示，返回裸 ok
+    const out2 = await tool.execute({ content: '结论', broadcast: false });
+    expect(out2).toBe('ok');
+  });
+
+  it('voiceNotice 缺省（未注入）：返回值保持裸 ok（零开销路径）', async () => {
+    const submit = vi.fn().mockReturnValue({ ok: true });
+    const out = await createSayTool(submit).execute({ content: 'x' });
+    expect(out).toBe('ok');
+  });
+
   it('只读副作用：不触发权限审批（sideEffect=read）', () => {
     const tool = createSayTool(() => ({ ok: true }));
 

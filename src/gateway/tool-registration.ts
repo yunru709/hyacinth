@@ -102,7 +102,20 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
   // 钩子（say-voice 插件装配；未装配时 loop 侧安全忽略）。
   {
     const { createSayTool } = await import('../tools/say.js');
-    toolRegistry.register(createSayTool((content, voice) => loop.submitSay(content, voice)));
+    // 语音侧状态明示（2026-10-24 用户要求）：交付始终 ok，但播报意图存在而
+    // 语音不可用时，tool_result 带具体指引 —— 装配层判 TTS 状态，工具零依赖不变。
+    const { getTtsService } = await import('../tts/cosyvoice.js');
+    const voiceNotice = (opts: import('../tools/say.js').SayVoiceOptions): string | null => {
+      if (opts.broadcast === false) return null;                       // 本次明确不朗读
+      try {
+        if (configCenter.get<boolean>('voice.say.broadcast') !== true) return null; // 播报总开关关
+      } catch { return null; }
+      const svc = getTtsService();
+      if (!svc.modelState().ready) return '未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型';
+      if (!svc.serviceState().running) return '推理服务未运行，正在自动拉起（冷启动约 1 分钟）；如未出声请在 设置 → 语音 手动启动';
+      return null;
+    };
+    toolRegistry.register(createSayTool((content, voice) => loop.submitSay(content, voice), voiceNotice));
   }
 
   // ── goal 模式工具（2026-10-10）─────────────────────────────────────

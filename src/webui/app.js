@@ -4018,9 +4018,12 @@
     if (test) test.addEventListener('click', async () => {
       test.disabled = true;
       try {
-        const r = await client.request('tts.synthesize', { text: '你好，我是风信子，很高兴为你朗读这段话。' });
-        const audio = new Audio('data:audio/wav;base64,' + r.audioWavBase64);
-        audio.play().catch(() => appendMsg('error', '音频播放失败（浏览器自动播放策略）'));
+        // broadcast=true：后端广播 tts.say_voice 事件 → handleSayVoice 播放 ——
+        // 与 say 工具播报同一条通路（试听即播报链验证，不做前端本地播放）
+        await client.request('tts.synthesize', {
+          text: '你好，我是风信子，很高兴为你朗读这段话。',
+          broadcast: true,
+        });
       } catch (e) {
         appendMsg('error', '试听合成失败：' + ((e && e.message) || e));
       }

@@ -96,16 +96,14 @@ class SayVoiceBroadcast {
     private readonly deps: {
       engine: SayVoiceEngine;
       getConfig: <T>(key: string) => T | undefined;
-      logger: { warn(msg: string, ctx?: unknown): void; info?(msg: string): void };
+      logger: { warn(msg: string, ctx?: unknown): void };
     },
   ) {}
 
   /** loop.sayVoice 钩子入口（fire-and-forget：调用方不 await） */
   onSayDelivered(text: string, opts: SayVoiceOptions, notify: NotifyFn): void {
-    const flag = this.deps.getConfig<boolean>('voice.say.broadcast');
-    this.deps.logger.info?.(`[debug-sayvoice] gate: opts.broadcast=${opts.broadcast} cfg=${flag} busy=${this.busy}`);
     if (opts.broadcast === false) return;                        // 本次明确不朗读
-    if (flag !== true) return; // 用户总开关
+    if (this.deps.getConfig<boolean>('voice.say.broadcast') !== true) return; // 用户总开关
     if (this.busy) {
       this.queued = { text, opts, notify };                      // 忙时只留最新一句
       return;
@@ -126,7 +124,6 @@ class SayVoiceBroadcast {
   }
 
   private async speakOnce(text: string, opts: SayVoiceOptions, notify: NotifyFn): Promise<void> {
-    this.deps.logger.info?.(`[debug-sayvoice] speakOnce enter: ${text.slice(0, 20)}`);
     const speech = speechTextFromMarkdown(text);
     const voice = opts.voice || String(this.deps.getConfig<string>('voice.say.voice') ?? '') || undefined;
     try {
@@ -138,9 +135,7 @@ class SayVoiceBroadcast {
         voice,
         speed: opts.speed,
       };
-      this.deps.logger.info?.(`[debug-sayvoice] ready event dispatching: ${wav.length}B wav, event=${UI_EVENT.SAY_VOICE}`);
       notify(UI_EVENT.SAY_VOICE, payload);
-      this.deps.logger.info?.('[debug-sayvoice] notify() returned (fire-and-forget emit done)');
     } catch (err) {
       // 失败不重试不升级：交付正文本身已完整到达（message.say），语音是增强
       this.deps.logger.warn('say-voice: broadcast failed', { error: err instanceof Error ? err.message : String(err) });
@@ -195,8 +190,6 @@ export function createSayVoicePlugin(
         getConfig,
         logger: {
           warn: (msg, e) => ctx.logger.warn(msg, { error: e instanceof Error ? e.message : String(e) }),
-          // TODO(debug-sayvoice): 临时诊断，链路定位后移除
-          info: (msg) => ctx.logger.info(msg),
         },
       });
       // loop.sayVoice 回填由装配批（plugin-contributions.ts）取 'say-voice.api' 完成，

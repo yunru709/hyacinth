@@ -14,6 +14,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { createLogger } from '../logging/logger.js';
 import { downloadFile, ModelDownloadError } from '../stt/download.js';
@@ -316,44 +317,41 @@ export class CosyVoiceService {
 
   /** 合成语音 → WAV Buffer（推理服务返回 audio/wav）。speed 原生透传（0.5~2）。 */
   async synthesize(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number } = {}): Promise<Buffer> {
-    // 注意不做 health 预检直接 POST：health() 的 http.get 在 serve 进程内会
-    // 无故挂起（见 start() 注释）。未就绪时 POST 立刻 ECONNREFUSED → 走 start()
-    // 拉起重试一次；就绪时省一次往返。
-    try {
-      return await this.postTts(text, opts);
-    } catch {
+    // 预检走 TCP 层而非 http（health() 的 http.get 在 serve 进程内连接失败时会
+    // 无故不触发任何回调 —— 2026-10-24 实况 ✗；net.connect 的 error/超时双保险
+    // 可靠）。端口不通 → start() 拉起（就绪信号走 python stdout，见 start()）。
+    if (!(await this.portOpen())) {
       await this.start();
-      return await this.postTts(text, opts);
     }
     return await this.postTts(text, opts);
   }
 
-  private postTts(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number }): Promise<Buffer> {
-    const payload = JSON.stringify({ text, variant: opts.variant ?? this.variant, voice: opts.voice ?? '', speed: opts.speed ?? 1 });
-    return new Promise((resolve, reject) => {
-      const req = http.request({
-        host: '127.0.0.1',
-        port: COSYVOICE_PORT,
-        path: '/tts',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-        timeout: 300_000,
-      }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c) => chunks.push(c as Buffer));
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            reject(new Error(`TTS 服务返回 ${res.statusCode}：${Buffer.concat(chunks).toString('utf8').slice(0, 200)}`));
-            return;
-          }
-          resolve(Buffer.concat(chunks));
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => req.destroy(new Error('TTS 合成超时')));
-      req.write(payload);
-      req.end();
+  /** TCP 探活（1.5s 超时 + error 兜底，两者都算「不通」） */
+  private portOpen(timeoutMs = 1500): Promise<boolean> {
+    return new Promise((resolve) => {
+      const sock = net.connect({ host: '127.0.0.1', port: COSYVOICE_PORT }, () => { sock.destroy(); resolve(true); });
+      const to = setTimeout(() => { sock.destroy(); resolve(false); }, timeoutMs);
+      sock.on('error', () => { clearTimeout(to); resolve(false); });
     });
+  }
+
+  private async postTts(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number }): Promise<Buffer> {
+    // 用 fetch（undici 栈）而非 http.request：serve 进程内 node:http 客户端对
+    // 本服务存在「连接失败无回调 / 响应 end 不触发」的挂死实况（2026-10-24 ✗，
+    // bash 独立进程同代码正常 —— 疑似进程内 http 栈状态被污染）。undici 是独立
+    // 实现，实测稳定；AbortSignal 兜底防一切挂起。
+    const payload = JSON.stringify({ text, variant: opts.variant ?? this.variant, voice: opts.voice ?? '', speed: opts.speed ?? 1 });
+    const res = await fetch(`http://127.0.0.1:${COSYVOICE_PORT}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      signal: AbortSignal.timeout(300_000),
+    });
+    if (!res.ok) {
+      const errText = (await res.text()).slice(0, 200);
+      throw new Error(`TTS 服务返回 ${res.status}：${errText}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
   }
 }
 

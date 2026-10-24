@@ -16,7 +16,7 @@
 // ============================================================
 
 import type { DomainHandler } from '../server.js';
-import { UI_EVENT } from '../../events.js';
+import { UI_EVENT, type SayVoiceEvent } from '../../events.js';
 
 // ────────────────────────────────────────────────────────────
 // 结构化接口（真实 CosyVoiceService 天然兼容）
@@ -204,13 +204,29 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
     },
 
     // ── tts.synthesize ─────────────────────────────────────
-    /** 合成 → WAV base64（服务运行时会自动拉起，冷启动含模型加载可能 30s+） */
+    /**
+     * 合成 → WAV base64（服务运行时会自动拉起，冷启动含模型加载可能 30s+）。
+     * broadcast=true 时同时广播 tts.say_voice 事件（与 say 工具播报同一条
+     * 事件通路）—— 设置页「试听」用它验证真实播报链，而非前端本地播放。
+     */
     async synthesize(params: unknown): Promise<{ audioWavBase64: string }> {
       syncMirror(service());
-      const { text, variant, voice } = (params ?? {}) as { text?: string; variant?: 'base' | 'rl'; voice?: string };
+      const { text, variant, voice, speed, broadcast } = (params ?? {}) as {
+        text?: string; variant?: 'base' | 'rl'; voice?: string; speed?: number; broadcast?: boolean;
+      };
       if (!text || typeof text !== 'string') throw new Error('tts.synthesize requires "text"');
-      const buf = await service().synthesize(text, { variant, voice });
-      return { audioWavBase64: buf.toString('base64') };
+      const buf = await service().synthesize(text, { variant, voice, speed });
+      const audioWavBase64 = buf.toString('base64');
+      if (broadcast === true) {
+        options.emit?.(UI_EVENT.SAY_VOICE, {
+          state: 'ready',
+          audioWavBase64,
+          textPreview: text.slice(0, 60),
+          voice,
+          speed,
+        });
+      }
+      return { audioWavBase64 };
     },
   };
 }
