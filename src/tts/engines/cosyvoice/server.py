@@ -19,6 +19,7 @@ CosyVoice3 本地推理服务 — hyacinth 桌面语音合成的 python 侧胶�
 import argparse
 import io
 import os
+import socket
 import sys
 import threading
 

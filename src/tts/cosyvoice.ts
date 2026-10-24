@@ -95,6 +95,8 @@ export class CosyVoiceService {
   private downloadProgress: TtsModelState['downloadProgress'];
   private downloadError: string | null = null;
   private proc: ChildProcess | null = null;
+  /** 认领的是别的后端进程已拉起的实例 ⇒ 生命周期不归我们，stop() 不能 kill */
+  private adopted = false;
   private lastServiceError: string | null = null;
   /** python 环境（探测结果缓存；设置页手动刷新） */
   private pyEnv: PythonEnvState | null = null;
