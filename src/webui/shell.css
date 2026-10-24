@@ -981,11 +981,13 @@
 .model-pick[aria-expanded="true"] .model-pick-caret { opacity: 0.9; transform: rotate(180deg); }
 
 .model-pop {
-  position: absolute;
-  /* 与 composer 的 padding 对齐（24px），让弹层右缘和输入框右缘齐平 */
-  right: 24px;
-  bottom: calc(100% + 6px);
-  width: 300px;
+  /* 定位由 positionModelPop() 逐次计算（锚定 #model-pick-btn 的 rect）。
+     为什么用 fixed 而不是 absolute：弹层挂在 .composer 里，而 #hyacinth-main 是
+     overflow:hidden —— 预览栏放大/拖宽把主区挤到不足弹层宽度时，弹层右半会被
+     main 整体裁掉，紧贴着的就是预览栏（实测）。fixed 脱离任何裁剪容器，z-index
+     回到根上下文（45：高于 dock 及其内部元素、低于命令面板 80/90）。 */
+  position: fixed;
+  width: min(320px, calc(100vw - 16px));
   max-height: min(460px, 64vh);
   display: flex;
   flex-direction: column;

@@ -3330,6 +3330,21 @@
     }
   }
 
+  /** 弹层定位：锚定按钮 rect、向上弹出（fixed 定位，见 .model-pop 的 CSS 注释 ——
+   *  必须脱离 #hyacinth-main 的 overflow:hidden，否则窄主区下右半被裁）。
+   *  横向贴按钮右缘对齐（与旧 right:24 的视觉一致），越界时收进视口。 */
+  function positionModelPop() {
+    const pop = $('#model-pop');
+    const btn = $('#model-pick-btn');
+    if (!pop || !btn || pop.hidden) return;
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth || 320;
+    const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.bottom = Math.round(window.innerHeight - r.top + 6) + 'px';
+    pop.style.top = 'auto';
+  }
+
   function modelPickOpen(on) {
     const pop = $('#model-pop');
     const btn = $('#model-pick-btn');
@@ -3337,6 +3352,7 @@
     pop.hidden = !on;
     btn.setAttribute('aria-expanded', on ? 'true' : 'false');
     if (on) {
+      positionModelPop();
       void modelPickLoad();
     } else {
       const detail = $('#model-detail');
@@ -3361,6 +3377,8 @@
         modelPickOpen(false);
       }
     });
+    // 视口变化（窗口缩放 / 预览栏拖宽）时重定位 —— 弹层锚定的是按钮 rect
+    window.addEventListener('resize', () => { if (!pop.hidden) positionModelPop(); });
     void modelPickLoad();
   }
 
