@@ -1,0 +1,7 @@
+﻿python.exe : Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-PXQS5X\script.ps1:9 字符: 1
++ & C:\Python311\python.exe "C:\Users\74689\Desktop\Agent\hyacinth\tool ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Sliding Window ...be encountered.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
