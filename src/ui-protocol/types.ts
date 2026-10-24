@@ -120,7 +120,7 @@ export const UI_DOMAIN = {
   BUNDLE: 'bundle',
   /** MCP 服务器：list / add / remove / enable / disable / reconnect */
   MCP: 'mcp',
-  /** 插件状态（B-4：挂载失败可见性，对应内核 PluginHost.list()）：list */
+  /** 插件状态（B-4：挂载失败可见性）：内核挂载 list + 目录插件清单/启停/重载 */
   PLUGIN: 'plugin',
   /** Supervisor 监督状态（S5 可观测面）：status */
   SUPERVISOR: 'supervisor',
@@ -248,8 +248,12 @@ export const UI_METHOD = {
   MCP_ENABLE: 'mcp.enable',
   MCP_DISABLE: 'mcp.disable',
   MCP_RECONNECT: 'mcp.reconnect',
-  // plugin
+  // plugin（内核挂载 list + 目录插件管理面）
   PLUGIN_LIST: 'plugin.list',
+  PLUGIN_LIST_DIRECTORY: 'plugin.listDirectory',
+  PLUGIN_ACTIVATE: 'plugin.activate',
+  PLUGIN_DEACTIVATE: 'plugin.deactivate',
+  PLUGIN_RELOAD: 'plugin.reload',
   // supervisor
   SUPERVISOR_STATUS: 'supervisor.status',
   // arch（架构监督）

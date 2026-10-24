@@ -162,6 +162,9 @@ export interface AgentComponents {
   companionSessionManager: CompanionSessionManager;
   backgroundRegistry: BackgroundProcessRegistry;
   scheduler: HeartbeatScheduler;
+  /** 目录插件管理器（getAll/activate/deactivate/reloadFromDisk）。内核插件挂载
+   *  状态走 loop.pluginHost（plugin.list），两者在 plugin 契约域分列。 */
+  pluginManager: import('../plugins/manager.js').PluginManager;
   /** 架构监督（扩展注册表方案）：本体注册表（出厂图只读视图）+ 扩展注册表（名单+生效视图） */
   assemblyRegistry?: AssemblyRegistry;
   extensionRegistry?: ExtensionRegistry;
@@ -760,6 +763,8 @@ export async function createAgentAssembly(
     companionSessionManager,
     backgroundRegistry,
     scheduler: heartbeatScheduler,
+    // 目录插件管理面（plugin 契约域经 backend 注入消费：清单/启停/重载）
+    pluginManager,
     channelLoops,
   };
 }

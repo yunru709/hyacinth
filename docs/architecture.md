@@ -1799,6 +1799,12 @@ JSON RPC：契约层在 `preview.read` 结果与 `preview.rawUrl` 里**签发** 
   `realpath` 比对防符号链接逃逸、`.git` 硬排除且 `node_modules` 默认隐藏（`all=true` 才列）。
 - browse/setRoot 等价于"扩大服务端可读范围"，**仅限回环连接**：HTTP 看 remoteAddress，
   WS 看升级连接的 remoteAddress（装配侧不确定时缺省拒绝，fail-closed）。
+- **docx 语义预览**（`kind:'docx'`）：mammoth 转语义 HTML（标题/段落/表格/加粗；
+  **不还原排版**，老式 .doc 不支持）。mammoth 是"预留未接线"的既有依赖。消毒在
+  服务端做且只做一次（`sanitizeDocxHtml`：mammoth 白名单重建 + 剥 script/事件属性/
+  javascript: 协议），前端直接 innerHTML —— 不能走 renderRichInto（markdown.js
+  会整体 escapeHtml，HTML 变源码）。上限 `MAX_DOCX_BYTES`(2MB)：mammoth 是 CPU 活，
+  超限/损坏回退 binary 提示下载。
 - 只读是硬边界：没有写/删/移动，改文件仍必须走 agent 工具（带审批）。
 
 **根目录可切换**（原先锁死在启动目录）。标题栏那颗按钮就是入口 —— 它显示的是**当前根名**，

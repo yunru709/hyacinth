@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import mammoth from 'mammoth';
 import { createLogger } from '../logging/logger.js';
 
 const logger = createLogger('preview-service');
@@ -150,6 +151,7 @@ export type PreviewMeta = {
   isCustom: boolean;
   maxTextBytes: number;
   maxRawBytes: number;
+  maxDocxBytes: number;
   maxListEntries: number;
   hidden: string[];
   hiddenByDefault: string[];
@@ -222,10 +224,14 @@ const MIME_BY_EXT: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 
 /** 前端用来决定"怎么渲染"的类别；不是完整 MIME 表，够用即可 */
-export type PreviewKind = 'text' | 'markdown' | 'image' | 'pdf' | 'html' | 'binary' | 'dir';
+export type PreviewKind = 'text' | 'markdown' | 'image' | 'pdf' | 'html' | 'docx' | 'binary' | 'dir';
+
+/** docx 语义预览的上限：mammoth 转换是 CPU 活，超大文档会拖慢 serve 进程 ⇒ 超限回退 binary */
+export const MAX_DOCX_BYTES = 2 * 1024 * 1024;
 
 export function classifyFile(relPath: string): { ext: string; kind: PreviewKind; lang: string } {
   const ext = path.extname(relPath).toLowerCase();
@@ -240,6 +246,9 @@ export function classifyFile(relPath: string): { ext: string; kind: PreviewKind;
   // HTML 单独成一类：前端默认用沙箱 iframe 渲染，并可切回源码。
   // 当成普通 text 的话，点开一个页面只能看到标签 —— 预览栏对 .html 就等于没有预览。
   if (ext === '.html' || ext === '.htm') return { ext, kind: 'html', lang: 'html' };
+  // docx 单独成一类：mammoth 转语义 HTML（见 read()），保留标题/段落/表格/加粗，
+  // **不还原排版**。老式 .doc（非 zip）mammoth 不认，走 binary。
+  if (ext === '.docx') return { ext, kind: 'docx', lang: 'docx' };
   return { ext, kind: 'text', lang: LANG_BY_EXT[ext] ?? '' };
 }
 
@@ -262,6 +271,23 @@ const LANG_BY_EXT: Record<string, string> = {
 
 function mimeFor(ext: string): string {
   return MIME_BY_EXT[ext] ?? 'application/octet-stream';
+}
+
+/**
+ * docx 语义 HTML 的服务端消毒（消毒只做一次、前端直接 innerHTML）：
+ * mammoth 的输出是从 docx XML **重建**的白名单结构（元素固定、文本已转义），
+ * 真正的注入面只有文档自带的内容——剥掉 script/style/iframe 等容器、on* 事件
+ * 属性、href/src 的 javascript:/vbscript: 协议。再叠一层保险：前端此前对
+ * markdown.js 的约定是"先转义再拼 HTML"，docx 的 HTML 不能走它（会被整体
+ * 转义成源码），前端 innerHTML 依赖这里挡住恶意文档。
+ */
+/** 导出供测试直测（消毒是安全函数，值得不经 HTTP 的单元覆盖） */
+export function sanitizeDocxHtml(html: string): string {
+  return html
+    .replace(/<\s*(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?\s*>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(href|src)\s*=\s*(["'])\s*(javascript|vbscript)[^"']*\2/gi, ' $1="#"');
 }
 
 /**
@@ -436,6 +462,7 @@ export function createPreviewService(cwd: string, opts: { stateFile?: string } =
       isCustom: path.resolve(root.norm) !== path.resolve(defaultRootNorm),
       maxTextBytes: MAX_TEXT_BYTES,
       maxRawBytes: MAX_RAW_BYTES,
+      maxDocxBytes: MAX_DOCX_BYTES,
       maxListEntries: MAX_LIST_ENTRIES,
       hidden: [...ALWAYS_HIDDEN],
       hiddenByDefault: [...HIDDEN_BY_DEFAULT],
@@ -526,6 +553,52 @@ export function createPreviewService(cwd: string, opts: { stateFile?: string } =
       }
 
       const { ext, kind, lang } = classifyFile(relBack);
+
+      // docx：mammoth 转语义 HTML（标题/段落/表格/加粗；不还原排版）。上限内才
+      // 转换（CPU 活，超大文件会拖慢 serve）；转换失败（损坏文档）**显式**回退
+      // binary —— 不能落通用路径：小损坏文件可能没有 NUL 字节，会被误判成"文本"
+      // 把原文当 HTML 展示。超限的 docx 走下方通用路径（zip 有 NUL，自然判二进制）。
+      if (ext === '.docx' && st.size <= MAX_DOCX_BYTES) {
+        try {
+          const buf = Buffer.alloc(st.size);
+          const fh = await fs.promises.open(abs, 'r');
+          try {
+            await readExactly(fh, buf, st.size);
+          } finally {
+            await fh.close();
+          }
+          const { value } = await mammoth.convertToHtml({ buffer: buf });
+          return {
+            path: relBack,
+            name: path.basename(relBack),
+            ext,
+            kind: 'docx',
+            lang: 'docx',
+            binary: false,
+            content: sanitizeDocxHtml(value),
+            size: st.size,
+            bytes: Buffer.byteLength(value, 'utf8'),
+            truncated: false,
+            mtime: Math.floor(st.mtimeMs),
+          };
+        } catch {
+          // 损坏的 docx / mammoth 异常：诚实表达"读不出语义"
+          return {
+            path: relBack,
+            name: path.basename(relBack),
+            ext,
+            kind: 'binary',
+            lang: '',
+            binary: true,
+            content: '',
+            size: st.size,
+            bytes: 0,
+            truncated: false,
+            mtime: Math.floor(st.mtimeMs),
+          };
+        }
+      }
+
       const want = Math.min(st.size, MAX_TEXT_BYTES + 1);
       const buf = Buffer.alloc(Math.max(want, SNIFF_BYTES));
       const fh = await fs.promises.open(abs, 'r');

@@ -885,3 +885,19 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   outline-offset: -6px;
   border-radius: 10px;
 }
+
+/* ── 插件视图（#/plugins）────────────────────────────────────
+   状态徽标：三态（启用=成功色 / 出错=错误色 / 其余=中性）。风格对齐
+   预览栏的 pv-badge（shell.css），但语义色走全局 --state-* 变量。 */
+.plugin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background: var(--tint-strong, rgba(127, 127, 127, 0.15));
+  color: var(--hyacinth-muted-foreground, var(--hyacinth-foreground));
+}
+.plugin-badge.is-ok { background: color-mix(in srgb, var(--state-success) 18%, transparent); color: var(--state-success); }
+.plugin-badge.is-error { background: color-mix(in srgb, var(--state-error) 16%, transparent); color: var(--state-error); }

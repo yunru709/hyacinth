@@ -772,13 +772,14 @@ export class HttpWebhookChannel implements ChannelHandler {
         return new StatsManager(this.cwd).get(dir);
       };
 
-      // kb / process / orchestrator / tool / bundle / mcp 域依赖 agent 组件（initialize 后才就绪）：用可变引用延迟解析
+      // kb / process / orchestrator / tool / bundle / mcp / plugin 域依赖 agent 组件（initialize 后才就绪）：用可变引用延迟解析
       let agentComponents: {
         knowledgeBase?: unknown;
         backgroundRegistry?: unknown;
         toolRegistry?: unknown;
         bundleRegistry?: unknown;
         mcpSystem?: unknown;
+        pluginManager?: unknown;
         loop?: { bypassManager?: unknown; sessionDir?: string; activeRouter?: { name?: string }; syncRouter?(target?: string): Promise<void> };
         sessionManager?: unknown;
         sessionDir?: string;
@@ -838,6 +839,30 @@ export class HttpWebhookChannel implements ChannelHandler {
           (agentComponents?.bundleRegistry as import('../../ui-protocol/domains/bundle.js').BundleRegistryLike | undefined) ?? null,
         getMCP: () =>
           (agentComponents?.mcpSystem as import('../../ui-protocol/domains/mcp.js').MCPSystemLike | undefined) ?? null,
+        // 目录插件管理面：把 PluginManager 映射成 plugin 域的窄形状（manifest 拍平 +
+        // 管理方法直通）。agentComponents 就绪前（页面连接早于 initialize 完成）为 null
+        // ⇒ 前端列表为空 + 写操作报错，属于正常瞬态。
+        getDirectoryPlugins: () => {
+          const pm = agentComponents?.pluginManager as
+            | import('../../plugins/manager.js').PluginManager
+            | undefined;
+          if (!pm) return null;
+          return {
+            getAll: () => pm.getAll().map((p) => ({
+              id: p.manifest.id,
+              name: p.manifest.name,
+              description: p.manifest.description,
+              status: p.status,
+              error: p.error,
+              dir: p.dir,
+              skillCount: p.manifest.skills?.length ?? 0,
+              mcpServerCount: p.mcpServers?.length ?? 0,
+            })),
+            activate: (id: string) => pm.activate(id),
+            deactivate: (id: string) => pm.deactivate(id),
+            reloadFromDisk: (id: string) => pm.reloadFromDisk(id),
+          };
+        },
         getCompanionMgr: () =>
           ((agentComponents as Record<string, unknown>)?.companionSessionManager as import('../../ui-protocol/domains/companion.js').CompanionMgrLike | undefined) ?? null,
         getRouterSwitcher: () => {
@@ -872,10 +897,14 @@ export class HttpWebhookChannel implements ChannelHandler {
 
       if (this.wsAgentFactory) {
         await session.initialize(this.wsAgentFactory);
-        // initialize 后 agent 组件就绪：供 kb/process 域延迟解析
+        // initialize 后 agent 组件就绪：供 kb/process/plugin 等域延迟解析
         agentComponents = session.getComponents<{
           knowledgeBase?: unknown;
           backgroundRegistry?: unknown;
+          toolRegistry?: unknown;
+          bundleRegistry?: unknown;
+          mcpSystem?: unknown;
+          pluginManager?: unknown;
           loop?: { bypassManager?: unknown };
           sessionManager?: unknown;
           sessionDir?: string;

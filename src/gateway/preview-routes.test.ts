@@ -14,12 +14,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerPreviewRoutes, MAX_TEXT_BYTES, MAX_RAW_BYTES } from './preview-routes.js';
-import { createPreviewService } from './preview-service.js';
+import { createPreviewService, sanitizeDocxHtml, MAX_DOCX_BYTES } from './preview-service.js';
+import { buildZip } from '../ui-protocol/util/zip.js';
 
 let root: string;
 let app: FastifyInstance;
@@ -207,6 +209,94 @@ describe('GET /api/fs/read', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+// ============================================================
+// docx 语义预览（mammoth 转语义 HTML）
+// ============================================================
+// 测试用的 docx 由 buildZip 现场构造（最小 OOXML 三件套：Content_Types /
+// rels / document.xml），不引入二进制夹具文件。
+describe('docx 预览', () => {
+  function makeDocx(bodyXml: string[]): Buffer {
+    const paras = bodyXml.map((t) => `<w:p><w:r><w:t>${t}</w:t></w:r></w:p>`).join('');
+    return buildZip([
+      { path: '[Content_Types].xml', data: Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') },
+      { path: '_rels/.rels', data: Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>') },
+      { path: 'word/document.xml', data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paras}</w:body></w:document>`) },
+    ]);
+  }
+
+  it('docx → kind=docx + 语义 HTML（binary=false）', async () => {
+    fs.writeFileSync(path.join(root, '样例.docx'), makeDocx(['你好，文档', '第二段']));
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/fs/read?path=' + encodeURIComponent('样例.docx') });
+      expect(res.statusCode).toBe(200);
+      const j = res.json();
+      expect(j.kind).toBe('docx');
+      expect(j.binary).toBe(false);
+      expect(j.content).toContain('<p>你好，文档</p>');
+      expect(j.content).toContain('<p>第二段</p>');
+      expect(j.truncated).toBe(false);
+    } finally {
+      fs.unlinkSync(path.join(root, '样例.docx'));
+    }
+  });
+
+  it('超过上限的 docx 回退 binary（mammoth 转换是 CPU 活，超大不伺候）', async () => {
+    // 文件体积（zip deflate **之后**）必须 > MAX_DOCX_BYTES ⇒ 用低压缩率的随机
+    // base64（熵 ~6bit/字符，deflate 后仍 ≈75% 原大）填充，原文取 3 倍上限保压缩后仍超限。
+    const big = Buffer.from(randomBase64(MAX_DOCX_BYTES * 3)).toString('utf8');
+    fs.writeFileSync(path.join(root, 'big.docx'), makeDocx([big]));
+    try {
+      const st = fs.statSync(path.join(root, 'big.docx'));
+      expect(st.size).toBeGreaterThan(MAX_DOCX_BYTES);   // 夹具自检：确实超限
+      const res = await app.inject({ method: 'GET', url: '/api/fs/read?path=big.docx' });
+      const j = res.json();
+      expect(j.binary).toBe(true);
+      expect(j.kind).toBe('binary');
+    } finally {
+      fs.unlinkSync(path.join(root, 'big.docx'));
+    }
+  });
+
+  it('损坏的 docx（不是合法 zip）回退 binary，不 500', async () => {
+    fs.writeFileSync(path.join(root, 'broken.docx'), Buffer.from('这不是一个 zip'));
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/fs/read?path=broken.docx' });
+      expect(res.statusCode).toBe(200);
+      const j = res.json();
+      expect(j.binary).toBe(true);
+      expect(j.kind).toBe('binary');
+    } finally {
+      fs.unlinkSync(path.join(root, 'broken.docx'));
+    }
+  });
+});
+
+describe('sanitizeDocxHtml（服务端消毒直测）', () => {
+  it('剥 script/style 容器、on* 事件属性、javascript: 协议', () => {
+    const dirty = '<p onclick="evil()">a</p><script>alert(1)</script><style>x</style>'
+      + '<a href="javascript:alert(2)">b</a><img src="javascript:alert(3)">';
+    const clean = sanitizeDocxHtml(dirty);
+    expect(clean).not.toContain('<script');
+    expect(clean).not.toContain('<style');
+    expect(clean).not.toContain('onclick');
+    expect(clean).not.toContain('javascript:');
+    expect(clean).toContain('href="#"');
+  });
+
+  it('正常内容原样保留', () => {
+    const ok = '<h1>标题</h1><p>正文 <strong>加粗</strong></p><table><tr><td>x</td></tr></table>';
+    expect(sanitizeDocxHtml(ok)).toBe(ok);
+  });
+});
+
+function randomBase64(n: number): string {
+  const bytes = Buffer.alloc(n);
+  for (let i = 0; i < n; i += 65536) {
+    crypto.randomBytes(Math.min(65536, n - i)).copy(bytes, i);
+  }
+  return bytes.toString('base64');
+}
 
 describe('GET /api/fs/raw', () => {
   it('下发原始字节 + 正确 Content-Type', async () => {

@@ -213,7 +213,30 @@ export async function switchProvider(
         // fallback failed
       }
     } else {
-      const created = tryCreateProviderFromConfig(deps, providerName, model);
+      let created = tryCreateProviderFromConfig(deps, providerName, model);
+      if (!created) {
+        // ★ 第二数据源：厂商目录（providers.json，envKey → 环境变量密钥）。
+        //   tryCreateProviderFromConfig 只认 configCenter 的 provider.<name> 段
+        //   （config.json），而「WebUI 里新配了密钥、从未启动过」的厂商只有
+        //   providers.json 段 + 环境密钥 —— 此前这里直接落 throw，WebUI 的
+        //   「切换」按钮对这类厂商全灭（实测：minimax 有 key 却切不过去）。
+        //   与上面"已注册实例换模型"用同一个 createProviderFromConfig 工厂。
+        const { getProviderConfigLoader } = await import('../provider/config.js');
+        const meta = getProviderConfigLoader(process.cwd()).getAll()
+          .find((x) => x.id === providerName);
+        const apiKey = meta?.envKey ? process.env[meta.envKey] : undefined;
+        if (meta && apiKey) {
+          const sessionDir = deps.getSessionDir();
+          const built = ProviderManager.createProviderFromConfig({
+            type: providerName as import('../types.js').ProviderType,
+            apiKey,
+            model: model || meta.defaultModel || '',
+            baseUrl: meta.baseUrl,
+            userId: sessionDir ? mainUserId(path.basename(sessionDir)) : undefined,
+          });
+          created = built;
+        }
+      }
       if (created) {
         newProvider = created;
         providerRouter.register(providerName, created);

@@ -153,6 +153,12 @@ export interface UiProtocolSessionBackend {
   /** 场景图 URL 构造器（scene.imageUrl 用；缺省 /api/companion/:character/scene.png，可选）。 */
   makeSceneUrl?: (character: string) => string;
   /**
+   * 目录插件管理面（plugin.listDirectory/activate/deactivate/reload 用）：装配侧把
+   * PluginManager 映射成窄形状注入（manifest 字段拍平 + 管理方法直通，形状见
+   * PluginManagerLike）。可选：未注入时目录插件查询返回空、写操作报错（fail-closed）。
+   */
+  getDirectoryPlugins?: () => import('../../ui-protocol/domains/plugin.js').PluginManagerLike | null;
+  /**
    * 文件预览服务（preview 域用）：与 gateway/preview-routes 的 HTTP 路由共享
    * 同一实例（根状态只有一份）。fs 安全校验全在服务里，协议域零 fs 依赖。
    * 可选：未装配时 preview.* 报"服务未装配"（TUI 无预览栏，不传即可）。
@@ -410,6 +416,9 @@ export class UiProtocolSession {
     this.server.registerDomain('bundle', createBundleDomain({ getBundleRegistry: () => backend.getBundleRegistry?.() ?? null }));
     this.server.registerDomain('plugin', createPluginDomain({
       getPluginHosts: () => (this.loop?.pluginHost?.list() as unknown as PluginStatusLike[]) ?? [],
+      // 目录插件管理面（PluginManager 映射）：initialize 后 agentComponents 就绪，
+      // 闭包延迟解析；未接入的通道（如 TUI 未传）查询返回空、写操作报错。
+      getDirectoryManager: () => backend.getDirectoryPlugins?.() ?? null,
     }));
     // supervisor 域（S5 可观测面）：uptime/guardian/lastRestart 来自 supervisor/protocol
     // 契约叶；plugins 复用 plugin 域数据源；watchers/git 由 backend 可选注入。

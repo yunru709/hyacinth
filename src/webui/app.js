@@ -196,9 +196,9 @@
   // ════════════════════════════════════════════════════════════
   // SPA hash 路由
   // ════════════════════════════════════════════════════════════
-  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'companion'];
+  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'plugins', 'companion'];
   // data-view → data-nav-item 映射（导航里 model 对应 models）
-  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule' };
+  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins' };
 
   function currentView() {
     const h = (location.hash || '#/chat').replace(/^#\//, '');
@@ -231,6 +231,7 @@
     if (view === 'sessions' && connected) loadSessions();
     if (view === 'settings' && connected) loadSettings();
     if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
+    if (view === 'plugins' && connected) loadPlugins();     // 插件视图（内核挂载 + 目录插件管理）
     if (view === 'settings' && connected) loadToolsAndMCP();
     if (view === 'companion' && connected) loadCompanion();
     // 离开陪伴视图：清 live 场景状态（下次进入重新加载）。
@@ -786,6 +787,7 @@
         if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); loadVoiceManager(); }
         if (currentView() === 'companion') loadCompanion();
         if (currentView() === 'schedule') loadSchedule();   // 定时任务视图（首屏就在该视图时也要加载 ✓）
+        if (currentView() === 'plugins') loadPlugins();     // 插件视图
         refreshState();
         // 同步陪伴模式状态（后端可能因 startup.defaultMode='companion' 已激活）
         client.request('companion.get').then((res) => {
@@ -1866,6 +1868,126 @@
     tasks.forEach((t) => listEl.appendChild(scheduleRow(t)));
   }
 
+  // ── 插件视图（plugin 契约域：内核挂载 list + 目录插件管理面）────────
+  // 目录插件可启停/重载（PluginManager 管理面经契约层暴露）；内核插件
+  // （permission-chain/bypass/world-engine 等安全与能力基座）只读展示。
+
+  const PLUGIN_STATUS_LABEL = {
+    activated: '已启用',
+    loaded: '已加载未启用',
+    discovered: '已发现',
+    deactivated: '已停用',
+    error: '出错',
+  };
+
+  function pluginStatusBadge(st) {
+    const cls = st === 'activated' ? 'is-ok'
+      : st === 'error' ? 'is-error'
+      : st === 'deactivated' || st === 'discovered' ? 'is-warn' : '';
+    return el('span', 'plugin-badge ' + cls, PLUGIN_STATUS_LABEL[st] || st);
+  }
+
+  function pluginRow(p, actions) {
+    const row = el('div', 'px-4 py-3 rounded-lg border border-border bg-card flex items-start justify-between gap-3');
+    const left = el('div', 'min-w-0');
+    const title = el('div', 'flex items-center gap-2 flex-wrap');
+    title.appendChild(el('span', 'text-sm font-medium text-foreground', p.name || p.id));
+    title.appendChild(el('span', 'text-xs text-muted-foreground font-mono', p.id));
+    if (actions) title.appendChild(pluginStatusBadge(p.status));
+    left.appendChild(title);
+    if (p.description) left.appendChild(el('div', 'text-xs text-muted-foreground mt-1', p.description));
+    if (p.error) left.appendChild(el('div', 'text-xs text-state-error mt-1 break-all', p.error));
+    const meta = [];
+    if (actions) {
+      if (p.skillCount) meta.push('技能 ' + p.skillCount);
+      if (p.mcpServerCount) meta.push('MCP ' + p.mcpServerCount);
+    } else if (p.deps && p.deps.length) {
+      meta.push('依赖 ' + p.deps.join(', '));
+    }
+    if (meta.length) left.appendChild(el('div', 'text-xs text-muted-foreground mt-1', meta.join(' · ')));
+    row.appendChild(left);
+
+    if (actions) {
+      const btns = el('div', 'shrink-0 flex items-center gap-1.5');
+      const mkBtn = (label, method, warn) => {
+        const b = el('button', 'px-2.5 py-1 rounded-md border border-border text-xs font-medium transition-colors ' +
+          (warn ? 'text-state-error hover:bg-state-error/10' : 'text-foreground hover:bg-muted-foreground/10'), label);
+        b.type = 'button';
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            await client.request(method, { id: p.id });
+            await loadPlugins();
+          } catch (err) {
+            b.disabled = false;
+            const hint = $('#plugins-status');
+            if (hint) hint.textContent = (p.id + ' ' + label + '失败：' + (err && err.message || err));
+          }
+        };
+        return b;
+      };
+      if (p.status === 'activated') btns.appendChild(mkBtn('停用', 'plugin.deactivate', true));
+      else btns.appendChild(mkBtn('启用', 'plugin.activate'));
+      btns.appendChild(mkBtn('重载', 'plugin.reload'));
+      row.appendChild(btns);
+    }
+    return row;
+  }
+
+  async function loadPlugins() {
+    const listEl = $('#plugins-list');
+    if (!listEl) return;
+    bindPluginsOnce();
+    const statusEl = $('#plugins-status');
+    let dir = null, kernel = null;
+    try { dir = await client.request('plugin.listDirectory'); } catch (e) { dir = null; }
+    try { kernel = await client.request('plugin.list'); } catch (e) { kernel = null; }
+
+    if (statusEl) {
+      const n = dir && dir.plugins ? dir.plugins.length : 0;
+      const on = dir && dir.plugins ? dir.plugins.filter((p) => p.status === 'activated').length : 0;
+      statusEl.textContent = dir
+        ? ('目录插件 ' + on + '/' + n + ' 已启用 · 内核插件 ' + (kernel ? kernel.length : '?') + ' 个')
+        : '目录插件管理不可用（后端未就绪）';
+    }
+
+    listEl.innerHTML = '';
+    // 目录插件：可管理（启用/停用/重载）
+    listEl.appendChild(el('div', 'text-xs font-semibold text-muted-foreground uppercase tracking-wide', '目录插件'));
+    if (!dir) {
+      listEl.appendChild(el('div', 'text-sm text-state-error', '取不到目录插件清单（后端可能未就绪）'));
+    } else if (!dir.plugins.length) {
+      listEl.appendChild(el('div', 'text-sm text-muted-foreground',
+        '还没有目录插件。把带 plugin.json 的插件目录放进 ~/.agent/plugins/ 后点「刷新」。'));
+    } else {
+      const wrap = el('div', 'space-y-2');
+      dir.plugins.forEach((p) => wrap.appendChild(pluginRow(p, true)));
+      listEl.appendChild(wrap);
+    }
+
+    // 内核插件：只读（安全与能力基座）
+    listEl.appendChild(el('div', 'text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2', '内核插件'));
+    if (!kernel || !kernel.length) {
+      listEl.appendChild(el('div', 'text-sm text-muted-foreground', '取不到内核插件状态。'));
+    } else {
+      const wrap = el('div', 'space-y-2');
+      kernel.forEach((p) => wrap.appendChild(pluginRow({
+        id: p.id, name: p.id, description: '', status: p.state === 'error' ? 'error' : 'activated',
+        error: p.error, deps: p.deps,
+      }, false)));
+      listEl.appendChild(wrap);
+    }
+  }
+
+  /** 绑定插件工具条（只绑一次；由 loadPlugins 触发 ⇒ 视图 markup 必已在） */
+  let pluginsBound = false;
+  function bindPluginsOnce() {
+    if (pluginsBound) return;
+    pluginsBound = true;
+    const refresh = $('#plugins-refresh-btn');
+    if (refresh) refresh.onclick = () => { loadPlugins(); };
+  }
+
   /** 绑定工具条（只绑一次 ✓；由 loadSchedule 触发 ⇒ 视图 markup 必已在 ✓） */
   function bindScheduleOnce() {
     if (scheduleBound) return;
@@ -2359,6 +2481,7 @@
       pvRenderMeta(data);
       content.textContent = '';
       if (data.kind === 'markdown') pvRenderMarkdown(content, data);
+      else if (data.kind === 'docx') pvRenderDocx(content, data);
       else if (data.kind === 'image') pvRenderImage(content, data);
       else if (data.kind === 'pdf') pvRenderPdf(content, data);
       else if (data.kind === 'html') pvRenderHtml(content, data);
@@ -2400,6 +2523,19 @@
     // markdown.js 的输出是可信 HTML（它自己做转义），与聊天正文同一条渲染路径；
     // 高亮与公式加载也一并在这里处理（预览栏的 .md 同样要能看公式）
     renderRichInto(div, d.content);
+    if (d.truncated) pvTruncNote(box, d);
+  }
+
+  /**
+   * docx 语义预览：服务端 mammoth 转好的 HTML（已消毒）直接 innerHTML。
+   * ⚠️ 不能走 renderRichInto —— markdown.js 会先 escapeHtml 再拼，mammoth 的
+   * HTML 会被整体转义成源码。消毒责任在服务端（sanitizeDocxHtml：mammoth
+   * 白名单重建 + script/事件属性/危险协议剥离）。
+   */
+  function pvRenderDocx(box, d) {
+    const div = el('div', 'pv-md msg-rich');
+    box.appendChild(div);
+    div.innerHTML = d.content;
     if (d.truncated) pvTruncNote(box, d);
   }
 
