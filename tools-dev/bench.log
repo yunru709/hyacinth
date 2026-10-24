@@ -1,1 +1,3 @@
 ﻿voice=FlutterShy url=http://127.0.0.1:3178/tts
+warmup   len=3   wall=  3.95s audio=  0.60s RTF= 6.58x bytes=28844
+same-1   len=6   wall=  2.66s audio=  0.04s RTF=66.55x bytes=1964

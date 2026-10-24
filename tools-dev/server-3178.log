@@ -19,3 +19,30 @@ Provider'
   warnings.warn(
 2026-10-25 05:54:01,171 INFO use wetext frontend
 [cosyvoice] model ready
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:54:16,232 WARNING synthesis text 你好。 too short than prompt text Real
+ly, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me comp
+any and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:54:18,290 INFO synthesis text 你好。
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:103: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:426: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(self.fp16):
+2026-10-25 05:54:20,170 INFO yield speech len 0.6, rtf 3.133392731348674
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:54:20,192 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:54:22,105 INFO synthesis text 你好，孑遗。
+2026-10-25 05:54:22,833 INFO yield speech len 0.04, rtf 18.201416730880737
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:54:22,854 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:54:24,779 INFO synthesis text 你好，孑遗。
