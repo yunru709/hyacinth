@@ -70,7 +70,12 @@ def load_model():
         os.link(llm_rl, llm_pt)
         link_created = True
     try:
-        _MODEL = CosyVoice3(_ARGS.model_dir, load_trt=False, fp16=False)
+        # fp16 开关走环境变量（2026-10-25 测速实验）：8 GB 卡上 fp32 实测
+        # 14 字文本热态 9.3 s（RTF 0.18x，比实时慢 5.5 倍），首句 15 s。
+        # 默认 1（开），设 COSYVOICE_FP16=0 可回退 fp32 做对照。
+        _use_fp16 = os.environ.get("COSYVOICE_FP16", "1") != "0"
+        print(f"[cosyvoice] fp16={_use_fp16}", flush=True)
+        _MODEL = CosyVoice3(_ARGS.model_dir, load_trt=False, fp16=_use_fp16)
     finally:
         if link_created:
             try:
