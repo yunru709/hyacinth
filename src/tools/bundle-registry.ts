@@ -80,7 +80,10 @@ const BUILTIN_COMMON: ToolBundle = {
     // 进程三件套是 bash(async) 的伴侣：起了后台进程就必须能看见 / 停掉。
     'interrupt', 'restart', 'trigger_compression',
     'process_list', 'process_kill', 'process_output',
-    'say', 'ask_user',
+    // say = 说话（短、会朗读、不结束回合）；deliver = 交付（长文、不朗读、结束回合）。
+    // 两者都是「能不能开口」的基础设施 ⇒ 与 interrupt/switch_mode 同级必须常驻，
+    // 否则默认 coding 包下我会变成哑巴（说不了、也交不了）。
+    'say', 'deliver', 'ask_user',
     // ── 模式进出 ──
     // switch_mode 是**模式无关**的通用入口：任何模式下都必须能用它进出 ⇒ 漏了它
     // = 默认 coding 包下「进得去、出不来」✗（由 bundle-consistency 守卫测试抓出过）。
