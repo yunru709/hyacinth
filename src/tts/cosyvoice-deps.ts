@@ -211,7 +211,25 @@ export async function ensureCosyVoiceDeps(opts: {
     throw new Error(`pip install 失败：${pip.tail.slice(-8).join(' | ')}`);
   }
 
-  // 4) 复检导入（而非信 pip 退出码 —— 版本冲突可能装完仍 import 失败）
+  // 4) wetext 正则化资源（CosyVoice3 文本 frontend 硬依赖）：snapshot_download
+  //    每次 API 校验、匿名限流时会挂 —— 预热一次本地缓存；成功后 server.py
+  //    的离线补丁直接用缓存，运行期零网络。失败不阻断（重试点下载即可）。
+  const wetextCache = path.join(os.homedir(), '.cache', 'modelscope', 'hub', 'models', 'pengzhendong', 'wetext');
+  const wetextOk = () => {
+    try {
+      const q = path.join(wetextCache, 'zh', 'tn', 'tagger.fst');
+      return fs.existsSync(q) && fs.statSync(q).size > 10_000;
+    } catch { return false; }
+  };
+  if (!wetextOk()) {
+    say('预热 wetext 文本正则化资源（约 20MB）…');
+    const warm = await run(pythonPath, ['-c', "from modelscope import snapshot_download; snapshot_download('pengzhendong/wetext')"], { env: cosyvoicePythonEnv(), onLine: say });
+    if (!wetextOk()) {
+      say(`wetext 资源预热未完成（可稍后重试下载）：${warm.tail.slice(-2).join(' ')}`);
+    }
+  }
+
+  // 5) 复检导入（而非信 pip 退出码 —— 版本冲突可能装完仍 import 失败）
   if (!(await cosyvoiceImportOk(pythonPath))) {
     const probe = await run(pythonPath, ['-c', 'from cosyvoice.cli.cosyvoice import CosyVoice3'], { env: cosyvoicePythonEnv() });
     throw new Error(`依赖装完仍无法导入 cosyvoice：${probe.tail.slice(-5).join(' | ')}`);

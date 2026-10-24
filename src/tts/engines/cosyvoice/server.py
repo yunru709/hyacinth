@@ -29,6 +29,26 @@ _MODEL = None          # CosyVoice3 实例（懒加载，首个请求前完成�
 _LOCK = threading.Lock()
 
 
+def _patch_wetext_offline():
+    """wetext 正则化资源本地化：CosyVoice3 的文本 frontend 硬依赖 wetext FST，
+    而其 snapshot_download 每次启动都打 modelscope API 校验 —— 匿名限流时
+    报错降级为 no frontend → 合成必挂（endofprompt 断言）。
+    本地缓存（首次成功下载后）文件其实全齐，这里把下载函数替换为
+    「缓存存在直接返回」，运行期零网络依赖。"""
+    cache = os.path.join(os.path.expanduser("~"), ".cache", "modelscope",
+                         "hub", "models", "pengzhendong", "wetext")
+    probe = os.path.join(cache, "zh", "tn", "tagger.fst")
+    if not (os.path.isfile(probe) and os.path.getsize(probe) > 10000):
+        return False
+    try:
+        import wetext.wetext as _wt
+        _wt.snapshot_download = lambda *a, **k: cache
+        print("[cosyvoice] wetext resources: local cache (offline mode)", flush=True)
+        return True
+    except Exception:
+        return False
+
+
 def load_model():
     """加载 CosyVoice3（选择 base / rl 的 LLM 权重）。"""
     global _MODEL
@@ -37,6 +57,7 @@ def load_model():
 
     from cosyvoice.cli.cosyvoice import CosyVoice3  # 官方生态
 
+    _patch_wetext_offline()
     print(f"[cosyvoice] loading model from {_ARGS.model_dir} (variant={_ARGS.variant}) ...", flush=True)
     # 官方构造写死载 llm.pt（base 权重）。rl-only 下载场景（llm.pt 缺、llm.rl.pt
     # 在）：先把 rl 权重硬链为 llm.pt（同盘零拷贝）让构造直接载 rl，构造完成后
