@@ -246,12 +246,28 @@ export class CosyVoiceService {
   // ── 推理服务生命周期 ───────────────────────────────────────
 
   serviceState(): CosyVoiceServiceState {
-    return { running: this.proc !== null && !this.proc.killed, port: COSYVOICE_PORT, lastError: this.lastServiceError ?? undefined };
+    const own = this.proc !== null && !this.proc.killed;
+    return { running: own || this.adopted, port: COSYVOICE_PORT, lastError: this.lastServiceError ?? undefined };
   }
 
   /** 启动本地推理服务（模型未就绪 / cosyvoice 未安装时抛错）。 */
   async start(): Promise<void> {
     if (this.proc && !this.proc.killed) return;
+
+    // 跨进程判重（2026-10-25 事故）：本服务是**进程级单例**，但本机可能同时跑多个
+    // 后端进程（webui :3199 与桌面 :3130），各自持有一份单例 ⇒ 各自 spawn 一个
+    // server.py，而端口 3178 是硬编码的。旧版只在 synthesize() 里做端口预检，
+    // start() 本身没有 ⇒ 凡直接走 start() 的路径（设置页「启动服务」、冷启动兜底）
+    // 都会无条件再拉一个，把显存吃到 7934/8188 MiB。
+    // 现在：端口已通 ⇒ 认领那个实例，不 spawn（它是别人的子进程，我们不负责 kill）。
+    if (await this.portOpen()) {
+      this.adopted = true;
+      this.lastServiceError = null;
+      logger.info(`CosyVoice3 推理服务已在 :${COSYVOICE_PORT} 运行，认领现有实例（不重复拉起）`);
+      return;
+    }
+    this.adopted = false;
+
     const st = this.modelState();
     if (!st.ready) throw new Error(`CosyVoice3 模型未就绪（缺 ${st.missingFiles.join(', ')})，先在设置页下载`);
     const script = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'engines', 'cosyvoice', 'server.py');
@@ -280,6 +296,7 @@ export class CosyVoiceService {
     this.proc.on('exit', (code) => {
       logger.warn(`CosyVoice3 推理服务退出（code=${code}）`);
       this.proc = null;
+      this.adopted = false;
     });
 
     // 等待就绪：模型加载可能要数十秒（torch 初始化 + 权重载入）
@@ -297,10 +314,12 @@ export class CosyVoiceService {
   }
 
   stop(): void {
+    // 认领来的实例是别的后端进程的孩子，kill 不到也不该 kill —— 只解除认领。
     if (this.proc) {
       try { this.proc.kill(); } catch { /* ignore */ }
       this.proc = null;
     }
+    this.adopted = false;
   }
 
   private health(): Promise<boolean> {
