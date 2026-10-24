@@ -5,3 +5,16 @@
     + CategoryInfo          : NotSpecified: (Sliding Window ...be encountered.:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
+2026-10-25 05:43:18,717 INFO input frame rate=25
+C:\Python311\Lib\site-packages\torch\nn\utils\weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprec
+ated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+C:\Python311\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:197: UserWarning: Specified provide
+r 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecution
+Provider'
+  warnings.warn(
+2026-10-25 05:43:25,809 DEBUG Attempting to acquire lock 2615714268240 on C:\Users\74689\.cache\modelscope\hub\.lock\pe
+ngzhendong___wetext
+2026-10-25 05:43:25,811 DEBUG Lock 2615714268240 acquired on C:\Users\74689\.cache\modelscope\hub\.lock\pengzhendong___
+wetext
+2026-10-25 05:43:25,849 DEBUG Starting new HTTPS connection (1): www.modelscope.cn:443
