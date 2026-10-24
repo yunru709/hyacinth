@@ -204,6 +204,25 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _ExclusiveHTTPServer(ThreadingHTTPServer):
+    """独占绑定端口的 HTTP 服务。
+
+    为什么不用默认的 ThreadingHTTPServer：它 `allow_reuse_address = True`，
+    在 Windows 上等于 SO_REUSEADDR —— 允许**两个进程同时绑定同一端口**（后绑者抢占），
+    于是重复实例既不报错也不退出，只是把连接搅乱。2026-10-25 实况：两个后端进程
+    （webui :3199 与 :3130 各持一份 CosyVoiceService 单例）各拉起一个 server.py，
+    两个都"绑上了"，显存被吃到 7934/8188 MiB，其中一个完全是废物。
+    改用 SO_EXCLUSIVEADDRUSE ⇒ 第二个实例 bind 立即失败、进程秒退、零显存代价。
+    """
+
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     global _ARGS
     parser = argparse.ArgumentParser(description="CosyVoice3 local inference server (hyacinth)")
@@ -213,11 +232,19 @@ def main():
     parser.add_argument("--port", type=int, default=3178)
     _ARGS = parser.parse_args()
 
-    # 模型在后台线程预加载：/health 先行可探测（Node 轮询就绪）
-    threading.Thread(target=load_model, daemon=True).start()
-
-    server = ThreadingHTTPServer(("127.0.0.1", _ARGS.port), Handler)
+    # 顺序不可倒：**先 bind、后加载模型**。
+    # 旧版是「先起线程 load_model() 再 bind」⇒ 重复实例要先把 ~4 GB 权重灌进显存，
+    # 才在 bind 那一步发现端口被占（而且旧版还抢得住，见 _ExclusiveHTTPServer）。
+    # 端口拿不到就没必要加载模型。
+    try:
+        server = _ExclusiveHTTPServer(("127.0.0.1", _ARGS.port), Handler)
+    except OSError as e:
+        print(f"[cosyvoice] port {_ARGS.port} unavailable ({e}); exiting", file=sys.stderr, flush=True)
+        sys.exit(2)
     print(f"[cosyvoice] listening on 127.0.0.1:{_ARGS.port}", flush=True)
+
+    # 模型在后台线程加载：/health 在就绪前返回 503（Node 侧据此等待）
+    threading.Thread(target=load_model, daemon=True).start()
     server.serve_forever()
 
 
