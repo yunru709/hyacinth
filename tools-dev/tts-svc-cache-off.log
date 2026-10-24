@@ -19,3 +19,142 @@ Provider'
   warnings.warn(
 2026-10-25 06:05:48,551 INFO use wetext frontend
 [cosyvoice] model ready
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:05:54,104 WARNING synthesis text 你好。 too short than prompt text Real
+ly, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me comp
+any and everything has been nice and quiet, so it's okay.[token], this may lead to bad performance
+2026-10-25 06:05:56,074 INFO synthesis text 你好。
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:103: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+Exception in thread Thread-3 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:426: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(self.fp16):
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:05:57,179 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.[token], this may lead to bad performance
+2026-10-25 06:05:58,999 INFO synthesis text 你好，孑遗。
+Exception in thread Thread-5 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:05:59,636 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.[token], this may lead to bad performance
+2026-10-25 06:06:01,420 INFO synthesis text 你好，孑遗。
+Exception in thread Thread-7 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:06:01,862 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.[token], this may lead to bad performance
+2026-10-25 06:06:03,657 INFO synthesis text 你好，孑遗。
+Exception in thread Thread-9 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:06:04,151 WARNING synthesis text 现在我在测试流式输出，看看首包到底有多快。 too short tha
+n prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. An
+imals keep me company and everything has been nice and quiet, so it's okay.[token], this may lead to bad performance
+2026-10-25 06:06:05,941 INFO synthesis text 现在我在测试流式输出，看看首包到底有多快。
+Exception in thread Thread-11 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 06:06:06,479 WARNING synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上。我听见院子里有小动物窸窸
+窣窣地走动，而你大概正琢磨着那个配置值该填什么。 too short than prompt text Really, I promise. Haha, you don't have to worry about me. I'm used
+ to being by myself in the cottage. Animals keep me company and everything has been nice and quiet, so it's okay.[token
+], this may lead to bad performance
+2026-10-25 06:06:08,318 INFO synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上。我听见院子里有小动物窸窸窣窣地走动，而你大概正琢磨着那个配置值该填什么。
+Exception in thread Thread-13 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+
+  0%|          | 0/1 [00:02<?, ?it/s]
