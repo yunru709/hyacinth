@@ -20,3 +20,1144 @@ Provider'
   warnings.warn(
 2026-10-25 06:12:06,131 INFO use wetext frontend
 [cosyvoice] model ready
+[cosyvoice] prompt features cached (FlutterShy.wav) in 2.02s: speech_token=(1, 396) speech_feat=(1, 792, 80)
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:103: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+Exception in thread Thread-3 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:426: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(self.fp16):
+[cosyvoice] tts failed (3 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-5 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (3 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-7 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (3 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-9 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (6 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-11 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (6 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-13 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (6 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-15 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (12 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-17 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (12 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-19 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (12 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-21 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (20 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-23 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (20 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-25 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (20 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-27 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (21 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-29 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (21 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-31 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (21 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-33 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (37 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-35 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (37 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
+Exception in thread Thread-37 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+[cosyvoice] tts failed (37 chars, voice=FlutterShy): Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 354, in do_POST
+    wav = synthesize(text, voice, speed)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 271, in synthesize
+    outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\src\tts\engines\cosyvoice\server.py", line 237, in _zero_shot_cached
+    outs.extend(model.model.tts(**model_input, stream=False, speed=speed))
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
