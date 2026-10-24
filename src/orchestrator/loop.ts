@@ -519,7 +519,7 @@ export class AgentLoop {
   private gitManager: GitManager;
   private switchingProvider = false;
   private lastContextTokens = 0;
-  /** 公开只读访问器 — 供 UI 协议层（state.get）读取当前上下文 token 占用 */
+  /** 公开只读访问器 — 供 UI 契约层（state.get）读取当前上下文 token 占用 */
   get contextTokensUsed(): number { return this.lastContextTokens; }
   private pendingCompression: Promise<CompressionResult | null> | null = null;
 

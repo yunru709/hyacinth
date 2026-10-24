@@ -1,5 +1,5 @@
 // ============================================================
-// UI 协议层 — 旁路 agent 编排域（orchestrator.*）
+// UI 契约层 — 旁路 agent 编排域（orchestrator.*）
 // ============================================================
 // 覆盖 UI 对旁路 agent（对应 TUI /orchestrator on|off）的控制：
 //   orchestrator.get          查询 orchestrator 旁路 agent 是否激活

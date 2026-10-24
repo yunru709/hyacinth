@@ -59,7 +59,7 @@ Hyacinth 是一个**可编程、可扩展的智能体框架**。它把 Agent 的
 
 ### 多渠道
 
-TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连接）与**微信 ClawBot**（http-polling）两个插件渠道——统一经 `ui-protocol`（19 个业务域）连接。
+TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连接）与**微信 ClawBot**（http-polling）两个插件渠道——统一经 `ui-protocol`（UI 契约层，21 个业务域）连接。
 
 ### 可观测与自管理
 
@@ -243,14 +243,14 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | | `local-model/` `generation/` `media/` `multimodal/` | 本地模型托管与下载；生成供应商层（图 / 视频 / 音频）；媒体库；图片管线 |
 | | `machine/` `schedule/` `dependency/` | Flow 状态机；定时调度；依赖分析 |
 | **交互界面** | `channels/` | ChannelManager + TUI / HTTP 内置渠道 + feishu / clawbot 插件渠道 + 跨渠道分发 |
-| | `ui/` `ui-protocol/` `webui/` | TUI 组件；统一 RPC + 事件协议（19 域）；WebUI 静态前端 |
+| | `ui/` `ui-protocol/` `webui/` | TUI 组件；UI 契约层：统一 RPC + 事件（21 域）；WebUI 静态前端 |
 | **基础设施** | `hot-reload/` `lifecycle/` `runtime/` `logging/` `utils/` `shims/` | 15 Watcher 家族；受管进程状态；运行时配置中心；日志器；通用工具；类型兜底 |
 
 ### 关键数量（读一次源码即知，勿记快照）
 
 - 内置工具 **109**（+ MCP / 插件动态工具）
 - Provider 类型 **19**
-- 模块目录 **44**，装配条目 **44**，可替换点 **47**，ui-protocol 域 **19**，热重载 Watcher **15**
+- 模块目录 **44**，装配条目 **44**，可替换点 **47**，ui-protocol 域 **21**，热重载 Watcher **15**
 - 测试文件 **231**（`vitest run` 输出为准）
 
 ***

@@ -60,40 +60,40 @@ dotnet publish desktop/native-shell/native-shell.csproj -c Release -r win-x64 `
 ```
 desktop/native-shell/
   Program.cs            入口（ApplicationConfiguration + 全局异常落盘）
-  MainForm.cs           窗壳：拉后端 / WebView2 宿主 / DPI / 单实例与退出清理 / 无边框窗体
-  TitleBar.cs           自绘标题栏（品牌 + 最小化/最大化/关闭）+ 无边框的 Win32 细节
+  MainForm.cs           窗壳：拉后端 / WebView2 宿主 / DPI / 单实例与退出清理 / 托盘常驻
+  ShellTheme.cs         窗口 chrome 染色（系统标题栏染页面顶栏同色）+ Win11 圆角
   native-shell.csproj   工程（WinExe / net10.0-windows / RID win-x64 / 框架依赖）
+  app.ico               应用图标（生成产物，勿手改 —— 见「应用图标」节）
   out/                  构建产物（.gitignore 忽略）
 ```
 
-## 窗口外观：自绘标题栏（无边框）
+## 窗口外观：标准窗口 + DWM 染色（2026-10-24 换方案）
 
-窗口没有系统标题栏：顶部是一条 44 逻辑像素的自绘条（左：六边形 + `Hyacinth`，中间留空，
-右：最小化 / 最大化 / 关闭），带 DWM 圆角与阴影，四边四角可拉伸。
+窗口是**完全标准的系统窗口**（一行窗口结构代码都不碰），没有自绘标题栏、没有
+`FormBorderStyle.None`、没有 `WM_NCCALCSIZE` 清零、没有缩放热区带。外观由
+`ShellTheme.cs` 的 DWM 染色实现：
 
-改这块之前先读这三条，都是踩过的：
+- `DWMWA_CAPTION_COLOR(35)` / `DWMWA_TEXT_COLOR(36)`：系统标题栏与标题文字染成
+  **页面顶栏同色**（文字隐形后，caption 左侧只剩窗口图标 = 品牌位）；
+- `DWMWA_BORDER_COLOR(34)`：边框同色，外沿只剩阴影勾边；
+- `DWMWA_USE_IMMERSIVE_DARK_MODE(20)`：系统三颗 caption 按钮的深浅跟随页面主题。
 
-1. **`FormBorderStyle.None` 不能单独用**：`MainForm.CreateParams` 必须补回
-   `WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX`。少了 `WS_THICKFRAME`，DWM 就不再
-   认为这是"有边框"的窗口 ⇒ 阴影、圆角、贴边动画全没，窗口变成一块硬边方块。
-2. **客户区被撑成整个窗口**（`WndProc` 里 `WM_NCCALCSIZE` 返回 0）：否则 `WS_THICKFRAME`
-   会留一圈约 8px 的非客户区，没人绘制、还把内容整体往里挤。
-   代价是最大化时窗口会按"工作区 + 边框"放大 ⇒ 用 `WM_GETMINMAXINFO` 把 `ptMaxSize/
-   ptMaxPosition` 订到工作区（`ShellFrame.ClampMaximizedBounds`），不然会盖住任务栏、
-   页面右下各被切掉一截。
-3. **边缘拉伸的热区必须是窗体自己的像素**：WM_NCHITTEST 只发给「光标下那个窗口」，
-   而 WebView2 的 `Chrome_WidgetWin` 子窗口会把鼠标消息直接送进 Chromium、不转发。
-   所以内容层四周让出 4px（`ShellFrame.ResizeBorderLogical`，颜色与页面底色同为 `#0a0b14`），
-   命中测试由 `FrameAwarePanel.WndProc` 转发给 `ShellFrame.HitTest`。
+颜色由页面在 `applyTheme` 时经 `window.chrome.webview.postMessage` 报上来
+（webui 的 `notifyShellTheme`，含明暗判定）；壳在 `WebMessageReceived` 里实时应用。
+三颗系统按钮 / 拖拽 / 缩放 / 圆角 / 阴影 / Snap 全是系统原生机制。
 
-其它约定：
-- 拖动走 `WM_NCLBUTTONDOWN + HTCAPTION`（借系统的移动循环，因此 Aero Snap / 多显示器 DPI
-  过渡都是白送的）；双击最大化由标题栏自己按 `SystemInformation.DoubleClickTime` 判，
-  不依赖 `WM_NCLBUTTONDBLCLK`（按下即进移动循环，那条消息的到达时机不可靠）。
-- 三个按钮全部 `Graphics` 画（不是 ×/□/— 字符），最大化状态画「还原」双框。
-- 关闭按钮走 `Form.Close()`，因此仍然受 `OnFormClosing` 的托盘语义约束。
-- 圆角用 `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE=33, 2)`；**Win10 上该属性
-  不存在**，调用返回 E_INVALIDARG ⇒ 静默降级为直角，绝不能让它抛到 `OnHandleCreated`。
+**为什么换**：上一版自绘无边框（上面那套 `None`+`THICKFRAME`+`NCCALCSIZE`+热区带）
+两类问题反复出现——某些外部 ShowWindow 路径下 DWM 重算非客户区时浮出一条系统蓝
+标题栏；客户区四周的深色热区带去不掉。对照参考 DeepSeek Harness / ZCode（Electron
+`titleBarStyle hidden + titleBarOverlay`）：它们的共同点是**不碰窗口非客户区结构**。
+本方案同理，只是 WebView2 的 WCO API（SDK 1.0.4258 尚未暴露 titleBarOverlay）用
+DWM 染色替代。**别再走回自绘路线** —— 上面的坑记录就是它的墓志铭。
+
+- 单实例唤回：第二实例 `EnumWindows`（**FindWindow 搜不到 Hide() 后的窗口**，实测
+  踩过）按标题找到第一实例，`PostMessage(WM_SHOWME)` 让第一实例自己的 UI 线程走
+  `ShowMainWindow()` —— 跨实例只传消息、不传状态。
+- 关闭按钮走系统 caption（或托盘菜单），受 `OnFormClosing` 的托盘语义约束。
+- 这些 DWM 属性是 Win11 22000+；Win10 返回 E_INVALIDARG ⇒ 静默保持系统默认标题栏。
 
 ## 相关工具（开发/诊断）
 
@@ -101,21 +101,39 @@ desktop/native-shell/
 - `tools-dev/gui/probe-startup-mode.mjs` —— 一次拿齐「后端配置 / 后端模式 / 页面 hash+localStorage」
 - `tools-dev/gui/shot-window.ps1` —— 截原生窗口（**必须** `SetProcessDPIAware`，否则 150% 缩放下截错位）
 
-## 托盘常驻（可选，默认关闭）
+## 应用图标
 
-```powershell
-$env:HYACINTH_TRAY = "1"    # 只认 "1" / "true"，其余值一律当关闭
+`app.ico` 不是手画资产，是 **`scripts/gen-desktop-icon.cjs` 用代码画出来的**：参数化 SVG
+（一朵紫风信子，配色与 WebUI `--neutral-0` / `--primary-500` 同源）→ sharp 逐尺寸原生
+光栅化（16/24/32/48/64/128/256）→ 手工组装多尺寸 .ico。改配色 / 花序布局只改脚本重跑：
+
+```bash
+pnpm run gen:desktop-icon
 ```
 
-| | 默认（不设开关） | `HYACINTH_TRAY=1` |
-|---|---|---|
-| 点窗口 × | 退出进程 + 停后端 | 窗口隐藏（`Hide()`），后端与 WebView2 继续跑 |
-| 任务栏 | 消失（进程已退） | 消失（窗口隐藏），只剩托盘图标 |
-| 关机 / 任务管理器结束任务 | 正常退出 | 正常退出（只拦 `CloseReason.UserClosing`） |
-| 怎么彻底退出 | 就是关窗 | 右键托盘图标 → **退出**（托盘图标随后一起消失） |
+csproj 里两处引用：`ApplicationIcon`（exe 文件图标 / 任务栏 / 快捷方式）+
+`EmbeddedResource`（运行期取 256 大图，Alt-Tab 不糊）。标题栏品牌标（TitleBar.cs 的
+`DrawHyacinthMark`）是同一设计的 GDI+ 矢量版，保持"exe 图标 = 托盘图标 = 标题栏花标"。
 
-- 托盘菜单：**显示主窗口**（还原并激活）、**退出**（`StopBackend()` → `Application.Exit()`）。
-- 双击托盘图标 = 显示主窗口（最小化状态会先还原成 Normal）。
+## 托盘常驻（默认开启）
+
+2026-10-24 用户裁定：桌面壳定位为**后台常驻程序** —— 关窗只是收进托盘，
+后端继续跑；托盘菜单「退出」才是真正结束进程。
+
+```powershell
+$env:HYACINTH_TRAY = "0"    # 退回"关窗即退出"的老行为（只认 "0" / "false"，其余值一律当开）
+```
+
+| | 默认（不设开关） | `HYACINTH_TRAY=0` |
+|---|---|---|
+| 点窗口 × | 窗口隐藏（`Hide()`），后端与 WebView2 继续跑 | 退出进程 + 停后端 |
+| 任务栏 | 消失（窗口隐藏），只剩托盘图标 | 消失（进程已退） |
+| 关机 / 任务管理器结束任务 | 正常退出（只拦 `CloseReason.UserClosing`） | 正常退出 |
+| 怎么彻底退出 | 托盘菜单 → **退出**（`StopBackend()` → `Application.Exit()`） | 就是关窗 |
+
+- 托盘菜单（按常驻程序常规形态）：**打开主窗口**（默认项，加粗）、**在浏览器中打开**
+  （WebView2 出问题时的救生通道）、**打开日志文件夹**、**退出**。
+- 单击托盘图标 = 打开主窗口（Telegram / 微信等的主流行为）；双击同效。
 - 首次收进托盘会弹一次气泡提示，之后不再弹。
 - 开关为什么用环境变量：壳没有自己的设置界面，做设置项就得引入配置持久化，
   成本与收益不匹配。理由写在 `MainForm.cs` 的类注释里。

@@ -29,7 +29,8 @@ import { createLogger } from '../../logging/logger.js';
 import { getModelContextWindow } from '../../setup/model-defaults.js';
 import { getDefaultConfig } from '../../runtime/defaults.js';
 import { registerMediaRoutes, isPublicReadRoute } from '../../gateway/media-routes.js';
-import { registerPreviewRoutes } from '../../gateway/preview-routes.js';
+import { registerPreviewRoutes, createPreviewService, type PreviewService } from '../../gateway/preview-routes.js';
+import { isLoopbackRemoteAddress } from '../../gateway/preview-service.js';
 import { LocalModelModule } from '../../local-model/index.js';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
@@ -61,6 +62,13 @@ function isPublicWebUIRoute(url: string): boolean {
     path === '/app.js' ||
     path === '/markdown.js' ||
     path === '/favicon.ico' ||
+    // index.html 的 <link>/<script> 引用（浏览器加载它们无法带 Authorization 头，
+    // 不进白名单的话配钥匙场景下样式/高亮/公式/主题选择器全 401，实测 shell.css）
+    path === '/shell.css' ||
+    path === '/code-themes.css' ||
+    path === '/math.js' ||
+    path === '/highlight.js' ||
+    path === '/themes.json' ||
     path.startsWith('/vendor/') ||
     path.startsWith('/assets/')
   );
@@ -228,6 +236,13 @@ export class HttpWebhookChannel implements ChannelHandler {
   private wsAgentFactory: AgentFactory | null = null;
   /** 实际绑定端口（port 0 自动分配时读回，供调用方/测试获取） */
   private actualPort = 0;
+  /**
+   * 文件预览服务：HTTP 路由（preview-routes）与 WS 契约域（preview.*）共享
+   * 同一实例 —— 根状态只有一份，从任何一条通道换根，另一条立刻可见。
+   */
+  private previewService: PreviewService | null = null;
+  /** 访问钥匙（start 时从 config/env 读取；preview.rawUrl 签发 ?token= 用） */
+  private apiKeyValue: string | null = null;
 
   /** 实际绑定端口（start 后有效；未 start 为 0） */
   get boundPort(): number { return this.actualPort; }
@@ -247,6 +262,7 @@ export class HttpWebhookChannel implements ChannelHandler {
     this.maxContext = config.maxContext as number ?? getModelContextWindow(this.provider.getProviderType(), this.provider.getModel());
 
     const apiKey = getApiKey(config);
+    this.apiKeyValue = apiKey;
     // 早期测试开关（用户 2026-09-20 要求）：显式声明"我知道风险"才放行 ✓
     const noAuth = config.noAuth === true || config.noAuth === 'true';
     if (!apiKey) {
@@ -345,8 +361,10 @@ export class HttpWebhookChannel implements ChannelHandler {
 
     // ── 工作区文件预览（WebUI 右侧「预览」栏，只读）─────────────────
     // 与 media 相反：这组端点**要钥匙**——它能读到工作区里任何文件，而 fetch
-    // 能带 Authorization 头，没有豁免的理由。路径越界在模块内 fail-closed。
-    registerPreviewRoutes(this.app, this.cwd);
+    // 能带 Authorization 头，没有豁免的理由。路径越界 fail-closed（preview-service）。
+    // 同一服务实例交给 WS 契约域（preview.*）：JSON 数据面走契约层，HTTP 只搬字节。
+    this.previewService = createPreviewService(this.cwd);
+    registerPreviewRoutes(this.app, this.previewService);
 
     // 生成语音端点：重放列表 + 音频文件（IndexTTS2 等本地 TTS 产出的陪伴语音）
     {
@@ -562,31 +580,31 @@ export class HttpWebhookChannel implements ChannelHandler {
       }
     });
 
-    tuiWss.on('connection', (ws) => {
+    tuiWss.on('connection', (ws, req) => {
       const sessionId = `tui_${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
       logger.info('TUI WS client connected', { sessionId });
-      void this.wireUiSession(ws, sessionId);
+      void this.wireUiSession(ws, sessionId, req);
     });
 
     // ── Desktop GUI WebSocket 端点 ──
-    desktopWss.on('connection', (ws) => {
+    desktopWss.on('connection', (ws, req) => {
       const now = new Date();
       const date = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
       const time = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
       const sessionId = `webui_${date}-${time}-${randomBytes(3).toString('hex')}`;
       logger.info('Desktop WS client connected', { sessionId });
-      void this.wireUiSession(ws, sessionId);
+      void this.wireUiSession(ws, sessionId, req);
     });
 
-    // ── UI 协议层 WebSocket 端点（/ui，统一 UI 协议层） ─
-    uiWss.on('connection', (ws) => {
+    // ── UI 契约层 WebSocket 端点（/ui，统一 UI 契约层） ─
+    uiWss.on('connection', (ws, req) => {
       // 与 /desktop 同格式的 webui_ 前缀：可被 SessionManager 渠道识别（feishu_/webui_/tui_）
       const now = new Date();
       const date = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
       const time = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
       const sessionId = `webui_${date}-${time}-${randomBytes(3).toString('hex')}`;
       logger.info('UI WS client connected', { sessionId });
-      void this.wireUiSession(ws, sessionId);
+      void this.wireUiSession(ws, sessionId, req);
     });
 
 
@@ -660,7 +678,18 @@ export class HttpWebhookChannel implements ChannelHandler {
    * historyProvider（events.jsonl）→ UiWsSession.initialize 创建 AgentLoop。
    * 连接断开时自动 close 会话。
    */
-  private async wireUiSession(ws: import('ws').WebSocket, sessionId: string): Promise<void> {
+  private async wireUiSession(
+    ws: import('ws').WebSocket,
+    sessionId: string,
+    /** 升级请求（回环判定用：preview.browse/setRoot 仅限本机；缺省按非回环 fail-closed） */
+    req?: import('node:http').IncomingMessage,
+  ): Promise<void> {
+    // 回环判定：WS 升级连接的 remoteAddress 即客户端地址（HTTP 路由看
+    // req.socket 同源）。拿不到一律按非回环处理 —— 换根/浏览全盘是"扩大
+    // 服务端可读范围"的操作，宁可误拒也不能放给局域网 ✗
+    const previewLoopback = isLoopbackRemoteAddress(
+      (req as { socket?: { remoteAddress?: string } } | undefined)?.socket?.remoteAddress,
+    );
     try {
       // UiWsSession 与 start() 内为同一模块实例（动态 import 保持与 start 一致）
       const { UiWsSession } = await import('./ui-ws-session.js');
@@ -773,6 +802,14 @@ export class HttpWebhookChannel implements ChannelHandler {
           const { ConfigManager } = await import('../../setup/config.js');
           await new ConfigManager(this.cwd).saveApiKey(provider, apiKey);
         },
+        // preview 域：与 HTTP 路由共享同一服务实例（换根两边立刻一致）；rawUrl
+        // 由服务端签发并嵌入 ?token=（<img>/<iframe> 无法带 Authorization 头）；
+        // browse/setRoot 仅限回环连接，与 HTTP 路由同一安全边界。
+        previewService: () => this.previewService,
+        makePreviewRawUrl: (rel: string) =>
+          '/api/fs/raw?path=' + encodeURIComponent(rel)
+          + (this.apiKeyValue ? '&token=' + encodeURIComponent(this.apiKeyValue) : ''),
+        previewLoopback,
         listLocalModels: () => {
           const localModel = LocalModelModule.getInstance();
           return localModel.list().map((e) => ({

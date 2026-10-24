@@ -2055,9 +2055,9 @@
   // ════════════════════════════════════════════════════════════
   // 预览栏：工作区文件查看器（只读）
   // ════════════════════════════════════════════════════════════
-  // 数据来自 /api/fs/*（src/gateway/preview-routes.ts）。越界、符号链接、
-  // 绝对路径都在服务端 fail-closed，这里**不重复做安全判断** —— 前端校验
-  // 只是装饰，绕过它只需一行 fetch。这里只负责展示和交互。
+  // 数据面走 UI 契约层（preview.* 域，src/ui-protocol/domains/preview.ts）。
+  // 越界、符号链接、绝对路径都在服务端 fail-closed，这里**不重复做安全判断**
+  // —— 前端校验只是装饰，绕过它只需一行调用。这里只负责展示和交互。
   const PV_KEY = 'hyacinth.preview';
   /** 行号渲染上限：几万行的日志/产物会把 DOM 撑爆，只渲染前 N 行并提示 */
   const PV_MAX_LINES = 5000;
@@ -2080,57 +2080,29 @@
     inflight: new Set(),// 正在请求的目录
     current: null,      // 当前预览的文件元信息
     htmlSource: false,  // HTML 预览：false=渲染（iframe）/ true=源码；跨文件保留用户的偏好
-    token: null,        // 惰性读取的 ?token=
     pendingPath: '',    // ?preview=<path> 待到位的文件
   };
 
   function pvClamp(n, lo, hi) { return Math.min(hi, Math.max(lo, n)); }
 
-  /** 钥匙从 URL 来（与 WS 同一来源）；没有就是 --no-auth 场景，不带头即可 */
-  function pvToken() {
-    if (pv.token === null) {
-      pv.token = new URLSearchParams(location.search).get('token') || '';
-    }
-    return pv.token;
-  }
-
-  async function pvGetJson(url) {
-    const headers = {};
-    const t = pvToken();
-    if (t) headers.Authorization = 'Bearer ' + t;
-    const r = await fetch(url, { headers, cache: 'no-store' });
-    if (!r.ok) {
-      let msg = 'HTTP ' + r.status;
-      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* 非 JSON 响应 */ }
-      throw new Error(msg);
-    }
-    return r.json();
-  }
-
-  /** 换根用。与 pvGetJson 同一套鉴权头，只是多了 JSON body 与 POST */
-  async function pvPostJson(url, body) {
-    const headers = { 'Content-Type': 'application/json' };
-    const t = pvToken();
-    if (t) headers.Authorization = 'Bearer ' + t;
-    const r = await fetch(url, {
-      method: 'POST', headers, cache: 'no-store',
-      body: JSON.stringify(body || {}),
-    });
-    if (!r.ok) {
-      let msg = 'HTTP ' + r.status;
-      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* 非 JSON 响应 */ }
-      throw new Error(msg);
-    }
-    return r.json();
-  }
+  // ── 数据面：全部走 UI 契约层（preview.* RPC）──────────────────
+  // 此前这里是一组直连 HTTP 的 fetch（/api/fs/list|read|meta|browse|root），
+  // 与聊天等能力形成两套通道；现在统一收进契约层 —— 服务端 preview 域做
+  // 同一套 fail-closed 校验，前端不再硬编码任何后端 HTTP 路径。
+  // 仅原始字节（<img>/<iframe> 加载）仍是 HTTP：浏览器那几处无法设置请求头，
+  // 地址由服务端签发（preview.read 的 url 字段 / preview.rawUrl，?token= 已嵌入）。
 
   /**
-   * 图片/PDF 用 <img src> / <iframe src> 加载 —— 这两处浏览器**无法设置请求头**，
-   * 所以钥匙只能走 ?token=（服务端对 /api/fs/raw 特批，见 authHook）。
+   * bindPreviewDock 在 IIFE 顶层早于 client 创建执行（初始化拉 meta），
+   * 预览栏的启动期 RPC 统一排队到 WS onOpen 之后；其余调用都由用户交互
+   * 触发，天然晚于就绪。
    */
-  function pvRawUrl(p) {
-    const t = pvToken();
-    return '/api/fs/raw?path=' + encodeURIComponent(p) + (t ? '&token=' + encodeURIComponent(t) : '');
+  let pvResolveReady;
+  const pvReady = new Promise((res) => { pvResolveReady = res; });
+
+  /** 契约层 RPC（reject 的是 {code,message}，与旧 fetch 错误一样取 .message） */
+  function pvRpc(method, params) {
+    return client.request('preview.' + method, params || {});
   }
 
   function pvSave() {
@@ -2208,8 +2180,7 @@
     if (!force && pv.children.has(dirPath)) return;
     pv.inflight.add(dirPath);
     try {
-      const q = '?path=' + encodeURIComponent(dirPath) + (pv.showAll ? '&all=1' : '');
-      const data = await pvGetJson('/api/fs/list' + q);
+      const data = await pvRpc('list', { path: dirPath, all: pv.showAll });
       pv.children.set(dirPath, data.entries || []);
       pvRenderTree();
       if (data.truncated) pvNote('这个目录条目过多，只显示了前一部分');
@@ -2383,7 +2354,7 @@
     content.appendChild(el('div', 'pv-tree-note', '读取中…'));
 
     try {
-      const data = await pvGetJson('/api/fs/read?path=' + encodeURIComponent(path));
+      const data = await pvRpc('read', { path });
       pv.current = data;
       pvRenderMeta(data);
       content.textContent = '';
@@ -2435,7 +2406,8 @@
   function pvRenderImage(box, d) {
     const wrap = el('div', 'pv-image-wrap');
     const img = document.createElement('img');
-    img.src = pvRawUrl(d.path);
+    // url 由契约层签发（preview.read 结果自带，?token= 服务端已嵌入）
+    img.src = d.url;
     img.alt = d.name;
     img.onload = () => { img.title = d.name; };
     img.onerror = () => {
@@ -2449,7 +2421,7 @@
   function pvRenderPdf(box, d) {
     const f = document.createElement('iframe');
     f.className = 'pv-pdf';
-    f.src = pvRawUrl(d.path);
+    f.src = d.url;
     f.title = d.name;
     box.appendChild(f);
   }
@@ -2469,7 +2441,7 @@
     }
     const f = document.createElement('iframe');
     f.className = 'pv-html-frame';
-    f.src = pvRawUrl(d.path);
+    f.src = d.url;
     f.title = d.name;
     f.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups');
     f.setAttribute('referrerpolicy', 'no-referrer');
@@ -2495,7 +2467,7 @@
     wrap.appendChild(el('div', '', '这是二进制文件，预览栏不下发原始内容。'));
     wrap.appendChild(el('div', '', fmtSize(d.size) + ' · ' + (d.ext || '未知类型')));
     const a = el('a', 'pv-open-link', '在新标签页打开');
-    a.href = pvRawUrl(d.path);
+    a.href = d.url;
     a.target = '_blank';
     a.rel = 'noopener';
     wrap.appendChild(a);
@@ -3258,8 +3230,8 @@
 
   // ── 根目录切换 ────────────────────────────────────────────────
   // 预览栏原本锁死在启动目录，想看桌面上的产物只能绕出去。
-  // 这里给一个目录选择器：浏览用 /api/fs/browse（只回目录名、只限本机），
-  // 落定用 /api/fs/root。选中的根由**服务端**持久化（~/.agent/preview-root.json），
+  // 这里给一个目录选择器：浏览用 preview.browse（只回目录名、只限本机），
+  // 落定用 preview.setRoot。选中的根由**服务端**持久化（~/.agent/preview-root.json），
   // 所以重启后还在，多个标签页也不会各看各的。
 
   /** 面板里最多露几个盘符 chip（多于此数的走路径输入框） */
@@ -3335,7 +3307,7 @@
     list.textContent = '';
     list.appendChild(el('div', 'pv-root-note-inline', '读取中…'));
     try {
-      const d = await pvGetJson('/api/fs/browse' + (dir ? '?dir=' + encodeURIComponent(dir) : ''));
+      const d = await pvRpc('browse', dir ? { dir } : {});
       pvRoot.dir = d.dir || '';
       pvRoot.parent = d.parent || '';
       pvRoot.entries = d.entries || [];
@@ -3458,7 +3430,7 @@
    */
   async function pvAdoptServerRoot() {
     try {
-      const m = await pvGetJson('/api/fs/meta');
+      const m = await pvRpc('meta');
       if (!m) return;
       const changed = !pvSamePath(m.root, pv.rootAbs);
       pvApplyRootMeta(m);
@@ -3482,7 +3454,7 @@
     if (open) open.disabled = true;
     if (note) note.textContent = '切换中…';
     try {
-      const m = await pvPostJson('/api/fs/root', { root: target });
+      const m = await pvRpc('setRoot', { root: target });
       pvApplyRootMeta(m);
 
       // 换根后旧树/旧文件全部作废：相对路径的含义已经变了，
@@ -3659,8 +3631,9 @@
       });
     }
 
-    // 根目录元信息：拿不到就整栏禁用并说明原因（例如后端版本还没这个端点）
-    pvGetJson('/api/fs/meta').then((m) => {
+    // 根目录元信息：拿不到就整栏禁用并说明原因（例如 WS 还没连上 / 通道未装配）。
+    // bindPreviewDock 早于 client 创建执行，启动期 RPC 排队到 WS onOpen 之后再发。
+    pvReady.then(() => pvRpc('meta')).then((m) => {
       // 标题栏现在显示"当前根名"：换根之后必须一眼看出看的是哪儿，
       // 完整路径挂在按钮 title 上。
       pvApplyRootMeta(m);
@@ -4831,6 +4804,25 @@
     try { localStorage.setItem('hyacinth.theme', id); } catch (e) { /* 隐私模式忽略 */ }
     probeUserBg(id);
     syncThemeCards(id);
+    notifyShellTheme();
+  }
+
+  /**
+   * 把页面底色与明暗报给桌面壳（WebView2 宿主）。壳用 DWM 把**系统标题栏**染成
+   * 同一颜色（caption 与页面顶栏融为一体、边框只剩阴影勾边），并按明暗切换
+   * 系统 caption 按钮的深浅 —— 窗口结构是原生系统边框，壳不碰任何 NC 消息。
+   * 仅 WebView2 环境有 window.chrome.webview；普通浏览器打开时静默跳过。
+   */
+  function notifyShellTheme() {
+    try {
+      const host = window.chrome && window.chrome.webview;
+      if (!host || typeof host.postMessage !== 'function') return;
+      const bg = getComputedStyle($('#app-shell')).backgroundColor;
+      if (!bg) return;
+      const m = /(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(bg);
+      const dark = !m || (0.2126 * m[1] + 0.7152 * m[2] + 0.0722 * m[3]) < 128;
+      host.postMessage(JSON.stringify({ type: 'hyacinth-theme', background: bg, dark }));
+    } catch (e) { /* 序列化失败/宿主不可用都不影响页面 */ }
   }
 
   /** 同步主题卡片选中态（grid 还没渲染时无副作用，由 renderThemes 用 currentTheme 兜住） */
@@ -6475,6 +6467,8 @@
 
   const client = new ProtocolClient(wsUrl, {
     onOpen: () => {
+      // 预览栏的启动期 RPC 排队在这（bindPreviewDock 早于 client 创建执行）
+      pvResolveReady();
       // ui.connected 事件（后端 attach 完成）后再拉数据 + 标记在线
     },
     onClose: () => {

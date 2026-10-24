@@ -1,5 +1,5 @@
 // ============================================================
-// UiProtocolSession — 传输无关的 UI 协议会话
+// UiProtocolSession — 传输无关的 UI 契约会话
 // ============================================================
 // 把一条 UI 连接（InProc / WebSocket / 未来渠道）接入 ui-protocol
 // 协议层，屏蔽具体传输差异：
@@ -52,6 +52,7 @@ import { createArchDomain } from '../../ui-protocol/domains/arch.js';
 import { readSnapshot, formatLinksSection } from '../../utils/reference-analysis-state.js';
 import { createMCPDomain, type MCPSystemLike } from '../../ui-protocol/domains/mcp.js';
 import { createCompanionDomain, type SceneReaderLike, type CompanionSceneMeta } from '../../ui-protocol/domains/companion.js';
+import { createPreviewDomain, type PreviewServiceLike } from '../../ui-protocol/domains/preview.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
 import { getSayHistoryStore } from '../../companion/say-history.js';
@@ -151,6 +152,24 @@ export interface UiProtocolSessionBackend {
   makeVoiceUrl?: (id: string) => string;
   /** 场景图 URL 构造器（scene.imageUrl 用；缺省 /api/companion/:character/scene.png，可选）。 */
   makeSceneUrl?: (character: string) => string;
+  /**
+   * 文件预览服务（preview 域用）：与 gateway/preview-routes 的 HTTP 路由共享
+   * 同一实例（根状态只有一份）。fs 安全校验全在服务里，协议域零 fs 依赖。
+   * 可选：未装配时 preview.* 报"服务未装配"（TUI 无预览栏，不传即可）。
+   */
+  previewService?: () => PreviewServiceLike | null;
+  /**
+   * 预览原始字节 URL 签发器（preview.read 的 url 字段 / preview.rawUrl 用）。
+   * 契约层签发地址、前端不硬编码 HTTP 路径（与 makeVoiceUrl/makeSceneUrl 同一
+   * 模式）。缺省相对路径 /api/fs/raw?path=…；带钥匙部署时应由装配侧覆盖以
+   * 嵌入 ?token=（<img>/<iframe> 无法带 Authorization 头）。
+   */
+  makePreviewRawUrl?: (rel: string) => string;
+  /**
+   * 连接是否来自回环（preview.browse / preview.setRoot 仅限本机，与 HTTP 路由
+   * 同一安全边界）。缺省 false = fail-closed：装配侧不确定时一律拒绝。
+   */
+  previewLoopback?: boolean;
 }
 
 /**
@@ -426,6 +445,14 @@ export class UiProtocolSession {
       keepPerCharacter: backend.keepPerCharacter ?? DEFAULT_KEEP_PER_CHARACTER,
       makeVoiceUrl: backend.makeVoiceUrl ?? ((id: string) => `/api/companion/voice/${id}/file`),
       makeSceneUrl: backend.makeSceneUrl ?? ((character: string) => `/api/companion/${encodeURIComponent(character)}/scene.png`),
+    }));
+    // preview 域（文件预览数据面）：fs 安全实现在 gateway/preview-service，经
+    // backend 注入并与 HTTP 路由共享同一根状态；字节流不进 JSON 协议 —— read
+    // 结果带服务端签发的 url（与 makeVoiceUrl/makeSceneUrl 同一模式）。
+    this.server.registerDomain('preview', createPreviewDomain({
+      getService: () => backend.previewService?.() ?? null,
+      makeRawUrl: backend.makePreviewRawUrl ?? ((rel: string) => `/api/fs/raw?path=${encodeURIComponent(rel)}`),
+      loopback: backend.previewLoopback ?? false,
     }));
   }
 

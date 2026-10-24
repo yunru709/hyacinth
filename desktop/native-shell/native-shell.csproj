@@ -13,10 +13,19 @@
          （2026-10-16 实测：bin 顶层无该 dll）。指定 RID 后 loader 会被复制到输出根。 -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <!-- 应用图标：由 scripts/gen-desktop-icon.cjs 用代码画出来（参数化 SVG → 多尺寸 .ico）。
+         ApplicationIcon 负责 exe 文件图标 / 任务栏 / 快捷方式；EmbeddedResource 供运行期
+         按需取大尺寸（Alt-Tab / 256px 场景，ExtractAssociatedIcon 只有 32px）。 -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- LogicalName 固定资源名（默认会被冠上 RootNamespace，取流时对不上） -->
+    <EmbeddedResource Include="app.ico" LogicalName="app.ico" />
   </ItemGroup>
 
 </Project>

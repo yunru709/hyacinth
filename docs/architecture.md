@@ -200,9 +200,11 @@ input → bypass → context → llm → tools → finalize
 
 基于 `@earendil-works/pi-tui` 的可复用组件（不负责渲染主循环，渲染在 gateway/tui）：`CommandRegistry`（内置斜杠命令 + commands.json 热重载）、`ChatLog`（流式/工具状态缓存）、消息/Markdown/Diff/工具卡片组件、`OSC8` 超链接、主题与终端净化。
 
-### 6.3 UI 协议层（`ui-protocol/`，23 文件）
+### 6.3 UI 契约层（`ui-protocol/`，52 文件）
 
-**TUI/WebUI/桌面端共享的统一双向 RPC+事件协议**（传输中立/形态中立）：`UiRequest/UiResponse/UiEvent`（方法命名空间 `<domain>.<action>`）。`UiProtocolServer` 路由 + `UIAdapter`（InProc 本地 / `WsAdapter` WebSocket ping/pong）+ 19 个业务域工厂（config/session/model/message/state/permission/command/kb/process/orchestrator/context/tool/bundle/mcp/plugin/supervisor/companion/schedule/meta）。`src/events.ts` 是跨层中立事件契约（业务核心与 UI 共享、零依赖）。
+**TUI/WebUI/桌面端共享的统一双向 RPC+事件协议**（传输中立/形态中立）：`UiRequest/UiResponse/UiEvent`（方法命名空间 `<domain>.<action>`）。`UiProtocolServer` 路由 + `UIAdapter`（InProc 本地 / `WsAdapter` WebSocket ping/pong）+ 21 个业务域工厂（config/session/model/message/state/permission/command/kb/process/orchestrator/context/tool/bundle/mcp/plugin/supervisor/companion/schedule/arch/mode/preview/meta）。`src/events.ts` 是跨层中立事件契约（业务核心与 UI 共享、零依赖）。
+
+**URL 签发模式**：字节流（图片/语音/场景图/预览原始文件）塞不进 JSON RPC，由契约层在应答里签发 HTTP 地址（`preview.read` 的 `url`、`companion.voiceList` 的 `url`、`companion.scene` 的 `imageUrl`）——消费端不硬编码任何后端路径，新 UI 只依赖契约方法面即可重建。数据面（JSON）全部走域方法，HTTP 只保留"搬字节"的端点。
 
 ### 6.4 WebUI（`webui/`）
 
@@ -314,7 +316,7 @@ input → bypass → context → llm → tools → finalize
 - `gateway`（入口/装配）→ `orchestrator`（主循环）→ `kernel`（生命周期/接缝/管道原语）→ `logging`
 - `parser`（流路由）被 `orchestrator/stages/llm` 消费
 - `runtime`（配置中心）被 gateway、orchestrator、很多业务层消费（单例注入面）
-- `events.ts` / `types.ts` 是零依赖的顶层契约层，被 `orchestrator` 与 UI 协议层共同引用（事件落盘 `EventStore` 在 `memory/events.ts`）
+- `events.ts` / `types.ts` 是零依赖的顶层契约层，被 `orchestrator` 与 UI 契约层共同引用（事件落盘 `EventStore` 在 `memory/events.ts`）
 
 ---
 
@@ -540,7 +542,7 @@ gateway/{cli,tui,server} ──► gateway/{factory,agent-assembly,boot,*-contri
   gateway → orchestrator → kernel → logging（正向依赖，无反向）
   parser → types（流事件契约）
   runtime ← 被 gateway/orchestrator/全业务层注入消费（singleton 注入面）
-  events/types = 零依赖中立契约层，业务核心与 UI 协议层共同引用（避免倒置）；事件落盘在 memory/events.ts
+  events/types = 零依赖中立契约层，业务核心与 UI 契约层共同引用（避免倒置）；事件落盘在 memory/events.ts
 ```
 
 - **装配依赖**：agent-assembly.ts 依调用序 + 贡献批 needs/provides 拓扑（assembly-runner/assembly-graph）承载；共享可变引用用 `loopRefBox` 懒容器/原位回填。
@@ -1441,16 +1443,16 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 
 ## 一、模块总览与依赖方向
 
-四个模块构成"多渠道接入 + 前端渲染 + 统一 UI 协议"三层骨架：
+四个模块构成"多渠道接入 + 前端渲染 + 统一 UI 契约"三层骨架：
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  src/channels/  多渠道接入层（ChannelHandler 抽象 + 内置/插件渠道）│
-│  └─ 内置渠道：TUI、HTTP Webhook、UI 协议会话（WS/进程内）        │
+│  └─ 内置渠道：TUI、HTTP Webhook、UI 契约会话（WS/进程内）        │
 │  └─ 插件渠道：飞书 feishu、微信 ClawBot                            │
 ├──────────────────────────────────────────────────────────────┤
 │  src/ui-protocol/  前端协议层（连接任意 UI 形态的统一双向协议）    │
-│  ── UiProtocolServer 路由 + 传输适配器 + 19 个业务域              │
+│  ── UiProtocolServer 路由 + 传输适配器 + 21 个业务域              │
 ├──────────────────────────────────────────────────────────────┤
 │  src/ui/  TUI 组件库（斜杠命令、聊天日志、Markdown/Diff/主题）    │
 ├──────────────────────────────────────────────────────────────┤
@@ -1600,7 +1602,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
   `src/channels/session-prefix-contract.guard.test.ts` —— 前缀常量由渠道模块自持、
   **register 后自动就位、unregister 后失效**、多前缀解析到 `sessionChannel`、
   插件前缀登记必须早于 `enabled` 判断。
-- WebUI 会话前缀：`http-webhook.ts`（REST `/api/chat`）与 `ui-protocol-session.ts`（WS/UI 协议会话）
+- WebUI 会话前缀：`http-webhook.ts`（REST `/api/chat`）与 `ui-protocol-session.ts`（WS/UI 契约会话）
   创建 Agent 时传 `channel: 'webui'`，使 WebUI 会话落 `webui_` 前缀并启用渠道隔离恢复。
   **历史缺口**：这两处曾不传 channel，WebUI 会话落成裸日期 ID，与 CLI/serve 的裸会话混在
   同一命名空间 —— 既分不清来源、也无法按渠道恢复。
@@ -1668,7 +1670,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 - 消息模型：`UiRequest{kind,id,method,params}`（UI→后端）、`UiResponse{kind,id,ok,result|error}`（后端→UI）、`UiEvent{kind,type,payload}`（后端→UI 推送）。`method` 命名空间 `<domain>.<action>`。
 - 目标是让 **TUI 本地（InProc）、WebUI / 桌面端 / 远程 TUI（WebSocket）、未来渠道**共享同一套协议与后端能力；`UiWsSession`（WS 端）与 `UiProtocolSession`（进程内）复用同一装配链路。
 
-结构：`index.ts`（统一出口）、`server.ts`（路由）、`adapter.ts`（UIAdapter 接口 + InProc 实现）、`transport/ws.ts`（WS 传输适配器）、`types.ts`（协议类型/常量）、`domains/`（19 个业务域）、`util/zip.ts`（最小 zip）、另有跨层中立事件契约 `src/events.ts`（types.ts 仅 re-export）。
+结构：`index.ts`（统一出口）、`server.ts`（路由）、`adapter.ts`（UIAdapter 接口 + InProc 实现）、`transport/ws.ts`（WS 传输适配器）、`types.ts`（协议类型/常量）、`domains/`（21 个业务域）、`util/zip.ts`（最小 zip）、另有跨层中立事件契约 `src/events.ts`（types.ts 仅 re-export）。
 
 ### 4.2 server.ts —— `UiProtocolServer`（核心路由）
 - `registerDomain(domain, handler)`：注册领域处理器。关键设计：**注册时用 `Object.keys(handler)` 快照方法表**（`methodTables`），只收录可枚举属性→冻结"协议方法面"契约；后挂的、不可枚举的生命周期方法（如 `config.dispose`）不进方法面，既不可被远程调用也不上报能力清单。
@@ -1692,7 +1694,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 ### 4.6 events.ts —— 跨层中立事件契约（src/ 顶层）
 `UI_EVENT` 定义后端→UI 推送事件：`ui.connected/ui.error`、`message.*`（text/thinking/tool_use/tool_result/diff/status/error/turn_start/turn_info/flush/interrupt/ask_user）、`state.update`、`config.change`、`model.change`、`session.change`、`permission.request`、`companion.say`、`companion.voice`。设计动因（P5-6）：事件是业务与 UI 共享契约，产生者既有协议层也有业务核心（companion.say 由 AgentLoop、companion.voice 由 TTS），独立成层避免 AgentLoop 反向依赖 UI 适配层；本层与 src/types.ts 平级、保持零依赖。
 
-### 4.7 domains/ —— 19 个业务域工厂
+### 4.7 domains/ —— 21 个业务域工厂
 每个域导出 `createXxxDomain(options): DomainHandler`，通过"结构化小接口"（真实后端类结构兼容）依赖后端能力，可独立测试、可替换实现。职责概览：
 
 | 域 | 主要方法 | 依赖的后端（桥接层注入） |
@@ -1724,6 +1726,7 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | plugin | list（内核插件挂载状态，B-4） | loop.pluginHost.list() |
 | companion | get/activate/deactivate/voices/voiceBind/voiceRegister/…. 切换流程与 companion_mode 工具对齐（委托 loop.syncRouter(mode)，模式真源 = session type） | RouterSwitcherLike(getRouter/syncRouter) + CompanionSessionManager + VoiceLibrary/VoiceGenStore/SayHistoryStore/SceneReader（全部注入，协议层零业务依赖） |
 | schedule | list/（写操作可选） | HeartbeatScheduler（loop.getScheduler） |
+| preview | meta/list/read/browse/setRoot/rawUrl（文件预览数据面；read 结果带**签发的 url**，browse/setRoot 仅限回环连接） | gateway/preview-service（与 HTTP 路由共享同一实例；未装配时方法报错，TUI 不传） |
 | meta（内建） | get（版本/能力协商） | 协议服务器自身 |
 
 工具域还提供 `util/zip.ts` 的 `buildZip`（session.export 用，纯 Node deflate + 标准 ZIP 结构，零第三方依赖）。
@@ -1782,12 +1785,20 @@ iframe 的 `sandbox` 只给 `allow-scripts allow-forms allow-popups`，**不给 
 ——低于命令面板（80/90），全屏阅读时 Cmd+K 仍可用。Esc 逐级退：全屏 → 放大 → 窄栏（一次一层，
 不顺手关栏）。三档状态与两个尺寸都存 localStorage。
 
-数据来自 `gateway/preview-routes.ts` 的 `/api/fs/{meta,list,read,raw}`：
+数据面走 UI 契约层：`preview.meta / preview.list / preview.read / preview.browse /
+preview.setRoot / preview.rawUrl`（`src/ui-protocol/domains/preview.ts`）。fs 安全校验只有
+一份实现 —— `gateway/preview-service.ts`，HTTP 路由与契约域共享同一服务实例（从任何一条
+通道换根，另一条立刻一致）。原始字节（`<img>`/`<iframe>`/下载）由浏览器直接加载，塞不进
+JSON RPC：契约层在 `preview.read` 结果与 `preview.rawUrl` 里**签发** HTTP 地址（含
+`?token=`，服务端嵌入；与 companion 的 makeVoiceUrl/makeSceneUrl 同一模式），
+前端不硬编码任何后端 HTTP 路径。
 - **不豁免 API key**（与 `/api/media` 相反）。媒体端点豁免是因为 `<img src>` 设不了请求头；
-  而本组是 fetch 调用，且能读到工作区里任何文件（源码、配置、可能含密钥的 .env），没理由放宽。
+  而本组数据面经 WS 鉴权连接，且能读到工作区里任何文件（源码、配置、可能含密钥的 .env），没理由放宽。
 - 唯一例外是 `/api/fs/raw`：它被 `<img>`/`<iframe>` 加载，因此额外接受 `?token=`（与 WS 升级同一机制）。
 - 路径安全 fail-closed 三层：拒绝绝对路径（Windows 上 `path.resolve` 遇到第二个绝对路径会整体丢弃前一个）、
-  `realpath` 比对防符号链接逃逸、`.git` 硬排除且 `node_modules` 默认隐藏（`?all=1` 才列）。
+  `realpath` 比对防符号链接逃逸、`.git` 硬排除且 `node_modules` 默认隐藏（`all=true` 才列）。
+- browse/setRoot 等价于"扩大服务端可读范围"，**仅限回环连接**：HTTP 看 remoteAddress，
+  WS 看升级连接的 remoteAddress（装配侧不确定时缺省拒绝，fail-closed）。
 - 只读是硬边界：没有写/删/移动，改文件仍必须走 agent 工具（带审批）。
 
 **根目录可切换**（原先锁死在启动目录）。标题栏那颗按钮就是入口 —— 它显示的是**当前根名**，
@@ -1873,7 +1884,7 @@ loop 的 `enterGoal`/`exitGoal`，与 TUI 的 `/goal` 是同一批方法，不�
 ## 六、贯穿数据流小结
 
 1. **多渠道入站**：各渠道（TUI/HTTP WS/飞书/ClawBot）把用户消息规范化为 `ChannelMessageEvent` → `ChannelManager.onEvent` 回调 → `handler.handleMessage`（各渠道自管 session/AgentLoop/回复）。
-2. **UI 协议出站**：凡走 ui-protocol 的界面（TUI 本地 InProc、WebUI/桌面/远程 TUI 的 WS），`ProtocolOutputHandler` 把 AgentLoop 回调转成 `message.*` 等事件广播给所有 UI；权限/ask_user 经 `PendingRequestRegistry` 转成带 id 的请求-应答。
+2. **UI 契约出站**：凡走 ui-protocol 的界面（TUI 本地 InProc、WebUI/桌面/远程 TUI 的 WS），`ProtocolOutputHandler` 把 AgentLoop 回调转成 `message.*` 等事件广播给所有 UI；权限/ask_user 经 `PendingRequestRegistry` 转成带 id 的请求-应答。
 3. **跨渠道借道**：任何会话里的 Agent 可调 `send_channel_message` 工具 → `MessageDispatcher` → 目标渠道 `handler.send()`，"纯借用"发送能力（不建 session、不写历史、不改渠道内部状态）。
 4. **事件契约解耦**：`src/events.ts` 承载业务核心与 UI 共享的事件契约，`ui-protocol/types.ts` 只 re-export，保证依赖方向正确。
 

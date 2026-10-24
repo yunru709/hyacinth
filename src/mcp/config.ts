@@ -19,7 +19,7 @@ const BLOCKED_COMMANDS = new Set([
  *
  * ⚠️ C-10（2026-10-22 核实）：P-Config 收敛后 **生产端只可能产生 `'user'`**
  * （`getMCPConfigPaths` 只返回用户级）。`'project'` / `'project-agent'` 仍保留在类型里，
- * 是因为：① UI 协议视图（`ui-protocol/domains/mcp.ts`）与前端可能按字符串分派；
+ * 是因为：① UI 契约视图（`ui-protocol/domains/mcp.ts`）与前端可能按字符串分派；
  * ② 历史数据/插件可能带着旧值。**新增代码不要假设这两个值会出现**。
  */
 export type MCPConfigScope = 'user' | 'project' | 'project-agent';

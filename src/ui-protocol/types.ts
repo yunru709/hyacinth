@@ -1,7 +1,7 @@
 // ============================================================
-// UI 协议层 — 核心类型
+// UI 契约层 — 核心类型
 // ============================================================
-// 统一 UI 协议：为任意形态的 UI（TUI / WebUI / 未来渠道）提供
+// 统一 UI 契约：为任意形态的 UI（TUI / WebUI / 未来渠道）提供
 // 覆盖全部操作面的双向协议。本文件只定义协议类型与常量，
 // 不依赖任何后端内部模块，保证协议层独立、可移植。
 //
@@ -65,7 +65,7 @@ export type UiMessage = UiRequest | UiResponse | UiEvent;
 // ────────────────────────────────────────────────────────────
 
 /**
- * UI 协议版本号（语义化）。客户端应读取 protocol.meta.version 并做
+ * UI 契约版本号（语义化）。客户端应读取 protocol.meta.version 并做
  * 兼容性判断；主版本变更 = 破坏性协议变更。
  */
 export const UI_PROTOCOL_VERSION = '1.0.0';
@@ -130,6 +130,8 @@ export const UI_DOMAIN = {
   COMPANION: 'companion',
   /** 调度任务（对应 TUI /schedule）：list / add / addDaily / remove / toggle / runtime */
   SCHEDULE: 'schedule',
+  /** 文件预览（WebUI「预览」栏数据面）：meta / list / read / browse / setRoot / rawUrl */
+  PREVIEW: 'preview',
   /** 协议元信息（P5-3）：版本/能力协商 get */
   META: 'meta',
 } as const;
@@ -139,7 +141,7 @@ export const UI_DOMAIN = {
  *
  * P5-4 同源契约：本表必须与各域工厂实际返回的 handler 键**双向一致**——
  * 表里每一条都必须真实可调用，域实现的每一个方法都必须在表内声明。
- * 由 `index.test.ts` 的「常量同源守卫」用真实装配（UiProtocolSession 全 18 域）
+ * 由 `index.test.ts` 的「常量同源守卫」用真实装配（UiProtocolSession 全域）
  * 双向断言，任一侧新增/遗漏都会让测试变红。
  *
  * 注意：中断入口是 `message.stop`（不是 message.interrupt）；
@@ -267,6 +269,13 @@ export const UI_METHOD = {
   COMPANION_VOICE_PRUNE: 'companion.voicePrune',
   COMPANION_SAY_HISTORY: 'companion.sayHistory',
   COMPANION_SCENE: 'companion.scene',
+  // preview（文件预览数据面；字节流不进协议，url 由 read/rawUrl 签发）
+  PREVIEW_META: 'preview.meta',
+  PREVIEW_LIST: 'preview.list',
+  PREVIEW_READ: 'preview.read',
+  PREVIEW_BROWSE: 'preview.browse',
+  PREVIEW_SET_ROOT: 'preview.setRoot',
+  PREVIEW_RAW_URL: 'preview.rawUrl',
   // meta（P5-3 版本/能力协商）
   META_GET: 'meta.get',
 } as const;

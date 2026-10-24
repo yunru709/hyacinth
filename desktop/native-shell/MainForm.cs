@@ -22,19 +22,21 @@ namespace native_shell;
 ///          ⇒ 完全自包含，换台机器（无需装 .NET / Node / pnpm）也能双击运行；
 ///       B) 开发形态：仓库里构建出来的 exe ⇒ 回退到仓库根。
 ///     **判据一律以 exe 自身所在目录为准，绝不写死某台机器的路径。**
-///  6) **托盘常驻是可选能力，默认关闭**（2026-10-23 加）：未设置 `HYACINTH_TRAY=1` 时，
-///     关窗 = 退出进程 + 停后端，与加托盘之前**完全一致**；只有显式开启才变成"关窗收进托盘、
-///     后端继续跑"。默认值必须保守 —— 托盘常驻会让用户在"以为已经退出"的情况下继续被
-///     后端占用端口/内存，这个语义变更不能悄悄发生。
+///  6) **托盘常驻是默认行为**（2026-10-24 用户裁定：桌面壳定位为后台常驻程序）：
+///     关窗 = 收进托盘（窗口隐藏、后端继续跑），**托盘菜单「退出」才是真正结束进程**。
+///     要回到"关窗即退出"的老行为，设 `HYACINTH_TRAY=0`。
 ///  7) **开关用环境变量而不是设置项**：壳没有自己的设置界面（也就没有"设置"这个概念），
 ///     要做设置项就得先引入一层配置持久化（文件格式 / 读写 / 迁移 / 并发写 / 损坏回退），
 ///     成本与"一个布尔开关"的收益完全不匹配。环境变量与既有的 `HYACINTH_PORT`、
 ///     `HYACINTH_WEBVIEW2_USER_DATA` 同一风格，改一次、用完即弃，不污染用户目录。
-///  8) **窗口是自绘的无边框窗体**（2026-10-23 改）：系统标题栏在深色页面上是一条浅灰带，
-///     颜色还由用户的 DWM 主题决定、盖不住，所以关掉它、自己画一条 44 逻辑像素的
-///     （品牌 + 三个按钮，见 TitleBar.cs）。
-///     ⚠️ **别把 `CreateParams` 里那三个样式位当成冗余删掉**：光 `None` 会把 DWM 阴影和
-///     系统级边缘热区一起丢掉，窗口退化成一块没阴影的硬边方块 —— 这是这类改造最常见的翻车点。
+///  8) **标准窗口 + DWM 染色**（2026-10-24 换方案，替代 10-23 的自绘无边框）：
+///     自绘路线（FormBorderStyle.None + WM_NCCALCSIZE 清零 + 自绘标题栏 + 4px 热区带）
+///     两类问题反复出现——外部 ShowWindow 路径下 DWM 重算 NC 浮出系统蓝标题栏、
+///     客户区四周的深色热区带去不掉。现在窗口是**完全标准的系统窗口**，外观交给
+///     DWM 染色（标题栏/文字/边框染页面顶栏同色，系统按钮深浅随页面主题，见
+///     ShellTheme），页面在 applyTheme 时经 WebMessage 报色。对照参考：DeepSeek
+///     Harness / ZCode（Electron）用 titleBarStyle hidden + titleBarOverlay 达成
+///     同一效果 —— 共同点是"不碰窗口非客户区结构"。
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -58,72 +60,65 @@ public sealed class MainForm : Form
     private static readonly string BaseUrl = $"http://127.0.0.1:{Port}";
 
     /// <summary>
-    /// 托盘常驻开关：<c>HYACINTH_TRAY=1</c>（也接受 <c>true</c>）。
-    /// **默认 false** ⇒ 关窗即退出 + 停后端，行为与加托盘之前逐字一致（见类注释第 6 条）。
-    /// 只认显式开启：拼错/写成 "yes" 一律当关闭 —— 宁可用户发现"没生效"，
-    /// 也不要因为一个手滑的值让进程在后台常驻。
+    /// 托盘常驻开关：默认**开**（关窗收进托盘，托盘「退出」才结束进程）。
+    /// 设 <c>HYACINTH_TRAY=0</c>（或 <c>false</c>）退回"关窗即退出"的老行为。
+    /// 除显式的 0/false 之外一律当开 —— 默认语义就是常驻，拼错值不该悄悄改变它。
     /// </summary>
-    private static readonly bool TrayEnabled = IsSwitchOn(Environment.GetEnvironmentVariable("HYACINTH_TRAY"));
+    private static readonly bool TrayEnabled = !IsSwitchOff(Environment.GetEnvironmentVariable("HYACINTH_TRAY"));
 
-    private static bool IsSwitchOn(string? raw)
+    private static bool IsSwitchOff(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return false;
         var v = raw.Trim();
-        return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase);
+        return v == "0" || v.Equals("false", StringComparison.OrdinalIgnoreCase);
     }
 
     private readonly WebView2 _web = new();
 
-    /// <summary>自绘标题栏（无系统标题栏，见 <see cref="CreateParams"/> 与 TitleBar.cs）</summary>
-    private readonly TitleBar _titleBar;
-
-    /// <summary>内容容器：唯一职责是给四周让出缩放热区（见 ShellFrame.ResizeBorderLogical）</summary>
-    private readonly FrameAwarePanel _content;
-
     private Process? _backend;
     private bool _spawnedBackend;
 
-    // ── 托盘常驻（仅 TrayEnabled 时创建，其余时候保持 null）────────────────
+    // ── 托盘常驻（TrayEnabled 默认开；HYACINTH_TRAY=0 关闭时不创建）────────
     private NotifyIcon? _tray;
     private ContextMenuStrip? _trayMenu;
-    private Icon? _trayIcon;          // ExtractAssociatedIcon 返回的是我们**自己拥有**的图标句柄，必须单独释放
+    private Icon? _trayIcon;          // LoadAppIcon 返回的是我们**自己拥有**的图标句柄，必须单独释放
+    private Icon? _formIcon;          // 窗体/任务栏图标（取 256 大图，Alt-Tab 不糊），同样自持有
     private bool _balloonShown;       // 气泡只弹一次：每次关窗都弹会让人关不掉提示
     private bool _exiting;            // 托盘「退出」已发起 ⇒ FormClosing 不得再拦截
+
+    /// <summary>
+    /// 单实例"唤回"消息（RegisterWindowMessage）。第二实例 EnumWindows 找到本窗口后
+    /// PostMessage 过来，本实例在 UI 线程的 WndProc 里走 ShowMainWindow() —— 跨实例
+    /// 只传消息、不传状态（理由见 Program.TryActivateExisting 的注释）。
+    /// </summary>
+    internal static readonly uint WmShowMe = RegisterWindowMessage("Hyacinth.ShowMe");
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint RegisterWindowMessage(string name);
 
     public MainForm()
     {
         Text = "Hyacinth";
-        // 自绘标题栏 ⇒ 不要系统标题栏。但**不能只写这一行**：None 会连窗口的
-        // 尺寸边框和阴影一起拿掉（见 CreateParams 里的三个样式位）。
-        FormBorderStyle = FormBorderStyle.None;
+        // 应用图标（gen-desktop-icon.cjs 画的紫风信子）：窗体、任务栏、Alt-Tab 都用它。
+        // 用 EmbeddedResource 里的 256 大图而不是 Icon 属性缺省值 —— 缺省只吃 exe 的 32px，
+        // Alt-Tab / 大任务栏上会被拉糊。caption 左侧的 16px 小图标也来自它（品牌位）。
+        _formIcon = LoadAppIcon(256);
+        if (_formIcon is not null) Icon = _formIcon;
+        // ⚠️ **窗口保持完全标准的系统边框**（2026-10-24 换方案）：不再 FormBorderStyle.None、
+        // 不碰 WM_NCCALCSIZE、不留缩放热区带 —— 标题栏外观由 DWM 染色（ShellTheme）实现，
+        // 拖拽/缩放/三颗系统按钮/圆角/阴影全部是原生机制。上一版自绘无边框的
+        // "蓝标题栏浮出 / 深色热区带"两类问题就出在手工重造 NC 区上，全部退役。
+        // BackColor 只在 WebView2 就绪前的一瞬可见，取页面默认主题底色避免白闪。
+        BackColor = ShellTheme.Default;
         Width = 1440;
         Height = 900;
         MinimumSize = new Size(1080, 680);
         StartPosition = FormStartPosition.CenterScreen;
-        // 与 WebUI 的 --neutral-0 同色：标题栏、缩放热区、页面三者之间不会出现灰边
-        BackColor = Color.FromArgb(0x0A, 0x0B, 0x14);
         // 还原上次的窗口位置/大小（首次启动或状态文件损坏 ⇒ 保持上面的居中默认值）
         RestoreWindowState();
 
-        // 内容层比窗口小一圈（左右下各 4 逻辑像素）：那一圈是**窗体自己的表面**，
-        // 边缘拉伸的 WM_NCHITTEST 才收得到 —— WebView2 的浏览器子窗口会把边缘的
-        // 鼠标消息直接吞进 Chromium，铺满就拉不动。上沿不让，标题栏紧贴页面。
-        _content = new FrameAwarePanel
-        {
-            Dock = DockStyle.Fill,
-            BackColor = BackColor,
-            ResizeBandLogical = ShellFrame.ResizeBorderLogical,
-        };
         _web.Dock = DockStyle.Fill;
-        _content.Controls.Add(_web);
-
-        _titleBar = new TitleBar(this) { Dock = DockStyle.Top };
-
-        // ⚠️ 加的顺序不能反。WinForms 的 Dock 排布是**从 z-order 末尾往前**做的
-        // （最后加入的那个先占边），所以 Fill 必须先加、Top 后加；反过来 Fill 会把
-        // 标题栏整条盖住（探针实测 800×600 的窗体：fill 拿到 {0,0,784,561}，标题栏被压住）。
-        Controls.Add(_content);
-        Controls.Add(_titleBar);
+        Controls.Add(_web);
 
         // 托盘图标在构造期就挂上（而不是等第一次关窗才建）：这样"开启托盘常驻"这件事
         // 在启动后就可见，用户不会因为看不到图标而怀疑开关没生效。
@@ -140,77 +135,23 @@ public sealed class MainForm : Form
         FormClosed += (_, _) => StopBackend();
     }
 
-    // ── 无边框窗口（自绘标题栏 / 阴影 / 圆角 / 边缘拉伸）─────────────────
-
-    /// <summary>
-    /// 无边框窗口的样式位。
-    ///
-    /// ⚠️ **只设 <c>FormBorderStyle.None</c> 是一块硬边方块**：窗口既没有 DWM 阴影，
-    /// 也没有系统级边缘拖拽热区（只能靠自己在 MouseMove 里算，拖出屏幕就抖）。
-    /// 关键在把下面这三个位补回去：
-    ///  - <c>WS_THICKFRAME</c>(0x00040000)：告诉 DWM「这是个有尺寸边框的窗口」⇒ 阴影和
-    ///    圆角/贴边动画都回来了；同时它也是 DefWindowProc 认定「窗口可缩放」的依据；
-    ///  - <c>WS_MINIMIZEBOX</c>(0x00020000) / <c>WS_MAXIMIZEBOX</c>(0x00010000)：
-    ///    系统是按样式位判断「这个窗口能不能最小化/最大化」的（任务栏右键菜单、
-    ///    Win+↑、贴边分屏都走这套判断）。缺了它们，程序里设 WindowState 仍然有效，
-    ///    但系统提供的那几个入口会变成灰的/点了没反应。
-    ///
-    /// 不加 <c>WS_CAPTION</c>：那会把系统标题栏画回来，等于白改；
-    /// 也不加 <c>WS_SYSMENU</c>：它带来的系统菜单（Alt+Space）里"移动/大小"在
-    /// 无 NC 区的窗口上行为很怪，而"关闭"我们已经自己画了。
-    /// </summary>
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            const int WS_THICKFRAME = 0x00040000;
-            const int WS_MINIMIZEBOX = 0x00020000;
-            const int WS_MAXIMIZEBOX = 0x00010000;
-
-            var cp = base.CreateParams;
-            cp.Style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
-            return cp;
-        }
-    }
-
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        // Win11: 圆角；Win10: 调用返回 E_INVALIDARG，静默降级成直角（不会抛，见 ShellFrame）
-        ShellFrame.TryApplyRoundedCorners(Handle);
+        // 页面还没报色前先用默认主题色（夜园深色）；页面 applyTheme 后由
+        // WebMessageReceived 实时校正（含明暗切换）。Win10 上这些 DWM 属性
+        // 不存在 ⇒ 静默保持系统默认标题栏（见 ShellTheme）。
+        ShellTheme.Apply(Handle, ShellTheme.Default, dark: true);
+        // Win11: 圆角；Win10: E_INVALIDARG 静默直角（标准窗口 + DWM 染色下同样适用）
+        ShellTheme.TryApplyRoundedCorners(Handle);
     }
 
     protected override void WndProc(ref Message m)
     {
-        switch (m.Msg)
+        if (WmShowMe != 0 && unchecked((uint)m.Msg) == WmShowMe)
         {
-            case ShellFrame.WM_NCCALCSIZE when m.WParam != IntPtr.Zero:
-                // 把客户区强行撑成整个窗口矩形：不这么做的话，WS_THICKFRAME 会让
-                // DefWindowProc 在窗口里留一圈非客户区（约 8px 的尺寸边框）。
-                // 那一圈既没人绘制（我们没有标题栏可画），又会把内容整体往里挤 ——
-                // 表现就是"页面四周有一圈黑边、点不到真正的窗口边缘"。
-                // wParam=TRUE 时 lParam 里 rgrc[0] 已经是新的窗口矩形，原样留着就是
-                // 「客户区 = 窗口」，返回 0 表示这块区域需要全部重画。
-                m.Result = IntPtr.Zero;
-                return;
-
-            case ShellFrame.WM_NCHITTEST:
-                // 客户区被标题栏/内容控件盖着，正常收不到这个位置的消息；
-                // 这里兜住「窗体自己露出来的像素」（理论上不应有，但别指望布局永远完美）。
-                var hit = ShellFrame.HitTest(this, ShellFrame.ScreenPointFromLParam(m.LParam));
-                if (hit != ShellFrame.HTCLIENT)
-                {
-                    m.Result = (IntPtr)hit;
-                    return;
-                }
-                break;
-
-            case ShellFrame.WM_GETMINMAXINFO:
-                // 先让 WinForms 填好（它会把 MinimumSize 写进 ptMinTrackSize），
-                // 再只纠正最大化的尺寸/位置 —— 否则最大化后内容会顶出屏幕、盖住任务栏。
-                base.WndProc(ref m);
-                ShellFrame.ClampMaximizedBounds(Handle, m.LParam);
-                return;
+            ShowMainWindow();
+            return;
         }
         base.WndProc(ref m);
     }
@@ -219,19 +160,46 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// 建托盘图标 + 右键菜单。只有 <see cref="TrayEnabled"/> 为真时才会走到这里。
-    /// 图标复用 exe 自身图标：绿色包被用户换了图标/放在 U 盘上也认得出是同一个程序，
-    /// 不用再塞一份 .ico 进产物（少一个"忘了带资源文件"的失败点）。
+    /// 菜单按"常驻程序"的常规形态组织：打开主窗口（默认项，加粗）→ 常用动作 → 退出。
     /// </summary>
     private void SetupTray()
     {
-        _trayIcon = LoadTrayIcon();
+        _trayIcon = LoadAppIcon(32);
 
         _trayMenu = new ContextMenuStrip();
-        var showItem = new ToolStripMenuItem("显示主窗口");
+        var showItem = new ToolStripMenuItem("打开主窗口")
+        {
+            // 默认项：加粗显示，Enter 键触发 —— Windows 托盘菜单的常规约定
+            Font = new Font(_trayMenu.Font, FontStyle.Bold),
+        };
         showItem.Click += (_, _) => ShowMainWindow();
+
+        var browserItem = new ToolStripMenuItem("在浏览器中打开");
+        browserItem.Click += (_, _) =>
+        {
+            // WebView2 万一被安全软件拦崩（历史实测过），这条是独立于壳窗口的救生通道
+            try { Process.Start(new ProcessStartInfo(BaseUrl) { UseShellExecute = true }); }
+            catch { /* 打不开就算了，别让异常炸掉托盘线程 */ }
+        };
+
+        var logItem = new ToolStripMenuItem("打开日志文件夹");
+        logItem.Click += (_, _) =>
+        {
+            try
+            {
+                var dir = LogDir();
+                Directory.CreateDirectory(dir);   // 首次使用可能还没这个目录
+                Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
+            }
+            catch { /* 同上 */ }
+        };
+
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) => ExitFromTray();
+
         _trayMenu.Items.Add(showItem);
+        _trayMenu.Items.Add(browserItem);
+        _trayMenu.Items.Add(logItem);
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add(exitItem);
 
@@ -244,16 +212,35 @@ public sealed class MainForm : Form
             ContextMenuStrip = _trayMenu,
             Visible = true,
         };
-        // 双击 = 还原窗口，这是 Windows 托盘图标的默认期待行为，不做会被当成卡死
+        // 单击 = 还原窗口（Telegram/微信等常驻程序的主流行为）；DoubleClick 保留兜底
+        _tray.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left) ShowMainWindow();
+        };
         _tray.DoubleClick += (_, _) => ShowMainWindow();
     }
 
     /// <summary>
-    /// 取 exe 自带图标。取不到（exe 无图标资源 / 路径被裁掉）就退回系统默认图标：
-    /// 宁可图标丑一点，也不要因为图标问题让托盘功能整个失效。
+    /// 取应用图标（优先 EmbeddedResource 里的多尺寸 .ico —— 能按需取到 256 大图；
+    /// 取不到退回 exe 自身图标；再不行用系统默认）。宁可图标丑一点，
+    /// 也不要因为图标问题让托盘功能整个失效。
     /// </summary>
-    private static Icon LoadTrayIcon()
+    private static Icon? LoadAppIcon(int size)
     {
+        try
+        {
+            using var stream = typeof(Program).Assembly.GetManifestResourceStream("app.ico");
+            if (stream is not null)
+            {
+                // Icon(Stream, Size) 会挑 ≤size 的最佳档并按需缩放；
+                // 请求尺寸正好对应 ico 里内嵌的一档（32/256），通常无损取用。
+                return new Icon(stream, new Size(size, size));
+            }
+        }
+        catch
+        {
+            // 落到下面的回退
+        }
         try
         {
             var exe = Environment.ProcessPath;
@@ -316,6 +303,16 @@ public sealed class MainForm : Form
         // 状态照旧保存：无论这次是隐藏还是真退出，当前尺寸都不该丢
         SaveWindowState();
 
+        // 诊断日志（托盘拦截没生效时第一时间看这里）：reason 是否 UserClosing、
+        // TrayEnabled 是否为真、托盘图标是否已创建。定位完成后保留 —— 它是
+        // "关窗行为分叉"的唯一直接证据，后续排查同类问题省一次重建。
+        try
+        {
+            File.AppendAllText(Path.Combine(LogDir(), "shell-close.log"),
+                $"[{DateTime.Now:O}] close reason={e.CloseReason} cancel={e.Cancel} trayEnabled={TrayEnabled} exiting={_exiting} trayIcon={_tray is not null}\n");
+        }
+        catch { /* 诊断日志写不进去不阻断关闭 */ }
+
         if (!TrayEnabled || _exiting) return;
         if (e.CloseReason != CloseReason.UserClosing) return;
 
@@ -333,7 +330,7 @@ public sealed class MainForm : Form
         if (_tray is null || _balloonShown) return;
         _balloonShown = true;
         _tray.BalloonTipTitle = "Hyacinth 仍在后台运行";
-        _tray.BalloonTipText = "双击托盘图标可重新打开窗口；右键 → 退出 才会真正结束进程。";
+        _tray.BalloonTipText = "单击托盘图标可重新打开窗口；右键菜单 → 退出 才会真正结束进程。";
         _tray.BalloonTipIcon = ToolTipIcon.Info;
         _tray.ShowBalloonTip(4000);
     }
@@ -359,6 +356,8 @@ public sealed class MainForm : Form
             _trayMenu = null;
             _trayIcon?.Dispose();
             _trayIcon = null;
+            _formIcon?.Dispose();
+            _formIcon = null;
         }
         base.Dispose(disposing);
     }
@@ -686,7 +685,34 @@ public sealed class MainForm : Form
                 e.Handled = true;
                 try { Process.Start(new ProcessStartInfo(e.Uri) { UseShellExecute = true }); } catch { /* 忽略 */ }
             };
+            // 页面在 applyTheme 时把顶栏底色与明暗报上来（webui 的 notifyShellTheme），
+            // 壳把系统标题栏染成同一颜色 —— caption 与页面顶栏融为一体，系统按钮
+            // 深浅跟随主题。⚠️ 页面 postMessage 的是**字符串**（JSON.stringify 过的
+            // 消息），取 TryGetWebMessageAsString 拿原文再 Parse；WebMessageAsJson 是
+            // 给字符串再包一层引号的形态，直接当对象解析拿不到字段（实测踩过）。
+            _web.CoreWebView2.WebMessageReceived += (_, e) =>
+            {
+                try
+                {
+                    var raw = e.TryGetWebMessageAsString();
+                    using var doc = JsonDocument.Parse(raw);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("type", out var t) && t.GetString() == "hyacinth-theme"
+                        && root.TryGetProperty("background", out var bg)
+                        && bg.GetString() is { } css
+                        && TryParseCssColor(css, out var color))
+                    {
+                        var dark = !root.TryGetProperty("dark", out var d) || d.ValueKind != JsonValueKind.False;
+                        ShellTheme.Apply(Handle, color, dark);
+                    }
+                }
+                catch { /* 页面消息异常 / 非字符串消息：不影响壳 */ }
+            };
             _web.CoreWebView2.Settings.AreDevToolsEnabled = true;
+            // 悬停链接时左下角出现的地址预览条（"127.0.0.1:3130/#/model" 之类）：
+            // 那是浏览器状态栏 UI，桌面壳里页面导航全是站内 hash 路由，这条预览
+            // 只会暴露内部地址、没有半点用处（2026-10-24 用户要求去掉）。
+            _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
 
             await EnsureBackendAsync();
             _web.Source = new Uri(BaseUrl);
@@ -705,6 +731,54 @@ public sealed class MainForm : Form
             MessageBox.Show("启动失败：" + ex.Message + "\n\n详情已写入：\n" + logPath,
                 "Hyacinth", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>css 颜色（rgb()/rgba()/color(srgb …) 形式）→ Color。解析失败 / 全透明返回 false。</summary>
+    private static bool TryParseCssColor(string css, out Color color)
+    {
+        color = default;
+        if (string.IsNullOrWhiteSpace(css)) return false;
+        // #rgb / #rrggbb（页面如果直接发主题变量值）
+        if (css[0] == '#')
+        {
+            var hex = css.Substring(1);
+            if (hex.Length == 3) hex = string.Concat(hex.Select(c => $"{c}{c}"));
+            if (hex.Length == 6
+                && byte.TryParse(hex.AsSpan(0, 2), System.Globalization.NumberStyles.HexNumber, null, out var hr_)
+                && byte.TryParse(hex.AsSpan(2, 2), System.Globalization.NumberStyles.HexNumber, null, out var hg_)
+                && byte.TryParse(hex.AsSpan(4, 2), System.Globalization.NumberStyles.HexNumber, null, out var hb_))
+            {
+                color = Color.FromArgb(hr_, hg_, hb_);
+                return true;
+            }
+            return false;
+        }
+        // Chromium 对 color-mix()/相对色语法的 computed 值可能是 color(srgb r g b)（0~1 浮点）
+        if (css.StartsWith("color(srgb", StringComparison.OrdinalIgnoreCase))
+        {
+            var nums = css.Split('(', ')', ',', ' ').Where(s => double.TryParse(s, out _)).ToArray();
+            if (nums.Length >= 3)
+            {
+                color = Color.FromArgb(
+                    (int)Math.Clamp(double.Parse(nums[0]) * 255, 0, 255),
+                    (int)Math.Clamp(double.Parse(nums[1]) * 255, 0, 255),
+                    (int)Math.Clamp(double.Parse(nums[2]) * 255, 0, 255));
+                return true;
+            }
+            return false;
+        }
+        var rgb = css.Split('(', ')', ',');
+        if (rgb.Length < 5 || !css.StartsWith("rgb", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!byte.TryParse(rgb[1].Trim(), out var r)) return false;
+        if (!byte.TryParse(rgb[2].Trim(), out var g)) return false;
+        if (!byte.TryParse(rgb[3].Trim(), out var b)) return false;
+        if (css.StartsWith("rgba", StringComparison.OrdinalIgnoreCase)
+            && float.TryParse(rgb[4].Trim(), out var a) && a < 0.05f)
+        {
+            return false;   // 全透明（元素无背景时）不采纳
+        }
+        color = Color.FromArgb(r, g, b);
+        return true;
     }
 
     private void StopBackend()

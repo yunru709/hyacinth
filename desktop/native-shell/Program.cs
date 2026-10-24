@@ -35,23 +35,42 @@ internal static class Program
         Application.Run(new MainForm());
     }
 
-    /// <summary>把已在运行的窗口提到前台；找不到就返回 false（调用方退化为提示框）。</summary>
+    /// <summary>把已在运行的窗口提到前台；找不到就返回 false（调用方退化为提示框）。
+    ///
+    /// 两个坑（都实测过）：
+    ///  1. **FindWindow 搜不到 Hide() 后的窗口**：托盘常驻时窗口处于隐藏状态，
+    ///     FindWindow 返回 0 ⇒ 第二实例误判"没在运行"弹出提示框，托盘里的窗口
+    ///     纹丝不动。所以用 EnumWindows 枚举**全部**顶层窗口（含隐藏的）按标题匹配。
+    ///  2. **不直接 ShowWindow/SetForegroundWindow，发自定义消息让第一实例自己唤回**：
+    ///     跨进程操纵窗口状态会绕过 WinForms 的 Visible 跟踪；现在是标准系统窗口
+    ///     不再有 NC 绘制分叉，但让第一实例的 UI 线程走 ShowMainWindow()（还原 +
+    ///     Show + Activate）仍然是唯一能保证 WinForms 状态与 Win32 一致的做法。</summary>
     private static bool TryActivateExisting()
     {
-        var hwnd = FindWindow(null, "Hyacinth");
-        if (hwnd == IntPtr.Zero) return false;
-        ShowWindow(hwnd, SW_RESTORE);      // 最小化状态下先还原，否则 SetForegroundWindow 无效
-        return SetForegroundWindow(hwnd);
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, _) =>
+        {
+            var sb = new System.Text.StringBuilder(64);
+            if (GetWindowText(h, sb, sb.Capacity) > 0 && sb.ToString() == "Hyacinth")
+            {
+                found = h;
+                return false;   // 找到即停
+            }
+            return true;
+        }, IntPtr.Zero);
+        if (found == IntPtr.Zero) return false;
+        PostMessage(found, MainForm.WmShowMe, IntPtr.Zero, IntPtr.Zero);
+        return true;
     }
 
-    private const int SW_RESTORE = 9;
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder sb, int maxCount);
 
     [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }

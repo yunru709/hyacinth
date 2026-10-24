@@ -7,7 +7,7 @@
 //   - 产生者既有协议层（message.text / config.change / permission.request…），
 //     也有业务核心（companion.say 由 AgentLoop 产生、companion.voice 由
 //     TTS 流程产生）；
-//   - 消费者横跨 TUI / WebUI / 未来渠道，UI 协议层只是传输通道之一。
+//   - 消费者横跨 TUI / WebUI / 未来渠道，UI 契约层只是传输通道之一。
 //
 // 此前 UI_EVENT 定义在 src/ui-protocol/types.ts，导致 AgentLoop、
 // companion/voice、tools/companion-say 三个**业务核心模块**反向依赖

@@ -2,7 +2,7 @@
  * arch.test.ts — arch 域的 links 段（Phase 6 第 3 步）
  *
  * 验收线：「links 段两个入口都能看到能力状态与计数」。
- * 本文件管 **UI 协议域**那侧：`arch.list` 的返回里必须带 `links`，
+ * 本文件管 **UI 契约域**那侧：`arch.list` 的返回里必须带 `links`，
  * 且数据源**未注入时为 null**（前端据此显示"能力未注册（走核心兜底）"，而不是留白/报错）。
  * 协议层零业务依赖：域只调注入的 `getLinks()`，自己不认识 tools/channels（见 arch.ts 注释）。
  *

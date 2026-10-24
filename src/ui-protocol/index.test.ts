@@ -1,5 +1,5 @@
 // ============================================================
-// UI 协议层 — 单一装配器（UiProtocolSession）集成测试
+// UI 契约层 — 单一装配器（UiProtocolSession）集成测试
 // ============================================================
 // 验证生产入口 UiProtocolSession（P5-1 双装配点收敛后唯一装配器）：
 //  1. 可实例化，暴露 server / outputHandler / pending
@@ -169,11 +169,11 @@ describe('UiProtocolSession 单一装配器', () => {
     expect(session.pending).toBeTruthy();
   });
 
-  it('全部 21 域注册到协议服务器（20 业务域 + 内建 meta）', async () => {
+  it('全部 22 域注册到协议服务器（21 业务域 + 内建 meta）', async () => {
     const { session } = await setup();
     const domains = session.server.listDomains().sort();
     expect(domains).toEqual(
-      ['arch', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'process', 'schedule', 'session', 'state', 'supervisor', 'tool'].sort(),
+      ['arch', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'preview', 'process', 'schedule', 'session', 'state', 'supervisor', 'tool'].sort(),
     );
   });
 

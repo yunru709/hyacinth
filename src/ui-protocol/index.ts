@@ -1,5 +1,5 @@
 // ============================================================
-// UI 协议层 — 统一入口
+// UI 契约层 — 统一入口
 // ============================================================
 // 单一装配器（P5 收敛）：channels/builtin/ui-protocol-session.ts 的
 // `UiProtocolSession` 是唯一生产装配入口——构造注册静态域（config/
@@ -31,6 +31,7 @@ import { createBundleDomain } from './domains/bundle.js';
 import { createMCPDomain } from './domains/mcp.js';
 import { createPluginDomain } from './domains/plugin.js';
 import { createCompanionDomain } from './domains/companion.js';
+import { createPreviewDomain } from './domains/preview.js';
 
 // ────────────────────────────────────────────────────────────
 // 再导出（供外部集成与扩展）
@@ -113,3 +114,5 @@ export type {
   CommandExecutor,
   CommandDomainOptions,
 } from './domains/command.js';
+export { createPreviewDomain } from './domains/preview.js';
+export type { PreviewServiceLike, PreviewDomainOptions } from './domains/preview.js';

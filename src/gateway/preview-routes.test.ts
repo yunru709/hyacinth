@@ -19,6 +19,7 @@ import path from 'node:path';
 import fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerPreviewRoutes, MAX_TEXT_BYTES, MAX_RAW_BYTES } from './preview-routes.js';
+import { createPreviewService } from './preview-service.js';
 
 let root: string;
 let app: FastifyInstance;
@@ -47,7 +48,7 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(root, 'blob.bin'), Buffer.from([0x89, 0x50, 0x00, 0x01, 0x02]));
 
   app = fastify({ logger: false });
-  registerPreviewRoutes(app, root, { stateFile });
+  registerPreviewRoutes(app, createPreviewService(root, { stateFile }));
   await app.ready();
 });
 
@@ -363,7 +364,7 @@ describe('换根', () => {
   it('重启（新实例 + 同一 stateFile）恢复上次的根', async () => {
     await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: outside } });
     const app2 = fastify({ logger: false });
-    registerPreviewRoutes(app2, root, { stateFile });
+    registerPreviewRoutes(app2, createPreviewService(root, { stateFile }));
     await app2.ready();
     const meta = await app2.inject({ method: 'GET', url: '/api/fs/meta' });
     expect(path.resolve(meta.json().root)).toBe(path.resolve(outside));
@@ -377,7 +378,7 @@ describe('换根', () => {
     await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: gone } });
     fs.rmSync(gone, { recursive: true, force: true });
     const app3 = fastify({ logger: false });
-    registerPreviewRoutes(app3, root, { stateFile });
+    registerPreviewRoutes(app3, createPreviewService(root, { stateFile }));
     await app3.ready();
     const meta = await app3.inject({ method: 'GET', url: '/api/fs/meta' });
     expect(path.resolve(meta.json().root)).toBe(path.resolve(root));
@@ -397,7 +398,7 @@ describe('契约：fs 面只读，唯一可变入口是 root', () => {
 
   beforeAll(async () => {
     const app2 = fastify({ logger: false });
-    registerPreviewRoutes(app2, root, { stateFile });
+    registerPreviewRoutes(app2, createPreviewService(root, { stateFile }));
     await app2.ready();
     // printRoutes({ commonPrefix: false }) 输出形如：
     //   ├── /api/fs/meta (GET, HEAD)

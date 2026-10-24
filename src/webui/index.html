@@ -1591,13 +1591,13 @@
     </main>
 
     <!-- ── 预览栏（工作区文件查看器，只读）─────────────────────────────
-         后端是 /api/fs/*（registerPreviewRoutes），路径越界在服务端 fail-closed；
+         数据面走 UI 契约层（preview.* 域）；路径越界在服务端 fail-closed；
          这里只负责展示。默认收起，展开状态与宽度存 localStorage。 -->
     <aside id="preview-dock" hidden aria-label="文件预览">
       <div class="pv-head">
         <!-- 标题即"换根"入口：预览栏原先锁死在启动目录（hyacinth 仓库），
              想看一眼桌面上的产物只能绕出去。这里做成一个下拉按钮，
-             点开是目录选择器（后端 /api/fs/browse，只限本机）。 -->
+             点开是目录选择器（preview.browse，只限本机）。 -->
         <button id="pv-root-btn" class="pv-title pv-root-btn" type="button"
                 aria-haspopup="dialog" aria-expanded="false" title="点击切换预览根目录">
           <i data-lucide="folder-open"></i>
