@@ -18,3 +18,40 @@ ngzhendong___wetext
 2026-10-25 05:43:25,811 DEBUG Lock 2615714268240 acquired on C:\Users\74689\.cache\modelscope\hub\.lock\pengzhendong___
 wetext
 2026-10-25 05:43:25,849 DEBUG Starting new HTTPS connection (1): www.modelscope.cn:443
+2026-10-25 05:43:27,858 DEBUG https://www.modelscope.cn:443 "GET /api/v1/repos/internalAccelerationInfo HTTP/1.1" 200 1
+88
+2026-10-25 05:43:27,862 DEBUG Starting new HTTP connection (1): 100.100.100.200:80
+2026-10-25 05:43:28,067 DEBUG Starting new HTTPS connection (1): www.modelscope.cn:443
+2026-10-25 05:43:29,781 DEBUG https://www.modelscope.cn:443 "GET /api/v1/models/pengzhendong/wetext HTTP/1.1" 200 None
+2026-10-25 05:43:29,871 DEBUG https://www.modelscope.cn:443 "GET /api/v1/models/pengzhendong/wetext/revisions HTTP/1.1"
+ 403 137
+2026-10-25 05:43:29,872 - modelscope - ERROR - Authentication token does not exist, failed to access model pengzhendong
+/wetext which may not exist or may be private. Please login first.
+2026-10-25 05:43:29,872 DEBUG Attempting to release lock 2615714268240 on C:\Users\74689\.cache\modelscope\hub\.lock\pe
+ngzhendong___wetext
+2026-10-25 05:43:29,872 DEBUG Lock 2615714268240 released on C:\Users\74689\.cache\modelscope\hub\.lock\pengzhendong___
+wetext
+2026-10-25 05:43:29,872 INFO no frontend is avaliable
+Downloading Model from https://www.modelscope.cn to directory: C:\Users\74689\.cache\modelscope\hub\models\pengzhendong\wetext
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-stream-probe.py", line 85, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-stream-probe.py", line 39, in main
+    model = CosyVoice3(MODEL_DIR, load_trt=False, fp16=fp16)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\cosyvoice.py", line 213, in __init__
+    self.model.load('{}/llm.pt'.format(model_dir),
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 66, in load
+    self.llm.load_state_dict(torch.load(llm_model, map_location=self.device, weights_only=True), strict=True)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\serialization.py", line 1425, in load
+    with _open_file_like(f, "rb") as opened_file:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\serialization.py", line 751, in _open_file_like
+    return _open_file(name_or_buffer, mode)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\serialization.py", line 732, in __init__
+    super().__init__(open(name, mode))
+                     ^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\74689\\.agent\\models\\tts\\cosyvoice3/llm.pt'
