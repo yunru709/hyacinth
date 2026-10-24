@@ -1,0 +1,39 @@
+﻿voice=FlutterShy repeat=3 ok_min_audio=0.3s
+  3字 len=3   ERR  3.18s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  3字 len=3   ERR  0.43s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  3字 len=3   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 3字: ok 0/3 → BROKEN
+
+  6字 len=6   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  6字 len=6   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  6字 len=6   ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 6字: ok 0/3 → BROKEN
+
+  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 10字: ok 0/3 → BROKEN
+
+  15字 len=20  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  15字 len=20  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  15字 len=20  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 15字: ok 0/3 → BROKEN
+
+  21字 len=21  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  21字 len=21  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  21字 len=21  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 21字: ok 0/3 → BROKEN
+
+  31字 len=37  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  31字 len=37  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  31字 len=37  ERR  0.43s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  --> 31字: ok 0/3 → BROKEN
+
+=== SUMMARY ===
+  len     ok  usable  audio_range
+    3    0/3   False  -
+    6    0/3   False  -
+   12    0/3   False  -
+   20    0/3   False  -
+   21    0/3   False  -
+   37    0/3   False  -
