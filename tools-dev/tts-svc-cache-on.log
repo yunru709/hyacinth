@@ -1,7 +1,15 @@
-﻿python.exe : [cosyvoice] port 3178 unavailable ([WinError 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。); exiting
-所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-4RC6NC\script.ps1:13 字符: 1
+﻿[cosyvoice] listening on 127.0.0.1:3178
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=True
+python.exe : Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-pRQHNA\script.ps1:14 字符: 1
 + & C:\Python311\python.exe -u src\tts\engines\cosyvoice\server.py --mo ...
 + ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: ([cosyvoice] por...使用一次。); exiting:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (Sliding Window ...be encountered.:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
+2026-10-25 06:04:45,756 INFO input frame rate=25
+C:\Python311\Lib\site-packages\torch\nn\utils\weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprec
+ated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
