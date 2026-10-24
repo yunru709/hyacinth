@@ -1,0 +1,22 @@
+﻿[cosyvoice] listening on 127.0.0.1:3178
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] token-ratio patched: {'max_token_text_ratio': 8.0}
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=True
+python.exe : Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-q4cBKf\script.ps1:9 字符: 1
++ & C:\Python311\python.exe "C:\Users\74689\Desktop\Agent\hyacinth\src\ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Sliding Window ...be encountered.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-10-25 06:12:01,181 INFO input frame rate=25
+C:\Python311\Lib\site-packages\torch\nn\utils\weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprec
+ated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+C:\Python311\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:197: UserWarning: Specified provide
+r 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecution
+Provider'
+  warnings.warn(
+2026-10-25 06:12:06,131 INFO use wetext frontend
+[cosyvoice] model ready
