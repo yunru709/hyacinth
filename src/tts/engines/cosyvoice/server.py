@@ -103,7 +103,6 @@ def load_model():
     from cosyvoice.cli.cosyvoice import CosyVoice3  # 官方生态
 
     _patch_wetext_offline()
-    _patch_token_ratio()
     print(f"[cosyvoice] loading model from {_ARGS.model_dir} (variant={_ARGS.variant}) ...", flush=True)
     # 官方构造写死载 llm.pt（base 权重）。rl-only 下载场景（llm.pt 缺、llm.rl.pt
     # 在）：先把 rl 权重硬链为 llm.pt（同盘零拷贝）让构造直接载 rl，构造完成后
