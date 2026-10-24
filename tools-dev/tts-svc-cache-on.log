@@ -19,3 +19,100 @@ Provider'
   warnings.warn(
 2026-10-25 06:04:50,920 INFO use wetext frontend
 [cosyvoice] model ready
+[cosyvoice] prompt features cached (FlutterShy.wav) in 1.99s: speech_token=(1, 396) speech_feat=(1, 792, 80)
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:103: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+Exception in thread Thread-5 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py:426: FutureWarning: `torch.cuda.amp.autocast(args...)` is d
+eprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(self.fp16):
+Exception in thread Thread-7 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+Exception in thread Thread-9 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+Exception in thread Thread-11 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+Exception in thread Thread-13 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
+Exception in thread Thread-15 (llm_job):
+Traceback (most recent call last):
+  File "C:\Python311\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Python311\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 121, in llm_job
+    for i in token_generator:
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 36, in generator_context
+    response = gen.send(None)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\llm\llm.py", line 479, in inference
+    assert 151646 in text, '<|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!'
+           ^^^^^^^^^^^^^^
+AssertionError: <|endofprompt|> not detected in CosyVoice3 text or prompt_text, check your input!
