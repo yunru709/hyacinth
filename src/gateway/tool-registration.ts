@@ -93,29 +93,24 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
   toolRegistry.register(createFlowAddTool(flowRegistry));
   toolRegistry.register(createFlowCompleteTool(flowRegistry));
 
-  // ── 用户交互工具 ──
-  toolRegistry.register(createAskUserTool(() => loop.getAskUserHandler()));
-  // 交付结论工具（say）：把最终结论交给用户并结束回合。
-  // loop.submitSay 负责落 assistant 文本 + 屏显（不只留工具形态），
-  // finalize 在 toolCalled 之前据 sayStatus 判停（stopReason 'say_submitted'）。
-  // 语音参数（voice/speed/emotion/broadcast）随 submit 透传 → loop.sayVoice
-  // 钩子（say-voice 插件装配；未装配时 loop 侧安全忽略）。
+  // ── 输出工具：say（说话）+ deliver（交付）─────────────────────────
+  // 2026-10-25 拆分（孑遗定调）：
+  //   · say     = 「嘴」：短句、会朗读、**不结束回合** —— 说完还能继续干活；
+  //   · deliver = 「交付」：Markdown 长文、不朗读、**结束回合**（finalize 据
+  //     sayStatus='submitted' 判停，stopReason 'say_submitted'）。
+  // 两者共用 loop 侧的落盘 + 屏显通道（都在 tool_result 之后落，避免历史停在
+  // user(tool_result) 造成"连续 user"被严格厂商拒绝）。
+  // ⚠️ 语音不可用的提示**不再塞进 tool_result**（2026-10-25 孑遗：那是交付层噪音）：
+  // TTS 状态改走 say-voice 插件的 UI 事件 + 日志，工具返回保持裸 'ok'。
   {
     const { createSayTool } = await import('../tools/say.js');
-    // 语音侧状态明示（2026-10-24 用户要求）：交付始终 ok，但播报意图存在而
-    // 语音不可用时，tool_result 带具体指引 —— 装配层判 TTS 状态，工具零依赖不变。
-    const { getTtsService } = await import('../tts/cosyvoice.js');
-    const voiceNotice = (opts: import('../tools/say.js').SayVoiceOptions): string | null => {
-      if (opts.broadcast === false) return null;                       // 本次明确不朗读
-      try {
-        if (configCenter.get<boolean>('voice.say.broadcast') !== true) return null; // 播报总开关关
-      } catch { return null; }
-      const svc = getTtsService();
-      if (!svc.modelState().ready) return '未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型';
-      if (!svc.serviceState().running) return '推理服务未运行，正在自动拉起（冷启动约 1 分钟）；如未出声请在 设置 → 语音 手动启动';
-      return null;
-    };
-    toolRegistry.register(createSayTool((content, voice) => loop.submitSay(content, voice), voiceNotice));
+    const { createDeliverTool } = await import('../tools/deliver.js');
+    toolRegistry.register(
+      createSayTool((content, voice) => loop.submitSay(content, voice)),
+    );
+    toolRegistry.register(
+      createDeliverTool((content, title) => loop.submitDeliver(content, title)),
+    );
   }
 
   // ── goal 模式工具（2026-10-10）─────────────────────────────────────

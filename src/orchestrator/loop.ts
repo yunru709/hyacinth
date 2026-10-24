@@ -346,15 +346,22 @@ export class AgentLoop {
   /** ask_user 工具的交互 handler（按 loop 实例注入：构造时取 outputHandler.onAskUser，
    *  多路 UI 并发时各 loop 各自应答，不再覆盖进程内唯一全局 handler） */
   private askUserHandler: ((questions: AskUserQuestion[]) => Promise<string>) | null = null;
-  /** say 工具：本回合状态（'submitted' 已交付结论 / 'aborted' 连续失败超限） */
+  /** deliver 工具：本回合交付状态（'submitted' 已交付 → finalize 判停 /
+   *  'aborted' 连续失败超限 → 强制结束）。say 说话**不再**置此状态。 */
   private sayStatus: 'submitted' | 'aborted' | null = null;
-  /** say 工具：连续校验失败次数（report 失败时 toolCalled 仍为 true，会重置
+  /** 连续校验失败次数（deliver 失败时 toolCalled 仍为 true，会重置
    *  idleTurnCount 使空转兜底失效，故需独立上限，防空转到 maxTurns） */
   private sayFailureCount = 0;
-  /** say 待落盘的交付正文（延后到 tool_result 之后落盘，见 takeSayStatus 注释） */
-  private sayPendingContent: string | null = null;
-  /** say 随附的语音选项（与 sayPendingContent 同生命周期：submit 暂存、takeSayStatus 消费） */
-  private sayPendingVoice: import('../tools/say.js').SayVoiceOptions | undefined;
+  /** 本回合待落盘的输出队列（say「说话」与 deliver「交付」共用一条通道）——
+   *  延后到 tool_result 之后落盘，见 takeSayStatus 注释。
+   *  为什么是队列而不是单槽（2026-10-25）：say 不再结束回合后，一次回合内可以
+   *  说多句，单槽会被后一句覆盖 ⇒ 前面说的话凭空消失。 */
+  private pendingOutputs: Array<{
+    kind: 'say' | 'deliver';
+    content: string;
+    title?: string;
+    voice?: import('../tools/say.js').SayVoiceOptions;
+  }> = [];
   // ── goal 模式（2026-10-10：只改出口 —— 不达成目标不退出 LOOP）────────────
   /** goal 状态（session 级，落 <sessionDir>/goal.json，跨 restart 存活） */
   private goalState: GoalState | null = null;
