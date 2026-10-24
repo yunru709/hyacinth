@@ -133,3 +133,164 @@ ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, thi
 2026-10-25 05:55:12,260 INFO yield speech len 0.04, rtf 10.213583707809448
 
   0%|          | 0/1 [00:00<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:28,911 WARNING synthesis text 你好。 too short than prompt text Real
+ly, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me comp
+any and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:30,736 INFO synthesis text 你好。
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:31,405 WARNING synthesis text 你好。 too short than prompt text Real
+ly, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me comp
+any and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:33,193 INFO synthesis text 你好。
+2026-10-25 05:55:34,964 INFO yield speech len 2.4, rtf 0.7377222180366516
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:34,983 WARNING synthesis text 你好。 too short than prompt text Real
+ly, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me comp
+any and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:36,772 INFO synthesis text 你好。
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:37,440 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:39,233 INFO synthesis text 你好，孑遗。
+2026-10-25 05:55:40,131 INFO yield speech len 0.72, rtf 1.2472553385628595
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:40,134 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:41,919 INFO synthesis text 你好，孑遗。
+2026-10-25 05:55:45,047 INFO yield speech len 4.8, rtf 0.6517053643862407
+
+  0%|          | 0/1 [00:04<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:45,066 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:46,910 INFO synthesis text 你好，孑遗。
+2026-10-25 05:55:47,684 INFO yield speech len 0.32, rtf 2.4161510169506073
+
+  0%|          | 0/1 [00:02<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:47,689 WARNING synthesis text 你好孑遗，我在测试语音。 too short than prompt 
+text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals kee
+p me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:49,495 INFO synthesis text 你好孑遗，我在测试语音。
+2026-10-25 05:55:51,520 INFO yield speech len 2.64, rtf 0.7669232108376243
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:51,542 WARNING synthesis text 你好孑遗，我在测试语音。 too short than prompt 
+text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals kee
+p me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:53,337 INFO synthesis text 你好孑遗，我在测试语音。
+2026-10-25 05:55:55,096 INFO yield speech len 2.12, rtf 0.8298498279643508
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:55,099 WARNING synthesis text 你好孑遗，我在测试语音。 too short than prompt 
+text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals kee
+p me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 05:55:56,912 INFO synthesis text 你好孑遗，我在测试语音。
+2026-10-25 05:55:58,978 INFO yield speech len 2.68, rtf 0.7709633948198005
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:55:59,004 WARNING synthesis text 你好孑遗，我现在在测试语音合成的稳定性。 too short than
+ prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Ani
+mals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perform
+ance
+2026-10-25 05:56:00,812 INFO synthesis text 你好孑遗，我现在在测试语音合成的稳定性。
+2026-10-25 05:56:02,991 INFO yield speech len 2.96, rtf 0.7361808338680783
+
+  0%|          | 0/1 [00:03<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:02,995 WARNING synthesis text 你好孑遗，我现在在测试语音合成的稳定性。 too short than
+ prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Ani
+mals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perform
+ance
+2026-10-25 05:56:04,789 INFO synthesis text 你好孑遗，我现在在测试语音合成的稳定性。
+2026-10-25 05:56:07,513 INFO yield speech len 3.96, rtf 0.6875943655919547
+
+  0%|          | 0/1 [00:04<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:07,536 WARNING synthesis text 你好孑遗，我现在在测试语音合成的稳定性。 too short than
+ prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Ani
+mals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perform
+ance
+2026-10-25 05:56:09,334 INFO synthesis text 你好孑遗，我现在在测试语音合成的稳定性。
+2026-10-25 05:56:14,035 INFO yield speech len 6.76, rtf 0.6953729327613786
+
+  0%|          | 0/1 [00:06<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:14,038 WARNING synthesis text 现在我在测试流式输出，看看首包到底有多快。 too short tha
+n prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. An
+imals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perfor
+mance
+2026-10-25 05:56:15,831 INFO synthesis text 现在我在测试流式输出，看看首包到底有多快。
+2026-10-25 05:56:25,698 INFO yield speech len 16.8, rtf 0.587314438252222
+
+  0%|          | 0/1 [00:11<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:25,713 WARNING synthesis text 现在我在测试流式输出，看看首包到底有多快。 too short tha
+n prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. An
+imals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perfor
+mance
+2026-10-25 05:56:27,504 INFO synthesis text 现在我在测试流式输出，看看首包到底有多快。
+2026-10-25 05:56:31,952 INFO yield speech len 6.52, rtf 0.6823608846020845
+
+  0%|          | 0/1 [00:06<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:31,955 WARNING synthesis text 现在我在测试流式输出，看看首包到底有多快。 too short tha
+n prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. An
+imals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad perfor
+mance
+2026-10-25 05:56:33,764 INFO synthesis text 现在我在测试流式输出，看看首包到底有多快。
+2026-10-25 05:56:43,395 INFO yield speech len 16.8, rtf 0.5733185155051095
+
+  0%|          | 0/1 [00:11<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:43,409 WARNING synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走
+动。 too short than prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in
+ the cottage. Animals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may le
+ad to bad performance
+2026-10-25 05:56:45,212 INFO synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走动。
+2026-10-25 05:56:50,746 INFO yield speech len 9.08, rtf 0.6094779737195254
+
+  0%|          | 0/1 [00:07<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:50,749 WARNING synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走
+动。 too short than prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in
+ the cottage. Animals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may le
+ad to bad performance
+2026-10-25 05:56:52,544 INFO synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走动。
+2026-10-25 05:56:58,074 INFO yield speech len 9.28, rtf 0.5959565269535986
+
+  0%|          | 0/1 [00:07<?, ?it/s]
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 05:56:58,077 WARNING synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走
+动。 too short than prompt text Really, I promise. Haha, you don't have to worry about me. I'm used to being by myself in
+ the cottage. Animals keep me company and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may le
+ad to bad performance
+2026-10-25 05:56:59,874 INFO synthesis text 清晨的光从木屋窗子斜进来，落在摊开的记事本上，我听见院子里有小动物在走动。
+2026-10-25 05:57:05,137 INFO yield speech len 8.72, rtf 0.6035288539501504
+
+  0%|          | 0/1 [00:07<?, ?it/s]
+
+  0%|          | 0/2 [00:00<?, ?it/s]2026-10-25 06:01:58,614 WARNING synthesis text 在。记事本上还压着一件事没结：TTS还是比实时慢一倍热态三点三–每十四
+字三点八秒，RTF零点五乘，最大嫌疑是每次都在重算与文本无关的参考音speechfeat / speechtoken。 too short than prompt text Really, I promise. Haha, you don
+'t have to worry about me. I'm used to being by myself in the cottage. Animals keep me company and everything has been 
+nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance
+2026-10-25 06:02:00,777 INFO synthesis text 在。记事本上还压着一件事没结：TTS还是比实时慢一倍热态三点三–每十四字三点八秒，RTF零点五乘，最大嫌疑是每次都在重算与文本无关的参考音speech
+feat / speechtoken。
+2026-10-25 06:02:12,701 INFO yield speech len 18.52, rtf 0.6438239733034797
+
+  0%|          | 0/2 [00:14<?, ?it/s]
