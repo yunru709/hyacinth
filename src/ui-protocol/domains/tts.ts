@@ -84,8 +84,10 @@ export interface TtsDomainOptions {
   getService: () => TtsServiceLike | null;
   /** 读取下载源偏好（config models.mirror：''=auto | hf-mirror | huggingface） */
   getMirrorPref?: () => string | undefined;
-  /** 音色目录（模型目录 prompts/ 参考音对；缺省只报默认音色） */
+  /** 音色目录（<models.root>/voices 参考音对；缺省只报默认音色） */
   getVoices?: () => TtsVoiceInfoLike[];
+  /** 参考音目录绝对路径（设置页展示「放哪」；缺省不报） */
+  getVoicesDir?: () => string;
   /** 读取 say 播报配置（voice.say.broadcast / voice.say.voice） */
   getSayConfig?: () => SayBroadcastConfig;
   /** 写 say 播报配置（设置页开关/默认音色下拉） */
@@ -123,6 +125,7 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
         service: s.serviceState(),
         downloadError: s.downloadErrorText() ?? undefined,
         voices: options.getVoices?.() ?? [],
+        voicesDir: options.getVoicesDir?.() ?? '',
         say: options.getSayConfig?.() ?? { broadcast: false, voice: '' },
       };
     },

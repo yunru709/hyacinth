@@ -26,6 +26,7 @@ import {
   type CosyVoiceVariant,
 } from './cosyvoice-models.js';
 import { cosyvoiceImportOk, cosyvoicePythonEnv, ensureCosyVoiceDeps } from './cosyvoice-deps.js';
+import { DEFAULT_VOICE_ID, ensureVoicesReady, listVoiceEntries, voicesDir } from './voice-dir.js';
 
 const logger = createLogger('tts-cosyvoice');
 
@@ -72,26 +73,19 @@ export interface TtsVoiceInfo {
 }
 
 /**
- * 音色 = 模型目录 prompts/ 下的参考音对（<name>.wav + <name>.txt），
- * zero-shot 克隆该音色说话；id 'default' 固定存在（模型内置参考音
- * prompt.wav/prompt.txt，可能缺失 —— 缺失时推理服务回退零参考音，
- * 效果不可预期但可用）。用户放置新参考音文件即扩充音色目录，无需改码。
+ * 音色目录 = `<models.root>/voices/` 下的参考音对（<id>.wav + <id>.txt），
+ * zero-shot 克隆该音色说话。位置在模型权重目录**之外**（用户资产，详见
+ * voice-dir.ts）。id 'default' 固定列在首位：对应 voices/default.wav
+ * （缺失时推理服务回退模型内置 sft 音色/明确报错）。
+ * 旧位置（模型目录 prompts/ 与 prompt.*）在首次列出时自动搬迁一次。
  */
 export function listVoices(): TtsVoiceInfo[] {
-  const out: TtsVoiceInfo[] = [{ id: 'default', label: '默认（模型内置参考音）' }];
-  try {
-    const dir = path.join(COSYVOICE_DIR(), 'prompts');
-    if (fs.existsSync(dir)) {
-      for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.wav')) continue;
-        const id = f.slice(0, -4);
-        if (id === 'default' || id === 'prompt') continue;
-        // 参考音必须成对（wav=声音样本，txt=样本文字稿），落单的不进目录
-        if (!fs.existsSync(path.join(dir, `${id}.txt`))) continue;
-        out.push({ id, label: `${id}（自定义参考音）` });
-      }
-    }
-  } catch { /* 目录不可读 = 只有默认音色 */ }
+  ensureVoicesReady(COSYVOICE_DIR());
+  const out: TtsVoiceInfo[] = [{ id: DEFAULT_VOICE_ID, label: '默认（voices/default.wav）' }];
+  for (const e of listVoiceEntries()) {
+    if (e.id === DEFAULT_VOICE_ID) continue;
+    out.push({ id: e.id, label: `${e.id}（自定义参考音）` });
+  }
   return out;
 }
 
@@ -266,7 +260,10 @@ export class CosyVoiceService {
     // 无故挂起（无 error/无 timeout/永不 settle，2026-10-24 实况 ✗），而 python
     // 侧 'model ready' 必然经 stdout 到达 —— 零额外连接、无挂起面。
     let readyFromStdout = false;
-    this.proc = spawn(this.pythonPath, [script, '--model-dir', COSYVOICE_DIR(), '--variant', this.variant, '--port', String(COSYVOICE_PORT)], {
+    // 参考音目录：用户资产（<models.root>/voices），与模型权重目录解耦；
+    // 旧位置（模型目录内 prompt.*/prompts/）先搬迁一次再启动。
+    ensureVoicesReady(COSYVOICE_DIR());
+    this.proc = spawn(this.pythonPath, [script, '--model-dir', COSYVOICE_DIR(), '--variant', this.variant, '--port', String(COSYVOICE_PORT), '--voices-dir', voicesDir()], {
       stdio: ['ignore', 'pipe', 'pipe'],
       // PYTHONPATH 前置 CosyVoice 仓库根（~/.agent/envs/CosyVoice）：官方非 pip 包，
       // 依赖装好后靠仓库根 import —— spawn 与探测/安装共用同一环境合成。

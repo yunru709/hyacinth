@@ -3861,7 +3861,8 @@
       '<div class="settings-row">' +
       '  <div style="min-width:0">' +
       '    <div class="settings-label">默认音色</div>' +
-      '    <div class="settings-desc">音色 = 模型目录 prompts/ 下的参考音对（&lt;名字&gt;.wav + .txt），放入文件即出现在此列表</div>' +
+      '    <div class="settings-desc">音色 = 参考音对（同名 &lt;音色&gt;.wav + &lt;音色&gt;.txt，放 &lt;音色&gt;.wav 与逐字文字稿），放入该目录即出现在此列表；default 为默认音色</div>' +
+      '    <div class="settings-desc" id="say-voices-dir" data-dom-id="say-voices-dir" style="opacity:0.7;word-break:break-all;margin-top:4px">—</div>' +
       '  </div>' +
       '  <select id="say-broadcast-voice" class="settings-input" aria-label="默认音色"></select>' +
       '</div>';
@@ -3896,6 +3897,8 @@
     try { st = await client.request('tts.status'); } catch (e) { st = null; }
     if (!st) return;
     const say = st.say || {};
+    const dirEl = $('#say-voices-dir');
+    if (dirEl && st.voicesDir) dirEl.textContent = '参考音目录：' + st.voicesDir;
     if (toggle) toggle.checked = say.broadcast === true;
     if (voiceSel) {
       const voices = Array.isArray(st.voices) ? st.voices : [];

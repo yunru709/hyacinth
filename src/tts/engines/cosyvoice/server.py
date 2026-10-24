@@ -13,7 +13,7 @@ CosyVoice3 本地推理服务 — hyacinth 桌面语音合成的 python 侧胶�
 （src/tts/cosyvoice.ts）拉起/停止/健康检查。
 
 用法：
-  python server.py --model-dir <dir> --variant base|rl --port 3178
+  python server.py --model-dir <dir> --variant base|rl --port 3178 [--voices-dir <dir>]
 """
 
 import argparse
@@ -80,48 +80,65 @@ def load_model():
     return _MODEL
 
 
+def _voice_pair(voice: str):
+    """解析音色 → (wav, txt) 路径对；不存在返回 None。
+
+    主位置：--voices-dir（<models.root>/voices，用户资产目录）
+    兜底：模型目录内的旧位置（prompt.* / prompts/*）—— 迁移失败或用户手动
+          放回时仍可用，避免升级后突然「音色消失」。
+    """
+    vd = _ARGS.voices_dir
+    if vd:
+        wav = os.path.join(vd, f"{voice}.wav")
+        txt = os.path.join(vd, f"{voice}.txt")
+        if os.path.isfile(wav) and os.path.isfile(txt):
+            return wav, txt
+    if voice == "default":
+        wav = os.path.join(_ARGS.model_dir, "prompt.wav")
+        txt = os.path.join(_ARGS.model_dir, "prompt.txt")
+    else:
+        wav = os.path.join(_ARGS.model_dir, "prompts", f"{voice}.wav")
+        txt = os.path.join(_ARGS.model_dir, "prompts", f"{voice}.txt")
+    if os.path.isfile(wav) and os.path.isfile(txt):
+        return wav, txt
+    return None
+
+
 def synthesize(text: str, voice: str = "", speed: float = 1.0) -> bytes:
     """文本 → WAV 字节。
 
-    音色路径（voice 参数选择参考音；按可用性自动回退）：
-      1. 指定音色（voice 非 default/空）：模型目录 prompts/<voice>.wav +
-         prompts/<voice>.txt 成对存在 → zero-shot 克隆该音色；缺失则报错
-         （明确告知音色不存在，不静默换音色 —— 用户听得出差别）；
-      2. 默认音色：inference_sft（需要 spk2info.pt，基础模型没有则跳过）→
-         zero-shot + 模型目录 prompt.wav / prompt.txt。
+    音色路径（voice 参数选择参考音）：
+      1. 音色对存在（voices/<voice>.wav + .txt）→ zero-shot 克隆该音色；
+      2. 指定音色但不存在 → 报错（明确告知，不静默换音色 —— 用户听得出差别）；
+      3. 默认音色无参考音 → inference_sft（需要 spk2info.pt，基础模型没有则跳过）
+         → 明确报错（提示放 voices/default.wav）。
     speed：inference_* 原生参数（0.5~2），透传官方实现。
-    都不可用时明确报错（Node 侧把错误透给 UI）。
     """
     model = load_model()
+    want = voice or "default"
     with _LOCK:   # CosyVoice 推理非线程安全，串行化
         # 注意：inference_zero_shot 的 prompt_wav 参数**必须是文件路径** ——
         # frontend._extract_speech_feat 内部 load_wav(path) 自己加载/重采样
         # （传 tensor 会一路透传到 soundfile → "Invalid file: tensor(...)"）。
-        # ── 指定音色：prompts/ 参考音对，zero-shot 克隆 ──
-        if voice and voice != "default":
-            wav = os.path.join(_ARGS.model_dir, "prompts", f"{voice}.wav")
-            txt = os.path.join(_ARGS.model_dir, "prompts", f"{voice}.txt")
-            if not (os.path.isfile(wav) and os.path.isfile(txt)):
-                raise RuntimeError(f"音色不存在：{voice}（需要模型目录 prompts/{voice}.wav + {voice}.txt）")
-            prompt_text = open(txt, "r", encoding="utf-8").read().strip() + "<|endofprompt|>"  # v3 协议：参考音文字稿须以此特殊 token 结尾（llm 在此切分 prompt）
-            results = model.inference_zero_shot(text, prompt_text, wav, stream=False, speed=speed)
+        pair = _voice_pair(want)
+        if pair:
+            wav_path, txt_path = pair
+            prompt_text = open(txt_path, "r", encoding="utf-8").read().strip() + "<|endofprompt|>"  # v3 协议：参考音文字稿须以此特殊 token 结尾（llm 在此切分 prompt）
+            results = model.inference_zero_shot(text, prompt_text, wav_path, stream=False, speed=speed)
             return _to_wav(results)
 
-        # ── 默认音色：sft 内置（有 spk2info 才可用）→ prompt.wav 零样本 ──
+        if want != "default":
+            raise RuntimeError(f"音色不存在：{want}（需要 {_ARGS.voices_dir or 'voices'}/{want}.wav + {want}.txt）")
+
+        # ── 默认音色无参考音：sft 内置（有 spk2info 才可用）→ 明确报错 ──
         if getattr(model.frontend, "spk2info", None):
             try:
                 results = model.inference_sft(text, "中文女", stream=False, speed=speed)
                 return _to_wav(results)
             except Exception as e:
                 print(f"[cosyvoice] inference_sft unavailable ({e}); falling back to zero-shot", flush=True)
-        prompt_wav = os.path.join(_ARGS.model_dir, "prompt.wav")
-        prompt_txt = os.path.join(_ARGS.model_dir, "prompt.txt")
-        if os.path.isfile(prompt_wav) and os.path.isfile(prompt_txt):
-            prompt_text = open(prompt_txt, "r", encoding="utf-8").read().strip() + "<|endofprompt|>"
-            results = model.inference_zero_shot(text, prompt_text, prompt_wav, stream=False, speed=speed)
-            return _to_wav(results)
         raise RuntimeError(
-            "无可用的合成音色：模型无内置 sft 音色，且模型目录缺少 prompt.wav / prompt.txt（零样本参考）"
+            f"默认音色缺少参考音频：请放置 {_ARGS.voices_dir or '<models.root>/voices'}/default.wav 与该音频的逐字文字稿 default.txt"
         )
 
 
@@ -191,6 +208,7 @@ def main():
     parser = argparse.ArgumentParser(description="CosyVoice3 local inference server (hyacinth)")
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--variant", choices=["base", "rl"], default="rl")
+    parser.add_argument("--voices-dir", default="", help="参考音目录（<models.root>/voices，与模型权重解耦）")
     parser.add_argument("--port", type=int, default=3178)
     _ARGS = parser.parse_args()
 

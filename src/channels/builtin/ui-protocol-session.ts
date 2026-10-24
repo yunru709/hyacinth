@@ -57,6 +57,7 @@ import { createSttDomain } from '../../ui-protocol/domains/stt.js';
 import { createTtsDomain } from '../../ui-protocol/domains/tts.js';
 import { getSttService } from '../../stt/index.js';
 import { getTtsService, listVoices } from '../../tts/cosyvoice.js';
+import { voicesDir } from '../../tts/voice-dir.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
 import { getSayHistoryStore } from '../../companion/say-history.js';
@@ -449,6 +450,7 @@ export class UiProtocolSession {
         try { const v = backend.configCenter?.get('models.mirror'); return typeof v === 'string' ? v : undefined; } catch { return undefined; }
       },
       getVoices: () => listVoices(),
+      getVoicesDir: () => voicesDir(),
       getSayConfig: () => {
         try {
           const cc = backend.configCenter;
