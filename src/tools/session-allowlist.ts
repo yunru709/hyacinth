@@ -93,7 +93,7 @@ export async function load(sessionDir: string): Promise<SessionAllowlistData> {
 }
 
 /**
- * 同步版 load —— **只给 loop 构造函数用**（见 isUnrestrictedSync）。
+ * 同步版 load —— **只给 loop 构造函数用**（见 getProfileSync）。
  * 与 load 共用 parseData，两处行为不会漂移。
  */
 function loadSync(sessionDir: string): SessionAllowlistData {
@@ -168,19 +168,9 @@ export async function setProfile(sessionDir: string, profile: PermissionProfile)
   await save(sessionDir, data);
 }
 
-/** 同步读档位 —— 只给 loop 构造函数用（理由同 isUnrestrictedSync） */
+/** 同步读档位 —— 只给 loop 构造函数用（理由同上：构造函数是同步的） */
 export function getProfileSync(sessionDir: string): PermissionProfile {
   return loadSync(sessionDir).profile;
-}
-
-/**
- * 同步读 AOR 状态 —— **只给 loop 构造函数用**。
- *
- * 为什么必须同步：构造函数本身是同步的。若改用异步回填，首轮工具调用可能**早于**恢复完成
- * ⇒ 明明持久化了却仍弹一次权限条（这种"偶发不确定性"比慢几十微秒坏得多）。文件只有几百字节。
- */
-export function isUnrestrictedSync(sessionDir: string): boolean {
-  return loadSync(sessionDir).unrestricted;
 }
 
 export async function isToolAllowed(sessionDir: string, toolName: string): Promise<boolean> {

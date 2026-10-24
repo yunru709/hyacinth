@@ -25,6 +25,7 @@ import type { DomainHandler } from '../server.js';
 import { UI_EVENT } from '../../events.js';
 import type { ModelChannel, ProviderSummary, LocalModelEntry } from '../types.js';
 import type { LoopLike } from './state.js';
+import { modelCatalog } from '../../provider/catalog.js';
 
 // ────────────────────────────────────────────────────────────
 // 结构化接口（真实类兼容）
@@ -250,6 +251,34 @@ export function createModelDomain(options: ModelDomainOptions): DomainHandler {
         });
       }
       return { providers };
+    },
+
+    // ── model.listModels ───────────────────────────────────
+    /**
+     * 模型目录（供 UI 的模型选择器用）。
+     *
+     * 与 listProviders 的分工：那个列的是**厂商**（含密钥是否配置），这个列的是
+     * **具体模型**（上下文窗口 / 是否支持思考 / 默认思考档位）。选择器要平铺
+     * "厂商 + 模型"两级信息，只有厂商列表撑不起来。
+     *
+     * 只返回可用与预览态（deprecated/disabled 选了也没意义），按厂商名 + 模型名排序，
+     * 保证每次打开菜单顺序稳定（目录本身是 Map，插入顺序受 providers.json 影响）。
+     */
+    listModels: () => {
+      const models = modelCatalog.getAvailable()
+        .map((m) => ({
+          provider: String(m.provider),
+          id: m.id,
+          name: m.name,
+          contextWindow: m.contextWindow,
+          maxOutputTokens: m.maxOutputTokens,
+          reasoning: !!(m.capabilities && m.capabilities.thinking),
+          reasoningEffort: m.reasoningEffort,
+          status: m.status,
+          cost: m.cost ? { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead } : undefined,
+        }))
+        .sort((a, b) => (a.provider + a.name).localeCompare(b.provider + b.name));
+      return { models };
     },
 
     // ── model.switch ───────────────────────────────────────

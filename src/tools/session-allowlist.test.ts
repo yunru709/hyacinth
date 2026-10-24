@@ -52,9 +52,11 @@ describe('session-allowlist：会话隔离（审计 B3 回归）', () => {
   it('【B3】AOR（全放行）状态同样不跨会话', async () => {
     await allowlist.setUnrestricted(dirA, true);
 
-    expect(allowlist.isUnrestrictedSync(dirA)).toBe(true);
-    // 关键：B 必须仍是 false —— AOR 是"只认本 sessionDir"的会话级状态
-    expect(allowlist.isUnrestrictedSync(dirB)).toBe(false);
+    // 2026-10-24：AOR 不再是独立状态，unrestricted 只是 profile === 'full' 的落盘影子
+    // （见 setProfile 的双写；这里用档位表达同一语义）
+    expect(allowlist.getProfileSync(dirA)).toBe('full');
+    // 关键：B 必须仍是 confirm —— AOR 是"只认本 sessionDir"的会话级状态
+    expect(allowlist.getProfileSync(dirB)).toBe('confirm');
   });
 
   it('【B3】写入的根只落进自己的会话文件，不写别处', async () => {

@@ -177,6 +177,25 @@ describe('模型域', () => {
     expect(providers.find((p: any) => p.type === 'local').isLocal).toBe(true);
   });
 
+  it('model.listModels 返回模型目录（上下文 / 是否支持思考 / 稳定排序）', async () => {
+    const { client, responses, flush } = setup();
+    client.send({ kind: 'request', id: 'rm', method: 'model.listModels' });
+    await flush();
+    expect(responses[0]).toMatchObject({ id: 'rm', ok: true });
+    const models = (responses[0].result as any).models as any[];
+    expect(models.length).toBeGreaterThan(10);
+    const flash = models.find((m) => m.provider === 'deepseek' && m.id === 'deepseek-flash');
+    expect(flash).toMatchObject({ reasoning: true });
+    expect(flash.contextWindow).toBeGreaterThan(0);
+    // 默认档位来自目录：UI 用它做"未切换时显示的初始值"
+    expect(flash.reasoningEffort).toBe('high');
+    // 排序按 provider+name 字典序（UI 会在此基础上把当前厂商提到最前）
+    const keys = models.map((m) => m.provider + m.name);
+    expect(keys).toEqual([...keys].sort((a, b) => a.localeCompare(b)));
+    // deprecated / disabled 不该出现在可选项里
+    expect(models.every((m) => m.status === 'available' || m.status === 'preview')).toBe(true);
+  });
+
   it('model.listProviders 标记 configured（envKey 环境变量非空 / 本地无 envKey）', async () => {
     const { client, responses, flush } = setup();
     // 模拟：deepseek 已配 key，anthropic/openai 未配，local 无 envKey

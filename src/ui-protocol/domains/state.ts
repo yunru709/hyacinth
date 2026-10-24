@@ -77,6 +77,22 @@ export interface LoopLike {
   toggleProvider?(): void;
   /** 切换当前会话目录（session.switch 用，可选；真实 AgentLoop.switchSession） */
   switchSession?(newSessionDir: string): Promise<void>;
+  /**
+   * 读**目标会话目录**（session.delete/batchDelete 自愈用，可选）。
+   * 真实 AgentLoop 上是 **getter**（`get targetSessionDir()`），所以声明成属性而不是方法 ——
+   * 两边签名必须一致，否则结构类型不兼容。
+   *
+   * 为什么是 target 而不是 current：`switchSession` 只登记待切换，真正生效要等轮次边界；
+   * 于是"空闲时切了会话"之后 currentSessionDir 仍是旧的，而用户看着的已经是新会话。
+   * 判断"用户要删的是不是他正在看的那条"必须用 target，否则删当前会话不会触发自愈
+   * （实测：`nextSessionId` 恒为 null，删光了都不新建）。
+   *
+   * 为什么需要它：删掉的若正是 loop 指向的会话，下一条消息会沿旧路径把目录原样写回来 ——
+   * 用户看到的就是"刚清空，刷新一下又有几条会话"。
+   */
+  readonly targetSessionDir?: string;
+  /** 当前**已生效**的会话目录（targetSessionDir 缺席时的回退；真实上是 getter） */
+  readonly currentSessionDir?: string;
   /** 各角色模型来源（model.sources 用，可选；真实 AgentLoop.getModelSources） */
   getModelSources?(): Record<string, 'main' | 'local'> | null;
   /** 当前正在执行的调度任务名（schedule.runtime 用，可选；真实 AgentLoop.pendingTaskName） */

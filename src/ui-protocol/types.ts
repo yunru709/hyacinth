@@ -174,6 +174,7 @@ export const UI_METHOD = {
   CONFIG_SCHEMA: 'config.schema',
   // model
   MODEL_LIST_PROVIDERS: 'model.listProviders',
+  MODEL_LIST_MODELS: 'model.listModels',
   MODEL_SWITCH: 'model.switch',
   MODEL_TOGGLE: 'model.toggle',
   MODEL_SET_THINKING: 'model.setThinking',

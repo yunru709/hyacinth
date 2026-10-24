@@ -1698,8 +1698,17 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 | 域 | 主要方法 | 依赖的后端（桥接层注入） |
 |----|----------|--------------------------|
 | config | get/getAll/set/merge/reset/schema；订阅 change 事件 | RuntimeConfigCenter（ConfigCenterLike，save 持久化）；dispose 不可枚举 |
-| session | list/resume/create/delete/batchDelete/export/getLatest/switch | SessionManager + AgentLoop(switchSession)；export 用 util/zip 打包 |
-| model | getActive/listProviders/switch/setThinking/listChannels/upsert/remove/setChannelModel/setChannelRole/sources/local* | ModelChannelRegistry + ProviderManager + LocalModelModule + loop.switchProvider |
+| session | list/resume/create/delete/batchDelete/export/getLatest/switch | SessionManager + AgentLoop(switchSession)；export 用 util/zip 打包；**delete/batchDelete 自带自愈**（见下） |
+
+**删除当前会话的自愈在域里，不在 UI 里。** `delete` 只 `rm` 目录、不动 `loop.sessionDir`，若没人接管，
+下一条消息会沿旧路径把目录原样写回来（用户看到"刚清空，刷新一下又有几条"）。这属于**会话语义**
+（"当前会话没了，下一条消息该写到哪"）而不是视图语义 —— 放在前端意味着 TUI 删当前会话时行为分叉。
+因此 `session.delete` / `batchDelete` 在删完后自行判定：删到的若正是 `loop.currentSessionDir` 的末段，
+就切到剩余里 `updatedAt` 最新的一条，一条不剩则新建一条并切过去；结果通过应答里的
+`nextSessionId` + `createdNew` 回给调用方。UI 只做两件事：跳过去、重画（`applyDeleteSettle`）。
+`currentSessionDir` 在 AgentLoop 上是 getter（`get currentSessionDir()`），`LoopLike` 里也声明成
+`readonly` 属性 —— 声明成方法会导致结构类型不兼容。
+| model | getActive/listProviders/**listModels**/switch/setThinking/listChannels/upsert/remove/setChannelModel/setChannelRole/sources/local* | ModelChannelRegistry + ProviderManager + ModelCatalog（模型目录）+ LocalModelModule + loop.switchProvider |
 | message | chat/stop/askUserResolve；`ProtocolOutputHandler` 把 OutputHandler 回调转事件 | AgentLoop + PendingRequestRegistry + historyProvider(events.jsonl) |
 | state | get（StateSnapshot 组装 TurnInfo+路由+provider）/subscribe/unsubscribe | LoopLike + StatsManager |
 | permission | resolve；`PendingRequestRegistry`（permission + ask_user 共用请求-应答表） | loop.onPermissionRequest/onAskUser |
@@ -1743,11 +1752,20 @@ Zone5 含 `flow_injection`、`channel_context`、`session_mcp`、`session_tools`
 - `shell.css`：v3 外壳样式的**唯一来源**（顶栏 / 侧栏 / 消息流 / composer / 设置面板对齐 / 预览栏）。
   `app.css` 退回它原本该管的范围（markdown 正文、katex、设置页内部），重叠处由 `shell.css` 覆盖。
 
-### 5.1.1 右侧预览栏（工作区文件查看器，只读）
+### 5.1.1 右侧预览栏（文件查看器，只读）
 
-顶栏 `#preview-toggle-btn` 开合（快捷键 Ctrl/⌘+Alt+P，状态存 localStorage）。渲染文件内容：文本带
-行号（sticky 行号列，横向滚动不跑）、Markdown 走 `markdown.js`（与聊天正文同一渲染器）、图片与
-PDF 走 `<img>` / `<iframe>`。
+顶栏 `#preview-toggle-btn` 开合（快捷键 Ctrl/⌘+Alt+P，状态存 localStorage）。按 `kind` 分派渲染：
+文本带行号（sticky 行号列，横向滚动不跑）、Markdown 走 `markdown.js`（与聊天正文同一渲染器）、
+图片走 `<img>`、PDF 与 **HTML** 走 `<iframe>`（HTML 默认渲染，meta 行可切「源码」，见下）。
+
+HTML 预览的三个必要条件是踩出来的：
+- `classifyFile` 必须把 `.html/.htm` 判成 `html`，否则前端只会当普通文本；
+- `/api/fs/raw` 的 Content-Type 必须是 `text/html` 且**不带 charset** —— HTTP 头的 charset
+  优先级高于 `<meta charset>`，写死 utf-8 会让 gb2312/gbk 的老页面整页乱码（实测 tools-dev 的页面）；
+- 全局安全头 `X-Frame-Options: DENY` 必须对这个端点放开到 `SAMEORIGIN`，否则 iframe 白屏。
+  放开范围严格限定为 `/api/fs/raw` 且路径以 `.html/.htm/.pdf` 结尾，其它路由照旧 DENY。
+iframe 的 `sandbox` 只给 `allow-scripts allow-forms allow-popups`，**不给 allow-same-origin**：
+否则本地页面里的脚本能同源 fetch `/api/fs/read` 读工作区任意文件。
 
 **三档尺寸**，状态只有 `#preview-dock` 上的两个 class（`is-max` / `is-full`，全屏隐含放大）：
 
@@ -1772,10 +1790,57 @@ PDF 走 `<img>` / `<iframe>`。
   `realpath` 比对防符号链接逃逸、`.git` 硬排除且 `node_modules` 默认隐藏（`?all=1` 才列）。
 - 只读是硬边界：没有写/删/移动，改文件仍必须走 agent 工具（带审批）。
 
-两个链接入口：`?preview=1` 展开空栏、`?preview=<相对路径>` 直接定位到某个文件。
+**根目录可切换**（原先锁死在启动目录）。标题栏那颗按钮就是入口 —— 它显示的是**当前根名**，
+点开是一个目录选择器：快捷位置（工作区 / 主目录 / 前 4 个盘符 / 最近用过）+ 可编辑路径框 +
+子目录列表。点目录行＝进去，底部「在此打开」才是落定，两者分开避免误触。
+
+> **契约：`/api/fs` 面只读，唯一可变入口是 `POST /api/fs/root`。**
+> 其余全部是 GET（Fastify 会自动补一个 HEAD，属同一读路径）。换根之所以是 POST 而不是
+> query 参数：若做成 `GET /api/fs/list?root=<任意绝对路径>`，任何一次读取都能携带任意根，
+> 等于免钥读全盘；POST 则是**一次显式的、仅本机可发起的、可记审计日志**的视图状态变更。
+> `preview-routes.test.ts` 末尾的「契约」组会枚举真实路由表来钉死这个形状 —— 想加
+> `POST /api/fs/write` 之类必须先让那条测试变红，从而被迫先论证"预览栏为什么要写文件"。
+
+- 端点：`GET /api/fs/browse?dir=<绝对路径>`（只回子目录名）与 `POST /api/fs/root {root}`（`'default'` 回工作区）。
+  两者**只接受本机发起**（`remoteAddress` 是回环），否则拿到钥匙的局域网客户端能把根设成 `C:\` 再读全盘 ——
+  那等于把"预览一个目录"变成"读全盘"。换根本来就是坐在机器前的人做的事。
+- 选中的根由**服务端**持久化到 `~/.agent/preview-root.json`（含 recent），不是 localStorage：
+  这样多标签页看到的是同一个根，重启后也还在。记录里的目录若已被删，启动时退回工作区而不是卡在空根。
+- 换根只改"根"这一个变量：`list/read/raw` 的越界判定基准随之改变，agent 的工作目录与写入围栏**都不动**。
+  前端换根后必须清空 `expanded/children/current` —— 相对路径的含义已经变了，留着缓存会读到另一个目录里的同名文件。
+- 防误关：点面板外部靠 `composedPath()` 判断内外。用 `event.target.closest()` 会出错 —— 点目录行会立刻
+  重绘列表，事件冒泡到 document 时被点的节点已脱离文档，`closest` 返回 null ⇒ 面板被误判成"点了外面"而关闭。
+- **多标签页同步靠 `BroadcastChannel`**（`hyacinth.preview-root`）。fs 面刻意不为一个视图状态加事件流，
+  但根又确实是服务端共享的，所以换根成功后由本页广播一条 `root-changed`；其它页收到后**不直接信消息里的值**，
+  而是重新 `GET /api/fs/meta` 以服务端为准再对齐（消息只当"提醒"，避免失败切换被误传播）。
+  老浏览器无 `BroadcastChannel` 时退化为"开栏时自然对齐"，不报错。
+
+两个链接入口：`?preview=1` 展开空栏、`?preview=<相对路径>` 直接定位到某个文件（相对**当前根**）。
 工具卡参数里若含路径，整张卡可点 → 自动展开预览栏并定位（绝对路径先剥掉工作区前缀）。
 
-### 5.1.2 会话执行模式（权限档位 + goal）
+**拖拽引用**：树里的文件行 `draggable`，拖到输入框即在**光标处**插入带引号的绝对路径
+（`"C:\…\src\webui\app.js"`）。`dragstart` 同时写 `application/x-hyacinth-path`（相对路径，给
+composer 认）与 `text/plain`（绝对路径，拖到编辑器/地址栏时也能用）。composer 只认自定义 MIME ——
+网页里拖来的文字/链接不会被误当成工作区文件；拖拽悬停时图片是主色虚线、路径是成功色实线。
+目录行刻意不 draggable：它的主操作是展开/收起，加了会吞掉点击。
+
+### 5.1.2 模型选择器（输入框右下角）
+
+切换模型的入口在 composer 里（`#model-pick-btn`），顶栏的 `#header-model-name` 退化为只读状态。
+理由：切模型是"发这条消息之前"的决定，和发送按钮同处一个动作带里最顺手。
+
+- 弹层 `#model-pop` 向上开，列表来自 `model.listModels`（`ModelCatalog.getAvailable()`：
+  上下文 / 最大输出 / 是否支持思考 / 默认思考档位 / 价格）。当前厂商排在列表最前，其次当前厂商的
+  其它模型 —— 否则 58 条平铺时当前项会掉到很下面。
+- **悬停**列表项在左侧（窄屏翻右侧）展开二级菜单 `#model-detail`：规格表 + 思考强度。
+  位置按该项的 `getBoundingClientRect()` 算，纯 CSS 做不到"跟着当前项"。
+- 思考强度只对**当前生效的模型**可点：`setThinking` 作用在活跃 provider 上，让用户在别的模型
+  的详情卡里改强度，等于悄悄改掉当前模型的设置。其它模型的档位只读展示它的目录默认值。
+- 未配密钥的厂商只做视觉弱化（`is-muted`）不禁用：`listProviders.configured` 是启发式
+  （没有 envKey 的在线厂商会被误判为已配置），拿它当门禁会"看着能点、点了报错"。真切换失败时
+  给可操作文案（"到模型选择页添加该提供商"）。
+
+### 5.1.3 会话执行模式（权限档位 + goal）
 
 输入框下沿的「模式」按钮（`#mode-btn`）汇总"这个会话按什么规则干活"，点开是向上浮的菜单
 （`#mode-pop`，302px，浮在整个输入区上方而不是盖住 textarea）：四档权限 + 目标模式。

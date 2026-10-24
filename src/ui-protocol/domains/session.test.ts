@@ -148,7 +148,9 @@ describe('会话域', () => {
     client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId } });
     const delResp = await waitForResponse('d1');
     expect(delResp.ok).toBe(true);
-    expect(delResp.result).toEqual({ ok: true, sessionId });
+    // 2026-10-24：应答新增 nextSessionId / createdNew（删当前会话的自愈结果），
+    // 故用 objectContaining 而不是全等 —— 全等会把"多回一个有用字段"判成失败。
+    expect(delResp.result).toEqual(expect.objectContaining({ ok: true, sessionId }));
 
     // delete 事件
     await waitForEvent('session.change', (p) => (p as any).action === 'delete' && (p as any).sessionId === sessionId);
@@ -199,7 +201,7 @@ describe('会话域', () => {
     });
     const resp = await waitForResponse('b1');
     expect(resp.ok).toBe(true);
-    expect(resp.result).toEqual({ ok: true, deleted: [s1.id, s2.id], notFound: ['no-such-session'] });
+    expect(resp.result).toEqual(expect.objectContaining({ ok: true, deleted: [s1.id, s2.id], notFound: ['no-such-session'] }));
 
     // 触发 batchDelete 事件
     await waitForEvent('session.change', (p) => (p as any).action === 'batchDelete' && (p as any).deleted?.length === 2);
@@ -266,5 +268,179 @@ describe('会话域', () => {
     client.send({ kind: 'request', id: 'e2', method: 'session.export', params: { sessionIds: ['ghost-2'] } });
     const errResp = await waitForResponse('e2');
     expect(errResp.ok).toBe(false);
+  });
+});
+
+// ============================================================
+// 删当前会话后的自愈（settleAfterDelete）
+// ============================================================
+// 规矩：删掉的若正是 loop 指向的会话，域里必须把它切走（或有/无剩余两条路），
+// 并把 nextSessionId 回给调用方。前端不再自己排序、也不判断"该不该切"。
+//
+// 这里用**假 loop**（只实现 currentSessionDir getter + switchSession），因为真实
+// AgentLoop 的切换是延迟生效的（pendingSessionDir），断言"切到哪"看假 loop 记录即可。
+describe('删当前会话后的自愈', () => {
+  /** 带假 loop 的装配：current 指向某个会话目录，switchSession 只记录调用 */
+  function setupWithLoop(currentId: string | null) {
+    const client = new InProcAdapter('client');
+    const serverAdp = new InProcAdapter('server');
+    client.connect(serverAdp);
+    const server = new UiProtocolServer();
+    const switched: string[] = [];
+    const loop = {
+      get currentSessionDir() {
+        return currentId ? sessionManager.getSessionDir(currentId) : undefined;
+      },
+      async switchSession(dir: string) {
+        switched.push(path.basename(dir));
+        // 假 loop 立即生效（真实 loop 是延迟到轮次边界，本测试只关心"切到哪"）
+        currentId = path.basename(dir);
+      },
+    };
+    const domain = createSessionDomain({
+      sessionManager,
+      emit: (type, payload) => server.broadcast(type, payload),
+      getLoop: () => loop as never,
+    });
+    server.registerDomain('session', domain);
+    server.attach(serverAdp);
+    const responses: UiResponse[] = [];
+    client.onMessage((m) => { if (m.kind === 'response') responses.push(m); });
+    const waitForResponse = async (id: string): Promise<UiResponse> => {
+      const start = Date.now();
+      while (Date.now() - start < 5000) {
+        const found = responses.find((r) => r.id === id);
+        if (found) return found;
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      throw new Error(`timeout waiting for response "${id}"`);
+    };
+    const setCurrent = (id: string | null) => { currentId = id; };
+    return { client, waitForResponse, switched, setCurrent };
+  }
+
+  it('删的不是当前会话 → nextSessionId 为 null，不做任何切换', async () => {
+    const s1 = await sessionManager.create('normal');
+    const s2 = await sessionManager.create('normal');
+    const { client, waitForResponse, switched } = setupWithLoop(s1.id);
+
+    client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId: s2.id } });
+    const res = (await waitForResponse('d1')).result as any;
+    expect(res.ok).toBe(true);
+    expect(res.sessionId).toBe(s2.id);
+    expect(res.nextSessionId).toBeNull();
+    expect(res.createdNew).toBe(false);
+    expect(switched).toEqual([]);
+  });
+
+  it('删的是当前会话且有剩余 → 切到剩余里最新的一条', async () => {
+    const older = await sessionManager.create('normal');
+    const newer = await sessionManager.create('normal');
+    // create 之间隔一会，保证 updatedAt 有先后（同毫秒会让排序不稳定）
+    await new Promise((r) => setTimeout(r, 20));
+    const target = await sessionManager.create('normal');
+    // 手动把 older 的 meta 时间改早：靠 touch 拿不到，这里直接依赖创建顺序
+    const { client, waitForResponse, switched } = setupWithLoop(target.id);
+
+    client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId: target.id } });
+    const res = (await waitForResponse('d1')).result as any;
+    expect(res.nextSessionId).toBeTruthy();
+    expect(res.nextSessionId).not.toBe(target.id);
+    expect(res.createdNew).toBe(false);
+    // 切到的是剩下两条里 updatedAt 更大的那条
+    expect(res.nextSessionId).toBe(newer.id);
+    expect(switched).toEqual([newer.id]);
+    expect(older.id).toBeTruthy();
+  });
+
+  it('删的是最后一条 → 新建一条并切过去', async () => {
+    const only = await sessionManager.create('normal');
+    const { client, waitForResponse, switched } = setupWithLoop(only.id);
+
+    client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId: only.id } });
+    const res = (await waitForResponse('d1')).result as any;
+    expect(res.createdNew).toBe(true);
+    expect(res.nextSessionId).toBeTruthy();
+    expect(res.nextSessionId).not.toBe(only.id);
+    expect(switched).toEqual([res.nextSessionId]);
+    // 新会话确实落盘了
+    const list = await sessionManager.list();
+    expect(list.map((s) => s.id)).toContain(res.nextSessionId);
+  });
+
+  it('batchDelete 删到当前会话 → 同样自愈（不论当前是哪一条）', async () => {
+    const a = await sessionManager.create('normal');
+    const b = await sessionManager.create('normal');
+    const c = await sessionManager.create('normal');
+    const { client, waitForResponse, switched } = setupWithLoop(b.id);
+
+    client.send({
+      kind: 'request', id: 'b1', method: 'session.batchDelete',
+      params: { sessionIds: [a.id, b.id] },
+    });
+    const res = (await waitForResponse('b1')).result as any;
+    expect(res.deleted.sort()).toEqual([a.id, b.id].sort());
+    expect(res.nextSessionId).toBe(c.id);
+    expect(switched).toEqual([c.id]);
+  });
+
+  it('没有 loop（无 agent 场景）→ 不自愈，但删除本身成功', async () => {
+    const only = await sessionManager.create('normal');
+    const { client, waitForResponse } = setup();  // 这个 setup 不注入 loop
+
+    client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId: only.id } });
+    const res = (await waitForResponse('d1')).result as any;
+    expect(res.ok).toBe(true);
+    expect(res.nextSessionId).toBeNull();
+    expect(res.createdNew).toBe(false);
+  });
+});
+
+// ── 回归：切换是"待生效"的 ────────────────────────────────────
+// 真实 AgentLoop.switchSession 只登记 pendingSessionDir（本轮 tool_result 必须落在
+// 原会话，故生效推迟到轮次边界）。于是"空闲时切了会话"之后 currentSessionDir 仍是旧的，
+// 而用户界面上显示的是新会话。
+//
+// 只读 currentSessionDir 判断"删的是不是当前"会**全部漏判**：删了正在看的会话，
+// nextSessionId 恒为 null，前端只能自己兜 —— 那正是这次下沉要消灭的东西。
+// 这条用假 loop 把两个 getter 显式分开，钉住"必须用 target"。
+describe('自愈判定用目标会话（待切换优先）', () => {
+  it('current 是旧会话、target 是用户正在看的 → 删 target 触发自愈', async () => {
+    const oldOne = await sessionManager.create('normal');
+    const viewed = await sessionManager.create('normal');
+    const client = new InProcAdapter('client');
+    const serverAdp = new InProcAdapter('server');
+    client.connect(serverAdp);
+    const server = new UiProtocolServer();
+    const switched: string[] = [];
+    // 模拟"已切到 viewed，但还没到轮次边界"：current 仍指 oldOne
+    const loop = {
+      get currentSessionDir() { return sessionManager.getSessionDir(oldOne.id); },
+      get targetSessionDir() { return sessionManager.getSessionDir(viewed.id); },
+      async switchSession(dir: string) { switched.push(path.basename(dir)); },
+    };
+    server.registerDomain('session', createSessionDomain({
+      sessionManager,
+      getLoop: () => loop as never,
+    }));
+    server.attach(serverAdp);
+    const responses: UiResponse[] = [];
+    client.onMessage((m) => { if (m.kind === 'response') responses.push(m); });
+    const waitForResponse = async (id: string): Promise<UiResponse> => {
+      const start = Date.now();
+      while (Date.now() - start < 5000) {
+        const found = responses.find((r) => r.id === id);
+        if (found) return found;
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      throw new Error('timeout');
+    };
+
+    client.send({ kind: 'request', id: 'd1', method: 'session.delete', params: { sessionId: viewed.id } });
+    const res = (await waitForResponse('d1')).result as any;
+    // 关键断言：必须触发自愈并切到 oldOne（唯一剩下的）
+    expect(res.nextSessionId).toBe(oldOne.id);
+    expect(res.createdNew).toBe(false);
+    expect(switched).toEqual([oldOne.id]);
   });
 });

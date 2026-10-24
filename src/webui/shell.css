@@ -945,6 +945,210 @@
 .cbtn-stop { background: var(--s3); color: var(--hyacinth-foreground); }
 .cbtn[hidden] { display: none; }
 
+/* ── 7.1 模型选择器（输入框右下角）────────────────────────────────
+   列表只负责"选哪个"，细节（上下文 / 是否支持思考 / 价格 / 思考强度）
+   放在悬停展开的二级菜单里 —— 每行都塞满元信息会让 10 个模型变成一堵墙。 */
+.model-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 200px;
+  height: 28px;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: var(--s1);
+  color: var(--hyacinth-muted-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.model-pick:hover,
+.model-pick[aria-expanded="true"] {
+  background: var(--s2);
+  border-color: var(--hair-strong);
+  color: var(--hyacinth-foreground);
+}
+.model-pick > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 148px;
+}
+.model-pick svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.model-pick .model-pick-caret { width: 10px; height: 10px; opacity: 0.5; }
+.model-pick[aria-expanded="true"] .model-pick-caret { opacity: 0.9; transform: rotate(180deg); }
+
+.model-pop {
+  position: absolute;
+  /* 与 composer 的 padding 对齐（24px），让弹层右缘和输入框右缘齐平 */
+  right: 24px;
+  bottom: calc(100% + 6px);
+  width: 300px;
+  max-height: min(460px, 64vh);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: var(--s1);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 18px 48px -20px rgba(0, 0, 0, 0.75);
+  z-index: 45;
+}
+.model-pop[hidden] { display: none; }
+.model-pop-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 8px 7px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--hyacinth-muted-foreground);
+}
+.model-pop-note { opacity: 0.7; }
+
+.model-list { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.model-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--hyacinth-foreground);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.model-item:hover,
+.model-item.is-hover { background: var(--s2); }
+.model-item.is-active { background: var(--tint); }
+/* 未配密钥：弱化但不禁止 —— "这模型什么规格"仍值得看，能不能切由后端判 */
+.model-item.is-muted { opacity: 0.6; }
+.model-item.is-muted:hover { opacity: 0.9; }
+.model-item-main { flex: 1 1 auto; min-width: 0; }
+.model-item-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-item-meta {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-item-check { flex: 0 0 auto; width: 14px; height: 14px; color: var(--hyacinth-primary); opacity: 0; }
+.model-item.is-active .model-item-check { opacity: 1; }
+
+/* 二级菜单：贴着悬停项的右侧展开。位置由 JS 按该项的 rect 计算（见 positionModelDetail），
+   纯 CSS 做不到"跟着当前项"。窗口太窄时会翻到左侧（is-left）。 */
+.model-detail {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 6px;
+  width: 264px;
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--s1);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 18px 48px -20px rgba(0, 0, 0, 0.75);
+  z-index: 46;
+}
+.model-detail[hidden] { display: none; }
+.model-detail.is-left { left: auto; right: calc(100% + 8px); }
+.model-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.model-detail-badge {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--hyacinth-primary);
+}
+.model-detail-desc {
+  margin: 6px 0 10px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--hyacinth-muted-foreground);
+}
+.model-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--hair);
+  font-size: 11px;
+}
+.model-detail-key { color: var(--hyacinth-muted-foreground); }
+.model-detail-val { color: var(--hyacinth-foreground); font-variant-numeric: tabular-nums; }
+.model-effort {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.model-effort-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.model-effort-btn:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+/* 非当前模型：档位只读（不代表可以就地改） */
+.model-effort-btn.is-readonly { cursor: default; }
+.model-effort-btn.is-readonly:hover { background: transparent; color: var(--hyacinth-muted-foreground); }
+
+/* ── 7.2 通道「改模型」编辑行 ─────────────────────────────────────
+   挂在通道行**下方**并独占整行：操作列只有按钮那么宽，两个下拉塞进去会
+   往左压到"提供商"列上（实测截图确认过），而且模型名一长就被截断。 */
+.chan-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hair);
+  background: color-mix(in srgb, var(--hyacinth-foreground) 4%, transparent);
+}
+.chan-edit-label {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  min-width: 76px;
+}
+.model-effort-btn.is-active {
+  background: var(--tint);
+  border-color: var(--tint-strong);
+  color: var(--hyacinth-primary);
+}
+
 /* 输入框下沿：左＝模式按钮，右＝操作提示。
    内缩 15px 是因为 composer 边框到 textarea 文字正好差这一格（对齐输入文字）。 */
 .composer-foot {
@@ -1667,6 +1871,186 @@
 .pv-title svg { width: 14px; height: 14px; color: var(--hyacinth-primary); flex: 0 0 auto; }
 .pv-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 
+/* ── 标题即换根按钮 ──
+   原来这里是 <span>，现在换成 <button>：外观沿用 .pv-title，只补按钮该有的
+   基线与 hover。caret 单独染色，别跟着 folder 图标一起变主色。 */
+.pv-root-btn {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  padding: 3px 6px 3px 4px;
+  margin-left: -4px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease);
+}
+.pv-root-btn:hover,
+.pv-root-btn[aria-expanded="true"] { background: var(--s2); }
+.pv-root-btn:focus-visible { outline: 2px solid var(--hyacinth-primary); outline-offset: -1px; }
+.pv-root-caret {
+  width: 12px !important;
+  height: 12px !important;
+  color: var(--hyacinth-muted-foreground) !important;
+  opacity: 0.7;
+  transition: transform var(--t-fast) var(--ease);
+}
+.pv-root-btn[aria-expanded="true"] .pv-root-caret { transform: rotate(180deg); }
+/* 换过根：caret 提亮，暗示"这里被改过"（原工作区在 title 里） */
+.pv-root-btn.is-custom .pv-root-caret { color: var(--hyacinth-primary) !important; opacity: 1; }
+
+/* ── 根目录选择器 ──
+   贴在标题栏下沿、横向铺满整栏。绝对定位而不是占据流内空间：
+   它是临时面板，弹出时不该把下面的树挤走。 */
+.pv-root-pop {
+  position: absolute;
+  top: 40px;
+  left: 8px;
+  right: 8px;
+  z-index: 40;
+  max-width: 560px;
+  /* 520 封顶：目录多时列表内部滚动，面板不至于长得像一整页 */
+  max-height: min(520px, calc(100% - 56px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hair-strong, var(--hair));
+  background: var(--s1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+.pv-root-pop[hidden] { display: none; }
+
+.pv-root-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.pv-root-chip {
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.pv-root-chip:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+.pv-root-chip.is-current {
+  color: var(--hyacinth-primary);
+  border-color: var(--hyacinth-primary);
+  background: var(--tint);
+}
+.pv-root-chip.is-dir { border-style: dashed; }
+
+.pv-root-pathbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pv-root-up { width: 24px; height: 24px; flex: 0 0 auto; }
+.pv-root-up svg { width: 14px; height: 14px; }
+.pv-root-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hair);
+  background: var(--s2);
+  color: var(--hyacinth-foreground);
+}
+.pv-root-path:focus { outline: none; border-color: var(--hyacinth-primary); }
+
+.pv-root-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  padding: 3px;
+}
+.pv-root-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--hyacinth-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-root-item:hover { background: var(--s2); }
+.pv-root-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-root-item svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--hyacinth-muted-foreground);
+}
+.pv-root-note-inline {
+  padding: 10px 8px;
+  font-size: 11px;
+  color: var(--hyacinth-muted-foreground);
+  line-height: 1.6;
+}
+.pv-root-note-inline.is-error { color: var(--state-error); }
+
+.pv-root-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pv-root-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--hyacinth-muted-foreground);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-root-btn-ghost,
+.pv-root-btn-main {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--hyacinth-foreground);
+}
+.pv-root-btn-ghost:hover { background: var(--s2); }
+.pv-root-btn-main {
+  border-color: transparent;
+  background: var(--hyacinth-primary);
+  color: #fff;
+}
+.pv-root-btn-main:disabled { opacity: 0.5; cursor: default; }
+.pv-root-btn-main:not(:disabled):hover { filter: brightness(1.08); }
+
 .pv-icon {
   display: inline-flex;
   align-items: center;
@@ -1761,6 +2145,15 @@
   transition: background var(--t-fast) var(--ease);
 }
 .pv-item:hover { background: var(--s2); }
+/* 拖拽引用：文件行可拖进输入框（插入绝对路径）。拖动中压暗，明确"正在被拖的是它" */
+.pv-item.is-dragging { opacity: 0.45; }
+
+/* 从预览栏拖文件进来时换成实线 + 成功色：落点是"插入路径"，不是"加图片附件"
+   （app.css 里 is-drag-over 是主色虚线；同特异度，本文件后加载 ⇒ 这条赢） */
+#chat-composer.is-drag-path {
+  outline-style: solid;
+  outline-color: var(--state-success);
+}
 .pv-item.is-active { background: var(--tint); color: var(--hyacinth-foreground); }
 .pv-item.is-dir { font-weight: 550; }
 /* lucide 会把 <i data-lucide> 换成 <svg>；是否保留原 class 取决于版本，
@@ -1977,6 +2370,33 @@
   border: 0;
   background: #fff;
 }
+/* HTML 预览（沙箱 iframe）：白底是刻意的 —— 大多数页面按白底设计，
+   套用暗色主题的卡片底会让浅色页面看起来"发灰" */
+.pv-html-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border: 0;
+  background: #fff;
+}
+
+/* meta 行右侧的「源码 / 预览」切换 */
+.pv-src-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  height: 20px;
+  padding: 0 9px;
+  border: 1px solid var(--hair-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hyacinth-muted-foreground);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.pv-src-toggle:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+
 .pv-binary {
   padding: 24px 16px;
   text-align: center;

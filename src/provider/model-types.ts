@@ -7,6 +7,20 @@
 
 import type { ProviderSampling } from './fields.js';
 
+/**
+ * 推理/思考强度档位（OpenAI 兼容层的 `reasoning_effort` 直接透传这个值）。
+ *
+ * 为什么是这五档：上游实际使用的取值集合就是 `minimal|low|medium|high|max`
+ * （OpenAI 系有 minimal/low/medium/high，DeepSeek V4 用 high/max），
+ * 原先只声明 'high'|'max' 会把"低档"整个表达不出来 —— UI 上的三档里
+ * 有两档其实映射不到上游。
+ *
+ * ⚠️ 这是**能力上限**而不是每个模型都支持：具体某个模型接受哪些值由上游决定，
+ * 传不认识的档位会被上游 400。所以 UI 侧只对 `capabilities.thinking` 的模型
+ * 显示这组档位，且默认值来自模型目录条目（reasoningEffort）。
+ */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max';
+
 /** 模型目录条目 */
 export interface ModelCatalogEntry {
   id: string;
@@ -34,8 +48,8 @@ export interface ModelCatalogEntry {
   status: string;
   replacedBy?: string;
   reasoning?: boolean;
-  /** 推理/思考强度：high | max（仅 DeepSeek V4 等支持 reasoning 的模型有效） */
-  reasoningEffort?: 'high' | 'max';
+  /** 推理/思考强度（仅支持 reasoning 的模型有效） */
+  reasoningEffort?: ReasoningEffort;
   /**
    * **模型级**思考接线覆盖（优先于厂商级 thinkingStyle，取值见 thinking-style.ts）。
    *

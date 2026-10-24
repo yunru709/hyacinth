@@ -81,8 +81,8 @@
         <div class="view-pop-head">显示</div>
         <button class="view-item" type="button" role="switch" aria-checked="true" data-view="thinking">
           <span class="view-item-body">
-            <span class="view-item-title">思考过程</span>
-            <span class="view-item-desc">作答前的推理；关掉后只剩结论</span>
+            <span class="view-item-title">思考内容</span>
+            <span class="view-item-desc">模型内部的推理（thinking）；工具与结论照常显示</span>
           </span>
           <span class="view-switch" aria-hidden="true"></span>
         </button>
@@ -210,6 +210,16 @@
               rows="1"
               aria-label="消息输入"></textarea>
             <div class="composer-actions">
+              <!-- 模型选择器：从顶栏挪到输入框旁。
+                   理由：切模型是"发这条消息之前"的决定，和发送按钮同处一个动作带里最顺手；
+                   顶栏那枚 chip 继续做只读状态展示，不承担切换入口。 -->
+              <button id="model-pick-btn" class="model-pick" type="button"
+                      aria-haspopup="menu" aria-expanded="false" aria-controls="model-pop"
+                      title="切换模型（悬停查看详情）">
+                <i data-lucide="cpu"></i>
+                <span id="model-pick-name">模型</span>
+                <i data-lucide="chevron-up" class="model-pick-caret"></i>
+              </button>
               <input type="file" id="chat-file-input" accept="image/*" multiple hidden>
               <button id="chat-attach-btn" class="cbtn" aria-label="添加图片" title="添加图片（也可直接粘贴或拖入）">
                 <i data-lucide="paperclip" class="w-4 h-4"></i>
@@ -222,6 +232,18 @@
               </button>
             </div>
           </div>
+          <!-- 模型选择弹层：向上开（贴输入框），悬停列表项时右侧展开二级菜单。
+               二级菜单承载"这个模型能干什么"（上下文 / 是否支持思考 / 价格）与
+               "思考强度"这一个真正可调的旋钮 —— 列表只负责选，细节不塞进每一行。 -->
+          <div id="model-pop" class="model-pop" hidden role="menu" aria-label="选择模型">
+            <div class="model-pop-head">
+              <span>模型</span>
+              <span id="model-pop-count" class="model-pop-note"></span>
+            </div>
+            <div id="model-list" class="model-list" role="listbox" aria-label="模型"></div>
+            <div id="model-detail" class="model-detail" hidden></div>
+          </div>
+
           <!-- 输入框下沿：左＝会话模式（权限档位 + 目标模式），右＝操作提示。
                为什么放在这里而不是输入框内部：档位是"这个会话按什么规则干活"的常驻状态，
                不是一次性动作（发送/附件），塞进右侧按钮排会让人以为是"再点一下就发出去"。
@@ -329,18 +351,34 @@
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <section aria-labelledby="reasoning-heading" class="bg-card border border-border rounded-lg p-5">
                 <h2 id="reasoning-heading" class="text-sm font-semibold text-foreground mb-4">推理强度</h2>
-                <div class="inline-flex p-1 rounded-md bg-muted border border-border" role="radiogroup" aria-label="推理强度">
+                <!-- 五档 + 关闭：上游实际的取值集合就是 minimal/low/medium/high/max，
+                     原来的三档把"极低"和"最高"挤掉了（模型页只能表达 low/medium/high，
+                     而 DeepSeek V4 吃的是 high/max ⇒ 选"高"实际发 medium，选"中"发 medium 也一样）。
+                     关闭单独成档：它对应 enabled:false（不发 reasoning_effort），不是某个强度值。 -->
+                <div class="inline-flex flex-wrap p-1 rounded-md bg-muted border border-border" role="radiogroup" aria-label="推理强度">
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="off" class="sr-only peer">
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">关</span>
+                  </label>
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="minimal" class="sr-only peer">
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">极低</span>
+                  </label>
                   <label class="cursor-pointer">
                     <input type="radio" name="reasoning" value="low" class="sr-only peer">
-                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">低</span>
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">低</span>
                   </label>
                   <label class="cursor-pointer">
                     <input type="radio" name="reasoning" value="medium" class="sr-only peer" checked>
-                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-primary peer-checked:border peer-checked:border-primary transition-colors">中</span>
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-primary peer-checked:border peer-checked:border-primary transition-colors">中</span>
                   </label>
                   <label class="cursor-pointer">
                     <input type="radio" name="reasoning" value="high" class="sr-only peer">
-                    <span class="block px-4 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">高</span>
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">高</span>
+                  </label>
+                  <label class="cursor-pointer">
+                    <input type="radio" name="reasoning" value="max" class="sr-only peer">
+                    <span class="block px-3 py-1.5 text-xs rounded text-muted-foreground peer-checked:bg-card peer-checked:text-foreground peer-checked:border peer-checked:border-border transition-colors">最高</span>
                   </label>
                 </div>
                 <p id="model-reasoning-desc" class="mt-3 text-xs text-muted-foreground">中等强度在响应速度与复杂推理之间取得平衡。</p>
@@ -1557,10 +1595,15 @@
          这里只负责展示。默认收起，展开状态与宽度存 localStorage。 -->
     <aside id="preview-dock" hidden aria-label="文件预览">
       <div class="pv-head">
-        <span class="pv-title" title="工作区根目录">
+        <!-- 标题即"换根"入口：预览栏原先锁死在启动目录（hyacinth 仓库），
+             想看一眼桌面上的产物只能绕出去。这里做成一个下拉按钮，
+             点开是目录选择器（后端 /api/fs/browse，只限本机）。 -->
+        <button id="pv-root-btn" class="pv-title pv-root-btn" type="button"
+                aria-haspopup="dialog" aria-expanded="false" title="点击切换预览根目录">
           <i data-lucide="folder-open"></i>
           <span id="pv-root-name">文件预览</span>
-        </span>
+          <i data-lucide="chevron-down" class="pv-root-caret"></i>
+        </button>
         <span class="pv-head-actions">
           <button id="pv-refresh-btn" class="pv-icon" type="button" title="刷新当前目录" aria-label="刷新当前目录">
             <i data-lucide="refresh-cw"></i>
@@ -1611,6 +1654,27 @@
             <i data-lucide="panel-right-close"></i>
           </button>
         </span>
+      </div>
+
+      <!-- 根目录选择器：贴着标题栏向下展开。三段式 ——
+           快捷位置（工作区/主目录/盘符/最近）→ 路径输入 + 一级目录列表 → 确认。
+           点目录行是"进去"，底部按钮才是"就选这个"，两者职责分开，
+           免得点一下就换根、误触之后还得再找回来。 -->
+      <div id="pv-root-pop" class="pv-root-pop" role="dialog" aria-label="选择预览根目录" hidden>
+        <div class="pv-root-shortcuts" id="pv-root-shortcuts"></div>
+        <form class="pv-root-pathbar" id="pv-root-pathbar">
+          <button type="button" id="pv-root-up" class="pv-icon pv-root-up" title="上一级" aria-label="上一级">
+            <i data-lucide="corner-left-up"></i>
+          </button>
+          <input id="pv-root-path" class="pv-root-path" type="text" spellcheck="false"
+                 autocomplete="off" aria-label="目录路径" placeholder="C:\…">
+        </form>
+        <div class="pv-root-list" id="pv-root-list" role="listbox" aria-label="子目录" tabindex="0"></div>
+        <div class="pv-root-foot">
+          <span class="pv-root-note" id="pv-root-note">只能在本机操作</span>
+          <button type="button" id="pv-root-cancel" class="pv-root-btn-ghost">取消</button>
+          <button type="button" id="pv-root-open" class="pv-root-btn-main">在此打开</button>
+        </div>
       </div>
 
       <!-- .pv-body：目录列 / 分隔条 / 正文列 三件套。

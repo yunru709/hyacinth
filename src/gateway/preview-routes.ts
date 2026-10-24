@@ -1,29 +1,37 @@
 /**
- * preview-routes — 工作区**只读**文件预览（供 WebUI 右侧「预览」栏）
+ * preview-routes — 文件预览（供 WebUI 右侧「预览」栏）
  *
  * 端点：
- *   GET /api/fs/meta              → 工作区根路径 / 名称 / 各项上限
- *   GET /api/fs/list?path=&all=1  → 某个目录的一级条目
- *   GET /api/fs/read?path=        → 文本文件内容（UTF-8，超长截断）
- *   GET /api/fs/raw?path=         → 原始字节（图片 / PDF / 其它二进制）
+ *   GET  /api/fs/meta              → 当前根路径 / 名称 / 各项上限
+ *   GET  /api/fs/list?path=&all=1  → 某个目录的一级条目
+ *   GET  /api/fs/read?path=        → 文本文件内容（UTF-8，超长截断）
+ *   GET  /api/fs/raw?path=         → 原始字节（图片 / PDF / HTML / 其它二进制）
+ *   GET  /api/fs/browse?dir=       → 目录选择器用：列**子目录**（只回环可达）
+ *   POST /api/fs/root              → 切换预览根目录（只回环可达）
  *
  * 认证策略（与 /api/media **相反**）：
  *   媒体端点豁免钥匙，是因为 <img src> 没法带 Authorization 头；
- *   本组端点是 fetch 调用的，能带。而它能读到工作区里**任何**文件——源码、
+ *   本组端点是 fetch 调用的，能带。而它能读到根目录里**任何**文件——源码、
  *   配置、可能含密钥的 .env——没有理由放宽，因此不进 isPublicReadRoute。
  *
- * 安全姿态（fail-closed，三条）：
- *   1. 只接受相对路径；以 / 或盘符开头的绝对路径直接拒（path.resolve 在
- *      Windows 上遇到第二个绝对路径会**整体丢弃前一个**，只看相对性判断会漏）。
- *   2. resolve 之后再用 realpath 比对：符号链接指向工作区外 ⇒ 拒。
+ * 安全姿态（fail-closed，四条）：
+ *   1. list/read/raw 只接受**相对当前根**的路径；以 / 或盘符开头的绝对路径
+ *      直接拒（path.resolve 在 Windows 上遇到第二个绝对路径会**整体丢弃前
+ *      一个**，只看相对性判断会漏）。
+ *   2. resolve 之后再用 realpath 比对：符号链接指向根外 ⇒ 拒。
  *      只看 resolve 后的字符串会被 `link -> /etc` 这类链接骗过去。
  *   3. `.git` 永不列出：对象库体积大且对"看文件"毫无意义。
+ *   4. **换根只能本机发起**（browse / root 两个端点校验 remoteAddress 是回环）。
+ *      否则任何拿到钥匙的局域网客户端都能把根设成 `C:\` 再随意读——
+ *      那等于把"预览工作区"变成"读全盘"。回环限制不影响正常使用：
+ *      换根本来就是坐在机器前的人做的事。
  *
  * 只读是本模块的硬边界：没有写、没有删、没有移动。要改文件走 agent 的工具
  * （带审批），不要在这里开口子。
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createLogger } from '../logging/logger.js';
@@ -152,6 +160,12 @@ const MIME_BY_EXT: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.svg': 'image/svg+xml',
   '.pdf': 'application/pdf',
+  // HTML 预览用同源 iframe 加载：缺了这条会回 octet-stream，浏览器只会当附件下载。
+  // ⚠️ **不能带 charset**：HTTP 头的 charset 优先级高于页面里的 <meta charset>，
+  //    写死 utf-8 会让 gb2312/gbk 的老页面整页乱码（实测 tools-dev 下的页面就是 gb2312）。
+  //    不声明则浏览器按 <meta> 走；没有 meta 的现代页面会被自动嗅探成 utf-8。
+  '.html': 'text/html',
+  '.htm': 'text/html',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mp3': 'audio/mpeg',
@@ -163,7 +177,7 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 /** 前端用来决定"怎么渲染"的类别；不是完整 MIME 表，够用即可 */
-export type PreviewKind = 'text' | 'markdown' | 'image' | 'pdf' | 'binary' | 'dir';
+export type PreviewKind = 'text' | 'markdown' | 'image' | 'pdf' | 'html' | 'binary' | 'dir';
 
 export function classifyFile(relPath: string): { ext: string; kind: PreviewKind; lang: string } {
   const ext = path.extname(relPath).toLowerCase();
@@ -175,6 +189,9 @@ export function classifyFile(relPath: string): { ext: string; kind: PreviewKind;
     return { ext, kind: 'image', lang: '' };
   }
   if (ext === '.pdf') return { ext, kind: 'pdf', lang: '' };
+  // HTML 单独成一类：前端默认用沙箱 iframe 渲染，并可切回源码。
+  // 当成普通 text 的话，点开一个页面只能看到标签 —— 预览栏对 .html 就等于没有预览。
+  if (ext === '.html' || ext === '.htm') return { ext, kind: 'html', lang: 'html' };
   return { ext, kind: 'text', lang: LANG_BY_EXT[ext] ?? '' };
 }
 
@@ -225,44 +242,155 @@ function stripBom(s: string): string {
   return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
 }
 
+// ── 根目录状态 ────────────────────────────────────────────────────
+
+/** 根目录选择的落盘位置（与其它本机状态同放 ~/.agent） */
+const ROOT_STATE_FILE = path.join(os.homedir(), '.agent', 'preview-root.json');
+/** 目录选择器里最多回多少条子目录 */
+const MAX_BROWSE_ENTRIES = 500;
+/** 最近使用保留几条 */
+const MAX_RECENT_ROOTS = 6;
+
+interface RootState {
+  /** 规范化绝对路径（未 realpath） */
+  norm: string;
+  /** realpath 后的路径，越界判定基准 */
+  real: string;
+}
+
+interface RootPrefs {
+  root: string;
+  recent: string[];
+}
+
+/**
+ * 把一个绝对路径变成 RootState。
+ * realpath 失败（目录刚被删/没权限）时退回 norm —— 此时 meta 会给出
+ * exists:false，前端据此提示，而不是把整个预览栏打死。
+ */
+function makeRoot(abs: string): RootState {
+  const norm = path.resolve(abs);
+  let real: string;
+  try {
+    real = fs.realpathSync(norm);
+  } catch {
+    real = norm;
+  }
+  return { norm, real };
+}
+
+/** 目录是否存在（异常一律当不存在：无权限与不存在对用户是同一种结果） */
+function isDirectory(abs: string): boolean {
+  try {
+    return fs.statSync(abs).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** 读根目录偏好；坏文件/不存在都退回空设置（不抛） */
+function loadRootPrefs(file: string): RootPrefs {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<RootPrefs>;
+    return {
+      root: typeof raw.root === 'string' ? raw.root : '',
+      recent: Array.isArray(raw.recent) ? raw.recent.filter((x) => typeof x === 'string') : [],
+    };
+  } catch {
+    return { root: '', recent: [] };
+  }
+}
+
+function saveRootPrefs(file: string, prefs: RootPrefs): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(prefs, null, 2), 'utf-8');
+  } catch (err) {
+    // 存不下只是"下次启动记不住"，不该让当前这次切换失败
+    logger.warn(`preview root 持久化失败: ${(err as Error)?.message ?? err}`);
+  }
+}
+
+/**
+ * 是否本机发起。换根 / 浏览任意目录只对回环开放：
+ * 这两件事等价于"扩大服务端的可读范围"，没有任何理由让局域网客户端做。
+ */
+function isLoopbackRequest(req: FastifyRequest): boolean {
+  const ip = req.socket?.remoteAddress ?? '';
+  return ip === '::1' || ip === '127.0.0.1' || ip === '::ffff:127.0.0.1';
+}
+
+/** Windows 下探测存在的盘符根（`C:\`），其它平台给 `/` */
+function listDriveRoots(): string[] {
+  if (process.platform !== 'win32') return ['/'];
+  const out: string[] = [];
+  for (let c = 65; c <= 90; c++) {
+    const root = String.fromCharCode(c) + ':\\';
+    try {
+      if (fs.statSync(root).isDirectory()) out.push(root);
+    } catch {
+      // 空光驱/未挂载的盘符会抛，正常跳过
+    }
+  }
+  return out;
+}
+
 // ── 路由注册 ──────────────────────────────────────────────────────
 
 /**
- * 注册工作区文件预览路由。
+ * 注册文件预览路由。
  * @param app Fastify 实例（由 http-webhook 传入）
- * @param cwd 工作目录（即"工作区根"；预览不允许越过它）
+ * @param cwd 启动时的工作目录 —— 作为**默认根**，用户可在预览栏里换成别的目录
+ * @param opts.stateFile 根目录偏好的落盘文件（测试传临时文件，避免污染 ~/.agent）
  */
-export function registerPreviewRoutes(app: FastifyInstance, cwd: string): void {
-  const rootNorm = path.resolve(cwd || process.cwd());
-  // root 自己也 realpath 一次：若 cwd 本身就在符号链接下，用它当基准比对会
-  // 把"链接内"误判成"链接外" ✗
-  let rootReal: string;
-  try {
-    rootReal = fs.realpathSync(rootNorm);
-  } catch {
-    rootReal = rootNorm;
-  }
+export function registerPreviewRoutes(
+  app: FastifyInstance,
+  cwd: string,
+  opts: { stateFile?: string } = {},
+): void {
+  const stateFile = opts.stateFile ?? ROOT_STATE_FILE;
+  const defaultRootNorm = path.resolve(cwd || process.cwd());
+  // 持久化过的根优先：重启后接着看上次那个目录，符合"我选过了"的预期。
+  // 但记录里的目录若已不存在，就别硬撑 —— 退回工作区，否则一开栏就是一屏报错。
+  const prefs = loadRootPrefs(stateFile);
+  const savedOk = prefs.root && isDirectory(prefs.root);
+  let root: RootState = makeRoot(savedOk ? prefs.root : defaultRootNorm);
 
-  const safe = (rel: string | undefined | null): SafePath => resolveInside(rootReal, rootNorm, rel);
+  const safe = (rel: string | undefined | null): SafePath => resolveInside(root.real, root.norm, rel);
 
-  // ── GET /api/fs/meta ────────────────────────────────────────────
-  app.get('/api/fs/meta', async (_req: FastifyRequest, reply: FastifyReply) => {
+  function metaOf(): Record<string, unknown> {
     let exists = false;
     try {
-      exists = fs.statSync(rootNorm).isDirectory();
+      exists = fs.statSync(root.norm).isDirectory();
     } catch {
       exists = false;
     }
-    return reply.send({
-      root: rootNorm,
-      name: path.basename(rootNorm) || rootNorm,
+    return {
+      root: root.norm,
+      name: path.basename(root.norm) || root.norm,
       exists,
+      defaultRoot: defaultRootNorm,
+      // 换过根 ⇒ 前端可以显示"回到工作区"这类入口
+      isCustom: path.resolve(root.norm) !== path.resolve(defaultRootNorm),
       maxTextBytes: MAX_TEXT_BYTES,
       maxRawBytes: MAX_RAW_BYTES,
       maxListEntries: MAX_LIST_ENTRIES,
       hidden: [...ALWAYS_HIDDEN],
       hiddenByDefault: [...HIDDEN_BY_DEFAULT],
-    });
+    };
+  }
+
+  function rememberRecent(dir: string): void {
+    const next = [dir, ...prefs.recent.filter((x) => path.resolve(x) !== path.resolve(dir))]
+      .slice(0, MAX_RECENT_ROOTS);
+    prefs.recent = next;
+    prefs.root = dir;
+    saveRootPrefs(stateFile, prefs);
+  }
+
+  // ── GET /api/fs/meta ────────────────────────────────────────────
+  app.get('/api/fs/meta', async (_req: FastifyRequest, reply: FastifyReply) => {
+    return reply.send(metaOf());
   });
 
   // ── GET /api/fs/list ────────────────────────────────────────────
@@ -433,6 +561,114 @@ export function registerPreviewRoutes(app: FastifyInstance, cwd: string): void {
     } catch (err) {
       return fail(reply, err, 'raw');
     }
+  });
+
+  // ── GET /api/fs/browse ─────────────────────────────────────────
+  // 目录选择器专用：接受**绝对路径**（无法再走 resolveInside —— 它的意义就是
+  // 走到当前根之外去挑新根）。所以只回目录名、不回文件内容，且只限本机。
+  app.get('/api/fs/browse', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isLoopbackRequest(req)) {
+      return reply.status(403).send({ error: '选择目录只允许在本机操作' });
+    }
+    const q = req.query as Record<string, string | undefined>;
+    const raw = (q.dir ?? '').trim();
+    if (raw && !path.isAbsolute(raw)) {
+      return reply.status(400).send({ error: '需要绝对路径' });
+    }
+    const dir = raw ? path.resolve(raw) : root.norm;
+
+    let st: fs.Stats;
+    try {
+      st = await fs.promises.stat(dir);
+    } catch {
+      return reply.status(404).send({ error: '目录不存在或无权访问' });
+    }
+    if (!st.isDirectory()) {
+      return reply.status(400).send({ error: '这不是目录' });
+    }
+
+    let names: string[] = [];
+    try {
+      names = await fs.promises.readdir(dir);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      // 系统保护目录（System Volume Information 之类）会 EPERM/EACCES：
+      // 这是"看到了但进不去"，与"不存在"要分开说，否则用户以为路径打错了
+      if (e.code === 'EPERM' || e.code === 'EACCES') {
+        return reply.status(403).send({ error: '没有访问该目录的权限' });
+      }
+      throw e;
+    }
+
+    const entries: Array<{ name: string; path: string }> = [];
+    let truncated = false;
+    for (const name of names) {
+      if (name === '.git' || name === '.svn' || name === '.hg') continue;
+      const childAbs = path.join(dir, name);
+      let isDir = false;
+      try {
+        // lstat 而非 stat：符号链接一律不当目录列出来，避免点进去落到别处
+        const ls = await fs.promises.lstat(childAbs);
+        isDir = ls.isDirectory();
+      } catch {
+        continue;
+      }
+      if (!isDir) continue;
+      if (entries.length >= MAX_BROWSE_ENTRIES) { truncated = true; break; }
+      entries.push({ name, path: childAbs });
+    }
+    // Windows 的盘符根与 POSIX 的 / 都不区分大小写，排序用 localeCompare 更自然
+    entries.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+
+    const parent = path.dirname(dir);
+    const shortcuts: Array<{ label: string; path: string; kind: string }> = [
+      { label: '工作区', path: defaultRootNorm, kind: 'workspace' },
+      { label: '主目录', path: os.homedir(), kind: 'home' },
+      ...listDriveRoots().map((p) => ({ label: p.replace(/[\\/]+$/, '') || p, path: p, kind: 'drive' })),
+    ];
+    // 去重（主目录和工作区可能是同一个），保序
+    const seen = new Set<string>();
+    const uniq = shortcuts.filter((s) => {
+      const k = path.resolve(s.path).toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    return reply.send({
+      dir,
+      // 到盘符根就没了：dirname('C:\\') === 'C:\\'
+      parent: parent === dir ? null : parent,
+      entries,
+      truncated,
+      shortcuts: uniq,
+      recent: prefs.recent.filter((x) => isDirectory(x)),
+      current: root.norm,
+    });
+  });
+
+  // ── POST /api/fs/root ──────────────────────────────────────────
+  // 换根：只改"预览看哪儿"，不动 agent 的工作目录，也不动工具围栏。
+  app.post('/api/fs/root', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isLoopbackRequest(req)) {
+      return reply.status(403).send({ error: '切换根目录只允许在本机操作' });
+    }
+    const body = (req.body ?? {}) as { root?: unknown };
+    const raw = typeof body.root === 'string' ? body.root.trim() : '';
+
+    // 空 / 'default' ⇒ 回到启动时的工作区（前端"回到工作区"按钮走这条路）
+    const target = !raw || raw === 'default' ? defaultRootNorm : raw;
+    if (target !== defaultRootNorm && !path.isAbsolute(target)) {
+      return reply.status(400).send({ error: '需要绝对路径' });
+    }
+    if (!isDirectory(target)) {
+      return reply.status(404).send({ error: '目录不存在' });
+    }
+
+    root = makeRoot(target);
+    rememberRecent(root.norm);
+    logger.info(`preview root → ${root.norm}`);
+    return reply.send(metaOf());
   });
 }
 

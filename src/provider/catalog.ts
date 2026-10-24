@@ -1,6 +1,7 @@
 import type { ProviderType } from '../types.js';
 import { getModelCatalogLoader, type ModelCatalogEntry } from './model-catalog-loader.js';
 import type { ProviderSampling } from './fields.js';
+import type { ReasoningEffort } from './model-types.js';
 
 /** 模型能力标记 */
 export interface ModelCapabilities {
@@ -33,7 +34,7 @@ export interface ModelInfo {
   status: 'available' | 'preview' | 'deprecated' | 'disabled';
   replacedBy?: string;
   /** 推理/思考强度（仅支持 reasoning 的模型有效） */
-  reasoningEffort?: 'high' | 'max';
+  reasoningEffort?: ReasoningEffort;
   /** 模型级思考接线覆盖（优先于厂商级；见 model-types.ts 同名字段说明） */
   thinkingStyle?: string;
   /** 模型级默认采样参数（激活配置/厂商级未覆盖时生效） */

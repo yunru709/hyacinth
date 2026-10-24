@@ -9,6 +9,7 @@ import type {
 } from '../types.js';
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
+import type { ReasoningEffort } from './model-types.js';
 import {
   buildThinkingParams,
   resolveThinkingStyle,
@@ -88,8 +89,15 @@ export interface OpenAICompatibleOptions {
  *
  * 用法：通过工厂函数设置各自的默认值。
  */
-/** DeepSeek 思考强度选项 */
-export type DeepSeekReasoningEffort = 'high' | 'max';
+/**
+ * 思考强度选项 —— 现在与 catalog 共用同一个类型（`minimal|low|medium|high|max`）。
+ *
+ * 旧名保留为别名：它是"OpenAI 兼容层透传给上游 reasoning_effort 的值"，
+ * 语义上早就不限于 DeepSeek（OpenAI 系的 minimal/low/medium/high 走同一条路）。
+ * ⚠️ 具体某家接不接受某个值由上游决定，传错会 400 —— 所以 UI 只对
+ * `capabilities.thinking` 的模型放出这组档位。
+ */
+export type DeepSeekReasoningEffort = ReasoningEffort;
 
 export class OpenAICompatibleProvider implements Provider {
   private client: OpenAI;

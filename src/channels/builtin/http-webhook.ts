@@ -311,7 +311,19 @@ export class HttpWebhookChannel implements ChannelHandler {
 
     this.app.addHook('onSend', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.header('X-Content-Type-Options', 'nosniff');
-      reply.header('X-Frame-Options', 'DENY');
+      /**
+       * 预览栏用**同源 iframe** 渲染工作区里的 HTML / PDF，全局 DENY 会把 iframe 直接挡成白屏。
+       * 只对 `/api/fs/raw` 这一个只读端点、且路径确实是 html/pdf 时放开到 SAMEORIGIN：
+       *   · 其它所有路由仍然禁止被任何页面嵌入；
+       *   · SAMEORIGIN 只允许本站自己的页面嵌入（预览栏），外部站点依旧嵌不了；
+       *   · 该端点本身 fail-closed（相对路径 + realpath 校验 + .git 排除），且只读。
+       */
+      let embeddable = false;
+      try {
+        const u = decodeURIComponent(String(_req.url || '')).toLowerCase();
+        embeddable = u.startsWith('/api/fs/raw') && /\.(?:html?|pdf)(?:$|&)/.test(u);
+      } catch { /* 非法编码：按不可嵌入处理 */ }
+      reply.header('X-Frame-Options', embeddable ? 'SAMEORIGIN' : 'DENY');
       reply.header('X-XSS-Protection', '1; mode=block');
       reply.header('Access-Control-Allow-Origin', (config.corsOrigin as string) || '*');
       reply.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');

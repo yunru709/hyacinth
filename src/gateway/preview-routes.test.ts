@@ -24,11 +24,16 @@ let root: string;
 let app: FastifyInstance;
 /** 工作区外的目录（用于验证越界被拒） */
 let outside: string;
+/** 根目录偏好的临时落盘文件：绝不能写真实的 ~/.agent/preview-root.json */
+let stateFile: string;
 
 beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'hyacinth-preview-'));
   outside = fs.mkdtempSync(path.join(os.tmpdir(), 'hyacinth-outside-'));
+  stateFile = path.join(root, '..', `hyacinth-preview-state-${process.pid}.json`);
+  try { fs.rmSync(stateFile, { force: true }); } catch { /* ignore */ }
   fs.writeFileSync(path.join(outside, 'secret.txt'), '工作区外的秘密', 'utf-8');
+  fs.mkdirSync(path.join(outside, 'sub'));
 
   fs.writeFileSync(path.join(root, 'a.txt'), '你好，工作区', 'utf-8');
   fs.writeFileSync(path.join(root, 'README.md'), '# 标题\n\n正文', 'utf-8');
@@ -42,12 +47,13 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(root, 'blob.bin'), Buffer.from([0x89, 0x50, 0x00, 0x01, 0x02]));
 
   app = fastify({ logger: false });
-  registerPreviewRoutes(app, root);
+  registerPreviewRoutes(app, root, { stateFile });
   await app.ready();
 });
 
 afterAll(async () => {
   if (app) await app.close();
+  try { fs.rmSync(stateFile, { force: true }); } catch { /* ignore */ }
   for (const d of [root, outside]) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
   }
@@ -159,6 +165,18 @@ describe('GET /api/fs/read', () => {
     expect(j.content).toContain('# 标题');
   });
 
+  it('HTML 被标成 html：前端据此走沙箱 iframe 而不是代码视图', async () => {
+    fs.writeFileSync(path.join(root, 'p.html'), '<html><body>x</body></html>', 'utf-8');
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/fs/read?path=p.html' });
+      const j = res.json();
+      expect(j.kind).toBe('html');
+      expect(j.lang).toBe('html');
+    } finally {
+      fs.unlinkSync(path.join(root, 'p.html'));
+    }
+  });
+
   it('二进制：不下发内容，只给信号让前端改走 raw', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/fs/read?path=blob.bin' });
     const j = res.json();
@@ -197,6 +215,23 @@ describe('GET /api/fs/raw', () => {
     expect(res.rawPayload.length).toBe(5);
   });
 
+  it('HTML：text/html 且**不带 charset**（带了会让 gb2312 老页面整页乱码）', async () => {
+    fs.writeFileSync(
+      path.join(root, 'enc.html'),
+      '<html><head><meta charset="gb2312"></head><body>中文</body></html>',
+      'utf-8',
+    );
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/fs/raw?path=enc.html' });
+      expect(res.statusCode).toBe(200);
+      // 精确断言：HTTP 头的 charset 优先级高于 <meta>，一旦有人"顺手"加上 utf-8，
+      // 预览栏里的老页面就会变成一片乱码（这个 bug 已经踩过一次）
+      expect(res.headers['content-type']).toBe('text/html');
+    } finally {
+      fs.unlinkSync(path.join(root, 'enc.html'));
+    }
+  });
+
   it('SVG 带 CSP：内联 svg 能跑脚本，是个 XSS 通道', async () => {
     fs.writeFileSync(path.join(root, 'x.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'utf-8');
     const res = await app.inject({ method: 'GET', url: '/api/fs/raw?path=x.svg' });
@@ -219,5 +254,183 @@ describe('GET /api/fs/raw', () => {
   it('同样拒绝越界', async () => {
     const res = await app.inject({ method: 'GET', url: `/api/fs/raw?path=${encodeURIComponent('../nope/secret.txt')}` });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+// ============================================================
+// 换根（browse / root）
+// ============================================================
+// 这组的重点是"换根真的生效，但只能本机做"：
+//   1. browse 只回子目录、能浏览到工作区**之外**（选择器的正当用途）
+//   2. 非回环发起 → 403（否则局域网客户端能把根设成 C:/ 再读全盘）
+//   3. POST 之后 meta.isCustom 翻转、旧相对路径改指向新根
+//   4. 'default' 回工作区；相对路径 / 不存在 → 400 / 404
+//   5. 偏好写盘后，新实例启动即恢复（"重启后还记得"）
+describe('换根', () => {
+  const remoteOutside = { remoteAddress: '10.1.2.3' };
+
+  it('browse 列出子目录（不含文件、不含 .git），并支持绝对路径下钻', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/fs/browse' });
+    expect(res.statusCode).toBe(200);
+    const j = res.json();
+    expect(j.dir).toBe(root);
+    expect(j.entries.map((e: { name: string }) => e.name)).toContain('src');
+    expect(j.entries.map((e: { name: string }) => e.name)).not.toContain('.git');
+    // 文件不入列（只有目录才是"位置"）
+    expect(j.entries.map((e: { name: string }) => e.name)).not.toContain('a.txt');
+    // 快捷位置至少要有工作区
+    expect(j.shortcuts.some((s: { kind: string }) => s.kind === 'workspace')).toBe(true);
+
+    const out = await app.inject({
+      method: 'GET',
+      url: '/api/fs/browse?dir=' + encodeURIComponent(outside),
+    });
+    expect(out.statusCode).toBe(200);
+    const oj = out.json();
+    expect(oj.dir).toBe(outside);
+    expect(oj.entries.map((e: { name: string }) => e.name)).toEqual(['sub']);
+    expect(oj.parent).toBe(path.dirname(outside));
+  });
+
+  it('browse 拒绝相对路径与不存在的目录', async () => {
+    const rel = await app.inject({ method: 'GET', url: '/api/fs/browse?dir=src' });
+    expect(rel.statusCode).toBe(400);
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/fs/browse?dir=' + encodeURIComponent(path.join(outside, 'nope')),
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it('非本机发起：browse / root 都 403', async () => {
+    const b = await app.inject({ method: 'GET', url: '/api/fs/browse', ...remoteOutside });
+    expect(b.statusCode).toBe(403);
+    const r = await app.inject({
+      method: 'POST', url: '/api/fs/root',
+      payload: { root: outside }, ...remoteOutside,
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('POST 换根后：meta 翻转、旧相对路径改指新根', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/api/fs/root', payload: { root: outside },
+    });
+    expect(res.statusCode).toBe(200);
+    const m = res.json();
+    expect(path.resolve(m.root)).toBe(path.resolve(outside));
+    expect(m.isCustom).toBe(true);
+    expect(path.resolve(m.defaultRoot)).toBe(path.resolve(root));
+
+    // 换根前 'secret.txt' 在工作区里不存在；换到 outside 后应能读到
+    const read = await app.inject({ method: 'GET', url: '/api/fs/read?path=secret.txt' });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().content).toContain('工作区外的秘密');
+
+    // 越界判定基准也跟着换了：原来的工作区现在反而在"外面"
+    const back = await app.inject({
+      method: 'GET', url: '/api/fs/read?path=' + encodeURIComponent('../' + path.basename(root) + '/a.txt'),
+    });
+    expect(back.statusCode).toBe(403);
+  });
+
+  it('偏好的确落盘（含 recent）', async () => {
+    const prefs = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(path.resolve(prefs.root)).toBe(path.resolve(outside));
+    expect(prefs.recent.length).toBeGreaterThan(0);
+  });
+
+  it('root 校验：相对路径 400、不存在 404', async () => {
+    const rel = await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: 'src' } });
+    expect(rel.statusCode).toBe(400);
+    const missing = await app.inject({
+      method: 'POST', url: '/api/fs/root',
+      payload: { root: path.join(outside, 'nope') },
+    });
+    expect(missing.statusCode).toBe(404);
+    // 失败的切换不该把当前根弄坏
+    const meta = await app.inject({ method: 'GET', url: '/api/fs/meta' });
+    expect(path.resolve(meta.json().root)).toBe(path.resolve(outside));
+  });
+
+  it("'default' 回到工作区", async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: 'default' } });
+    expect(res.statusCode).toBe(200);
+    expect(path.resolve(res.json().root)).toBe(path.resolve(root));
+    expect(res.json().isCustom).toBe(false);
+  });
+
+  it('重启（新实例 + 同一 stateFile）恢复上次的根', async () => {
+    await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: outside } });
+    const app2 = fastify({ logger: false });
+    registerPreviewRoutes(app2, root, { stateFile });
+    await app2.ready();
+    const meta = await app2.inject({ method: 'GET', url: '/api/fs/meta' });
+    expect(path.resolve(meta.json().root)).toBe(path.resolve(outside));
+    await app2.close();
+    // 复位，避免影响后续（本文件内没有后续，但保持对称）
+    await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: 'default' } });
+  });
+
+  it('记录里的目录被删掉时，退回工作区而不是卡在空根', async () => {
+    const gone = fs.mkdtempSync(path.join(os.tmpdir(), 'hyacinth-gone-'));
+    await app.inject({ method: 'POST', url: '/api/fs/root', payload: { root: gone } });
+    fs.rmSync(gone, { recursive: true, force: true });
+    const app3 = fastify({ logger: false });
+    registerPreviewRoutes(app3, root, { stateFile });
+    await app3.ready();
+    const meta = await app3.inject({ method: 'GET', url: '/api/fs/meta' });
+    expect(path.resolve(meta.json().root)).toBe(path.resolve(root));
+    await app3.close();
+  });
+});
+
+// ============================================================
+// 契约守卫：/api/fs 面「全只读 + 唯一一个受控 POST」
+// ============================================================
+// 这一组的用意不是测行为，而是**钉死形状**：
+// 预览栏的 fs 面必须只有 GET（读）+ 一个 POST /api/fs/root（换根，仅回环）。
+// 以后有人想加 POST /api/fs/write、DELETE /api/fs/entry 之类，这里会先红 ——
+// 想清楚"为什么预览栏需要写文件"再改，而不是顺手加一个。
+describe('契约：fs 面只读，唯一可变入口是 root', () => {
+  const routes: Array<{ method: string; url: string }> = [];
+
+  beforeAll(async () => {
+    const app2 = fastify({ logger: false });
+    registerPreviewRoutes(app2, root, { stateFile });
+    await app2.ready();
+    // printRoutes({ commonPrefix: false }) 输出形如：
+    //   ├── /api/fs/meta (GET, HEAD)
+    //   末行用 └──。前导是绘制树形的字符，必须先剥掉再匹配。
+    // 注意 GET 会被自动补一个 HEAD —— 那是同一读路径的伴生方法，不算写。
+    for (const raw of app2.printRoutes({ commonPrefix: false }).split('\n')) {
+      const line = raw.replace(/^[\s│├└─╮╯╰┬┴┼]*/, '').trim();
+      const m = /^(\/api\/fs\S*)\s+\(([A-Z, ]+)\)/.exec(line);
+      if (m) for (const meth of m[2].split(',').map((x) => x.trim())) routes.push({ method: meth, url: m[1] });
+    }
+    // 一条都没解析出来 ⇒ 解析逻辑对不上框架输出格式。此时"没违规"只是空集假象，
+    // 必须显式失败，否则这条守卫会静默通过（第一次写就踩到了：正则是 ^ 锚定，
+    // 被树形前缀挡住，路由 0 条）。
+    expect(routes.length).toBeGreaterThan(0);
+    await app2.close();
+  });
+
+  it('除 POST /api/fs/root 外，全部是 GET（HEAD 是 GET 的伴生，不算写）', () => {
+    const writes = routes.filter(
+      (r) => r.method !== 'GET' && r.method !== 'HEAD' && r.url !== '/api/fs/root',
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it('POST 有且仅有 /api/fs/root 一个', () => {
+    const posts = routes.filter((r) => r.method === 'POST');
+    expect(posts.map((r) => r.url)).toEqual(['/api/fs/root']);
+  });
+
+  it('解析出的读端点齐全（防止解析器漏行导致守卫被架空）', () => {
+    const gets = new Set(routes.filter((r) => r.method === 'GET').map((r) => r.url));
+    for (const p of ['/api/fs/meta', '/api/fs/list', '/api/fs/read', '/api/fs/raw', '/api/fs/browse']) {
+      expect(gets.has(p)).toBe(true);
+    }
   });
 });

@@ -778,6 +778,9 @@
         resetReconnect();
         loadHistory();
         loadSidebarRecent();      // A4：连接后才有 currentSessionId ⇒ 此刻才能正确高亮当前项
+        // 模型按钮的文案要等 WS 通了才能拉（bindModelPicker 在连接前就跑过一次，
+        // 那次必然失败 ⇒ 不补这一下，按钮会一直停在占位符"模型"）
+        void modelPickLoad();
         if (currentView() === 'model') loadModel();
         if (currentView() === 'sessions') loadSessions();
         if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); loadVoiceManager(); }
@@ -917,11 +920,26 @@
       case 'state.update':
         updateHeader(payload);
         break;
-      case 'session.change':
-        currentSessionId = (payload && payload.sessionId) || currentSessionId;
+      case 'session.change': {
+        // 协议层在 create / delete / batchDelete 后都会广播这条。
+        // ⚠️ 之前只更新 currentSessionId、**不刷新任何列表** ⇒ 在会话管理里删完，
+        //    左侧「最近」还是旧的，必须按 F5 才对得上（实测复现）。
+        //    delete 的 payload 带 sessionId，batchDelete 带 deleted 数组，两者都可能没有。
+        const p = payload || {};
+        const act = p.action || '';
+        // 只有 switch 的 sessionId 是"新的当前会话"；delete 的 sessionId 是**被删的**那个，
+        // 拿它覆盖 currentSessionId 等于把指针指向一个已不存在的目录（原实现的隐患）。
+        if (act === 'switch' && p.sessionId) currentSessionId = p.sessionId;
+        if (act === 'create' || act === 'delete' || act === 'batchDelete') {
+          void loadSidebarRecent();
+          if (currentView() === 'sessions') void loadSessions();
+        }
         break;
+      }
       case 'model.change':
         refreshState();
+        // 输入框旁的模型按钮与顶栏 chip 必须同源：TUI 或另一个窗口切了模型，这里跟着变
+        void modelPickLoad();
         if (currentView() === 'model') loadModel();
         break;
       case 'config.change':
@@ -1120,10 +1138,15 @@
     cohere: 'network', groq: 'zap', deepseek: 'cpu', qwen: 'cloud',
     ollama: 'box', llamacpp: 'box', local: 'hard-drive',
   };
+  // 六档（含 off）：与 index.html 的 radio 一一对应，也与上游 reasoning_effort 的
+  // 取值集合对齐（minimal/low/medium/high/max）。
   const REASONING_DESC = {
+    off: '完全关闭思考，响应最快；适合纯检索、格式转换这类不需要推理的任务。',
+    minimal: '极低强度，只做必要的前置判断。',
     low: '低强度优先响应速度，适合简单问答与短任务。',
     medium: '中等强度在响应速度与复杂推理之间取得平衡。',
     high: '高强度投入更多推理步骤，适合复杂代码与深度分析。',
+    max: '最高强度，允许模型长时间自检；慢，但适合难题与多步规划。',
   };
 
   async function loadModel() {
@@ -1139,6 +1162,11 @@
       renderChannels((chans && chans.channels) || []);
       renderLocalModels((loc && loc.models) || []);
       updateActiveCard(act);
+      // 档位回显：radio 默认 checked 写死在 HTML 里（medium），与实际生效值可能不一致
+      // （模型目录里 deepseek-flash 的默认是 high）。这里按输入框旁那个选择器的最新状态对齐。
+      $$('input[name="reasoning"]').forEach((r) => { r.checked = r.value === modelPick.effort; });
+      const rDesc = $('#model-reasoning-desc');
+      if (rDesc && REASONING_DESC[modelPick.effort]) rDesc.textContent = REASONING_DESC[modelPick.effort];
     } catch (e) { /* ignore */ }
   }
 
@@ -1212,9 +1240,25 @@
   }
 
   /**
+   * 模型目录缓存 —— 通道「改模型」的下拉选项数据源（与输入框旁的模型选择器同一份）。
+   *
+   * 为什么要缓存：每个通道行都可能展开一次改模型表单，逐个请求 58 条目录很浪费；
+   * 目录本身在一次会话里几乎不变（除非重启服务）。
+   */
+  let modelCatalogCache = null;
+  async function ensureModelCatalog() {
+    if (modelCatalogCache && modelCatalogCache.length) return modelCatalogCache;
+    const r = await client.request('model.listModels').catch(() => null);
+    modelCatalogCache = (r && r.models) || [];
+    return modelCatalogCache;
+  }
+
+  /**
    * 通道行操作 —— 接 model.setChannelModel / resetChannelModel / removeChannel ✓
-   * 优先用**行内表单**（点「改模型」在本行展开两个输入框 ✓）。
+   * 「改模型」是**行内表单**（点一下在本行展开两个下拉 ✓），不是弹窗、不是手填。
    * ⚠️ 刻意不用 window.prompt ✗：无头探针遇到原生对话框会卡住 ✓
+   * ⚠️ 原来是两个文本框，用户得自己记住 `provider` 和 `model` 的拼写 —— 拼错要到
+   *    "切换失败"才知道。目录里已经有全部厂商/模型，没有理由让人手打。
    */
   function channelOps(c, row) {
     const ops = el('div', 'flex items-center gap-1.5 justify-end flex-wrap');
@@ -1239,33 +1283,101 @@
       return b;
     };
 
-    // ── 改模型：行内表单（provider + model）──
+    // ── 改模型：行内表单（厂商下拉 + 模型下拉，联动）──
     const editBtn = mkBtn('改模型', '修改该通道的提供商/模型（写入配置文件，重启后仍生效）');
-    editBtn.onclick = () => {
-      ops.innerHTML = '';
-      const pIn = document.createElement('input');
-      pIn.placeholder = 'provider';
-      pIn.value = c.provider || '';
-      pIn.className = 'w-24 text-[11px] px-2 py-1 rounded-md border border-border bg-background text-foreground';
-      const mIn = document.createElement('input');
-      mIn.placeholder = 'model';
-      mIn.value = c.model || '';
-      mIn.className = 'w-36 text-[11px] px-2 py-1 rounded-md border border-border bg-background text-foreground';
+    editBtn.onclick = async () => {
+      // 再点一次 = 收起。编辑区挂在**本行下方**（独占整行），不挤在窄窄的操作列里 ——
+      // 操作列只有按钮那么宽，两个下拉塞进去会往左压到"提供商"列上。
+      const open = row.nextElementSibling;
+      if (open && open.classList.contains('chan-edit-row')) { open.remove(); return; }
+
+      const models = await ensureModelCatalog();
+      const selCls = 'text-[11px] px-2 py-1 rounded-md border border-border bg-background text-foreground';
+
+      // 厂商列表：目录里去重 + 保序；当前厂商若不在目录里（本地 / 自定义）补到最前，
+      // 否则一展开下拉就会"选中的是别人"
+      const provs = [...new Set(models.map((m) => m.provider))].sort();
+      const curProv = c.provider || provs[0] || '';
+      if (curProv && !provs.includes(curProv)) provs.unshift(curProv);
+
+      const pSel = document.createElement('select');
+      pSel.className = selCls + ' w-32';
+      pSel.title = '提供商';
+      pSel.setAttribute('aria-label', '提供商');
+      provs.forEach((p) => {
+        const o = document.createElement('option');
+        o.value = p;
+        o.textContent = p;
+        pSel.appendChild(o);
+      });
+      if (curProv) pSel.value = curProv;
+
+      const mSel = document.createElement('select');
+      mSel.className = selCls + ' w-56';
+      mSel.title = '模型';
+      mSel.setAttribute('aria-label', '模型');
+
+      // 通道里存的 model 可能是历史写法（带厂商前缀，如 deepseek/deepseek-v4.1-flash）
+      const curModel = String(c.model || '');
+      const curBare = curModel.includes('/') ? curModel.split('/').pop() : curModel;
+
+      const fillModels = () => {
+        const list = models.filter((m) => m.provider === pSel.value);
+        mSel.innerHTML = '';
+        if (!list.length) {
+          const o = document.createElement('option');
+          o.value = '';
+          o.textContent = '（使用该厂商默认模型）';
+          mSel.appendChild(o);
+          return;
+        }
+        list.forEach((m) => {
+          const o = document.createElement('option');
+          o.value = m.id;
+          o.textContent = m.name;
+          mSel.appendChild(o);
+        });
+        // 当前值不在目录里（自定义模型 / 已下线）⇒ 补一条"当前"选项并选中，
+        // 这样点"确定"等于什么都没改，而不是悄悄换成列表第一个
+        const hit = list.find((m) => m.id === curModel || m.id === curBare);
+        if (!hit && curModel && pSel.value === curProv) {
+          const o = document.createElement('option');
+          o.value = curModel;
+          o.textContent = curModel + '（当前，未在目录中）';
+          mSel.appendChild(o);
+          mSel.value = curModel;
+        } else if (hit) {
+          mSel.value = hit.id;
+        }
+      };
+      fillModels();
+      pSel.onchange = fillModels;
+
       const ok = mkBtn('确定');
       const cancel = mkBtn('取消');
-      cancel.onclick = () => renderOpsInto(ops, c, row);
+
+      const editRow = el('div', 'chan-edit-row');
+      editRow.appendChild(el('span', 'chan-edit-label', c.name));
+      editRow.appendChild(pSel);
+      editRow.appendChild(mSel);
+      editRow.appendChild(ok);
+      editRow.appendChild(cancel);
+      row.after(editRow);
+
+      cancel.onclick = () => editRow.remove();
       ok.onclick = () => {
-        if (!connected) { renderOpsInto(ops, c, row); return; }
+        if (!connected) { editRow.remove(); return; }
+        const provider = pSel.value;
+        if (!provider) return;
         ok.disabled = true;
         client.request('model.setChannelModel', {
           name: c.name,
-          provider: pIn.value.trim() || c.provider,
-          model: mIn.value.trim() || undefined,
+          provider,
+          model: mSel.value || undefined,
         })
-          .then(() => { appendMsg('system', '通道 ' + c.name + ' 已切换模型'); loadModel(); })
+          .then(() => { editRow.remove(); appendMsg('system', '通道 ' + c.name + ' 已切换模型'); loadModel(); })
           .catch((e) => { ok.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message)); });
       };
-      ops.appendChild(pIn); ops.appendChild(mIn); ops.appendChild(ok); ops.appendChild(cancel);
     };
     ops.appendChild(editBtn);
 
@@ -1470,8 +1582,12 @@
       r.addEventListener('change', () => {
         if (!r.checked) return;
         if (descEl && REASONING_DESC[r.value]) descEl.textContent = REASONING_DESC[r.value];
-        const enabled = r.value !== 'low';
-        client.request('model.setThinking', { enabled, effort: r.value }).catch(() => {});
+        // 'off' 是"关闭思考"这一档（enabled:false，不发 reasoning_effort）；
+        // 其余五档都是开启 + 具体强度 —— 以前把 low 当关闭，导致"低"发出去的是 disabled。
+        const enabled = r.value !== 'off';
+        client.request('model.setThinking', { enabled, effort: enabled ? r.value : undefined }).catch(() => {});
+        // 输入框旁的模型选择器里也有同一组档位：两处共用一个状态，切换要互相看得见
+        syncThinkingUI(r.value);
       });
     });
     // 添加密钥按钮
@@ -1953,14 +2069,17 @@
     width: 380,         // 栏宽 px
     treeH: 46,          // 竖排时：文件树占整栏高度的百分比
     treeW: 300,         // 放大态（横排）时：右侧目录列的宽度 px
-    rootName: '',       // 工作区根名（后端给）
-    rootAbs: '',        // 工作区绝对路径（剥工具参数里的前缀用）
+    rootName: '',       // 当前根目录名（后端给；可切换）
+    rootAbs: '',        // 当前根绝对路径（剥工具参数里的前缀用）
+    rootDefault: '',    // 启动时的工作区（"回到工作区"的目标）
+    isCustomRoot: false,// 是否已经换过根
     cwd: '.',           // 当前树的根目录（相对路径）
     showAll: false,     // 是否显示 node_modules 等依赖目录
     expanded: new Set(),// 已展开的目录
     children: new Map(),// path -> entries[]（目录内容缓存）
     inflight: new Set(),// 正在请求的目录
     current: null,      // 当前预览的文件元信息
+    htmlSource: false,  // HTML 预览：false=渲染（iframe）/ true=源码；跨文件保留用户的偏好
     token: null,        // 惰性读取的 ?token=
     pendingPath: '',    // ?preview=<path> 待到位的文件
   };
@@ -1980,6 +2099,23 @@
     const t = pvToken();
     if (t) headers.Authorization = 'Bearer ' + t;
     const r = await fetch(url, { headers, cache: 'no-store' });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* 非 JSON 响应 */ }
+      throw new Error(msg);
+    }
+    return r.json();
+  }
+
+  /** 换根用。与 pvGetJson 同一套鉴权头，只是多了 JSON body 与 POST */
+  async function pvPostJson(url, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    const t = pvToken();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    const r = await fetch(url, {
+      method: 'POST', headers, cache: 'no-store',
+      body: JSON.stringify(body || {}),
+    });
     if (!r.ok) {
       let msg = 'HTTP ' + r.status;
       try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) { /* 非 JSON 响应 */ }
@@ -2150,7 +2286,36 @@
       else if (e.key === 'ArrowRight' && isDir && !pv.expanded.has(entry.path)) { e.preventDefault(); pvActivate(entry); }
       else if (e.key === 'ArrowLeft' && isDir && pv.expanded.has(entry.path)) { e.preventDefault(); pvActivate(entry); }
     };
+
+    // ── 拖到输入框 = 插入该文件的绝对路径 ──────────────────────
+    // 只给文件加（目录拖进去得到的是一串路径，agent 反而要去列目录；
+    // 而且目录行本身是"点开/收起"，draggable 会让轻微拖动吞掉点击）。
+    if (!isDir) {
+      row.draggable = true;
+      row.classList.add('is-draggable');
+      row.addEventListener('dragstart', (e) => {
+        const abs = pvAbsPath(entry.path);
+        // 自定义类型是给 composer 认的"这是本应用的文件"；
+        // text/plain 让用户能拖到浏览器地址栏/编辑器里当普通路径用
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/x-hyacinth-path', entry.path);
+        e.dataTransfer.setData('text/plain', abs);
+        row.classList.add('is-dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
+    }
     return row;
+  }
+
+  /**
+   * 工作区相对路径 → 绝对路径。
+   * Windows 下用反斜杠（与服务端返回的 rootAbs 保持同一种写法），其余用正斜杠。
+   */
+  function pvAbsPath(rel) {
+    const root = String(pv.rootAbs || '').replace(/[\\/]+$/, '');
+    if (!root) return rel;                       // 拿不到 root（meta 未就绪）：退回相对路径
+    const sep = root.includes('\\') ? '\\' : '/';
+    return root + sep + String(rel).split('/').join(sep);
   }
 
   function extOf(name) {
@@ -2225,6 +2390,7 @@
       if (data.kind === 'markdown') pvRenderMarkdown(content, data);
       else if (data.kind === 'image') pvRenderImage(content, data);
       else if (data.kind === 'pdf') pvRenderPdf(content, data);
+      else if (data.kind === 'html') pvRenderHtml(content, data);
       else if (data.binary) pvRenderBinary(content, data);
       else pvRenderText(content, data);
       pvRenderTree();
@@ -2244,6 +2410,14 @@
     meta.appendChild(el('span', 'pv-badge', fmtSize(d.size)));
     if (d.truncated) {
       meta.appendChild(el('span', 'pv-badge is-warn', '已截断'));
+    }
+    // HTML：渲染 / 源码 切换。放在 meta 行最右，不占正文空间
+    if (d.kind === 'html') {
+      const btn = el('button', 'pv-src-toggle', pv.htmlSource ? '预览' : '源码');
+      btn.type = 'button';
+      btn.title = pv.htmlSource ? '用浏览器渲染这个页面' : '查看 HTML 源码';
+      btn.onclick = () => pvToggleHtmlSource();
+      meta.appendChild(btn);
     }
   }
 
@@ -2278,6 +2452,42 @@
     f.src = pvRawUrl(d.path);
     f.title = d.name;
     box.appendChild(f);
+  }
+
+  /**
+   * HTML 预览：默认用 iframe 渲染真实页面，meta 行可切回源码。
+   *
+   * ⚠️ sandbox **刻意不给 allow-same-origin**：给了的话，本地页面里的脚本就能
+   * 直接 fetch `/api/fs/read?path=…` 读工作区任意文件（同源带 cookie/token）。
+   * 现在脚本照常运行（allow-scripts），但 origin 是 opaque，拿不到本应用的 API。
+   * 代价：依赖 localStorage / 同源 iframe 通信的页面会报错 —— 对"看一眼长什么样"够用。
+   */
+  function pvRenderHtml(box, d) {
+    if (pv.htmlSource) {
+      pvRenderText(box, d);
+      return;
+    }
+    const f = document.createElement('iframe');
+    f.className = 'pv-html-frame';
+    f.src = pvRawUrl(d.path);
+    f.title = d.name;
+    f.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups');
+    f.setAttribute('referrerpolicy', 'no-referrer');
+    box.appendChild(f);
+  }
+
+  /** 渲染 / 源码 之间切换（只对 HTML 生效） */
+  function pvToggleHtmlSource() {
+    const d = pv.current;
+    if (!d || d.kind !== 'html') return;
+    pv.htmlSource = !pv.htmlSource;
+    const content = $('#pv-content');
+    if (!content) return;
+    content.textContent = '';
+    if (pv.htmlSource) pvRenderText(content, d);
+    else pvRenderHtml(content, d);
+    pvRenderMeta(d);
+    content.scrollTop = 0;
   }
 
   function pvRenderBinary(box, d) {
@@ -2329,6 +2539,8 @@
     dock.hidden = !open;
     // 收起时一并退出放大态：否则下次打开会莫名其妙占满整屏。
     if (!open) pvSetMax(false);
+    // 面板挂在栏里，栏都收了就不该留着 aria-expanded=true
+    if (!open && pvRoot.open) pvRootOpen(false);
     if (btn) btn.setAttribute('aria-pressed', open ? 'true' : 'false');
     pvSave();
     if (open && !pv.children.has(pv.cwd)) await pvLoadDir(pv.cwd);
@@ -2775,10 +2987,544 @@
     });
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 模型选择器（输入框右下角）：列表 + 悬停二级菜单
+  // ════════════════════════════════════════════════════════════
+  // 分工：列表只负责"选哪个"；二级菜单承载"这个模型能干什么"（上下文 / 是否支持思考 /
+  // 价格）与唯一真正可调的旋钮（思考强度）。每行都塞满元信息会让 10 个模型变成一堵墙。
+  const EFFORT_DEFS = [
+    { id: 'off', label: '关' },
+    { id: 'minimal', label: '极低' },
+    { id: 'low', label: '低' },
+    { id: 'medium', label: '中' },
+    { id: 'high', label: '高' },
+    { id: 'max', label: '最高' },
+  ];
+  const modelPick = {
+    models: [],
+    /** 已配置密钥的厂商（来自 model.listProviders）；空集 = 不限制 */
+    ready: new Set(),
+    provider: '',
+    model: '',
+    effort: 'medium',
+    busy: false,
+  };
+
+  function fmtTokens(n) {
+    const v = Number(n) || 0;
+    if (v >= 1048576) return Math.round(v / 1048576) + 'M';
+    if (v >= 1024) return Math.round(v / 1024) + 'K';
+    return String(v);
+  }
+
+  function modelPickLabel() {
+    const hit = modelPick.models.find((x) => x.provider === modelPick.provider && x.id === modelPick.model);
+    return hit ? hit.name : (modelPick.model || '模型');
+  }
+
+  function renderModelPickButton() {
+    const name = $('#model-pick-name');
+    if (name) name.textContent = modelPickLabel();
+  }
+
+  function renderModelList() {
+    const box = $('#model-list');
+    const cnt = $('#model-pop-count');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!modelPick.models.length) {
+      box.appendChild(el('div', 'model-item-meta', '暂无可用模型（先到模型页配置提供商密钥）'));
+      if (cnt) cnt.textContent = '';
+      return;
+    }
+    for (const m of modelPick.models) {
+      const active = m.provider === modelPick.provider && m.id === modelPick.model;
+      // 不按"是否配了密钥"禁用列表项：listProviders 的 configured 是**启发式**
+      // （没有 envKey 的在线厂商会被误判为已配置 —— 实测 commandcode 就是如此），
+      // 拿它当门禁会出现"看着能点、点了报 Provider not found"或"能跑却灰着"。
+      // 只在明显缺密钥时加一行提示，能不能切交给后端判，失败时给可操作的错误。
+      const maybeUnconfigured = modelPick.ready.size > 0 && !modelPick.ready.has(m.provider) && !active;
+      // is-muted 只是视觉弱化，不做禁用：configured 本身是启发式，禁错了比不禁更糟
+      const b = el('button', 'model-item' + (active ? ' is-active' : '') + (maybeUnconfigured ? ' is-muted' : ''));
+      b.type = 'button';
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+      b.dataset.provider = m.provider;
+      b.dataset.model = m.id;
+      const main = el('span', 'model-item-main');
+      main.appendChild(el('span', 'model-item-name', m.name));
+      const meta = [fmtTokens(m.contextWindow) + ' 上下文'];
+      if (m.reasoning) meta.push('支持思考');
+      if (m.status === 'preview') meta.push('预览');
+      if (maybeUnconfigured) meta.push('未配置密钥');
+      main.appendChild(el('span', 'model-item-meta', meta.join(' · ')));
+      const chk = el('span', 'model-item-check');
+      chk.innerHTML = '<i data-lucide="check"></i>';
+      b.append(main, chk);
+      b.addEventListener('click', () => switchModel(m.provider, m.id));
+      b.addEventListener('mouseenter', () => showModelDetail(m, b));
+      b.addEventListener('focus', () => showModelDetail(m, b));
+      box.appendChild(b);
+    }
+    if (cnt) cnt.textContent = modelPick.models.length + ' 个';
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* 图标缺失不影响功能 */ } }
+  }
+
+  /** 二级菜单：内容随悬停项重建，位置按该项的 rect 算（CSS 做不到"跟着当前项"） */
+  function showModelDetail(m, item) {
+    const pop = $('#model-pop');
+    const detail = $('#model-detail');
+    if (!pop || !detail) return;
+    $$('#model-list .model-item').forEach((x) => x.classList.toggle('is-hover', x === item));
+    detail.hidden = false;
+    detail.innerHTML = '';
+
+    const title = el('div', 'model-detail-title');
+    title.appendChild(el('span', '', m.name));
+    if (m.status === 'preview') title.appendChild(el('span', 'model-detail-badge', '预览'));
+    detail.appendChild(title);
+
+    const bits = [];
+    if (m.reasoning) bits.push('支持思考');
+    bits.push('上下文 ' + fmtTokens(m.contextWindow));
+    detail.appendChild(el('p', 'model-detail-desc',
+      bits.join('，') + '。点一下左侧即切换；思考强度对之后发出的消息生效。'));
+
+    const row = (k, v) => {
+      const r = el('div', 'model-detail-row');
+      r.appendChild(el('span', 'model-detail-key', k));
+      r.appendChild(el('span', 'model-detail-val', v));
+      return r;
+    };
+    detail.appendChild(row('厂商', m.provider));
+    detail.appendChild(row('上下文窗口', fmtTokens(m.contextWindow)));
+    detail.appendChild(row('单次最大输出', fmtTokens(m.maxOutputTokens)));
+    if (m.cost) {
+      detail.appendChild(row('价格 / 1M', '$' + m.cost.input + ' 入 · $' + m.cost.output + ' 出'));
+    }
+
+    // 思考强度只对**当前生效的模型**可调：setThinking 作用在活跃 provider 上，
+    // 让用户在"Claude 的详情卡"里点档位、实际改掉 deepseek 的强度，是最难排查的那种错。
+    // 非当前模型只展示它自己的默认档位，并说明切换后才可调。
+    if (m.reasoning) {
+      const isCurrent = m.provider === modelPick.provider && m.id === modelPick.model;
+      const shown = isCurrent ? modelPick.effort : (m.reasoningEffort || 'medium');
+      detail.appendChild(row('思考强度', isCurrent ? '点击切换' : '切换后可调'));
+      const grp = el('div', 'model-effort');
+      for (const d of EFFORT_DEFS) {
+        const b = el('button', 'model-effort-btn' + (d.id === shown ? ' is-active' : ''), d.label);
+        b.type = 'button';
+        b.dataset.effort = d.id;
+        if (!isCurrent) {
+          b.disabled = true;
+          b.classList.add('is-readonly');
+        } else {
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setEffort(d.id);
+          });
+        }
+        grp.appendChild(b);
+      }
+      detail.appendChild(grp);
+    } else {
+      detail.appendChild(el('p', 'model-detail-desc', '该模型不支持思考档位。'));
+    }
+
+    // 位置：贴当前项右侧；右边放不下就翻到左侧（1440 窗口下 pop 已经贴右缘，必然翻左）
+    const pr = pop.getBoundingClientRect();
+    const ir = item.getBoundingClientRect();
+    detail.style.top = Math.max(6, Math.round(ir.top - pr.top)) + 'px';
+    detail.classList.toggle('is-left', pr.right + 272 > window.innerWidth);
+  }
+
+  async function modelPickLoad() {
+    try {
+      const [list, act, provs] = await Promise.all([
+        client.request('model.listModels'),
+        client.request('model.getActive').catch(() => null),
+        client.request('model.listProviders').catch(() => null),
+      ]);
+      if (act) {
+        modelPick.provider = act.provider || modelPick.provider;
+        modelPick.model = act.model || modelPick.model;
+      }
+      // 当前厂商排最前：58 个模型平铺时，若按字母序当前项会掉到第 7 屏外的位置，
+      // 每次打开都要先滚一段才能确认"我在用什么"
+      const curProv = modelPick.provider;
+      const curModel = modelPick.model;
+      modelPick.models = ((list && list.models) || []).slice().sort((a, b) => {
+        // 当前模型 > 当前厂商的其它模型 > 其余（各自按名字）
+        const rank = (m) => (m.provider === curProv ? (m.id === curModel ? 0 : 1) : 2);
+        const ra = rank(a);
+        const rb = rank(b);
+        if (ra !== rb) return ra - rb;
+        return (a.provider + a.name).localeCompare(b.provider + b.name);
+      });
+      // 哪些厂商真的有密钥（或本地就绪）：只用于给"未配置"的项加一层弱化提示。
+      // 空集不启用限制 —— 万一 listProviders 不可用，宁可让人试一次也别把整张表标灰。
+      modelPick.ready = new Set(
+        ((provs && provs.providers) || []).filter((p) => p.configured).map((p) => p.type),
+      );
+      const cur = modelPick.models.find((x) => x.provider === modelPick.provider && x.id === modelPick.model);
+      if (cur && cur.reasoningEffort) modelPick.effort = cur.reasoningEffort;
+      renderModelPickButton();
+      renderModelList();
+    } catch (e) { /* 断连时保持上次文案，不打断对话 */ }
+  }
+
+  async function switchModel(provider, model) {
+    if (modelPick.busy) return;
+    if (provider === modelPick.provider && model === modelPick.model) {
+      modelPickOpen(false);
+      return;
+    }
+    modelPick.busy = true;
+    try {
+      await client.request('model.switch', { provider, model });
+      modelPick.provider = provider;
+      modelPick.model = model;
+      renderModelPickButton();
+      renderModelList();
+      refreshState();
+      appendMsg('system', '已切换模型：' + modelPickLabel());
+      modelPickOpen(false);
+    } catch (e) {
+      const msg = (e && e.message) || '未知错误';
+      // "Provider xxx not found" 是**配置缺失**，不是模型问题：给出下一步动作，
+      // 否则用户只会反复点同一个条目
+      appendMsg('error', /not found/i.test(msg)
+        ? `切换失败：厂商「${provider}」尚未配置。到「模型选择」页添加该提供商，再回来切换。`
+        : '切换模型失败: ' + msg);
+    } finally {
+      modelPick.busy = false;
+    }
+  }
+
+  /** 思考强度：与模型页的 radio 共用同一套档位，改一处两边都跟着动 */
+  function syncThinkingUI(id) {
+    modelPick.effort = id;
+    $$('#model-detail .model-effort-btn').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.effort === id);
+    });
+  }
+
+  async function setEffort(id) {
+    const enabled = id !== 'off';
+    try {
+      await client.request('model.setThinking', { enabled, effort: enabled ? id : undefined });
+      syncThinkingUI(id);
+      $$('input[name="reasoning"]').forEach((r) => { r.checked = r.value === id; });
+      const descEl = $('#model-reasoning-desc');
+      if (descEl && REASONING_DESC[id]) descEl.textContent = REASONING_DESC[id];
+    } catch (e) {
+      appendMsg('error', '设置思考强度失败: ' + ((e && e.message) || '未知错误'));
+    }
+  }
+
+  function modelPickOpen(on) {
+    const pop = $('#model-pop');
+    const btn = $('#model-pick-btn');
+    if (!pop || !btn) return;
+    pop.hidden = !on;
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) {
+      void modelPickLoad();
+    } else {
+      const detail = $('#model-detail');
+      if (detail) { detail.hidden = true; detail.innerHTML = ''; }
+      $$('#model-list .model-item').forEach((x) => x.classList.remove('is-hover'));
+    }
+  }
+
+  function bindModelPicker() {
+    const btn = $('#model-pick-btn');
+    const pop = $('#model-pop');
+    if (!btn || !pop) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      modelPickOpen(pop.hidden);
+    });
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { if (!pop.hidden) modelPickOpen(false); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !pop.hidden) {
+        e.stopPropagation();
+        modelPickOpen(false);
+      }
+    });
+    void modelPickLoad();
+  }
+
+  // ── 根目录切换 ────────────────────────────────────────────────
+  // 预览栏原本锁死在启动目录，想看桌面上的产物只能绕出去。
+  // 这里给一个目录选择器：浏览用 /api/fs/browse（只回目录名、只限本机），
+  // 落定用 /api/fs/root。选中的根由**服务端**持久化（~/.agent/preview-root.json），
+  // 所以重启后还在，多个标签页也不会各看各的。
+
+  /** 面板里最多露几个盘符 chip（多于此数的走路径输入框） */
+  const PV_MAX_DRIVE_CHIPS = 4;
+
+  /** 选择器自己的临时状态，与 pv 分开：关掉面板不该影响正在看的那棵树 */
+  const pvRoot = {
+    open: false,
+    dir: '',          // 正在浏览的目录（绝对路径）
+    parent: '',       // 上一级（盘符根时为空）
+    entries: [],
+    shortcuts: [],
+    recent: [],
+    loading: false,
+  };
+
+  function pvRootEls() {
+    return {
+      pop: $('#pv-root-pop'),
+      btn: $('#pv-root-btn'),
+      chips: $('#pv-root-shortcuts'),
+      path: $('#pv-root-path'),
+      up: $('#pv-root-up'),
+      list: $('#pv-root-list'),
+      note: $('#pv-root-note'),
+      open: $('#pv-root-open'),
+      cancel: $('#pv-root-cancel'),
+    };
+  }
+
+  /** Windows 下路径比较要不分大小写（'C:\\Foo' 与 'c:\\foo' 是同一处） */
+  function pvSamePath(a, b) {
+    const norm = (p) => String(p || '').replace(/[\\/]+$/, '').toLowerCase();
+    return !!a && !!b && norm(a) === norm(b);
+  }
+
+  function pvApplyRootMeta(m) {
+    if (!m) return;
+    pv.rootName = m.name || m.root || '根目录';
+    pv.rootAbs = m.root || '';
+    pv.rootDefault = m.defaultRoot || pv.rootDefault || '';
+    pv.isCustomRoot = !!m.isCustom;
+    const name = $('#pv-root-name');
+    if (name) name.textContent = pv.rootName;
+    const btn = $('#pv-root-btn');
+    if (btn) {
+      btn.title = (m.root || '')
+        + (pv.isCustomRoot && pv.rootDefault ? '\n工作区：' + pv.rootDefault : '')
+        + '\n点击切换根目录';
+      btn.classList.toggle('is-custom', pv.isCustomRoot);
+    }
+  }
+
+  function pvRootOpen(on) {
+    const { pop, btn, path } = pvRootEls();
+    if (!pop || !btn) return;
+    const next = !!on && pv.open;
+    pop.hidden = !next;
+    pvRoot.open = next;
+    btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+    if (!next) return;
+    // 每次打开都从"当前根"重新起步：上次浏览到别处去，不该留着当起点
+    if (path) path.value = pv.rootAbs;
+    void pvRootBrowse(pv.rootAbs || '');
+  }
+
+  async function pvRootBrowse(dir) {
+    const { list, path, note, open } = pvRootEls();
+    if (!list) return;
+    // 连点目录时只认最后一次：慢响应先回来会把新目录盖掉
+    if (pvRoot.loading) return;
+    pvRoot.loading = true;
+    list.textContent = '';
+    list.appendChild(el('div', 'pv-root-note-inline', '读取中…'));
+    try {
+      const d = await pvGetJson('/api/fs/browse' + (dir ? '?dir=' + encodeURIComponent(dir) : ''));
+      pvRoot.dir = d.dir || '';
+      pvRoot.parent = d.parent || '';
+      pvRoot.entries = d.entries || [];
+      pvRoot.shortcuts = d.shortcuts || [];
+      pvRoot.recent = d.recent || [];
+      if (path) path.value = pvRoot.dir;
+      if (note) note.textContent = '不影响 agent 的工作目录';
+      if (open) open.disabled = false;
+      pvRootRender();
+    } catch (e) {
+      list.textContent = '';
+      list.appendChild(el('div', 'pv-root-note-inline is-error',
+        (e && e.message) || '读取目录失败'));
+      if (note) note.textContent = '';
+      if (open) open.disabled = true;
+    } finally {
+      pvRoot.loading = false;
+    }
+  }
+
+  function pvRootRender() {
+    const { chips, list, up } = pvRootEls();
+    if (!list || !chips) return;
+
+    // 快捷位置：工作区 / 主目录 / 盘符 / 最近用过的
+    chips.textContent = '';
+    let driveShown = 0;
+    const mkChip = (label, dir, extraCls) => {
+      const b = el('button', 'pv-root-chip' + (extraCls ? ' ' + extraCls : ''), label);
+      b.type = 'button';
+      b.title = dir;
+      b.onclick = () => void pvRootBrowse(dir);
+      chips.appendChild(b);
+    };
+    for (const s of pvRoot.shortcuts) {
+      // 盘符最多露 4 个：这台机器有 9 个（C:–J:），全铺出来会把面板挤成
+      // 两行 chip，还把"最近用过"顶到看不见的地方。要别的盘直接改路径框。
+      if (s.kind === 'drive') {
+        driveShown += 1;
+        if (driveShown > PV_MAX_DRIVE_CHIPS) continue;
+      }
+      const cls = [];
+      if (pvSamePath(s.path, pvRoot.dir)) cls.push('is-current');
+      if (s.kind === 'workspace') cls.push('is-dir');
+      mkChip(s.label, s.path, cls.join(' '));
+    }
+    for (const r of pvRoot.recent.slice(0, 3)) {
+      if (pvRoot.shortcuts.some((s) => pvSamePath(s.path, r))) continue;
+      mkChip(pathBaseName(r) || r, r, 'is-dir' + (pvSamePath(r, pvRoot.dir) ? ' is-current' : ''));
+    }
+
+    // 上级：盘符根没有 parent，此时按钮禁用而不是隐藏（位置不跳动）
+    if (up) up.disabled = !pvRoot.parent;
+
+    list.textContent = '';
+    if (!pvRoot.entries.length) {
+      list.appendChild(el('div', 'pv-root-note-inline', '这个目录下没有子目录，可以直接「在此打开」'));
+      return;
+    }
+    for (const e of pvRoot.entries) {
+      const row = el('div', 'pv-root-item');
+      row.setAttribute('role', 'option');
+      row.tabIndex = 0;
+      row.title = e.path;
+      row.appendChild(pvIcon('folder'));
+      row.appendChild(el('span', 'pv-root-item-name', e.name));
+      const go = () => void pvRootBrowse(e.path);
+      row.onclick = go;
+      row.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
+      };
+      list.appendChild(row);
+    }
+    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* 图标缺失不影响功能 */ } }
+  }
+
+  /** 取路径最后一段（盘符根返回自身，避免出现空标签） */
+  function pathBaseName(p) {
+    const s = String(p || '').replace(/[\\/]+$/, '');
+    const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  /**
+   * 多标签页同步：预览根是**服务端**状态，但服务端没有"根变了"的广播通道
+   * （fs 面刻意只做 REST，不为一个视图状态加事件流）。于是用 BroadcastChannel
+   * 在**同源标签页之间**补一条旁路：A 页换了根 → B 页收到 → 重新拉 meta 并重画。
+   *
+   * 为什么不在收到消息时直接信消息里的 root：服务端才是真源（也可能是**失败**的切换、
+   * 或第三人改了最近记录）。所以消息只当"提醒"，内容一律重新问服务端要。
+   * 特性检测兜底：老浏览器没有 BroadcastChannel 时退化成"开栏时自然对齐"。
+   */
+  const PV_CH_NAME = 'hyacinth.preview-root';
+  let pvChannel = null;
+  function pvChannelInit() {
+    if (typeof BroadcastChannel !== 'function') return;
+    try {
+      pvChannel = new BroadcastChannel(PV_CH_NAME);
+    } catch (e) { return; }
+    pvChannel.onmessage = (ev) => {
+      const msg = ev && ev.data;
+      if (!msg || msg.type !== 'root-changed') return;
+      // 自己发的不会回到自己（BroadcastChannel 不回声），这里再稳一手：
+      // 若本地根已经是那个值，说明差异不存在，直接返回，省一次 IO
+      if (msg.root && pvSamePath(msg.root, pv.rootAbs)) return;
+      void pvAdoptServerRoot();
+    };
+  }
+
+  /** 关栏时释放（页面 unload 也会自动释放，这里只是让显式关闭更干净） */
+  function pvChannelClose() {
+    if (!pvChannel) return;
+    try { pvChannel.close(); } catch (e) { /* ignore */ }
+    pvChannel = null;
+  }
+
+  /**
+   * 跟随服务端当前的根：重拉 meta → 若确实变了，作废树与当前文件并重画。
+   * 与 pvRootSwitch 的清理保持一致（相对路径含义已变，缓存一律不能留）。
+   */
+  async function pvAdoptServerRoot() {
+    try {
+      const m = await pvGetJson('/api/fs/meta');
+      if (!m) return;
+      const changed = !pvSamePath(m.root, pv.rootAbs);
+      pvApplyRootMeta(m);
+      if (!changed) return;
+      pv.cwd = '.';
+      pv.expanded.clear();
+      pv.children.clear();
+      pv.inflight.clear();
+      pv.current = null;
+      pvRenderCrumbs();
+      pvRenderTree();
+      pvClearView();
+      if (pv.open) await pvLoadDir('.');
+    } catch (e) { /* 同步失败不影响本地这件小事，下次开栏会自然对齐 */ }
+  }
+
+  async function pvRootSwitch(dir) {
+    const { open, note } = pvRootEls();
+    const target = dir || pvRoot.dir;
+    if (!target) return;
+    if (open) open.disabled = true;
+    if (note) note.textContent = '切换中…';
+    try {
+      const m = await pvPostJson('/api/fs/root', { root: target });
+      pvApplyRootMeta(m);
+
+      // 换根后旧树/旧文件全部作废：相对路径的含义已经变了，
+      // 留着会让"点一下树"读到另一个目录里的同名文件
+      pv.cwd = '.';
+      pv.expanded.clear();
+      pv.children.clear();
+      pv.inflight.clear();
+      pv.current = null;
+      pvRenderCrumbs();
+      pvRenderTree();
+      pvClearView();
+      pvRootOpen(false);
+      await pvLoadDir('.');
+      // 通知其它标签页（只广播成功的那次；失败留在本地提示里）
+      if (pvChannel) {
+        try { pvChannel.postMessage({ type: 'root-changed', root: pv.rootAbs }); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      if (note) note.textContent = (e && e.message) || '切换失败';
+      if (open) open.disabled = false;
+    }
+  }
+
+  /** 清空正文区（换根 / 关栏时用；与 pvOpenFile 的中间态清理保持一致） */
+  function pvClearView() {
+    const content = $('#pv-content');
+    const meta = $('#pv-meta');
+    const empty = $('#pv-empty');
+    if (content) { content.textContent = ''; content.hidden = true; }
+    if (meta) { meta.textContent = ''; meta.hidden = true; }
+    if (empty) empty.hidden = false;
+  }
+
   function bindPreviewDock() {
     pvLoadPrefs();
     const dock = $('#preview-dock');
     if (!dock) return;
+
+    // 多标签页：别的页换了根，这里跟着对齐（无 BroadcastChannel 的老浏览器退化为开栏对齐）
+    pvChannelInit();
+    window.addEventListener('pagehide', pvChannelClose);
 
     dock.style.setProperty('--pv-w', pv.width + 'px');
     dock.style.setProperty('--pv-tree-h', pv.treeH + '%');
@@ -2804,15 +3550,49 @@
     const fullBtn = $('#pv-full-btn');
     if (fullBtn) fullBtn.onclick = () => pvSetFull(!pv.full);
 
-    // Esc 逐级退：全屏 → 放大 → 窄栏，一次只退一层，不顺手把整栏关掉
+    // Esc 逐级退：根目录面板 → 全屏 → 放大，一次只退一层，不顺手把整栏关掉
     // （用户多半是想回去看聊天内容，不是要关掉预览）。
     // 有对话框/浮层开着时不抢 Esc：那种场景 Esc 属于那一层。
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !pv.max) return;
+      if (e.key !== 'Escape') return;
       if (document.querySelector('.cmd-overlay:not([hidden]), #permission-dialog:not([hidden])')) return;
       if (e.target && e.target.closest && e.target.closest('.cmd-overlay')) return;
+      // 面板最先退：它是这一层里最"临时"的东西
+      if (pvRoot.open) { pvRootOpen(false); return; }
+      if (!pv.max) return;
       if (pv.full) pvSetFull(false); else pvSetMax(false);
     });
+
+    // ── 根目录选择器 ──────────────────────────────────────────
+    const rootBtn = $('#pv-root-btn');
+    if (rootBtn) rootBtn.onclick = () => pvRootOpen(!pvRoot.open);
+    {
+      const els = pvRootEls();
+      if (els.cancel) els.cancel.onclick = () => pvRootOpen(false);
+      if (els.open) els.open.onclick = () => void pvRootSwitch(pvRoot.dir);
+      if (els.up) els.up.onclick = () => { if (pvRoot.parent) void pvRootBrowse(pvRoot.parent); };
+      // 回车 → 跳到输入框里的绝对路径；表单提交避免页面刷新
+      const form = $('#pv-root-pathbar');
+      if (form) {
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          const v = (els.path && els.path.value || '').trim();
+          if (v) void pvRootBrowse(v);
+        };
+      }
+      // 点面板外收起。判"里面"必须用 composedPath 而不是 t.closest：
+      // 点目录行会立刻重绘列表，等事件冒泡到 document 时被点的节点已经脱离
+      // 文档，closest('#pv-root-pop') 会返回 null ⇒ 误判成"点了外面"并把面板关掉
+      // （实测：点任意子目录，面板跟着消失）。composedPath 是事件派发时快照
+      // 下来的原始链路，节点后来被移除也不影响。
+      document.addEventListener('click', (e) => {
+        if (!pvRoot.open) return;
+        const pathArr = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        const inside = pathArr.some((n) => n && (n.id === 'pv-root-pop' || n.id === 'pv-root-btn'));
+        if (!inside) pvRootOpen(false);
+      });
+    }
+
     const refreshBtn = $('#pv-refresh-btn');
     if (refreshBtn) {
       refreshBtn.onclick = async () => {
@@ -2879,14 +3659,11 @@
       });
     }
 
-    // 工作区元信息：拿不到就整栏禁用并说明原因（例如后端版本还没这个端点）
+    // 根目录元信息：拿不到就整栏禁用并说明原因（例如后端版本还没这个端点）
     pvGetJson('/api/fs/meta').then((m) => {
-      pv.rootName = m.name || '工作区';
-      pv.rootAbs = m.root || '';
-      // 标题固定写"文件预览"：工作区名放面包屑第一级，两处都写会重复。
-      // 完整根路径放进 title，鼠标停一下能看到"这到底是哪个目录"。
-      const label = $('#pv-root-name');
-      if (label) label.title = m.root || '';
+      // 标题栏现在显示"当前根名"：换根之后必须一眼看出看的是哪儿，
+      // 完整路径挂在按钮 title 上。
+      pvApplyRootMeta(m);
       pvRenderCrumbs();
       if (pv.pendingPath) {
         const p = pv.pendingPath;
@@ -2898,7 +3675,7 @@
     }).catch((err) => {
       const label = $('#pv-root-name');
       if (label) label.textContent = '文件预览不可用';
-      pvNote('无法读取工作区：' + (err.message || String(err)), true);
+      pvNote('无法读取工作目录：' + (err.message || String(err)), true);
     });
 
     pvRenderCrumbs();
@@ -2975,18 +3752,61 @@
     // 比如未来给消息列表加"拖到此处引用文件"）
     const dropZone = composer || document.body;
     const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-    dropZone.addEventListener('dragover', (e) => { stop(e); dropZone.classList.add('is-drag-over'); });
+    // 两种拖拽落点：外部文件（当图片附件）与预览栏里的文件（插入绝对路径）。
+    // 用自定义 MIME 区分 —— 只有预览栏的 dragstart 会写入它，
+    // 网页里拖来的文字/链接不会被误当成"工作区文件"。
+    const PATH_MIME = 'application/x-hyacinth-path';
+    const clearDropState = () => {
+      dropZone.classList.remove('is-drag-over');
+      dropZone.classList.remove('is-drag-path');
+    };
+    dropZone.addEventListener('dragover', (e) => {
+      stop(e);
+      const dt = e.dataTransfer;
+      const isPath = !!(dt && dt.types && Array.prototype.includes.call(dt.types, PATH_MIME));
+      dropZone.classList.toggle('is-drag-path', isPath);
+      dropZone.classList.add('is-drag-over');
+    });
     dropZone.addEventListener('dragleave', (e) => {
       stop(e);
       // 只有真正离开容器才撤高亮，否则子元素间移动会闪
-      if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('is-drag-over');
+      if (!dropZone.contains(e.relatedTarget)) clearDropState();
     });
     dropZone.addEventListener('drop', (e) => {
       stop(e);
-      dropZone.classList.remove('is-drag-over');
-      const files = e.dataTransfer && e.dataTransfer.files;
-      if (files && files.length) addImageFiles(files);
+      clearDropState();
+      const dt = e.dataTransfer;
+      const files = dt && dt.files;
+      if (files && files.length) { addImageFiles(files); return; }
+      const rel = dt && dt.getData ? dt.getData(PATH_MIME) : '';
+      if (rel) insertComposerPath(pvAbsPath(rel));
     });
+  }
+
+  /**
+   * 把一段路径插到输入框**光标处**（带引号，两侧按需补空格）。
+   *
+   * 为什么不是"追加到末尾"：用户常常先写半句话（"看下这个文件"）再拖文件进来，
+   * 追加到末尾会让路径跑到句子外面。
+   */
+  function insertComposerPath(abs) {
+    const ta = $('#chat-input');
+    if (!ta || !abs) return;
+    const quoted = '"' + abs + '"';
+    const hasSel = typeof ta.selectionStart === 'number';
+    const start = hasSel ? ta.selectionStart : ta.value.length;
+    const end = hasSel ? ta.selectionEnd : ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const pre = before && !/\s$/.test(before) ? ' ' : '';
+    const post = after && !/^\s/.test(after) ? ' ' : '';
+    ta.value = before + pre + quoted + post + after;
+    const pos = (before + pre + quoted).length;
+    ta.focus();
+    try { ta.setSelectionRange(pos, pos); } catch (e) { /* 老浏览器 */ }
+    // 触发自动增高 / 发送按钮激活等既有监听
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.scrollTop = ta.scrollHeight;
   }
 
   function sendChat() {
@@ -3339,6 +4159,36 @@
     }
   }
 
+  /**
+   * 删完会话后的跳转 —— **决策由后端给**（`session.delete` / `batchDelete` 应答里的
+   * nextSessionId，见 domains/session.ts 的 settleAfterDelete）。
+   *
+   * 为什么不再在前端算："当前会话被删了，下一条消息该写到哪"是**会话语义**，
+   * 不是视图语义。放在前端意味着 TUI 删当前会话时行为分叉，而且前端得自己拉列表、
+   * 按 updatedAt 排序、判断"该不该切"—— 三件都可能与后端理解不一致。
+   * 现在前端只做两件事：切过去、重画。
+   *
+   * @param res 协议应答；nextSessionId 为空表示"删的不是当前会话"，什么也不用做
+   */
+  async function applyDeleteSettle(res) {
+    const nextId = res && res.nextSessionId;
+    if (!nextId) return;
+    try {
+      currentSessionId = nextId;
+      sessionSelection.delete(nextId);
+      // 列表与侧栏都已由 session.change 事件刷新；这里补标题、清空消息区、重拉历史
+      const item = (sidebarRecentCache || []).find((s) => s.id === nextId);
+      setSessionTitle(item ? recentSessionTitle(item) : '新会话');
+      clearChat();
+      await loadHistory();
+      appendMsg('system', res.createdNew
+        ? '当前会话已删除，已新建一个会话'
+        : '当前会话已删除，已切到「' + (item ? recentSessionTitle(item) : nextId) + '」');
+    } catch (e) {
+      appendMsg('error', '会话已删除，但切换视图失败：' + ((e && e.message) || '未知错误'));
+    }
+  }
+
   /** 顶栏的「当前会话」名。此前整个顶部没有任何"我在哪条会话"的信息，
    *  切完会话只能从侧栏高亮去猜。空标题时回落「新会话」。 */
   function setSessionTitle(text) {
@@ -3436,10 +4286,12 @@
           }).catch((e2) => appendMsg('error', '加载会话失败: ' + (e2 && e2.message)));
         } else if (action === 'delete') {
           if (!connected) return;
-          client.request('session.delete', { sessionId: sid }).then(() => {
+          client.request('session.delete', { sessionId: sid }).then((res) => {
             appendMsg('system', '已删除会话 ' + sid);
             sessionSelection.delete(sid);
             loadSessions();
+            // 侧栏由 session.change 事件刷新；这里只做"当前会话被删了"的视图收尾
+            void applyDeleteSettle(res);
           }).catch((e2) => appendMsg('error', '删除会话失败: ' + (e2 && e2.message)));
         }
       });
@@ -3479,6 +4331,7 @@
           sessionSelection.clear();
           appendMsg('system', `已批量删除 ${deleted.length} 个会话` + (notFound.length ? `（${notFound.length} 个不存在）` : ''));
           loadSessions();
+          void applyDeleteSettle(res);
         }).catch((e2) => appendMsg('error', '批量删除失败: ' + (e2 && e2.message)));
       };
     }
@@ -5492,6 +6345,7 @@
     bindPreviewDock();
     bindModeMenu();
     bindViewMenu();
+    bindModelPicker();
     bindGlobalInteractions();
 
     // 模型视图交互（推理强度 / 添加密钥 / Ollama 刷新）

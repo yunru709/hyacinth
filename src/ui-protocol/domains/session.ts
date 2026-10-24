@@ -121,6 +121,57 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
     return unique;
   }
 
+  /**
+   * 当前"用户看着"的会话 id（由 loop 的目录末段推断）；拿不到返回 ''。
+   *
+   * 优先 targetSessionDir（含待切换）：空闲状态下切会话时 currentSessionDir 还是旧的，
+   * 而界面已经显示新会话 —— 用 current 判断"删的是不是当前"会全部漏判
+   * （实测 nextSessionId 恒为 null，删光都不新建）。
+   */
+  function currentSessionIdOf(): string {
+    const l = loop ?? getLoop?.() ?? null;
+    const dir = l?.targetSessionDir ?? l?.currentSessionDir;
+    return dir ? path.basename(dir) : '';
+  }
+
+  /**
+   * 删掉**当前会话**之后的自愈：切到剩余里最新的一条；一条不剩就新建一条。
+   *
+   * 为什么必须在域里做（而不是交给前端）：这是**会话语义**——
+   * "当前会话没了，下一条消息该写到哪"。后端 `session.delete` 只 rm 目录、
+   * 不动 `loop.sessionDir`，若没人接管，下一条消息会沿旧路径把目录原样写回来
+   * （用户看到"刚清空，刷新一下又有几条"）。TUI 删当前会话时也必须得到同一结果，
+   * 放在前端就等于只修了 WebUI —— 所以判定与切换都在这里，UI 只负责"跳过去并重画"。
+   *
+   * @returns nextSessionId 为空表示"删的不是当前会话"（无需善后）
+   */
+  async function settleAfterDelete(deleted: string[]): Promise<{
+    nextSessionId: string | null;
+    createdNew: boolean;
+  }> {
+    const cur = currentSessionIdOf();
+    if (!cur || !deleted.includes(cur)) return { nextSessionId: null, createdNew: false };
+    const l = loop ?? getLoop?.() ?? null;
+    // 没有 loop（测试 / 无 agent 场景）：无从自愈，前端拿到 null 也不会乱切
+    if (!l?.switchSession) return { nextSessionId: null, createdNew: false };
+
+    const gone = new Set(deleted);
+    const rest = (await sessionManager.list())
+      .filter((s) => !gone.has(s.id))
+      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+    if (rest.length > 0) {
+      await l.switchSession(sessionManager.getSessionDir(rest[0].id));
+      emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId: rest[0].id });
+      return { nextSessionId: rest[0].id, createdNew: false };
+    }
+    const created = await sessionManager.create();
+    await l.switchSession(sessionManager.getSessionDir(created.id));
+    emit?.(UI_EVENT.SESSION_CHANGE, { action: 'create', session: toMeta(created) });
+    emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId: created.id });
+    return { nextSessionId: created.id, createdNew: true };
+  }
+
   return {
     // ── session.list ───────────────────────────────────────
     async list(): Promise<{ sessions: SessionMeta[] }> {
@@ -151,19 +202,33 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
     },
 
     // ── session.delete ─────────────────────────────────────
-    async delete(params: unknown): Promise<{ ok: true; sessionId: string }> {
+    // 删完若正是当前会话，顺手自愈（切到剩余里最新的一条 / 一条不剩就新建）。
+    // nextSessionId 直接回给调用方：前端不必自己排序、也不必判断"该不该切"。
+    async delete(params: unknown): Promise<{
+      ok: true;
+      sessionId: string;
+      nextSessionId: string | null;
+      createdNew: boolean;
+    }> {
       const sessionId = (params as { sessionId?: string } | undefined)?.sessionId;
       if (!sessionId) throw new Error('session.delete requires "sessionId"');
       await ensureExists(sessionId);
       const sessionDir = sessionManager.getSessionDir(sessionId);
       await rm(sessionDir, { recursive: true, force: true });
       emit?.(UI_EVENT.SESSION_CHANGE, { action: 'delete', sessionId });
-      return { ok: true, sessionId };
+      const settled = await settleAfterDelete([sessionId]);
+      return { ok: true, sessionId, ...settled };
     },
 
     // ── session.batchDelete ────────────────────────────────
     // 批量删除多个会话（不存在的不报错，记录到 notFound）。
-    async batchDelete(params: unknown): Promise<{ ok: true; deleted: string[]; notFound: string[] }> {
+    async batchDelete(params: unknown): Promise<{
+      ok: true;
+      deleted: string[];
+      notFound: string[];
+      nextSessionId: string | null;
+      createdNew: boolean;
+    }> {
       const sessionIds = normalizeIds(params);
       const sessions = await sessionManager.list();
       const exist = new Set(sessions.map((s) => s.id));
@@ -180,7 +245,10 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
       if (deleted.length > 0) {
         emit?.(UI_EVENT.SESSION_CHANGE, { action: 'batchDelete', deleted });
       }
-      return { ok: true, deleted, notFound };
+      const settled = deleted.length > 0
+        ? await settleAfterDelete(deleted)
+        : { nextSessionId: null, createdNew: false };
+      return { ok: true, deleted, notFound, ...settled };
     },
 
     // ── session.export ─────────────────────────────────────

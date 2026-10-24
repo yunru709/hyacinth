@@ -125,8 +125,17 @@ describe('mode 域', () => {
   it('WebUI 模式菜单的档位与顺序与后端一致（UI 契约守卫）', () => {
     // 前端是纯 JS、不进 tsc；顺序和 id 若与后端漂移，菜单会显示一个设不了的档位，
     // 或者把"最危险"的那个排到最上面。这里直接扫源码守住这份契约。
+    //
+    // ⚠️ 这是**有意的跨层耦合**：协议域的测试读前端文件，属少见做法。理由是
+    // 这份"顺序"只在两处出现、又是界面正确性的硬前提；靠人肉同步迟早漂。
+    // 代价要认清：前端一旦拆分/改名（MODE_DEFS 移出 app.js），这条会**假红**——
+    // 那时把它挪到对应的新文件即可，**不要删**。
     const src = readFileSync(path.resolve(process.cwd(), 'src/webui/app.js'), 'utf-8');
-    const ids = [...src.matchAll(/\{ id: '([a-z]+)', label: '/g)].map((m) => m[1]);
+    // 只扫 MODE_DEFS 那一段：文件里还有别的同格式数组（思考档位 EFFORT_DEFS），
+    // 全文匹配会把它们一起算进来（实测过一次，多出 off/minimal/… 直接红）
+    const start = src.indexOf('const MODE_DEFS');
+    const block = src.slice(start, src.indexOf('];', start));
+    const ids = [...block.matchAll(/\{ id: '([a-z]+)', label: '/g)].map((m) => m[1]);
     expect(ids).toEqual([...PERMISSION_PROFILES]);
   });
 

@@ -38,8 +38,13 @@ const SOURCES = ['index.html', 'app.js'];
  * 兜底名单：这些名字没法从源码静态扫出来 —— 它们是**运行时拼进 data-lucide** 的
  * （PROVIDER_ICONS 映射表）。脚本会额外解析那段表；这里再留一份硬编码的，
  * 是为了「表被改名/挪位置」时也不会静默丢图标，宁可多留几个。
+ *
+ * `folder` / `file` / `file-code` 来自 pvIconFor()：它按扩展名 `return 'xxx'`，
+ * 不是字面量 `data-lucide="xxx"`，所以上面的正则扫不到。漏掉的后果是文件树里
+ * **目录行和代码文件行没有图标**（静默空白，肉眼看图才发现）。
+ * icons.test.ts 里有一条守卫会盯住这三个名字。
  */
-const RUNTIME_FALLBACK = ['bot', 'cloud', 'sparkles', 'wind', 'network', 'zap', 'cpu', 'box', 'hard-drive'];
+const RUNTIME_FALLBACK = ['bot', 'cloud', 'sparkles', 'wind', 'network', 'zap', 'cpu', 'box', 'hard-drive', 'folder', 'file', 'file-code'];
 
 function die(msg) {
   console.error(`[gen-icons] ${msg}`);
