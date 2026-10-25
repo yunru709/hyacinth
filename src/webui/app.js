@@ -5123,12 +5123,20 @@
     return id.length > 16 ? id.slice(-16) : id;
   }
 
-  /** 当前会话判定：currentSessionId 可能是会话目录绝对路径（path.basename 语义），
-   *  而 session.list 返回的是 id ⇒ 两边都按 basename 比一次，避免高亮失效 ✗ */
+  /** 侧栏高亮 = **当前可见标签**绑定的会话，而不是本页 connection（primary）的会话。
+   *  否则切到并行标签后，聊天区显示 B、侧栏却还高亮 A —— 两处"选中的"互相矛盾。 */
+  function activeSessionId() {
+    const t = tabs.find((x) => x.id === activeTabId);
+    return t ? tabSessionId(t) : currentSessionId;
+  }
+
+  /** 当前会话判定：会话目录可能以绝对路径 / basename 两种形态出现 ⇒ 两边都按
+   *  basename 比一次，避免高亮失效 ✗ */
   function isCurrentSession(id) {
     if (!id) return false;
-    const base = (currentSessionId || '').split(/[\\/]/).pop();
-    return id === currentSessionId || id === base;
+    const cur = activeSessionId();
+    if (!cur) return false;
+    return sameSession(id, cur);
   }
 
   function renderSidebarRecent() {
@@ -5154,6 +5162,13 @@
       return;
     }
 
+    // 正在运行的会话 id：运行态只存在于标签上（primary + 各并行标签），
+    // 侧栏只做投影 —— 不新增第二份"谁在跑"的真相。
+    const runningIds = tabs
+      .filter((t) => t.running)
+      .map((t) => tabSessionId(t))
+      .filter(Boolean);
+
     // 按「今天 / 昨天 / 更早」分组：平铺一列时，8 条里有 5 条是别的日子，
     // 时间戳要逐条读才知道新旧 —— 分组把"哪条是刚聊的"变成一眼可见。
     let lastGroup = null;
@@ -5163,11 +5178,21 @@
         list.appendChild(el('div', 'recent-group-label', group));
         lastGroup = group;
       }
+      const current = isCurrentSession(s.id);
+      const running = runningIds.some((rid) => sameSession(rid, s.id));
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'sidebar-recent-item' + (isCurrentSession(s.id) ? ' is-current' : '');
+      row.className = 'sidebar-recent-item'
+        + (current ? ' is-current' : '')
+        + (running ? ' is-running' : '');
       row.dataset.sessionId = s.id;
       row.title = s.id;                       // 截断后的标题不可辨 ⇒ hover 给全 id
+      if (running) {
+        // 运行标记：动画本来就只在侧栏存在（标签条可能被隐藏/滚动掉）
+        const dot = document.createElement('span');
+        dot.className = 'sidebar-recent-dot';
+        row.appendChild(dot);
+      }
       const title = document.createElement('span');
       title.className = 'sidebar-recent-title';
       title.textContent = recentSessionTitle(s);
@@ -5242,13 +5267,18 @@
    *  切完会话只能从侧栏高亮去猜。空标题时回落「新会话」。 */
   function setSessionTitle(text) {
     const label = text || '新会话';
-    const el2 = $('#session-title');
-    if (el2) el2.textContent = label;
     // 顶栏标题 = primary 标签的标题（两者永远是同一件事）
     const primary = tabs.find((t) => t.kind === 'primary');
     if (primary && primary.title !== label) {
       primary.title = label;
       renderTabs();
+    }
+    // 但只有 primary 在前台时才改**可见**标题：正在看并行标签时，
+    // 顶栏必须跟着"你眼前这条会话"走，不能被后台 primary 的变化覆盖。
+    const active = tabs.find((t) => t.id === activeTabId);
+    if (!active || active.kind === 'primary') {
+      const el2 = $('#session-title');
+      if (el2) el2.textContent = label;
     }
   }
 
@@ -5269,6 +5299,7 @@
       currentSessionId = sid;
       const hit = sidebarRecentCache.find((x) => x.id === sid);
       setSessionTitle(hit ? recentSessionTitle(hit) : sid);
+      activateTab('primary');            // 用户刚点的是本页会话 ⇒ 切回 primary 标签
       clearChat();                       // 先清空，防止旧会话历史与新历史混在一起
       loadHistory();
       renderSidebarRecent();             // 高亮立刻跟随，不等下一轮 session.list
@@ -5318,6 +5349,7 @@
           if (!sid) return;
           return client.request('session.switch', { sessionId: sid }).then(() => {
             currentSessionId = sid;
+            activateTab('primary');
             loadSessions();
             loadSidebarRecent();      // A4：新建后立刻出现在「最近会话」并高亮
             clearChat();
@@ -5357,6 +5389,7 @@
             currentSessionId = sid;
             appendMsg('system', '已加载会话 ' + sid);
             goTo('#/chat');
+            activateTab('primary');
             loadHistory();
           }).catch((e2) => appendMsg('error', '加载会话失败: ' + (e2 && e2.message)));
         } else if (action === 'delete') {
@@ -7461,6 +7494,9 @@
   function renderTabs() {
     const list = $('#session-tabs-list');
     if (!list || embedMode) return;
+    // 只有一个标签时整条标签条不出现（单会话体验与以前完全一致）
+    const bar = $('#session-tabs');
+    if (bar) bar.hidden = tabs.length < 2;
     list.innerHTML = '';
     tabs.forEach((t) => {
       const btn = document.createElement('button');
@@ -7494,6 +7530,9 @@
       }
       list.appendChild(btn);
     });
+    // 单一出口：标签重画后顶栏标题必然与"当前可见标签"一致，
+    // 不依赖每个调用点各记一次同步（此前 pane-ready/status 就漏了，标题会停在旧值）。
+    syncTopbarTitle();
   }
 
   function activateTab(tabId) {
@@ -7501,7 +7540,15 @@
     if (!tab) return;
     activeTabId = tab.id;
     tabs.forEach((t) => { if (t.pane) t.pane.hidden = t.id !== activeTabId; });
-    renderTabs();
+    renderTabs();           // 内部同步顶栏标题
+    renderSidebarRecent();  // 侧栏高亮同步到当前可见标签
+  }
+
+  /** 顶栏「当前会话」= 当前可见标签的标题（primary 的标题由 setSessionTitle 维护） */
+  function syncTopbarTitle() {
+    const active = tabs.find((t) => t.id === activeTabId);
+    const el = $('#session-title');
+    if (active && el) el.textContent = active.title || '新会话';
   }
 
   /** 运行状态点（primary 由本页事件驱动，frame 由 iframe postMessage 驱动） */
@@ -7510,6 +7557,7 @@
     if (!t || t.running === running) return;
     t.running = running;
     renderTabs();
+    renderSidebarRecent();   // 侧栏「运行中」标记跟着标签运行态走
   }
 
   /** frame 标签 iframe 地址（token 透传：iframe 内的 WS 握手同样需要钥匙） */
@@ -7574,7 +7622,10 @@
     try { tab.frame.src = 'about:blank'; } catch (e) { /* ignore */ }
     if (tab.pane) tab.pane.remove();
     if (activeTabId === tabId) activateTab('primary');
-    else renderTabs();
+    else {
+      renderTabs();
+      renderSidebarRecent();   // 关掉的标签可能正带着「运行中」标记
+    }
   }
 
   /** 打开一条已有会话：已在某个标签里 ⇒ 切过去；否则新开一个 frame 标签 */
@@ -7603,17 +7654,23 @@
       tab.title = tabTitleFor(data.sessionId, tab.title);
       tab.error = '';
       renderTabs();
+      // 标签刚拿到会话 id ⇒ 侧栏高亮/运行点要立刻跟上（顶栏由 renderTabs 同步）
+      renderSidebarRecent();
     } else if (data.type === 'hyacinth:pane-status') {
       tab.running = !!data.running;
       tab.error = '';
       if (data.sessionId) tab.sessionId = data.sessionId;
       renderTabs();
-      // 回合结束 updatedAt 才变 ⇒ 刷新侧栏列表，并把占位标题换成真实标题
-      if (!data.running) void loadSidebarRecent().then(() => syncTabTitles());
+      renderSidebarRecent();
+      // 回合开始：新会话可能刚物化 ⇒ 拉一次列表让它带运行点出现在侧栏；
+      // 回合结束：updatedAt 变了 ⇒ 刷新相对时间，并把占位标题换成真实标题。
+      const inCache = sidebarRecentCache.some((s) => sameSession(s.id, tab.sessionId));
+      if (!data.running || !inCache) void loadSidebarRecent().then(() => syncTabTitles());
     } else if (data.type === 'hyacinth:pane-error') {
       tab.error = data.message || '连接失败';
       tab.running = false;
       renderTabs();
+      renderSidebarRecent();
     }
   }
 
@@ -7625,7 +7682,7 @@
       const next = tabTitleFor(t.sessionId, t.title);
       if (next && next !== t.title) { t.title = next; changed = true; }
     });
-    if (changed) renderTabs();
+    if (changed) renderTabs();   // 顶栏标题由 renderTabs 同步
   }
 
   function bindSessionTabs() {
@@ -7645,6 +7702,8 @@
 
     const addBtn = $('#tab-new-btn');
     if (addBtn) addBtn.addEventListener('click', () => createFrameTab(null));
+    const addBtnTop = $('#tab-new-btn-top');
+    if (addBtnTop) addBtnTop.addEventListener('click', () => createFrameTab(null));
 
     const list = $('#session-tabs-list');
     if (list) {

@@ -466,6 +466,15 @@
   white-space: nowrap;
 }
 .sidebar-recent-item.is-current .sidebar-recent-time { color: var(--hyacinth-primary); opacity: 0.9; }
+/* 运行中：该会话正在跑一轮对话（标签运行态在侧栏的投影，动画复用 tab-pulse） */
+.sidebar-recent-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--state-success);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
 
 /* 空搜索结果的占位 */
 .sidebar-recent-empty {
@@ -2510,6 +2519,7 @@
   overflow-x: auto;
   scrollbar-width: thin;
 }
+.session-tabs[hidden] { display: none; }
 .session-tabs-list { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .session-tab {
   flex: 0 0 auto;
