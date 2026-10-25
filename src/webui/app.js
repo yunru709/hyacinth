@@ -249,7 +249,10 @@
     // 确保图标渲染（切换后新显示区域）
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
     // 视图数据加载钩子
-    if (view === 'chat' && connected) loadHistory();
+    // ⚠ 本页正在跑一轮对话时，**不能**重拉历史：loadHistory 会 clearChat()，
+    //   把正在流式输出的过程块/交付全部抹掉，只剩磁盘里的旧快照 ——
+    //   用户看到的就是「切回来渲染停了，刷新才有」。可见性切换不该触发数据重载 ✓
+    if (view === 'chat' && connected && !primaryRunning()) loadHistory();
     if (view === 'model' && connected) loadModel();
     if (view === 'sessions' && connected) loadSessions();
     if (view === 'settings' && connected) loadSettings();
@@ -1818,8 +1821,17 @@
     }
     if (leaf === 'new') {
       client.request('session.create', { type: 'normal' })
-        .then((meta) => client.request('session.switch', { sessionId: meta && meta.id ? meta.id : meta }))
-        .then(() => { appendMsg('system', '已新建会话'); loadHistory(); loadSessions(); loadSidebarRecent(); })
+        .then((meta) => {
+          const sid = meta && meta.id ? meta.id : meta;
+          loadSessions();
+          loadSidebarRecent();
+          // 本页正在跑 ⇒ 另开标签，别 switch（会打断当前回合）
+          if (openAsTabIfPrimaryBusy(sid, '当前会话正在运行，新会话已在并行标签打开')) return;
+          return client.request('session.switch', { sessionId: sid }).then(() => {
+            appendMsg('system', '已新建会话');
+            loadHistory();
+          });
+        })
         .catch((e) => appendMsg('error', '新建失败: ' + (e && e.message)));
       return;
     }
@@ -4872,11 +4884,15 @@
       return;
     }
     setBusy(true);
+    // 发送即视为运行中：turn_start 回来之前也有一小段窗口，期间切会话同样会
+    // 让本轮中途换目录 ⇒ 守卫必须从按下发送的那一刻就生效
+    tabsSetRunning('primary', true);
     // 只有图没有文字 ⇒ 补一句自然的最小指令（协议要求 content 为非空字符串）
     const content = text || '请看这张图。';
     const payload = images.length ? { content, images } : { content };
     client.request('message.chat', payload).catch((e) => {
       setBusy(false);
+      tabsSetRunning('primary', false);
       appendMsg('error', `发送失败: ${(e && e.message) || '未知错误'}`);
     });
   }
@@ -5285,16 +5301,28 @@
   /** 侧栏点击会话：恢复 → 切换后端 loop → 重拉历史 */
   function openRecentSession(sid) {
     if (!connected || !sid) return;
+    // 窄屏抽屉是覆盖层：不收起会盖住刚打开的历史（宽屏下该 class 无样式 ⇒ 无副作用 ✓）
+    setNavDrawer(false);
     // 该会话已在某个并行标签里 ⇒ 直接切过去：用本页连接去 switch 会被后端占用表拒绝
     const openTab = tabForSession(sid);
     if (openTab && openTab.kind === 'frame') {
-      setNavDrawer(false);
       goTo('#/chat');
       activateTab(openTab.id);
       return;
     }
-    // 窄屏抽屉是覆盖层：不收起会盖住刚打开的历史（宽屏下该 class 无样式 ⇒ 无副作用 ✓）
-    setNavDrawer(false);
+    // 就是 primary 自己这条会话 ⇒ 只是"回到那个标签"：
+    // 再发一次 session.switch + clearChat/loadHistory 会把正在进行中的流式视图清掉 ✗
+    if (openTab && openTab.kind === 'primary') {
+      goTo('#/chat');
+      activateTab('primary');
+      return;
+    }
+    // primary 正在跑一轮对话 ⇒ 不能对它 switch（见 openAsTabIfPrimaryBusy 的说明）
+    if (openAsTabIfPrimaryBusy(sid)) {
+      goTo('#/chat');
+      return;
+    }
+    goTo('#/chat');
     const applySwitch = () => {
       currentSessionId = sid;
       const hit = sidebarRecentCache.find((x) => x.id === sid);
@@ -5347,11 +5375,14 @@
         client.request('session.create', { type: 'normal' }).then((meta) => {
           const sid = (meta && meta.id) || null;
           if (!sid) return;
+          goTo('#/chat');
+          loadSessions();
+          loadSidebarRecent();      // A4：新建后立刻出现在「最近会话」并高亮
+          // primary 运行中 ⇒ 新会话另开标签：对运行中的 loop 发 switch 会打断当前回合
+          if (openAsTabIfPrimaryBusy(sid, '当前会话正在运行，新会话已在并行标签打开')) return;
           return client.request('session.switch', { sessionId: sid }).then(() => {
             currentSessionId = sid;
             activateTab('primary');
-            loadSessions();
-            loadSidebarRecent();      // A4：新建后立刻出现在「最近会话」并高亮
             clearChat();
             appendMsg('system', '新会话已创建');
           });
@@ -5378,17 +5409,21 @@
           if (!connected) return;
           // 已开在并行标签里 ⇒ 切过去（用本页连接再 switch 会被后端占用表拒绝）
           const openTab = tabForSession(sid);
-          if (openTab && openTab.kind === 'frame') {
+          if (openTab) {
             goTo('#/chat');
             activateTab(openTab.id);
             return;
           }
           // 加载会话 = 切换后端 loop 当前会话目录（session.switch），
           // 而非仅读元数据（session.resume 不切换 loop，会导致后续消息写错会话）
+          if (openAsTabIfPrimaryBusy(sid)) {
+            goTo('#/chat');
+            return;
+          }
+          goTo('#/chat');
           client.request('session.switch', { sessionId: sid }).then(() => {
             currentSessionId = sid;
             appendMsg('system', '已加载会话 ' + sid);
-            goTo('#/chat');
             activateTab('primary');
             loadHistory();
           }).catch((e2) => appendMsg('error', '加载会话失败: ' + (e2 && e2.message)));
@@ -7491,6 +7526,32 @@
     return tabs.find((t) => sameSession(tabSessionId(t), sessionId)) || null;
   }
 
+  /** primary（本页连接）正在跑一轮对话？ */
+  function primaryRunning() {
+    const p = tabs.find((t) => t.kind === 'primary');
+    return !!(p && p.running);
+  }
+
+  /**
+   * 「去看另一条会话」的安全落点：primary 运行中 ⇒ 目标会话另开独立标签。
+   *
+   * 为什么运行中绝不能对 primary 发 session.switch（实测 + 代码路径）：
+   * `loop.switchSession()` 只登记 pendingSessionDir，真正换目录发生在**下一轮边界**
+   * 的 applyPendingSessionSwitch（loop.ts）。也就是说切走后当前回合会继续跑，
+   * 但后续写入已经指向别的会话目录；前端那边 clearChat()+loadHistory() 又把
+   * 正在进行中的流式视图清空 ⇒ 切回原会话只剩磁盘快照。用户看到的就是
+   * 「渲染停了，刷新才更新」。另开标签走自己的 WS / AgentLoop，原回合一点不受影响 ✓
+   *
+   * @returns true = 已交给标签接管（调用方不要再 switch / 重拉历史）
+   */
+  function openAsTabIfPrimaryBusy(sid, message) {
+    if (!primaryRunning()) return false;
+    const tab = createFrameTab(sid);
+    if (tab) appendMsg('system', message || '当前会话正在运行，已在并行标签打开目标会话');
+    // 已达标签上限（createFrameTab 内部已提示）：同样不能再 switch，否则破坏运行中的回合
+    return true;
+  }
+
   function renderTabs() {
     const list = $('#session-tabs-list');
     if (!list || embedMode) return;
@@ -7542,6 +7603,8 @@
     tabs.forEach((t) => { if (t.pane) t.pane.hidden = t.id !== activeTabId; });
     renderTabs();           // 内部同步顶栏标题
     renderSidebarRecent();  // 侧栏高亮同步到当前可见标签
+    // 回到本页标签 = 看最新进度：切走期间可能积了很多输出，不该停在离开时的位置
+    if (tab.kind === 'primary') scrollChat();
   }
 
   /** 顶栏「当前会话」= 当前可见标签的标题（primary 的标题由 setSessionTitle 维护） */
@@ -7735,6 +7798,7 @@
     // 新会话（侧栏顶部按钮，id="session-new-btn"）
     // 必须 create 之后紧跟 switch：session.create 只建目录，loop 仍指向旧会话，
     // 不切的话"新会话"点完，下一句话还是写进上一个会话里（与 #/sessions 的新建同款）。
+    // 例外：本页正在跑一轮对话时不 switch（会打断当前回合），改为另开标签（见下）。
     const newBtn = $('#session-new-btn');
     if (newBtn) {
       newBtn.onclick = () => {
@@ -7742,12 +7806,14 @@
         client.request('session.create', { type: 'normal' }).then((meta) => {
           const sid = (meta && meta.id) || null;
           if (!sid) return;
+          loadSidebarRecent();    // A4：新会话进列表 + 高亮
+          // primary 运行中 ⇒ 新会话另开标签：对运行中的 loop 发 switch 会打断当前回合
+          if (openAsTabIfPrimaryBusy(sid, '当前会话正在运行，新会话已在并行标签打开')) return;
           return client.request('session.switch', { sessionId: sid }).then(() => {
             currentSessionId = sid;
             setSessionTitle('新会话');
             clearChat();
             appendMsg('system', '新会话已创建');
-            loadSidebarRecent();    // A4：新会话进列表 + 高亮
           });
         }).catch((e) => appendMsg('error', '创建会话失败: ' + (e && e.message)));
       };
