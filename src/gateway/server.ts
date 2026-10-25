@@ -4,7 +4,8 @@ import { getProviderConfigLoader } from '../provider/config.js';
 import { SessionManager } from '../memory/session.js';
 import { SessionService } from '../session-service.js';
 import { ChannelManager } from '../channels/manager.js';
-import { HttpWebhookChannel } from '../channels/builtin/http-webhook.js';
+import { HttpWebhookChannel, setSessionClaimsProvider } from '../channels/builtin/http-webhook.js';
+import { getSessionClaims } from '../memory/session-claims.js';
 import { registerConfigChannels, getChannelPlugins } from '../channels/auto-detect.js';
 import { createAgent } from './factory.js';
 import os from 'node:os';
@@ -80,6 +81,10 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
 
   // 创建渠道管理器并注册渠道
   const manager = new ChannelManager();
+
+  // 注入进程级会话占用表（webui 多标签互斥依赖它）：本文件属 gateway 层，
+  // 白名单允许直连 memory；http-webhook 侧只保留类型导入（见该文件注释）。
+  setSessionClaimsProvider(getSessionClaims);
 
   // HTTP API 渠道
   manager.register(new HttpWebhookChannel(), {

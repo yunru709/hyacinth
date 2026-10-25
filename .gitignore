@@ -72,3 +72,8 @@ arch-report/
 # 开发期浏览器 UI 验证截图与运行日志（.tmp-*/ 目录 + .tmp-*.log）
 # 无任何代码引用（2026-10-24 核对），纯临时产物；此前 auto: pre-turn-* 提交误入库已清出
 .tmp*
+
+# Python 字节码缓存（CosyVoice server.py 的编译产物，非源码）
+# 2026-10-25：此前未忽略，`git status` 里会混进 __pycache__/*.pyc，容易误提交
+__pycache__/
+*.pyc

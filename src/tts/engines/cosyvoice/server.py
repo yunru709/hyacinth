@@ -237,8 +237,18 @@ def _patch_token_ratio():
     """
     raw_max = os.environ.get("COSYVOICE_MAX_TOKEN_RATIO", "").strip()
     raw_min = os.environ.get("COSYVOICE_MIN_TOKEN_RATIO", "").strip()
-    if not raw_max and not raw_min:
-        return False
+    # ⚠️ 2026-10-25 修正（bug-3）：此处原本是
+    #       `if not raw_max and not raw_min: return False`
+    #   ⇒ 没设环境变量时**完全不 patch**，于是 `_DEFAULT_MAX_RATIO = 12`
+    #   只被 server 侧算 cap 用到，**从未下发给模型** ⇒ 模型一直按上游 N×20 跑。
+    #
+    #   实证指纹（2026-10-25 21:37，say「孑遗，晚上好，我现在能出声说话了。」）：
+    #       日志: 撞顶不重试 (text_tokens=17 dur=13.60s cap=204 帧)
+    #       13.60 s / 40 ms = **340 帧 = 17 × 20**（上游默认），而 cap=204 = 17 × 12。
+    #   两个数同一条日志里互相矛盾 —— 这就是「常量只算不下发」的指纹。
+    #
+    #   现在：max 默认就下发 12（docstring 里 ratio12 的收窄实测至此才真正生效），
+    #   环境变量仍可显式覆盖（更宽/更紧都能做单变量对照）。
 
     def _parse(name, raw):
         try:
@@ -251,7 +261,8 @@ def _patch_token_ratio():
             return None
         return v
 
-    over = {}
+    # 默认就下发 12（理由见上方 bug-3）；env 显式给出则覆盖它。
+    over = {"max_token_text_ratio": _DEFAULT_MAX_RATIO}
     if raw_max:
         v = _parse("COSYVOICE_MAX_TOKEN_RATIO", raw_max)
         if v is not None:
@@ -553,6 +564,18 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed):
             if best is None or key < best[0]:
                 best = (key, seg)
             if ok:
+                break
+            # ── 撞顶（跑满 max_len）**不再重试**（2026-10-25）──────────────
+            # 撞顶 = LLM 一路到 max_len 都没发 EOS，单次 wall 就是
+            # `max_len × 40 ms`（21 字 ⇒ 420 帧 ⇒ 16.8 s）。tier=1 的产物
+            # 本身是「话基本说完了，只是拖长」（可懂）；再跑一次不是「修正」
+            # 而是再赌一次运气，代价是又一份最长 wall —— 用户等待直接翻倍。
+            # 实测依据：21 字句多次 sweep 里两次都是精确 16.80 s 撞顶，重试
+            # 那次也没有更接近自然时长（≈3~4 s）。
+            # 对照开关：COSYVOICE_RETRY_ON_CAP=1 恢复旧行为（撞顶仍重试）。
+            if hit_cap and os.environ.get("COSYVOICE_RETRY_ON_CAP", "0") != "1":
+                print(f'[cosyvoice] 撞顶不重试 (text_tokens={n_text} dur={dur:.2f}s '
+                      f'cap={max_len} 帧)', flush=True)
                 break
             if attempt < retry_cap:
                 print(f'[cosyvoice] 时长异常重试 {attempt + 1}/{retry_cap} '

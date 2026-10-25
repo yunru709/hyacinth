@@ -202,6 +202,41 @@ export function createSayVoicePlugin(
           broadcast.onSayDelivered(text, opts, notify),
       } satisfies SayVoiceApi & { onSayDelivered: (t: string, o: SayVoiceOptions, n: NotifyFn) => void });
       ctx.logger.info('say-voice plugin activated: say delivery broadcast ready');
+
+      // ── 启动时异步预热本地推理服务（2026-10-25 孑遗要求）───────────────
+      // 原话：「既然已经要使用 say 了，那么应该在启动的时候异步自动拉起服务」。
+      // 为什么放这里：插件挂载 = say 播报能力就位的最早时点。若推迟到首个 say 调用
+      // 才 spawn，会把 1~2 分钟的 torch 初始化 + 权重加载压到用户第一次等语音那一刻，
+      // 而那时他已经在等「说完了」——两段等待串联，体感最差。
+      //
+      // 三个前置条件，缺一不预热：
+      //   ① 播报总开关开着（关着就没必要白占 8 GB 显存）
+      //   ② 模型文件齐全（缺文件时拉起来只会每条都 500）
+      //   ③ 服务未在跑（单例 + 端口硬编码，重复启动会冲突/认领）
+      //
+      // 必须 fire-and-forget：加载耗时以分钟计，绝不能阻塞装配链（否则 TUI 起不来）。
+      // 失败只留痕不升级：文字交付照常，首句语音会走插件既有的「未就绪」提示。
+      // ⚠️ 只在「未注入自定义引擎」时预热 —— 测试注入假引擎时**绝不能** spawn python。
+      if (!services.engine && getConfig<boolean>('voice.say.broadcast') === true) {
+        void (async () => {
+          try {
+            const svc = getTtsService();
+            const st = svc.modelState();
+            if (!st.ready) {
+              ctx.logger.info(`say-voice: 跳过 TTS 预热（模型缺 ${st.missingFiles.join(', ')}）`);
+              return;
+            }
+            if (svc.serviceState().running) return;
+            ctx.logger.info('say-voice: 播报已开启，后台预热本地 TTS 服务（约 1~2 分钟）');
+            await svc.start();
+            ctx.logger.info('say-voice: 本地 TTS 服务已就绪');
+          } catch (err) {
+            ctx.logger.warn('say-voice: TTS 预热失败（文字交付不受影响）', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })();
+      }
     },
   };
 }

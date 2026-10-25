@@ -11,7 +11,7 @@
  *   editor          — user input area
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -791,6 +791,52 @@ export async function runTui(
     } catch { /* 协议不可用时保持旧值 */ }
   }
 
+  // ── say 语音播报：本地播放（2026-10-25 补）────────────────────────
+  // 背景（孑遗实听确认）：TUI 渠道此前**完全没有播放器** —— `tts.say_voice`
+  // 只被 webui 的 app.js 消费，TUI 的 handleProtocolEvent switch 里没有这个
+  // case ⇒ 事件到了直接被丢掉，一声不出。channels/interface.ts 也只有
+  // `images?`，没有音频字段 —— 整条 TUI 侧就是从没接过音频。
+  //
+  // 实现取最小可用：WAV 落盘 → 系统播放器（Windows `System.Media.SoundPlayer`）。
+  // 用 spawn 而不是 execSync：PlaySync 会阻塞到播放结束（4~14 秒），execSync 会把
+  // TUI 主线程一起卡住；spawn 异步，且能拿到退出码与 stderr。
+  // 位置选 `~/.agent/work/` 而非 %TEMP%：火绒会拦未知 exe 写 %TEMP%（见纪律）。
+  const playLocalWav = (wav: Buffer): void => {
+    try {
+      const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `say-${Date.now()}.wav`);
+      fs.writeFileSync(file, wav);
+      // ⚠️ 2026-10-25 修正：原实现用 `start /b` + 静默 catch，播放成败**完全不可知**
+      // （say-cache 里的 wav 被删只证明 powershell 起来了，不证明扬声器真出了声）。
+      // 违反「catch 里必须打日志」⇒ 改成 spawn + exit code/stderr 留痕。
+      const ps = spawn(
+        'powershell',
+        [
+          '-NoProfile',
+          '-WindowStyle',
+          'Hidden',
+          '-Command',
+          `$p='${file}'; try { (New-Object Media.SoundPlayer $p).PlaySync() } finally { Remove-Item $p -ErrorAction SilentlyContinue }`,
+        ],
+        { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
+      );
+      let stderr = '';
+      ps.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+      ps.on('error', (e: Error) => {
+        logger.warn('say-voice: 本地播放启动失败', { error: e.message });
+      });
+      ps.on('exit', (code: number | null) => {
+        if (code !== 0) {
+          logger.warn('say-voice: 本地播放失败', { code, stderr: stderr.slice(0, 300) });
+        }
+      });
+    } catch (e) {
+      // 播放器不可用 → 降级但不静默（语音是增强，不打断对话，但必须留痕）
+      logger.warn('say-voice: 本地播放异常', { error: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   // client 端协议事件分发：把协议事件映射回 TUI 渲染/交互
   // （message.* → tuiHandler；permission.request → 权限队列；ask_user → 表单）
   const handleProtocolEvent = (ev: UiEvent): void => {
@@ -802,6 +848,14 @@ export async function runTui(
         // 与普通 assistant 输出在视觉上区分开。
         chatLog.addDelivered(String(p.content ?? ''));
         break;
+      case UI_EVENT.SAY_VOICE: {
+        // payload: { state:'ready'|'error', audioWavBase64?, textPreview?, voice?, speed?, message? }
+        // error 态只静默（正文已完整到达，语音是增强）
+        if (String(p.state ?? '') === 'ready' && typeof p.audioWavBase64 === 'string') {
+          playLocalWav(Buffer.from(p.audioWavBase64, 'base64'));
+        }
+        break;
+      }
       case UI_EVENT.COMPANION_SAY:
         // 陪伴表达：与普通回复同形展示（payload.text 已是 [动作]（心声）话术 渲染结果）
         tuiHandler.onText?.(String(p.text ?? ''));
@@ -1129,7 +1183,12 @@ export async function runTui(
       | undefined;
 
     if (webuiCfg?.enabled === true) {
-      const { HttpWebhookChannel } = await import('../channels/builtin/http-webhook.js');
+      const { HttpWebhookChannel, setSessionClaimsProvider } = await import('../channels/builtin/http-webhook.js');
+      // 注入进程级会话占用表（webui 多标签互斥依赖它）：本文件属 gateway 层，
+      // 白名单允许直连 memory；http-webhook 侧只保留类型导入（见该文件注释）。
+      // 放在 webui 启用分支内：没开 webui 就不需要占用表。
+      const { getSessionClaims } = await import('../memory/session-claims.js');
+      setSessionClaimsProvider(getSessionClaims);
       const { DEFAULT_MAX_CONTEXT_TOKENS } = await import('../setup/config.js');
       const nodePath = await import('node:path');
       const { existsSync } = await import('node:fs');

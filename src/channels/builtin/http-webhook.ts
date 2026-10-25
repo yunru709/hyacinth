@@ -36,12 +36,69 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import type { UiWsSessionBackend } from './ui-ws-session.js';
-import { getSessionClaims } from '../../memory/session-claims.js';
+// 只做类型导入（编译后消失）⇒ 不构成「运行时直连业务核心」，符合 verify:layers 规则 5
+import type { SessionClaimRegistry } from '../../memory/session-claims.js';
 import { getRouterByName } from '../../context/profiles.js';
 import { switchToMode } from '../../context/mode-switch.js';
 import { clearPromptCache } from '../../prompts/loader.js';
 
 const logger = createLogger('http-webhook');
+
+// ── 会话占用表：依赖注入（2026-10-25）──────────────────────────────
+// 为什么本文件不再 `import { getSessionClaims } from memory/session-claims`：
+//   verify:layers 规则 5「UI 适配层不得直连业务核心」—— `channels/` 属 UI 侧，
+//   `memory/` 是业务核心，运行时相对导入必须 ∈ ui-direct-whitelist，且白名单只减不增。
+// 为什么不能改成走 ui-protocol 协议调用：
+//   这段判定发生在 **WS upgrade 事件**里（协议层尚未建立），请求发不出去（鸡生蛋）。
+// 所以改由装配方注入：gateway/server.ts 与 gateway/tui.ts 都在白名单内允许 memory，
+//   它们调 setSessionClaimsProvider(getSessionClaims) 把进程级单例交进来。
+// 未注入时用本实例内 Map 兜底：语义等价（claim/release/ownerOf/transfer/snapshot），
+//   仅互斥范围限于本实例 —— 单 channel 实例场景与注入行为一致。
+let claimsProvider: (() => SessionClaimRegistry) | null = null;
+let localClaims: SessionClaimRegistry | null = null;
+
+/** 装配方注入进程级占用表（webui 多标签互斥依赖它） */
+export function setSessionClaimsProvider(fn: () => SessionClaimRegistry): void {
+  claimsProvider = fn;
+}
+
+/** 本地兜底实现：与 memory 的 createSessionClaims 同语义，避免本文件运行时 import */
+function createLocalClaims(): SessionClaimRegistry {
+  const map = new Map<string, string>();
+  return {
+    claim(sessionId, owner) {
+      const holder = map.get(sessionId);
+      if (holder !== undefined && holder !== owner) return false;
+      map.set(sessionId, owner);
+      return true;
+    },
+    release(sessionId, owner) {
+      if (map.get(sessionId) === owner) map.delete(sessionId);
+    },
+    ownerOf(sessionId) {
+      return map.get(sessionId) ?? null;
+    },
+    transfer(from, to, owner) {
+      if (from !== to) {
+        const holder = map.get(to);
+        if (holder !== undefined && holder !== owner) return false;
+      }
+      map.set(to, owner);
+      if (from && from !== to && map.get(from) === owner) map.delete(from);
+      return true;
+    },
+    snapshot() {
+      return Object.fromEntries(map);
+    },
+  };
+}
+
+/** 取当前生效的占用表：已注入用进程级单例，否则用本实例兜底 */
+function resolveClaims(): SessionClaimRegistry {
+  if (claimsProvider) return claimsProvider();
+  localClaims ??= createLocalClaims();
+  return localClaims;
+}
 
 // ── 认证 ────────────────────────────────────────────────────────────
 
@@ -700,7 +757,7 @@ export class HttpWebhookChannel implements ChannelHandler {
     // 不带该参数：维持旧行为铸新 id（新建标签 / 普通刷新）。
     // 占用失败时先接受升级、回一条 ui.error 再关闭：浏览器 WebSocket 拿不到
     // HTTP 状态码，只有协议事件能把"为什么连不上"讲给前端。
-    const claims = getSessionClaims();
+    const claims = resolveClaims();
     const claimOwner = `ws_${randomBytes(8).toString('hex')}`;
     const requested = parseSessionParam(req);
     let effectiveSessionId = sessionId;
