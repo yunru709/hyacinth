@@ -1,0 +1,39 @@
+﻿voice=FlutterShy repeat=3 ok_min_audio=0.3s
+  3字 len=3   ok  wall= 4.72s audio= 1.36s
+  3字 len=3   ok  wall= 3.33s audio= 0.64s
+  3字 len=3   ok  wall= 1.26s audio= 0.80s
+  --> 3字: ok 3/3 → USABLE
+
+  6字 len=6   ok  wall= 3.00s audio= 2.72s
+  6字 len=6   ok  wall= 1.11s audio= 0.60s
+  6字 len=6   ok  wall= 1.91s audio= 1.48s
+  --> 6字: ok 3/3 → USABLE
+
+  10字 len=12  ok  wall= 2.42s audio= 2.08s
+  10字 len=12  ok  wall= 2.37s audio= 2.08s
+  10字 len=12  ok  wall= 2.24s audio= 1.92s
+  --> 10字: ok 3/3 → USABLE
+
+  15字 len=20  ok  wall= 4.79s audio= 4.72s
+  15字 len=20  ok  wall= 3.87s audio= 3.80s
+  15字 len=20  ok  wall= 4.35s audio= 4.40s
+  --> 15字: ok 3/3 → USABLE
+
+  21字 len=21  ok  wall= 5.34s audio= 5.60s
+  21字 len=21  ok  wall= 5.04s audio= 5.20s
+  21字 len=21  ok  wall=18.53s audio= 4.52s
+  --> 21字: ok 3/3 → USABLE
+
+  31字 len=37  ok  wall= 7.11s audio= 7.92s
+  31字 len=37  ok  wall= 7.12s audio= 7.96s
+  31字 len=37  ok  wall= 8.33s audio= 9.48s
+  --> 31字: ok 3/3 → USABLE
+
+=== SUMMARY ===
+  len     ok  usable  audio_range
+    3    3/3    True  0.64~1.36s
+    6    3/3    True  0.60~2.72s
+   12    3/3    True  1.92~2.08s
+   20    3/3    True  3.80~4.72s
+   21    3/3    True  4.52~5.60s
+   37    3/3    True  7.92~9.48s

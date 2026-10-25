@@ -1,0 +1,23 @@
+﻿  r0 EN-SHORT  ok  wall=  1.83s audio= 1.60s 
+  r0 EN-MID    ok  wall=  2.63s audio= 3.76s 
+  r0 ZH-SHORT  ok  wall=  0.98s audio= 0.80s 
+  r0 ZH-MID    ok  wall=  9.78s audio=16.80s 
+  r1 EN-SHORT  ok  wall=  0.63s audio= 0.16s 
+  r1 EN-MID    ok  wall=  1.26s audio= 1.28s 
+  r1 ZH-SHORT  ok  wall=  0.74s audio= 0.36s 
+  r1 ZH-MID    ok  wall=  9.79s audio=16.80s 
+  r2 EN-SHORT  err wall=  0.46s audio= 0.00s Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than a
+  r2 EN-MID    ok  wall=  2.36s audio= 3.48s 
+  r2 ZH-SHORT  ok  wall=  2.64s audio= 3.96s 
+  r2 ZH-MID    ok  wall=  1.01s audio= 0.88s 
+  r3 EN-SHORT  ok  wall=  1.24s audio= 1.32s 
+  r3 EN-MID    ok  wall=  2.77s audio= 4.12s 
+  r3 ZH-SHORT  ok  wall=  0.61s audio= 0.12s 
+  r3 ZH-MID    ok  wall=  9.68s audio=16.80s 
+
+=== SUMMARY ===
+case         ok  audio_min  audio_max   spread      cv
+EN-SHORT     3/4      0.16s      1.60s    1.44s   1.40  err=1
+EN-MID       4/4      1.28s      4.12s    2.84s   0.90  err=0
+ZH-SHORT     4/4      0.12s      3.96s    3.84s   2.93  err=0
+ZH-MID       4/4      0.88s     16.80s   15.92s   1.24  err=0

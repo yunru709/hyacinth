@@ -1,0 +1,144 @@
+﻿[probe] loading model (fp16=True) ...
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] min_len guard patched (mask all stop tokens while i < min_len)
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=True
+[cosyvoice] model ready
+
+########## 6字 n_text=6 min_len=12 max_len=120 ##########
+
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+  with torch.cuda.amp.autocast(self.fp16):
+
+100%|██████████| 1/1 [00:04<00:00,  4.14s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.14s/it]
+  A ras-default   r0: tok=   0 cut?     audio= 1.96s wall= 4.14s ras= 14 
+
+
+100%|██████████| 1/1 [00:03<00:00,  3.38s/it]
+100%|██████████| 1/1 [00:03<00:00,  3.38s/it]
+  A ras-default   r1: tok=   0 cut?     audio= 1.76s wall= 3.38s ras=  8 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.71s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.71s/it]
+  A ras-default   r2: tok=   0 cut?     audio= 0.52s wall= 2.71s ras=  7 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.63s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.63s/it]
+  A ras-default   r3: tok=   0 cut?     audio= 0.48s wall= 2.63s ras=  5 
+
+
+100%|██████████| 1/1 [00:03<00:00,  3.02s/it]
+100%|██████████| 1/1 [00:03<00:00,  3.02s/it]
+  B nucleus-only  r0: tok=   0 cut?     audio= 0.84s wall= 3.02s ras=  0 
+
+
+100%|██████████| 1/1 [00:04<00:00,  4.79s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.79s/it]
+  B nucleus-only  r1: tok=   0 cut?     audio= 4.32s wall= 4.79s ras=  0 
+
+
+100%|██████████| 1/1 [00:04<00:00,  5.00s/it]
+100%|██████████| 1/1 [00:04<00:00,  5.00s/it]
+  B nucleus-only  r2: tok=   0 cut?     audio= 4.80s wall= 5.00s ras=  0 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.98s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.98s/it]
+  B nucleus-only  r3: tok=   0 cut?     audio= 0.96s wall= 2.98s ras=  0 
+
+
+100%|██████████| 1/1 [00:05<00:00,  5.02s/it]
+100%|██████████| 1/1 [00:05<00:00,  5.02s/it]
+  C ras-lenient   r0: tok=   0 cut?     audio= 4.80s wall= 5.02s ras=  0 
+
+
+100%|██████████| 1/1 [00:04<00:00,  4.97s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.97s/it]
+  C ras-lenient   r1: tok=   0 cut?     audio= 4.80s wall= 4.97s ras=  0 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.86s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.86s/it]
+  C ras-lenient   r2: tok=   0 cut?     audio= 0.80s wall= 2.86s ras=  3 
+
+
+100%|██████████| 1/1 [00:05<00:00,  5.01s/it]
+100%|██████████| 1/1 [00:05<00:00,  5.01s/it]
+  C ras-lenient   r3: tok=   0 cut?     audio= 4.80s wall= 5.01s ras=  1 
+
+########## 21字 n_text=21 min_len=42 max_len=420 ##########
+
+
+100%|██████████| 1/1 [00:04<00:00,  4.72s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.72s/it]
+  A ras-default   r0: tok=   0 cut?     audio= 4.20s wall= 4.72s ras= 28 
+
+
+100%|██████████| 1/1 [00:05<00:00,  5.73s/it]
+100%|██████████| 1/1 [00:05<00:00,  5.73s/it]
+  A ras-default   r1: tok=   0 cut?     audio= 5.96s wall= 5.73s ras= 16 
+
+
+100%|██████████| 1/1 [00:05<00:00,  5.46s/it]
+100%|██████████| 1/1 [00:05<00:00,  5.46s/it]
+  A ras-default   r2: tok=   0 cut?     audio= 5.60s wall= 5.46s ras= 22 
+
+
+100%|██████████| 1/1 [00:11<00:00, 11.65s/it]
+100%|██████████| 1/1 [00:11<00:00, 11.65s/it]
+  A ras-default   r3: tok=   0 cut?     audio=16.80s wall=11.65s ras= 47 
+
+
+100%|██████████| 1/1 [00:28<00:00, 28.86s/it]
+100%|██████████| 1/1 [00:28<00:00, 28.86s/it]
+  B nucleus-only  r0: tok=   0 cut?     audio=16.80s wall=28.86s ras=  0 
+
+
+100%|██████████| 1/1 [00:11<00:00, 11.54s/it]
+100%|██████████| 1/1 [00:11<00:00, 11.54s/it]
+  B nucleus-only  r1: tok=   0 cut?     audio=16.80s wall=11.54s ras=  0 
+
+
+100%|██████████| 1/1 [00:06<00:00,  6.84s/it]
+100%|██████████| 1/1 [00:06<00:00,  6.84s/it]
+  B nucleus-only  r2: tok=   0 cut?     audio= 7.68s wall= 6.84s ras=  0 
+
+
+100%|██████████| 1/1 [00:11<00:00, 11.74s/it]
+100%|██████████| 1/1 [00:11<00:00, 11.74s/it]
+  B nucleus-only  r3: tok=   0 cut?     audio=16.16s wall=11.74s ras=  0 
+
+
+100%|██████████| 1/1 [00:04<00:00,  4.51s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.51s/it]
+  C ras-lenient   r0: tok=   0 cut?     audio= 3.56s wall= 4.51s ras=  0 
+
+
+100%|██████████| 1/1 [00:11<00:00, 11.76s/it]
+100%|██████████| 1/1 [00:11<00:00, 11.76s/it]
+  C ras-lenient   r1: tok=   0 cut?     audio=16.80s wall=11.76s ras=  5 
+
+
+100%|██████████| 1/1 [00:14<00:00, 14.61s/it]
+100%|██████████| 1/1 [00:14<00:00, 14.61s/it]
+  C ras-lenient   r2: tok=   0 cut?     audio=16.80s wall=14.61s ras=  3 
+
+
+100%|██████████| 1/1 [00:08<00:00,  8.21s/it]
+  C ras-lenient   r3: tok=   0 cut?     audio= 6.88s wall= 8.21s ras=  1 
+
+=== SUMMARY ===
+
+100%|██████████| 1/1 [00:08<00:00,  8.21s/it]
+[6字]
+  A ras-default  : n=4 tok 0~0 spread=   0 | audio 0.48~1.96s | hit_max=0/4 | ras=[14, 8, 7, 5]
+  B nucleus-only : n=4 tok 0~0 spread=   0 | audio 0.84~4.80s | hit_max=0/4 | ras=[0, 0, 0, 0]
+  C ras-lenient  : n=4 tok 0~0 spread=   0 | audio 0.80~4.80s | hit_max=0/4 | ras=[0, 0, 3, 1]
+
+[21字]
+  A ras-default  : n=4 tok 0~0 spread=   0 | audio 4.20~16.80s | hit_max=0/4 | ras=[28, 16, 22, 47]
+  B nucleus-only : n=4 tok 0~0 spread=   0 | audio 7.68~16.80s | hit_max=0/4 | ras=[0, 0, 0, 0]
+  C ras-lenient  : n=4 tok 0~0 spread=   0 | audio 3.56~16.80s | hit_max=0/4 | ras=[0, 5, 3, 1]

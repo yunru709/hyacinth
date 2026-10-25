@@ -1,0 +1,30 @@
+﻿[probe] loading model (fp16=True) ...
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] min_len guard patched (mask all stop tokens while i < min_len)
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=True
+C:\Python311\python.exe : Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be
+ encountered.
+所在位置 C:\Users\74689\AppData\Local\Temp\agent-ps-tKcC8J\script.ps1:9 字符: 159
++ ... atcha-TTS"; C:\Python311\python.exe -u tools-dev\tts-crosslingual-ab. ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Sliding Window ...be encountered.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-10-25 13:25:58,532 INFO input frame rate=25
+C:\Python311\Lib\site-packages\torch\nn\utils\weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprec
+ated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+C:\Python311\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:197: UserWarning: Specified provide
+r 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecution
+Provider'
+  warnings.warn(
+2026-10-25 13:26:03,613 INFO use wetext frontend
+[cosyvoice] model ready
+[probe] patching CosyVoice3LM.inference (owner for sampling_ids = TransformerLM)
+
+########## 6字 n_text=6 min_len=12 max_len=120 ##########
+
+  0%|          | 0/1 [00:00<?, ?it/s]2026-10-25 13:26:06,038 WARNING synthesis text 你好，孑遗。 too short than prompt text R
+eally, I promise. Haha, you don't have to worry about me. I'm used to being by myself in the cottage. Animals keep me c
+ompany and everything has been nice and quiet, so it's okay.<|endofprompt|>, this may lead to bad performance

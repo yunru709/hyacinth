@@ -1,0 +1,63 @@
+﻿[probe] loading model (fp16=True) ...
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] min_len guard patched (mask all stop tokens while i < min_len)
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=True
+[cosyvoice] model ready
+[probe] text='你好，孑遗。' n_text=6 min_len=12 max_len=120
+
+[ref-long ] wav=FlutterShy.wav ref_speech_token=397
+
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+  with torch.cuda.amp.autocast(self.fp16):
+
+100%|██████████| 1/1 [00:04<00:00,  4.20s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.20s/it]
+   r0: tokens=   0 stop=short?   audio= 1.96s wall= 4.20s 
+
+
+100%|██████████| 1/1 [00:03<00:00,  3.47s/it]
+100%|██████████| 1/1 [00:03<00:00,  3.47s/it]
+   r1: tokens=   0 stop=short?   audio= 1.76s wall= 3.47s 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.75s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.75s/it]
+   r2: tokens=   0 stop=short?   audio= 0.52s wall= 2.75s 
+
+
+100%|██████████| 1/1 [00:02<00:00,  2.73s/it]
+100%|██████████| 1/1 [00:02<00:00,  2.73s/it]
+   r3: tokens=   0 stop=short?   audio= 0.48s wall= 2.73s 
+
+[ref-short] wav=zero_shot_prompt.wav ref_speech_token=87
+
+
+100%|██████████| 1/1 [00:01<00:00,  1.17s/it]
+100%|██████████| 1/1 [00:01<00:00,  1.17s/it]
+   r0: tokens=   0 stop=short?   audio= 0.64s wall= 1.17s 
+
+
+100%|██████████| 1/1 [00:01<00:00,  1.78s/it]
+100%|██████████| 1/1 [00:01<00:00,  1.78s/it]
+   r1: tokens=   0 stop=short?   audio= 1.76s wall= 1.78s 
+
+
+100%|██████████| 1/1 [00:01<00:00,  1.23s/it]
+100%|██████████| 1/1 [00:01<00:00,  1.23s/it]
+   r2: tokens=   0 stop=short?   audio= 0.76s wall= 1.23s 
+
+
+100%|██████████| 1/1 [00:01<00:00,  1.07s/it]
+100%|██████████| 1/1 [00:01<00:00,  1.07s/it]
+   r3: tokens=   0 stop=short?   audio= 0.48s wall= 1.07s 
+
+=== SUMMARY ===
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-prompt-len-ab.py", line 128, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-prompt-len-ab.py", line 115, in main
+    for label, _ in REFS:
+        ^^^^^^^^
+ValueError: too many values to unpack (expected 2)

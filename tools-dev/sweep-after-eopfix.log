@@ -1,0 +1,39 @@
+﻿voice=FlutterShy repeat=3 ok_min_audio=0.3s
+  3字 len=3   ok  wall= 4.47s audio= 0.60s
+  3字 len=3   ok  wall= 2.24s audio= 2.40s
+  3字 len=3   bad wall= 0.70s audio= 0.16s
+  --> 3字: ok 2/3 → USABLE
+
+  6字 len=6   ERR  0.49s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
+  6字 len=6   ok  wall= 3.38s audio= 4.80s
+  6字 len=6   ok  wall= 2.15s audio= 2.76s
+  --> 6字: ok 2/3 → USABLE
+
+  10字 len=12  ok  wall= 3.25s audio= 3.92s
+  10字 len=12  ok  wall= 1.77s audio= 2.04s
+  10字 len=12  ok  wall= 2.08s audio= 2.56s
+  --> 10字: ok 3/3 → USABLE
+
+  15字 len=20  ok  wall= 2.45s audio= 3.08s
+  15字 len=20  ok  wall= 3.03s audio= 4.44s
+  15字 len=20  ok  wall= 2.68s audio= 2.92s
+  --> 15字: ok 3/3 → USABLE
+
+  21字 len=21  ok  wall= 3.48s audio= 4.72s
+  21字 len=21  ok  wall= 2.03s audio= 2.16s
+  21字 len=21  ok  wall= 1.97s audio= 2.08s
+  --> 21字: ok 3/3 → USABLE
+
+  31字 len=37  ok  wall= 6.18s audio=10.12s
+  31字 len=37  ok  wall= 6.41s audio= 9.04s
+  31字 len=37  ok  wall= 6.58s audio= 9.32s
+  --> 31字: ok 3/3 → USABLE
+
+=== SUMMARY ===
+  len     ok  usable  audio_range
+    3    2/3    True  0.16~2.40s
+    6    2/3    True  2.76~4.80s
+   12    3/3    True  2.04~3.92s
+   20    3/3    True  2.92~4.44s
+   21    3/3    True  2.08~4.72s
+   37    3/3    True  9.04~10.12s

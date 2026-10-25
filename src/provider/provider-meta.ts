@@ -199,7 +199,9 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
   //    因此这里是"出厂默认"，用户在 providers.json 里覆盖同名字段即可（逐字段回落，见 config.ts）。
   opencode: {
     id: 'opencode',
-    name: 'OpenCode Zen (Go)',
+    name: 'OpenCode Zen / Go',
+    // Zen 按量付费默认端点。oc_sk_ 前缀的 Go 订阅密钥由 createOpenCodeProvider
+    // 自动改走 https://opencode.ai/inference/go/openai/v1（见 compatible.ts）。
     baseUrl: 'https://opencode.ai/zen/v1',
     defaultModel: 'deepseek-v4.1-flash',
     envKey: 'OPENCODE_API_KEY',

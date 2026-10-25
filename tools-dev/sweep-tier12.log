@@ -1,0 +1,45 @@
+﻿voice=FlutterShy repeat=4 ok_min_audio=0.3s
+  3字 len=3   ok  wall= 4.58s audio= 1.36s
+  3字 len=3   ok  wall= 4.17s audio= 1.44s
+  3字 len=3   ok  wall= 1.47s audio= 1.12s
+  3字 len=3   ok  wall= 3.76s audio= 0.84s
+  --> 3字: ok 4/4 → USABLE
+
+  6字 len=6   ok  wall= 1.21s audio= 0.80s
+  6字 len=6   ok  wall= 2.19s audio= 2.00s
+  6字 len=6   ok  wall= 2.23s audio= 2.08s
+  6字 len=6   ok  wall= 2.79s audio= 2.72s
+  --> 6字: ok 4/4 → USABLE
+
+  10字 len=12  ok  wall= 2.48s audio= 2.24s
+  10字 len=12  ok  wall= 2.27s audio= 2.00s
+  10字 len=12  ok  wall= 2.02s audio= 1.80s
+  10字 len=12  ok  wall= 2.07s audio= 1.84s
+  --> 10字: ok 4/4 → USABLE
+
+  15字 len=20  ok  wall= 3.81s audio= 4.00s
+  15字 len=20  ok  wall= 3.51s audio= 3.60s
+  15字 len=20  ok  wall= 3.30s audio= 3.36s
+  15字 len=20  ok  wall= 3.79s audio= 3.96s
+  --> 15字: ok 4/4 → USABLE
+
+  21字 len=21  ok  wall=16.23s audio= 5.80s
+  21字 len=21  ok  wall= 5.40s audio= 6.04s
+  21字 len=21  ok  wall= 3.32s audio= 3.36s
+  21字 len=21  ok  wall= 3.40s audio= 3.44s
+  --> 21字: ok 4/4 → USABLE
+
+  31字 len=37  ok  wall= 7.42s audio= 8.76s
+  31字 len=37  ok  wall= 6.33s audio= 7.20s
+  31字 len=37  ok  wall= 8.75s audio= 8.88s
+  31字 len=37  ok  wall= 7.62s audio= 7.44s
+  --> 31字: ok 4/4 → USABLE
+
+=== SUMMARY ===
+  len     ok  usable  audio_range
+    3    4/4    True  0.84~1.44s
+    6    4/4    True  0.80~2.72s
+   12    4/4    True  1.80~2.24s
+   20    4/4    True  3.36~4.00s
+   21    4/4    True  3.36~6.04s
+   37    4/4    True  7.20~8.88s

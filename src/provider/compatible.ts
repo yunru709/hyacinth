@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import type {
   Message,
@@ -665,18 +666,50 @@ export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
 }
 
 /**
- * OpenCode Zen (Go) —— **聚合中转站**（OpenAI 兼容协议）。
+ * OpenCode Zen / Go —— **聚合中转站**（OpenAI 兼容协议）。
  *
  * ⚠️ 与 groq/xai 等"模型原厂"不同：端点背后是第三方聚合，模型清单随上游变动，
  * 可用性不由我们保证。此处只负责"接上线"，模型目录见 MODEL_CATALOG
  * （可被用户 providers.json 的 models 逐 id 覆盖）。
+ *
+ * ⚠️ Zen 与 Go 是**两套端点 + 两套密钥**：
+ *   - Zen（sk-…）→ https://opencode.ai/zen/v1（按量付费）
+ *   - Go（oc_sk_…）→ https://opencode.ai/inference/go/openai/v1（订阅制）
+ * 用 Go 密钥打 Zen 端点会 402（Insufficient account funds），且只看 `/models`
+ * 是发现不了的（GET 会 200）。因此这里按密钥前缀自动选端点，避免重跑 setup /
+ * 重置 providers.json 后又落回 Zen 默认值。
  */
+const OPENCODE_ZEN_BASE_URL = 'https://opencode.ai/zen/v1';
+const OPENCODE_GO_BASE_URL = 'https://opencode.ai/inference/go/openai/v1';
+
+/** OpenCode Go 订阅密钥前缀（oc_sk_…）；Zen 密钥是 sk-… */
+export function isOpenCodeGoKey(apiKey: string | undefined): boolean {
+  return typeof apiKey === 'string' && apiKey.startsWith('oc_sk_');
+}
+
+/**
+ * 解析 OpenCode 端点。
+ * 自定义 baseUrl（代理 / 反代）优先；仅当未配置或仍是 Zen 默认值时才参与自动切换。
+ */
+export function resolveOpenCodeBaseUrl(
+  configuredBaseUrl: string | undefined,
+  apiKey: string | undefined,
+): string {
+  const isBuiltIn = configuredBaseUrl === undefined
+    || configuredBaseUrl === OPENCODE_ZEN_BASE_URL
+    || configuredBaseUrl === OPENCODE_GO_BASE_URL;
+  if (isBuiltIn && isOpenCodeGoKey(apiKey)) return OPENCODE_GO_BASE_URL;
+  return configuredBaseUrl ?? OPENCODE_ZEN_BASE_URL;
+}
+
 export function createOpenCodeProvider(config?: CompatibleFactoryConfig) {
   const provCfg = getProviderConfigLoader().getProvider('opencode');
+  const envKey = provCfg?.envKey ?? 'OPENCODE_API_KEY';
+  const apiKey = config?.apiKey || process.env[envKey];
   return new OpenAICompatibleProvider({
-    apiKey: config?.apiKey,
-    envKey: 'OPENCODE_API_KEY',
-    baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://opencode.ai/zen/v1',
+    apiKey,
+    envKey,
+    baseUrl: resolveOpenCodeBaseUrl(config?.baseUrl ?? provCfg?.baseUrl, apiKey),
     model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
     providerType: 'opencode',
     userId: config?.userId,
@@ -684,6 +717,13 @@ export function createOpenCodeProvider(config?: CompatibleFactoryConfig) {
     fields: config?.fields,
     sampling: config?.sampling,
     fieldMap: config?.fieldMap,
+    // OpenCode Go 端点强制要求 x-opencode-session（缺了直接 400），
+    // 并要求客户端自报 User-Agent；会话 ID 每个 provider 实例生成一次，
+    // 主会话跨轮稳定，便于上游路由与 prompt cache 命中。
+    headers: {
+      'User-Agent': process.env.OPENCODE_USER_AGENT ?? 'hyacinth',
+      'x-opencode-session': process.env.OPENCODE_SESSION_ID ?? randomUUID(),
+    },
     // 思考接线从 meta 读（厂商差异的单一声明点，见 thinking-style.ts）：
     // 未声明 → undefined → 构造期归一回 'none'（不发任何字段，保守缺省）
     thinkingStyle: provCfg?.thinkingStyle,

@@ -1,39 +1,39 @@
 ﻿voice=FlutterShy repeat=3 ok_min_audio=0.3s
-  3字 len=3   ERR  3.18s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  3字 len=3   ERR  0.43s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  3字 len=3   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 3字: ok 0/3 → BROKEN
+  3字 len=3   ok  wall=12.48s audio= 0.96s
+  3字 len=3   ok  wall= 3.44s audio= 0.96s
+  3字 len=3   ok  wall= 3.73s audio= 0.96s
+  --> 3字: ok 3/3 → USABLE
 
-  6字 len=6   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  6字 len=6   ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  6字 len=6   ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 6字: ok 0/3 → BROKEN
+  6字 len=6   ok  wall= 5.26s audio= 1.92s
+  6字 len=6   ok  wall= 3.07s audio= 0.76s
+  6字 len=6   ok  wall= 2.62s audio= 0.68s
+  --> 6字: ok 3/3 → USABLE
 
-  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  10字 len=12  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 10字: ok 0/3 → BROKEN
+  10字 len=12  ok  wall= 5.14s audio= 1.80s
+  10字 len=12  ok  wall= 9.31s audio= 3.84s
+  10字 len=12  ok  wall= 4.42s audio= 1.56s
+  --> 10字: ok 3/3 → USABLE
 
-  15字 len=20  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  15字 len=20  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  15字 len=20  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 15字: ok 0/3 → BROKEN
+  15字 len=20  ok  wall= 9.91s audio= 4.16s
+  15字 len=20  ok  wall=14.46s audio= 6.40s
+  15字 len=20  ok  wall=14.92s audio= 6.40s
+  --> 15字: ok 3/3 → USABLE
 
-  21字 len=21  ERR  0.42s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  21字 len=21  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  21字 len=21  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 21字: ok 0/3 → BROKEN
+  21字 len=21  ok  wall=16.09s audio= 6.72s
+  21字 len=21  ok  wall=17.31s audio= 6.72s
+  21字 len=21  ok  wall=15.61s audio= 6.72s
+  --> 21字: ok 3/3 → USABLE
 
-  31字 len=37  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  31字 len=37  ERR  0.44s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  31字 len=37  ERR  0.43s HTTP 500: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual input size
-  --> 31字: ok 0/3 → BROKEN
+  31字 len=37  ok  wall=18.76s audio= 8.88s
+  31字 len=37  ok  wall=17.75s audio= 8.00s
+  31字 len=37  ok  wall=30.34s audio= 9.44s
+  --> 31字: ok 3/3 → USABLE
 
 === SUMMARY ===
   len     ok  usable  audio_range
-    3    0/3   False  -
-    6    0/3   False  -
-   12    0/3   False  -
-   20    0/3   False  -
-   21    0/3   False  -
-   37    0/3   False  -
+    3    3/3    True  0.96~0.96s
+    6    3/3    True  0.68~1.92s
+   12    3/3    True  1.56~3.84s
+   20    3/3    True  4.16~6.40s
+   21    3/3    True  6.72~6.72s
+   37    3/3    True  8.00~9.44s

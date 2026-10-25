@@ -1,0 +1,71 @@
+﻿[probe] patching TransformerLM.sampling_ids
+[probe] loading model (fp16=False) ...
+[cosyvoice] wetext resources: local cache (offline mode)
+[cosyvoice] loading model from C:\Users\74689\.agent\models\tts\cosyvoice3 (variant=rl) ...
+[cosyvoice] fp16=False
+[cosyvoice] model ready
+[probe] model ready in 13.4s sample_rate=24000
+[probe] speech_token_size=6561 sos=6561 eos_token=6562 task_id=6563 fill_token=6564
+[probe] stop_token_ids n=200 range=6561..6760 contains_sos=True contains_eos=True
+[probe] text='你好，孑遗。' segments=1
+
+  with self.llm_context, torch.cuda.amp.autocast(self.fp16 is True and hasattr(self.llm, 'vllm') is False):
+  with torch.cuda.amp.autocast(self.fp16):
+
+100%|██████████| 1/1 [00:04<00:00,  4.66s/it]
+100%|██████████| 1/1 [00:04<00:00,  4.66s/it]
+
+  run0: n_text=6 min_len=12 max_len=120
+         generated=24 stop=eos stop_id=6562 calls=25
+         audio=0.96s expect=0.96s wall=4.66s
+         first8 ids=[823, 859, 823, 13, 12, 88, 7, 331]
+         ignore_eos 屏蔽下标={6561} 是sos?={True} 是eos?={False}
+
+
+Traceback (most recent call last):
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-eos-probe.py", line 146, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\74689\Desktop\Agent\hyacinth\tools-dev\tts-eos-probe.py", line 117, in main
+    outs = list(model.inference_zero_shot(args.text, prompt_text, wav_path, stream=False, speed=1.0))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\cosyvoice.py", line 99, in inference_zero_shot
+    for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 379, in tts
+    this_tts_speech = self.token2wav(token=this_tts_speech_token,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\cli\model.py", line 447, in token2wav
+    tts_speech, _ = self.hift.inference(speech_feat=tts_mel, finalize=finalize)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\generator.py", line 717, in inference
+    f0 = self.f0_predictor(speech_feat.to(torch.float64), finalize=finalize).to(speech_feat)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\hifigan\f0_predictor.py", line 97, in forward
+    x = self.condnet[0](x)
+        ^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\74689\.agent\envs\CosyVoice\cosyvoice\transformer\convolution.py", line 185, in forward
+    x = super(CausalConv1d, self).forward(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 375, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python311\Lib\site-packages\torch\nn\modules\conv.py", line 370, in _conv_forward
+    return F.conv1d(
+           ^^^^^^^^^
+RuntimeError: Calculated padded input size per channel: (3). Kernel size: (4). Kernel size can't be greater than actual
+ input size
