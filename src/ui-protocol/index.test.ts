@@ -169,11 +169,11 @@ describe('UiProtocolSession 单一装配器', () => {
     expect(session.pending).toBeTruthy();
   });
 
-  it('全部 24 域注册到协议服务器（23 业务域 + 内建 meta）', async () => {
+  it('全部 25 域注册到协议服务器（24 业务域 + 内建 meta）', async () => {
     const { session } = await setup();
     const domains = session.server.listDomains().sort();
     expect(domains).toEqual(
-      ['arch', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'preview', 'process', 'schedule', 'session', 'state', 'stt', 'supervisor', 'tool', 'tts'].sort(),
+      ['arch', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'preview', 'process', 'schedule', 'session', 'skill', 'state', 'stt', 'supervisor', 'tool', 'tts'].sort(),
     );
   });
 

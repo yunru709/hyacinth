@@ -49,6 +49,17 @@ export interface SessionManagerLike {
 // 会话域选项
 // ────────────────────────────────────────────────────────────
 
+/**
+ * 会话占用端口（结构兼容 src/memory/session-claims.ts）。
+ * 协议层只依赖这 4 个同步方法，不 import 存储层实现。
+ */
+export interface SessionClaimPort {
+  claim(sessionId: string, owner: string): boolean;
+  release(sessionId: string, owner: string): void;
+  ownerOf(sessionId: string): string | null;
+  transfer(from: string | null | undefined, to: string, owner: string): boolean;
+}
+
 export interface SessionDomainOptions {
   sessionManager: SessionManagerLike;
   /** 会话变更事件推送（绑定到 server.broadcast）。可选。 */
@@ -57,6 +68,13 @@ export interface SessionDomainOptions {
   loop?: LoopLike | null;
   /** 动态获取 AgentLoop（loop 在 initialize 后才就绪时的延迟解析）。可选。 */
   getLoop?: () => LoopLike | null;
+  /** 会话占用表（多标签互斥）。未注入时不做占用校验。 */
+  claims?: SessionClaimPort;
+  /** 本连接的占用令牌（每条 UI 连接唯一）。 */
+  claimOwner?: string;
+  /** 本连接当前占用的 sessionId（切换后由 setClaimedSessionId 更新）。 */
+  getClaimedSessionId?: () => string | null;
+  setClaimedSessionId?: (sessionId: string) => void;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -64,7 +82,7 @@ export interface SessionDomainOptions {
 // ────────────────────────────────────────────────────────────
 
 export function createSessionDomain(options: SessionDomainOptions): DomainHandler {
-  const { sessionManager, emit, loop, getLoop } = options;
+  const { sessionManager, emit, loop, getLoop, claims, claimOwner } = options;
 
   /** 后端 Session → 协议 SessionMeta（剔除 projectKey 等内部字段） */
   const toMeta = (s: BackendSession): SessionMeta => ({
@@ -134,6 +152,11 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
     return dir ? path.basename(dir) : '';
   }
 
+  /** 释放本连接对某会话的占用（delete 走这条；仅持有者匹配时生效） */
+  function releaseClaim(sessionId: string): void {
+    if (claims && claimOwner) claims.release(sessionId, claimOwner);
+  }
+
   /**
    * 删掉**当前会话**之后的自愈：切到剩余里最新的一条；一条不剩就新建一条。
    *
@@ -159,14 +182,30 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
     const rest = (await sessionManager.list())
       .filter((s) => !gone.has(s.id))
       .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+    // 优先挑**没有被别的标签占用**的会话：否则自愈会把本 loop 接到别人正在
+    // 驱动的目录上，两个 loop 交错写同一个 events.jsonl（多标签场景新增约束）。
+    const free = claims && claimOwner
+      ? rest.filter((s) => {
+          const holder = claims.ownerOf(s.id);
+          return !holder || holder === claimOwner;
+        })
+      : rest;
 
-    if (rest.length > 0) {
-      await l.switchSession(sessionManager.getSessionDir(rest[0].id));
-      emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId: rest[0].id });
-      return { nextSessionId: rest[0].id, createdNew: false };
+    if (free.length > 0) {
+      const next = free[0];
+      await l.switchSession(sessionManager.getSessionDir(next.id));
+      if (claims && claimOwner && claims.claim(next.id, claimOwner)) {
+        options.setClaimedSessionId?.(next.id);
+      }
+      emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId: next.id });
+      return { nextSessionId: next.id, createdNew: false };
     }
     const created = await sessionManager.create();
     await l.switchSession(sessionManager.getSessionDir(created.id));
+    if (claims && claimOwner) {
+      claims.claim(created.id, claimOwner);
+      options.setClaimedSessionId?.(created.id);
+    }
     emit?.(UI_EVENT.SESSION_CHANGE, { action: 'create', session: toMeta(created) });
     emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId: created.id });
     return { nextSessionId: created.id, createdNew: true };
@@ -214,6 +253,7 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
       if (!sessionId) throw new Error('session.delete requires "sessionId"');
       await ensureExists(sessionId);
       const sessionDir = sessionManager.getSessionDir(sessionId);
+      releaseClaim(sessionId);
       await rm(sessionDir, { recursive: true, force: true });
       emit?.(UI_EVENT.SESSION_CHANGE, { action: 'delete', sessionId });
       const settled = await settleAfterDelete([sessionId]);
@@ -239,6 +279,7 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
           notFound.push(id);
           continue;
         }
+        releaseClaim(id);
         await rm(sessionManager.getSessionDir(id), { recursive: true, force: true });
         deleted.push(id);
       }
@@ -299,8 +340,26 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
       if (!l?.switchSession) {
         throw new Error('session.switch not supported (loop.switchSession not available)');
       }
+      // 占用校验与转移必须在**切换之前**完成：切换后 loop 已经指向新目录，
+      // 这时才发现被别人占用，本连接的下一条消息已经会写进对方会话 ✗
+      const prevClaimed = options.getClaimedSessionId?.() ?? null;
+      if (claims && claimOwner) {
+        if (!claims.transfer(prevClaimed, sessionId, claimOwner)) {
+          throw new Error(`会话 "${sessionId}" 已在另一个标签中打开，请先关闭那个标签`);
+        }
+      }
       const sessionDir = sessionManager.getSessionDir(sessionId);
-      await l.switchSession(sessionDir);
+      try {
+        await l.switchSession(sessionDir);
+      } catch (err) {
+        // 切换失败：把占用还回去，避免目标会话被本连接"空占"到断线
+        if (claims && claimOwner) {
+          claims.release(sessionId, claimOwner);
+          if (prevClaimed) claims.claim(prevClaimed, claimOwner);
+        }
+        throw err;
+      }
+      options.setClaimedSessionId?.(sessionId);
       emit?.(UI_EVENT.SESSION_CHANGE, { action: 'switch', sessionId });
       return { ok: true, sessionId };
     },

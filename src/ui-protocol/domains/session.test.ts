@@ -21,6 +21,7 @@ import path from 'node:path';
 import { UiProtocolServer } from '../server.js';
 import { InProcAdapter } from '../adapter.js';
 import { SessionManager } from '../../memory/session.js';
+import { createSessionClaims } from '../../memory/session-claims.js';
 import { createSessionDomain } from './session.js';
 import type { UiResponse } from '../types.js';
 
@@ -442,5 +443,90 @@ describe('自愈判定用目标会话（待切换优先）', () => {
     expect(res.nextSessionId).toBe(oldOne.id);
     expect(res.createdNew).toBe(false);
     expect(switched).toEqual([oldOne.id]);
+  });
+});
+
+// ── 会话占用（多标签互斥） ────────────────────────────────────
+// 一个会话只允许一个标签驱动：切换前的占用转移必须原子，
+// 被他人占用时 loop 绝不能动（否则消息会写进对方会话）。
+describe('会话占用（多标签互斥）', () => {
+  function setupWithClaims(arg: {
+    owner: string;
+    claimedId: string | null;
+    loopId: string | null;
+    claims: ReturnType<typeof createSessionClaims>;
+  }) {
+    const client = new InProcAdapter('client');
+    const serverAdp = new InProcAdapter('server');
+    client.connect(serverAdp);
+    const server = new UiProtocolServer();
+    let claimed = arg.claimedId;
+    const switched: string[] = [];
+    const loop = {
+      get targetSessionDir() {
+        return arg.loopId ? sessionManager.getSessionDir(arg.loopId) : undefined;
+      },
+      async switchSession(dir: string) {
+        switched.push(path.basename(dir));
+      },
+    };
+    server.registerDomain('session', createSessionDomain({
+      sessionManager,
+      getLoop: () => loop as never,
+      claims: arg.claims,
+      claimOwner: arg.owner,
+      getClaimedSessionId: () => claimed,
+      setClaimedSessionId: (id) => { claimed = id; },
+    }));
+    server.attach(serverAdp);
+    const responses: UiResponse[] = [];
+    client.onMessage((m) => { if (m.kind === 'response') responses.push(m); });
+    const waitForResponse = async (id: string): Promise<UiResponse> => {
+      const start = Date.now();
+      while (Date.now() - start < 5000) {
+        const found = responses.find((r) => r.id === id);
+        if (found) return found;
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      throw new Error('timeout');
+    };
+    return { client, waitForResponse, switched, claimed: () => claimed };
+  }
+
+  it('目标会话被他人占用 → 拒绝切换（loop 不动、占用不变）', async () => {
+    const mine = await sessionManager.create('normal');
+    const theirs = await sessionManager.create('normal');
+    const claims = createSessionClaims();
+    claims.claim(theirs.id, 'other-owner');
+    const { client, waitForResponse, switched, claimed } = setupWithClaims({
+      owner: 'me', claimedId: mine.id, loopId: mine.id, claims,
+    });
+    claims.claim(mine.id, 'me');
+
+    client.send({ kind: 'request', id: 's1', method: 'session.switch', params: { sessionId: theirs.id } });
+    const resp = await waitForResponse('s1');
+    expect(resp.ok).toBe(false);
+    expect(resp.error?.message).toContain('另一个标签');
+    expect(switched).toEqual([]);
+    expect(claims.ownerOf(theirs.id)).toBe('other-owner');
+    expect(claimed()).toBe(mine.id);
+  });
+
+  it('切换成功 → 占用从旧会话转移到新会话', async () => {
+    const a = await sessionManager.create('normal');
+    const b = await sessionManager.create('normal');
+    const claims = createSessionClaims();
+    const { client, waitForResponse, switched, claimed } = setupWithClaims({
+      owner: 'me', claimedId: a.id, loopId: a.id, claims,
+    });
+    claims.claim(a.id, 'me');
+
+    client.send({ kind: 'request', id: 's2', method: 'session.switch', params: { sessionId: b.id } });
+    const resp = await waitForResponse('s2');
+    expect(resp.ok).toBe(true);
+    expect(switched).toEqual([b.id]);
+    expect(claims.ownerOf(a.id)).toBeNull();
+    expect(claims.ownerOf(b.id)).toBe('me');
+    expect(claimed()).toBe(b.id);
   });
 });

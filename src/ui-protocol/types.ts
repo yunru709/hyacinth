@@ -116,6 +116,8 @@ export const UI_DOMAIN = {
   CONTEXT: 'context',
   /** 工具注册表：list / toggle / bundles */
   TOOL: 'tool',
+  /** 技能注册表：list / get / toggle */
+  SKILL: 'skill',
   /** 工具包：create / delete / activate / deactivate / addTools / removeTools / list */
   BUNDLE: 'bundle',
   /** MCP 服务器：list / add / remove / enable / disable / reconnect */
@@ -237,6 +239,10 @@ export const UI_METHOD = {
   TOOL_LIST: 'tool.list',
   TOOL_TOGGLE: 'tool.toggle',
   TOOL_BUNDLES: 'tool.bundles',
+  // skill
+  SKILL_LIST: 'skill.list',
+  SKILL_GET: 'skill.get',
+  SKILL_TOGGLE: 'skill.toggle',
   // bundle
   BUNDLE_LIST: 'bundle.list',
   BUNDLE_CREATE: 'bundle.create',

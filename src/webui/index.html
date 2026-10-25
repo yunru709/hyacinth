@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hyacinth WebUI</title>
+  <!-- 并行会话标签以 iframe 内嵌本页时（?embed=1），必须在首屏样式计算**之前**
+       打标，否则会先闪一下完整外壳（侧栏/顶栏）再消失。app.js 在 body 末尾，
+       等它执行完已经晚了。 -->
+  <script>
+    if (new URLSearchParams(location.search).get('embed') === '1') {
+      document.documentElement.classList.add('is-embed');
+    }
+  </script>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
   <!-- KaTeX 样式**不在首屏常驻**：它和 267KB 的 katex.min.js 一起改由 math.js
@@ -164,6 +172,10 @@
           <i data-lucide="puzzle"></i>
           <span>插件</span>
         </a>
+        <a href="#/skills" data-dom-id="nav-skills" data-nav-item="skills" class="nav-item">
+          <i data-lucide="sparkles"></i>
+          <span>技能</span>
+        </a>
         <a href="#/settings" data-dom-id="nav-settings" data-nav-item="settings" class="nav-item">
           <i data-lucide="sliders-horizontal"></i>
           <span>设置</span>
@@ -180,6 +192,19 @@
     
     <main id="hyacinth-main" data-nav-key="main" class="flex-1 overflow-hidden relative bg-background">
       <section data-view="chat" class="view-section h-full">
+      <div class="chat-shell">
+        <!-- 并行会话标签：一条标签 = 一条独立会话。
+             第一个标签是本页自己的连接（会话随侧栏切换），其余标签是 embed iframe，
+             各自一条 WS → 各自 AgentLoop。非活跃标签只是隐藏，任务照常继续跑。 -->
+        <div id="session-tabs" class="session-tabs" role="tablist" aria-label="并行会话">
+          <div id="session-tabs-list" class="session-tabs-list"></div>
+          <button id="tab-new-btn" class="session-tab-new" type="button"
+                  aria-label="新建并行会话" title="新建并行会话（新标签）">
+            <i data-lucide="plus"></i>
+          </button>
+        </div>
+        <div id="chat-panes" class="chat-panes">
+          <div id="chat-native-pane" class="chat-pane">
       <div id="chat-wrapper" class="h-full flex flex-col min-w-0">
         <!-- Message canvas（无消息时收起，让位给下面的空状态 ✓） -->
         <div id="message-list" class="msg-list" data-scroll-region="primary" hidden></div>
@@ -308,6 +333,9 @@
               <span>Enter 发送 / Shift+Enter 换行</span>
               <span id="composer-attach-hint" class="hidden">图片将随本条消息一起发送</span>
             </div>
+          </div>
+        </div>
+      </div>
           </div>
         </div>
       </div>
@@ -546,6 +574,44 @@
           </button>
         </div>
         <div id="plugins-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-4"></div>
+      </div>
+      </section>
+      <section data-view="skills" class="view-section h-full" hidden>
+      <style>
+        .skill-row { border: 1px solid var(--hyacinth-border); border-radius: 10px; background-color: var(--hyacinth-card); overflow: hidden; }
+        .skill-row-head { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; }
+        .skill-info { flex: 1 1 auto; min-width: 0; }
+        .skill-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .skill-name { font-family: var(--font-mono, ui-monospace, monospace); }
+        .skill-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hyacinth-border); color: var(--hyacinth-muted-foreground); font-weight: 500; }
+        .skill-desc { margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
+        .skill-tools { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
+        .skill-tool { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; padding: 1px 5px; border-radius: 4px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); }
+        .skill-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+        .skill-toggle { width: 38px; height: 22px; border-radius: 999px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-muted); position: relative; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease; }
+        .skill-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background-color: var(--hyacinth-foreground); opacity: 0.45; transition: transform 140ms ease, opacity 140ms ease; }
+        .skill-toggle.is-on { background-color: var(--hyacinth-primary); border-color: var(--hyacinth-primary); }
+        .skill-toggle.is-on::after { transform: translateX(16px); background-color: #fff; opacity: 1; }
+        .skill-toggle:disabled { opacity: 0.5; cursor: wait; }
+        .skill-expand { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; }
+        .skill-expand:hover { color: var(--hyacinth-foreground); }
+        .skill-body { display: none; border-top: 1px dashed var(--hyacinth-border); padding: 0 14px 12px; }
+        .skill-row.is-open .skill-body { display: block; }
+        .skill-prompt { margin-top: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.65; background-color: var(--hyacinth-background); border: 1px solid var(--hyacinth-border); border-radius: 6px; padding: 10px; color: var(--hyacinth-muted-foreground); }
+        .skill-meta { margin-top: 8px; font-size: 11px; color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
+        .skill-empty { padding: 40px 16px; text-align: center; font-size: 12.5px; color: var(--hyacinth-muted-foreground); }
+      </style>
+      <div class="h-full flex flex-col" data-dom-id="skills-panel">
+        <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 class="text-lg font-semibold text-foreground">技能</h1>
+            <p id="skills-status" class="text-xs text-muted-foreground mt-0.5">加载中…</p>
+          </div>
+          <button id="skills-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span>
+          </button>
+        </div>
+        <div id="skills-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
       </div>
       </section>
       <section data-view="settings" class="view-section h-full" hidden>

@@ -12,6 +12,22 @@
   'use strict';
 
   // ════════════════════════════════════════════════════════════
+  // 启动参数 / embed 模式
+  // ════════════════════════════════════════════════════════════
+  // embed=1：本页作为**并行会话标签**的 iframe 被父页内嵌。
+  //   - 隐藏侧栏 / 顶栏 / 标签条，固定停在 chat 视图（一页只承担"一条会话"）
+  //   - `session=<id>`：连接时显式绑定已存在会话（后端做占用校验）
+  //   - 就绪 / 运行状态经 postMessage 报给父页（父页只做标签条与切换）
+  // 选择 iframe 而非"单页多份聊天 DOM"：本页聊天状态是模块级单例，
+  // 一页渲染多条会话需要重写整套渲染管线；iframe 用浏览器隔离，
+  // 后端本就"一条 WS = 一个 UiProtocolSession = 一个 AgentLoop"。
+  // 关键点：非活跃标签只是 display:none —— 文档不卸载，任务照常跑。
+  const URL_PARAMS = new URLSearchParams(location.search);
+  const embedMode = URL_PARAMS.get('embed') === '1';
+  const embedSessionParam = URL_PARAMS.get('session');
+  if (embedMode) document.documentElement.classList.add('is-embed');
+
+  // ════════════════════════════════════════════════════════════
   // 协议客户端（WS /ui）
   // ════════════════════════════════════════════════════════════
   class ProtocolClient {
@@ -192,15 +208,22 @@
   let currentSessionId = null;
   let connected = false;
   let startupModeApplied = false; // 启动默认模式只自动进入一次（用户切走不拉回）
+  // 并行会话标签：tabs[0] 恒为本页自身的连接（primary），其余是 embed iframe。
+  // 放在共享状态里是因为"当前会话"的表示与侧栏 / session.change 共用同一份事实。
+  let tabs = [];
+  let activeTabId = null;
+  let tabSeq = 0;
 
   // ════════════════════════════════════════════════════════════
   // SPA hash 路由
   // ════════════════════════════════════════════════════════════
-  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'plugins', 'companion'];
+  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'plugins', 'skills', 'companion'];
   // data-view → data-nav-item 映射（导航里 model 对应 models）
-  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins' };
+  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins', skills: 'skills' };
 
   function currentView() {
+    // embed 本页 = 并行会话标签的一格：只承担一条会话，忽略 hash（父页 hash 不该泄漏进来）
+    if (embedMode) return 'chat';
     const h = (location.hash || '#/chat').replace(/^#\//, '');
     return VIEWS.includes(h) ? h : 'chat';
   }
@@ -232,6 +255,7 @@
     if (view === 'settings' && connected) loadSettings();
     if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
     if (view === 'plugins' && connected) loadPlugins();     // 插件视图（内核挂载 + 目录插件管理）
+    if (view === 'skills' && connected) loadSkills();       // 技能视图（列表 / 详情 / 启停）
     if (view === 'settings' && connected) loadToolsAndMCP();
     if (view === 'companion' && connected) loadCompanion();
     // 离开陪伴视图：清 live 场景状态（下次进入重新加载）。
@@ -333,7 +357,7 @@
     if (ml) ml.scrollTop = ml.scrollHeight;
   }
 
-  function bubbleUser(text, images) {
+  function bubbleUser(text, images, timestamp) {
     const wrap = el('div', 'msg msg-user');
     const b = el('div', 'msg-bubble');
     // 图片在前、文字在后：与「先看图再读需求」的阅读顺序一致
@@ -350,7 +374,7 @@
       b.appendChild(grid);
     }
     if (text) b.appendChild(el('p', 'msg-text', text));
-    b.appendChild(el('span', 'msg-time', nowTime()));
+    b.appendChild(el('span', 'msg-time', eventTime(timestamp)));
     wrap.appendChild(b);
     return wrap;
   }
@@ -488,7 +512,7 @@
     renderRichInto(content, text);
     body.appendChild(head);
     body.appendChild(content);
-    body.appendChild(el('span', 'msg-time', nowTime()));
+    body.appendChild(el('span', 'msg-time', eventTime(opts && opts.time)));
     wrap.appendChild(rail);
     wrap.appendChild(body);
     return wrap;
@@ -539,6 +563,27 @@
   function nowTime() {
     const d = new Date();
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  /**
+   * 历史消息时间：优先用事件自带时间戳，缺省才回落到当前时间。
+   * 过去统一用 nowTime() ⇒ 打开旧会话每条消息都显示“刚刚/现在”，时间语义全错。
+   *
+   * 兼容两种格式：
+   *   · SessionEvent："2026-10-25 06:18"（本地时间，直接取 HH:MM）
+   *   · ConversationEvent：ISO / 带 Z（交给 Date 转本地时间）
+   */
+  function eventTime(timestamp) {
+    if (!timestamp) return nowTime();
+    const s = String(timestamp);
+    if (/[TZ]/.test(s)) {
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) {
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+    }
+    const m = s.match(/(\d{1,2}):(\d{2})/);
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}` : nowTime();
   }
 
   function appendMsg(kind, text, images) {
@@ -603,7 +648,7 @@
     const sayText = historySayText(m);
     if (sayText) {
       flushHistoryProcess(true);
-      const dwrap = bubbleAssistant(sayText, { delivery: true });
+      const dwrap = bubbleAssistant(sayText, { delivery: true, time: m.timestamp });
       ml.appendChild(dwrap);
       return;
     }
@@ -615,7 +660,7 @@
       case 'user_input':
       case 'user':
         flushHistoryProcess(false);
-        ml.appendChild(bubbleUser(content));
+        ml.appendChild(bubbleUser(content, undefined, m.timestamp));
         break;
       case 'text':
       case 'assistant':
@@ -655,7 +700,9 @@
   async function loadHistory() {
     if (!connected || !currentSessionId) return;
     try {
-      const res = await client.request('message.history', { sessionId: currentSessionId });
+      // 50 条只够半轮长任务：末尾的 say 交付经常落在窗口外 ⇒ 刷新后只看到
+      // 过程块、看不到回复。取 200 条可覆盖多轮，且 coalesce 后体积仍可控。
+      const res = await client.request('message.history', { sessionId: currentSessionId, limit: 200 });
       const msgs = (res && res.messages) || [];
       clearChat();
       if (companionActive) {
@@ -801,7 +848,9 @@
         setOnline('connected');
         resetReconnect();
         loadHistory();
-        loadSidebarRecent();      // A4：连接后才有 currentSessionId ⇒ 此刻才能正确高亮当前项
+        if (!embedMode) loadSidebarRecent();  // embed 标签没有侧栏：省掉这次列表请求
+        // 通知父页"这个标签已就绪、绑定的是哪条会话"（父页据此回填标题/去重）
+        wsPostToParent({ type: 'hyacinth:pane-ready', sessionId: currentSessionId });
         // 模型按钮的文案要等 WS 通了才能拉（bindModelPicker 在连接前就跑过一次，
         // 那次必然失败 ⇒ 不补这一下，按钮会一直停在占位符"模型"）
         void modelPickLoad();
@@ -811,15 +860,20 @@
         if (currentView() === 'companion') loadCompanion();
         if (currentView() === 'schedule') loadSchedule();   // 定时任务视图（首屏就在该视图时也要加载 ✓）
         if (currentView() === 'plugins') loadPlugins();     // 插件视图
+        if (currentView() === 'skills') loadSkills();       // 技能视图（连接建立后补拉）
         refreshState();
         // 同步陪伴模式状态（后端可能因 startup.defaultMode='companion' 已激活）
-        client.request('companion.get').then((res) => {
-          if (res && res.active) {
-            companionActive = true;
-            companionCharacter = res.character || '';
-            updateCompanionButton();
-          }
-        }).catch(() => {});
+        // embed 标签内**不**接受陪伴态：那会把 message.text/say 全部挡在看不见的陪伴视图里，
+        // 标签就变成"发了没反应"。
+        if (!embedMode) {
+          client.request('companion.get').then((res) => {
+            if (res && res.active) {
+              companionActive = true;
+              companionCharacter = res.character || '';
+              updateCompanionButton();
+            }
+          }).catch(() => {});
+        }
         // 主题真源在后端（ui.theme）：启动时先按 localStorage 缓存应用以避免闪烁，
         // 连上后必须**主动**对齐一次后端值。旧实现只在 loadSettings() 里读它 ⇒
         // localStorage 丢失（清缓存 / 换机器 / 被旧版本回落值污染）时，用户会一直
@@ -832,7 +886,8 @@
         // 缓存 —— 那条缓存已整体移除，理由见 bindUI 之前的说明段）。
         // companion → 进陪伴视图（一次性；进入后 loadCompanion 会经协议层激活后端 Router；
         // 用户切走不拉回）。
-        if (!startupModeApplied) {
+        // embed 标签永远停在 chat：startup.defaultMode=companion 的跳转只在完整界面里做
+        if (!startupModeApplied && !embedMode) {
           startupModeApplied = true;
           client.request('config.get', { path: 'startup.defaultMode' }).then((r) => {
             const mode = (r && r.value) || 'normal';
@@ -842,6 +897,8 @@
         break;
       case 'message.turn_start':
         resetProcessGroup();   // 新回合 ⇒ 「过程」块另起一块 ✓
+        tabsSetRunning('primary', true);
+        wsPostToParent({ type: 'hyacinth:pane-status', sessionId: currentSessionId, running: true });
         showThinking(true);
         if (currentView() === 'companion') companionResetDialogue('…');
         break;
@@ -914,6 +971,8 @@
       case 'message.interrupt':
         showThinking(false);
         setBusy(false);
+        tabsSetRunning('primary', false);
+        wsPostToParent({ type: 'hyacinth:pane-status', sessionId: currentSessionId, running: false });
         if (currentView() === 'companion') {
           companionSetDialogue('⏹ 已中断');
         } else {
@@ -931,9 +990,11 @@
       case 'message.turn_info':
         // 回合 token 信息由 state.update 覆盖状态栏
         setBusy(false);
+        tabsSetRunning('primary', false);
+        wsPostToParent({ type: 'hyacinth:pane-status', sessionId: currentSessionId, running: false });
         // A4：一轮结束 updatedAt 才变 ⇒ 只在这里刷一次；流式事件（message.text 等）不刷，
         // 否则每个 chunk 一次 session.list，侧栏刷新成本直接乘上 token 数 ✗
-        loadSidebarRecent();
+        if (!embedMode) loadSidebarRecent();
         break;
       case 'message.ask_user':
         showAskUser(payload);
@@ -984,10 +1045,23 @@
       case 'permission.request':
         showPermission(payload);
         break;
-      case 'ui.error':
+      case 'ui.error': {
         showThinking(false);
-        appendMsg('error', (payload && payload.message) || '后端错误');
+        const p = payload || {};
+        appendMsg('error', p.message || '后端错误');
+        if (embedMode) {
+          // 标签失败原因回报父页（标签标题/状态点显示）；终端错误（会话不存在 / 被占用）
+          // 还要停掉自动重连 —— 否则每 1~10s 重试一次，永远连不上也永远在刷屏。
+          wsPostToParent({ type: 'hyacinth:pane-error', code: p.code || '', message: p.message || '' });
+          if (p.code === 'SESSION_IN_USE' || p.code === 'SESSION_NOT_FOUND' || p.code === 'INVALID_SESSION') {
+            client.closed = true;
+            if (client.reconnectTimer) { clearTimeout(client.reconnectTimer); client.reconnectTimer = null; }
+            try { if (client.ws) client.ws.close(); } catch (e) { /* ignore */ }
+            if (p.code === 'SESSION_IN_USE') appendMsg('system', '这条会话已在另一个标签中打开。请切到那个标签，或先关闭它。');
+          }
+        }
         break;
+      }
       default:
         break;
     }
@@ -2003,6 +2077,132 @@
       }, false)));
       listEl.appendChild(wrap);
     }
+  }
+
+  // ── 技能视图（skill 契约域：列表 / 详情 / 启停）──────────────────
+  // 技能是「按需激活的提示词包」：平时只进 Zone 2 索引，模型调用 Skill 工具
+  // 才注入完整定义。因此管理界面的核心只有两件事：看清有什么、决定开不开。
+
+  const SKILL_SOURCE_LABEL = {
+    builtin: '内置',
+    file: '文件',
+    plugin: '插件',
+    mcp: 'MCP',
+    user: '用户',
+  };
+
+  function skillRow(s) {
+    const row = el('div', 'skill-row');
+    const head = el('div', 'skill-row-head');
+    const info = el('div', 'skill-info');
+
+    const title = el('div', 'skill-title');
+    title.appendChild(el('span', 'skill-name', s.name));
+    title.appendChild(el('span', 'skill-badge', SKILL_SOURCE_LABEL[s.source] || s.source));
+    if (s.hasDir) title.appendChild(el('span', 'skill-badge', '目录式'));
+    if (!s.enabled) title.appendChild(el('span', 'skill-badge', '已禁用'));
+    info.appendChild(title);
+
+    if (s.description) info.appendChild(el('div', 'skill-desc', s.description));
+    if (s.relatedTools && s.relatedTools.length) {
+      const tools = el('div', 'skill-tools');
+      s.relatedTools.forEach((t) => tools.appendChild(el('span', 'skill-tool', t)));
+      info.appendChild(tools);
+    }
+
+    const actions = el('div', 'skill-actions');
+    const expand = el('button', 'skill-expand', '查看提示词');
+    expand.type = 'button';
+    const toggle = el('button', 'skill-toggle' + (s.enabled ? ' is-on' : ''));
+    toggle.type = 'button';
+    toggle.title = s.enabled ? '点击禁用' : '点击启用';
+    toggle.setAttribute('aria-label', (s.enabled ? '禁用' : '启用') + ' ' + s.name);
+    actions.appendChild(expand);
+    actions.appendChild(toggle);
+
+    head.appendChild(info);
+    head.appendChild(actions);
+    row.appendChild(head);
+
+    const body = el('div', 'skill-body');
+    row.appendChild(body);
+
+    let loaded = false;
+    expand.onclick = async () => {
+      const open = row.classList.toggle('is-open');
+      expand.textContent = open ? '收起' : '查看提示词';
+      if (!open || loaded) return;
+      expand.disabled = true;
+      try {
+        const res = await client.request('skill.get', { name: s.name });
+        const detail = (res && res.skill) || {};
+        const pre = el('pre', 'skill-prompt');
+        pre.textContent = detail.promptTemplate || '（该技能没有提示词正文）';
+        body.appendChild(pre);
+        if (detail.dir) {
+          const meta = el('div', 'skill-meta');
+          meta.textContent = '技能目录：' + detail.dir;
+          body.appendChild(meta);
+        }
+        loaded = true;
+      } catch (e) {
+        const meta = el('div', 'skill-meta');
+        meta.textContent = '读取失败：' + (e && e.message || e);
+        body.appendChild(meta);
+      } finally {
+        expand.disabled = false;
+      }
+    };
+
+    toggle.onclick = async () => {
+      const next = !toggle.classList.contains('is-on');
+      toggle.disabled = true;
+      try {
+        await client.request('skill.toggle', { name: s.name, enabled: next });
+        await loadSkills();
+      } catch (e) {
+        toggle.disabled = false;
+        const statusEl = $('#skills-status');
+        if (statusEl) statusEl.textContent = s.name + ' 切换失败：' + (e && e.message || e);
+      }
+    };
+
+    return row;
+  }
+
+  async function loadSkills() {
+    const listEl = $('#skills-list');
+    if (!listEl) return;
+    bindSkillsOnce();
+    let data = null;
+    try { data = await client.request('skill.list'); } catch (e) { data = null; }
+    if (!data) {
+      listEl.innerHTML = '';
+      listEl.appendChild(el('div', 'skill-empty', '取不到技能列表（后端可能未就绪）'));
+      return;
+    }
+    const skills = data.skills || [];
+    const statusEl = $('#skills-status');
+    if (statusEl) {
+      const on = skills.filter((s) => s.enabled).length;
+      statusEl.textContent = '共 ' + skills.length + ' 个技能 · 已启用 ' + on + ' 个' +
+        (skills.length ? ' · 禁用后仅从上下文索引移除，随时可恢复' : '');
+    }
+    listEl.innerHTML = '';
+    if (!skills.length) {
+      listEl.appendChild(el('div', 'skill-empty',
+        '还没有技能。把带 SKILL.md 的目录放进 ~/.agent/skills/ 后点「刷新」。'));
+      return;
+    }
+    skills.forEach((s) => listEl.appendChild(skillRow(s)));
+  }
+
+  let skillsBound = false;
+  function bindSkillsOnce() {
+    if (skillsBound) return;
+    skillsBound = true;
+    const refresh = $('#skills-refresh-btn');
+    if (refresh) refresh.onclick = () => { loadSkills(); };
   }
 
   /** 绑定插件工具条（只绑一次；由 loadPlugins 触发 ⇒ 视图 markup 必已在） */
@@ -4780,11 +4980,17 @@
       const tdUpdated = document.createElement('td');
       tdUpdated.className = 'px-4 py-3 align-middle';
       tdUpdated.innerHTML = '<span class="text-xs text-muted-foreground font-mono">' + esc(fmtSessionTime(s.updatedAt)) + '</span>';
-      // 7) 操作（加载 / 删除）
+      // 7) 操作（并行 / 加载 / 删除）
       const tdOps = document.createElement('td');
       tdOps.className = 'px-4 py-3 align-middle';
       const opsDiv = document.createElement('div');
       opsDiv.className = 'flex items-center justify-end gap-2';
+      const parallelBtn = document.createElement('button');
+      parallelBtn.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-background text-xs text-foreground hover:bg-muted transition-colors';
+      parallelBtn.setAttribute('aria-label', 'Open session in parallel tab');
+      parallelBtn.dataset.action = 'parallel';
+      parallelBtn.title = '在新标签中并行打开（后台也能继续跑）';
+      parallelBtn.innerHTML = '<i data-lucide="plus" class="w-3.5 h-3.5"></i><span>并行</span>';
       const loadBtn = document.createElement('button');
       loadBtn.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-background text-xs text-foreground hover:bg-muted transition-colors';
       loadBtn.setAttribute('aria-label', 'Load session');
@@ -4796,6 +5002,7 @@
       delBtn.setAttribute('aria-label', 'Delete session');
       delBtn.dataset.action = 'delete';
       delBtn.innerHTML = '<i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span>删除</span>';
+      opsDiv.appendChild(parallelBtn);
       opsDiv.appendChild(loadBtn);
       opsDiv.appendChild(delBtn);
       tdOps.appendChild(opsDiv);
@@ -4995,6 +5202,7 @@
       // 后端不保证顺序 ⇒ 自己按 updatedAt 倒序（同 renderSessions 的默认排序，app.js:1893-1897）
       sidebarRecentCache = all.slice().sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
       renderSidebarRecent();
+      syncTabTitles();
     } catch (e) {
       // 侧栏只是辅助入口：拉取失败就保持旧内容，不往聊天区塞错误打断对话 ✗
     }
@@ -5033,13 +5241,28 @@
   /** 顶栏的「当前会话」名。此前整个顶部没有任何"我在哪条会话"的信息，
    *  切完会话只能从侧栏高亮去猜。空标题时回落「新会话」。 */
   function setSessionTitle(text) {
+    const label = text || '新会话';
     const el2 = $('#session-title');
-    if (el2) el2.textContent = text || '新会话';
+    if (el2) el2.textContent = label;
+    // 顶栏标题 = primary 标签的标题（两者永远是同一件事）
+    const primary = tabs.find((t) => t.kind === 'primary');
+    if (primary && primary.title !== label) {
+      primary.title = label;
+      renderTabs();
+    }
   }
 
   /** 侧栏点击会话：恢复 → 切换后端 loop → 重拉历史 */
   function openRecentSession(sid) {
     if (!connected || !sid) return;
+    // 该会话已在某个并行标签里 ⇒ 直接切过去：用本页连接去 switch 会被后端占用表拒绝
+    const openTab = tabForSession(sid);
+    if (openTab && openTab.kind === 'frame') {
+      setNavDrawer(false);
+      goTo('#/chat');
+      activateTab(openTab.id);
+      return;
+    }
     // 窄屏抽屉是覆盖层：不收起会盖住刚打开的历史（宽屏下该 class 无样式 ⇒ 无副作用 ✓）
     setNavDrawer(false);
     const applySwitch = () => {
@@ -5115,8 +5338,19 @@
         if (!btn || !tr) return;
         const sid = tr.dataset.sessionId;
         const action = btn.dataset.action;
-        if (action === 'load') {
+        if (action === 'parallel') {
           if (!connected) return;
+          goTo('#/chat');
+          openSessionTab(sid);
+        } else if (action === 'load') {
+          if (!connected) return;
+          // 已开在并行标签里 ⇒ 切过去（用本页连接再 switch 会被后端占用表拒绝）
+          const openTab = tabForSession(sid);
+          if (openTab && openTab.kind === 'frame') {
+            goTo('#/chat');
+            activateTab(openTab.id);
+            return;
+          }
           // 加载会话 = 切换后端 loop 当前会话目录（session.switch），
           // 而非仅读元数据（session.resume 不切换 loop，会导致后续消息写错会话）
           client.request('session.switch', { sessionId: sid }).then(() => {
@@ -7183,8 +7417,251 @@
     if (initial) applySettingsTab(initial);
   }
 
+  // ════════════════════════════════════════════════════════════
+  // 并行会话标签（chat 视图顶部）
+  // ════════════════════════════════════════════════════════════
+  // 一条标签 = 一条会话 = 一条独立 /ui WS（独立 UI 协议会话 → 独立 AgentLoop）。
+  //   · primary：本页自己的连接，会话随侧栏 / session.switch 变化（恒在首位，不可关）；
+  //   · frame：embed iframe，绑定固定会话，非活跃时只是隐藏，任务照常继续跑。
+  // 会话互斥由后端 session-claims 强制（同一会话第二条连接会被拒绝），
+  // 前端的去重只是提前反馈，不构成唯一防线。
+  const TAB_MAX_FRAMES = 6;    // 每条 frame 标签都是一整页 + 一条 AgentLoop，别开成无底洞
+
+  /** embed iframe → 父页（同源 postMessage；非 embed / 顶层窗口时 no-op） */
+  function wsPostToParent(msg) {
+    if (!embedMode || window.parent === window) return;
+    try { window.parent.postMessage(msg, location.origin); } catch (e) { /* 父页已卸载 */ }
+  }
+
+  /** 会话 id 归一化比较：会话目录可能以 basename 形式出现 */
+  function sameSession(a, b) {
+    if (!a || !b) return false;
+    const base = (x) => String(x).split(/[\\/]/).pop();
+    return a === b || base(a) === base(b);
+  }
+
+  /** 标签当前绑定的会话 id（primary 跟随本页的 currentSessionId） */
+  function tabSessionId(t) {
+    return t.kind === 'primary' ? currentSessionId : t.sessionId;
+  }
+
+  /** 标签标题：优先会话列表里的真实标题，否则保留占位 */
+  function tabTitleFor(sessionId, fallback) {
+    if (!sessionId) return fallback || '新会话';
+    const hit = sidebarRecentCache.find((s) => s.id === sessionId);
+    return hit ? recentSessionTitle(hit) : (fallback || '新会话');
+  }
+
+  /** 这条会话已经在哪个标签里（含 primary） */
+  function tabForSession(sessionId) {
+    if (!sessionId) return null;
+    return tabs.find((t) => sameSession(tabSessionId(t), sessionId)) || null;
+  }
+
+  function renderTabs() {
+    const list = $('#session-tabs-list');
+    if (!list || embedMode) return;
+    list.innerHTML = '';
+    tabs.forEach((t) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'session-tab'
+        + (t.id === activeTabId ? ' is-active' : '')
+        + (t.running ? ' is-running' : '')
+        + (t.error ? ' is-error' : '');
+      btn.dataset.tabId = t.id;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', t.id === activeTabId ? 'true' : 'false');
+      btn.title = t.error || tabSessionId(t) || '新会话';
+
+      const dot = document.createElement('span');
+      dot.className = 'session-tab-dot';
+      const title = document.createElement('span');
+      title.className = 'session-tab-title';
+      title.textContent = t.title || '新会话';
+      btn.appendChild(dot);
+      btn.appendChild(title);
+
+      if (t.kind === 'frame') {
+        // 关闭键用 span 而不是 button：标签本身已是 button，嵌套 button 是非法 HTML
+        const close = document.createElement('span');
+        close.className = 'session-tab-close';
+        close.dataset.tabClose = t.id;
+        close.setAttribute('role', 'button');
+        close.setAttribute('aria-label', '关闭标签');
+        close.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+        btn.appendChild(close);
+      }
+      list.appendChild(btn);
+    });
+  }
+
+  function activateTab(tabId) {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    activeTabId = tab.id;
+    tabs.forEach((t) => { if (t.pane) t.pane.hidden = t.id !== activeTabId; });
+    renderTabs();
+  }
+
+  /** 运行状态点（primary 由本页事件驱动，frame 由 iframe postMessage 驱动） */
+  function tabsSetRunning(tabId, running) {
+    const t = tabs.find((x) => x.id === tabId);
+    if (!t || t.running === running) return;
+    t.running = running;
+    renderTabs();
+  }
+
+  /** frame 标签 iframe 地址（token 透传：iframe 内的 WS 握手同样需要钥匙） */
+  function frameUrl(sessionId) {
+    const p = new URLSearchParams();
+    p.set('embed', '1');
+    if (sessionId) p.set('session', sessionId);
+    const token = URL_PARAMS.get('token');
+    if (token) p.set('token', token);
+    return '/index.html?' + p.toString();
+  }
+
+  /** 开一个新标签。sessionId 为空 ⇒ 空会话（首条消息才物化） */
+  function createFrameTab(sessionId) {
+    if (embedMode) return null;
+    const panes = $('#chat-panes');
+    if (!panes) return null;
+    if (tabs.filter((t) => t.kind === 'frame').length >= TAB_MAX_FRAMES) {
+      appendMsg('system', `最多同时打开 ${TAB_MAX_FRAMES} 个并行标签`);
+      return null;
+    }
+
+    const id = 'tab-' + (++tabSeq);
+    // 新会话还没标题（懒登记，首条消息才物化）⇒ 用开标签的时刻当占位名，
+    // 否则并行开两个新标签会得到两个一模一样的「新会话」，切分不清。
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const placeholder = `新会话 ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const pane = document.createElement('div');
+    pane.className = 'chat-pane';
+    pane.dataset.tabPane = id;
+    pane.hidden = true;
+    const frame = document.createElement('iframe');
+    frame.className = 'chat-pane-frame';
+    frame.title = '并行会话';
+    frame.src = frameUrl(sessionId);
+    pane.appendChild(frame);
+    panes.appendChild(pane);
+
+    const tab = {
+      id,
+      kind: 'frame',
+      sessionId: sessionId || null,
+      title: sessionId ? tabTitleFor(sessionId) : placeholder,
+      running: false,
+      error: '',
+      pane,
+      frame,
+    };
+    tabs.push(tab);
+    activateTab(id);
+    return tab;
+  }
+
+  function closeTab(tabId) {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    const tab = tabs[idx];
+    if (tab.kind !== 'frame') return;          // 本页自身不能关
+    tabs.splice(idx, 1);
+    // 先导航走再删：文档卸载会立即断开这条 WS，后端随即释放会话占用
+    try { tab.frame.src = 'about:blank'; } catch (e) { /* ignore */ }
+    if (tab.pane) tab.pane.remove();
+    if (activeTabId === tabId) activateTab('primary');
+    else renderTabs();
+  }
+
+  /** 打开一条已有会话：已在某个标签里 ⇒ 切过去；否则新开一个 frame 标签 */
+  function openSessionTab(sessionId) {
+    if (!sessionId) return null;
+    const existing = tabForSession(sessionId);
+    if (existing) { activateTab(existing.id); return existing; }
+    return createFrameTab(sessionId);
+  }
+
+  /** iframe → 父页：就绪 / 运行状态 / 失败原因（同源校验） */
+  function handleTabMessage(ev) {
+    if (ev.origin !== location.origin) return;
+    const tab = tabs.find((t) => t.frame && t.frame.contentWindow === ev.source);
+    if (!tab) return;
+    const data = ev.data || {};
+    if (data.type === 'hyacinth:pane-ready' && data.sessionId) {
+      // 去重兜底：同一会话被两个标签认领（正常会被后端占用表拦住）
+      const dup = tabs.find((t) => t !== tab && sameSession(tabSessionId(t), data.sessionId));
+      if (dup) {
+        tab.error = '该会话已在其他标签打开';
+        renderTabs();
+        return;
+      }
+      tab.sessionId = data.sessionId;
+      tab.title = tabTitleFor(data.sessionId, tab.title);
+      tab.error = '';
+      renderTabs();
+    } else if (data.type === 'hyacinth:pane-status') {
+      tab.running = !!data.running;
+      tab.error = '';
+      if (data.sessionId) tab.sessionId = data.sessionId;
+      renderTabs();
+      // 回合结束 updatedAt 才变 ⇒ 刷新侧栏列表，并把占位标题换成真实标题
+      if (!data.running) void loadSidebarRecent().then(() => syncTabTitles());
+    } else if (data.type === 'hyacinth:pane-error') {
+      tab.error = data.message || '连接失败';
+      tab.running = false;
+      renderTabs();
+    }
+  }
+
+  /** 会话列表更新后，把 frame 标签的占位标题换成真实标题 */
+  function syncTabTitles() {
+    let changed = false;
+    tabs.forEach((t) => {
+      if (t.kind !== 'frame' || !t.sessionId) return;
+      const next = tabTitleFor(t.sessionId, t.title);
+      if (next && next !== t.title) { t.title = next; changed = true; }
+    });
+    if (changed) renderTabs();
+  }
+
+  function bindSessionTabs() {
+    if (embedMode) return;   // iframe 内不显示标签条
+    const nativePane = $('#chat-native-pane');
+    tabs = [{
+      id: 'primary',
+      kind: 'primary',
+      sessionId: null,
+      title: '新会话',
+      running: false,
+      error: '',
+      pane: nativePane,
+      frame: null,
+    }];
+    activeTabId = 'primary';
+
+    const addBtn = $('#tab-new-btn');
+    if (addBtn) addBtn.addEventListener('click', () => createFrameTab(null));
+
+    const list = $('#session-tabs-list');
+    if (list) {
+      list.addEventListener('click', (e) => {
+        const close = e.target.closest('[data-tab-close]');
+        if (close) { closeTab(close.dataset.tabClose); return; }
+        const btn = e.target.closest('[data-tab-id]');
+        if (btn) activateTab(btn.dataset.tabId);
+      });
+    }
+    window.addEventListener('message', handleTabMessage);
+    renderTabs();
+  }
+
   function bindUI() {
     bindToolsMCP();
+    bindSessionTabs();
     bindVoiceManager();
     bindSettingsPanelSwitch();
     // 侧栏搜索：输入即过滤本地缓存（列表已在内存里，不打后端）
@@ -7395,9 +7872,13 @@
   // HTTPS 页面必须用 wss://（浏览器 mixed-content 会拦截 ws://）；
   // 浏览器 WebSocket 无法设置 Authorization 头 → 服务端额外接受 ?token= 查询参数。
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-  let wsUrl = `${wsProto}://${host}:${port}/ui`;
-  const wsToken = new URLSearchParams(location.search).get('token');
-  if (wsToken) wsUrl += `?token=${encodeURIComponent(wsToken)}`;
+  // embed 标签额外带 session：后端据此绑定已有会话并做占用校验；
+  // 不带 = 旧行为（每条连接铸新 id，首条消息才物化）。
+  const wsQuery = new URLSearchParams();
+  const wsToken = URL_PARAMS.get('token');
+  if (wsToken) wsQuery.set('token', wsToken);
+  if (embedMode && embedSessionParam) wsQuery.set('session', embedSessionParam);
+  const wsUrl = `${wsProto}://${host}:${port}/ui${wsQuery.toString() ? '?' + wsQuery.toString() : ''}`;
 
   const client = new ProtocolClient(wsUrl, {
     onOpen: () => {

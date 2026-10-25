@@ -44,6 +44,7 @@ import { createProcessDomain, type BackgroundRegistryLike } from '../../ui-proto
 import { createOrchestratorDomain, type BypassManagerLike } from '../../ui-protocol/domains/orchestrator.js';
 import { createContextDomain, type ContextLoopLike, type ManifestLike } from '../../ui-protocol/domains/context.js';
 import { createToolDomain, type ToolRegistryLike } from '../../ui-protocol/domains/tool.js';
+import { createSkillDomain, type SkillRegistryLike } from '../../ui-protocol/domains/skill.js';
 import { createBundleDomain, type BundleRegistryLike } from '../../ui-protocol/domains/bundle.js';
 import { createPluginDomain, type PluginStatusLike } from '../../ui-protocol/domains/plugin.js';
 import { createSupervisorDomain } from '../../ui-protocol/domains/supervisor.js';
@@ -97,6 +98,13 @@ export interface UiProtocolSessionBackend {
   channel?: string;
   /** 懒登记会话（见 AgentFactory.createAgent.lazySession）：只记 id 与路径，不建目录不写文件 */
   lazySession?: boolean;
+  /**
+   * 会话占用表（多标签互斥）。装配侧传进程级实例；
+   * 未传时不做占用校验（TUI 本地路径行为零变更）。
+   */
+  claims?: import('../../ui-protocol/domains/session.js').SessionClaimPort;
+  /** 本连接的占用令牌（每条 UI 连接唯一） */
+  claimOwner?: string;
   /** 提供商元数据列表（model.listProviders 数据源，可选） */
   listProvidersMeta?: () => ProviderMetaLike[];
   /** 本地模型列表（model.listLocalModels 数据源；对应 LocalModelModule.list，可选） */
@@ -135,6 +143,8 @@ export interface UiProtocolSessionBackend {
   getToolLinks?: () => string | null;
   /** 动态获取工具注册表（tool 域用；对应 AgentComponents.toolRegistry，可选）。 */
   getToolRegistry?: () => ToolRegistryLike | null;
+  /** 动态获取技能注册表（skill 域用；对应 AgentComponents.skillRegistry，可选）。 */
+  getSkillRegistry?: () => SkillRegistryLike | null;
   /** 动态获取工具包注册表（bundle 域用；对应 AgentComponents.bundleRegistry，可选）。 */
   getBundleRegistry?: () => BundleRegistryLike | null;
   /** 动态获取 MCP 系统（mcp 域用；对应 AgentComponents.mcpSystem，可选）。 */
@@ -361,10 +371,13 @@ export class UiProtocolSession {
   private backend: UiProtocolSessionBackend;
   /** 陪伴场景目录监视句柄（scene_render 落盘 → COMPANION_SCENE 事件；close 时释放） */
   private sceneWatch: CompanionSceneWatchHandle | null = null;
+  /** 本连接当前占用的 sessionId（switch 后更新；close 时释放） */
+  private claimedSessionId: string | null = null;
 
   constructor(adapter: UIAdapter, sessionId: string | undefined, backend: UiProtocolSessionBackend) {
     this.adapter = adapter;
     this.sessionId = sessionId;
+    this.claimedSessionId = sessionId ?? null;
     this.server = new UiProtocolServer();
     this.pending = new PendingRequestRegistry();
     this.historyProvider = backend.historyProvider;
@@ -381,6 +394,11 @@ export class UiProtocolSession {
       emit,
       // loop 在 initialize 后才就绪，通过闭包延迟解析（session.switch 用）
       getLoop: () => this.loop as unknown as LoopLike,
+      // 占用表：连接级互斥（每个标签各自持有一条连接，同一会话只能被一条连接占用）
+      claims: backend.claims,
+      claimOwner: backend.claimOwner,
+      getClaimedSessionId: () => this.claimedSessionId,
+      setClaimedSessionId: (id: string) => { this.claimedSessionId = id; },
     }));
     this.registerModelDomain(backend.registry);
     this.server.registerDomain('command', createCommandDomain({
@@ -424,6 +442,16 @@ export class UiProtocolSession {
     this.server.registerDomain('tool', createToolDomain({
       getToolRegistry: () => backend.getToolRegistry?.() ?? null,
       getBundleRegistry: () => backend.getBundleRegistry?.() ?? null,
+    }));
+    // skill 域：技能列表 / 详情 / 启停。禁用列表落 skills.disabled（重启保留），
+    // 与 toggle_skill 工具共用同一份配置真源。
+    this.server.registerDomain('skill', createSkillDomain({
+      getSkillRegistry: () => backend.getSkillRegistry?.() ?? null,
+      persistDisabled: async (names) => {
+        const cc = backend.configCenter as ConfigCenterLike & { save?: () => void | Promise<void> };
+        cc.set('skills.disabled', names);
+        await cc.save?.();
+      },
     }));
     this.server.registerDomain('bundle', createBundleDomain({ getBundleRegistry: () => backend.getBundleRegistry?.() ?? null }));
     this.server.registerDomain('plugin', createPluginDomain({
@@ -660,6 +688,11 @@ export class UiProtocolSession {
     // 释放场景目录监视（不释放会持续持有 fs 句柄；每个 WS 连接各有一份）
     this.sceneWatch?.close();
     this.sceneWatch = null;
+    // 释放会话占用：连接断开后别的标签必须能再次打开这个会话
+    if (this.backend.claims && this.backend.claimOwner && this.claimedSessionId) {
+      this.backend.claims.release(this.claimedSessionId, this.backend.claimOwner);
+      this.claimedSessionId = null;
+    }
     this.adapter.close();
     this.loop = null;
   }

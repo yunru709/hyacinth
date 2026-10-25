@@ -16,6 +16,7 @@ import { WebSocket } from 'ws';
 import { HttpWebhookChannel } from './http-webhook.js';
 import { SessionManager } from '../../memory/session.js';
 import { appendEvent } from '../../memory/events.js';
+import { resetSessionClaims } from '../../memory/session-claims.js';
 import type { AgentFactory } from '../interface.js';
 import type { AgentLoop } from '../../orchestrator/loop.js';
 
@@ -91,6 +92,8 @@ const openSockets: (() => void)[] = [];
 
 afterEach(() => {
   for (const close of openSockets.splice(0)) close();
+  // 占用表是进程级单例：用例间不清理会让下一条"新连接"被上一条已死的连接挡住
+  resetSessionClaims();
 });
 
 afterAll(async () => {
@@ -150,6 +153,38 @@ describe('HttpWebhookChannel /ui 协议端点', () => {
     expect(msg.kind).toBe('event');
     expect(msg.type).toBe('ui.connected');
     expect((msg.payload as Record<string, unknown>).sessionId).toBeTruthy();
+  });
+
+  it('/ui?session= 绑定已存在会话：ui.connected 回报的是这条 id（不再铸新 id）', async () => {
+    const sm = new SessionManager(cwd);
+    const sess = await sm.create('normal');
+    const { messages } = connectWs(port, `/ui?session=${encodeURIComponent(sess.id)}`);
+    await waitFor(() => messages.length >= 1);
+    const msg = messages[0] as Record<string, unknown>;
+    expect(msg).toMatchObject({ kind: 'event', type: 'ui.connected' });
+    expect((msg.payload as Record<string, unknown>).sessionId).toBe(sess.id);
+  });
+
+  it('/ui?session= 同一会话的第二条连接被拒（SESSION_IN_USE）', async () => {
+    const sm = new SessionManager(cwd);
+    const sess = await sm.create('normal');
+    const first = connectWs(port, `/ui?session=${encodeURIComponent(sess.id)}`);
+    await waitFor(() => first.messages.some((m) => (m as any).type === 'ui.connected'));
+
+    // 后端占用表必须在**升级后**明确回 ui.error（浏览器 WebSocket 看不到 HTTP 状态码）
+    const second = connectWs(port, `/ui?session=${encodeURIComponent(sess.id)}`);
+    await waitFor(() => second.messages.length >= 1);
+    const err = second.messages[0] as { type?: string; payload?: { code?: string } };
+    expect(err.type).toBe('ui.error');
+    expect(err.payload?.code).toBe('SESSION_IN_USE');
+  });
+
+  it('/ui?session= 不存在的会话被拒（SESSION_NOT_FOUND）', async () => {
+    const { messages } = connectWs(port, '/ui?session=webui_not_exist_zzz');
+    await waitFor(() => messages.length >= 1);
+    const err = messages[0] as { type?: string; payload?: { code?: string } };
+    expect(err.type).toBe('ui.error');
+    expect(err.payload?.code).toBe('SESSION_NOT_FOUND');
   });
 
   it('/ui 协议往返：state.get 收到响应', async () => {

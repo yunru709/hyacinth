@@ -34,8 +34,9 @@ import { isLoopbackRemoteAddress } from '../../gateway/preview-service.js';
 import { LocalModelModule } from '../../local-model/index.js';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomBytes } from 'node:crypto';
 import type { UiWsSessionBackend } from './ui-ws-session.js';
+import { getSessionClaims } from '../../memory/session-claims.js';
 import { getRouterByName } from '../../context/profiles.js';
 import { switchToMode } from '../../context/mode-switch.js';
 import { clearPromptCache } from '../../prompts/loader.js';
@@ -328,16 +329,20 @@ export class HttpWebhookChannel implements ChannelHandler {
     this.app.addHook('onSend', async (_req: FastifyRequest, reply: FastifyReply) => {
       reply.header('X-Content-Type-Options', 'nosniff');
       /**
-       * 预览栏用**同源 iframe** 渲染工作区里的 HTML / PDF，全局 DENY 会把 iframe 直接挡成白屏。
-       * 只对 `/api/fs/raw` 这一个只读端点、且路径确实是 html/pdf 时放开到 SAMEORIGIN：
+       * 同源 iframe 有两种用途，全局 DENY 会把它们都挡成白屏：
+       *   1. 预览栏渲染工作区里的 HTML / PDF（/api/fs/raw）；
+       *   2. 并行会话标签：每个标签是一个 `/index.html?embed=1&session=…`。
+       * 因此对这两类请求放开到 SAMEORIGIN：
        *   · 其它所有路由仍然禁止被任何页面嵌入；
-       *   · SAMEORIGIN 只允许本站自己的页面嵌入（预览栏），外部站点依旧嵌不了；
-       *   · 该端点本身 fail-closed（相对路径 + realpath 校验 + .git 排除），且只读。
+       *   · SAMEORIGIN 只允许本站自己的页面嵌入，外部站点依旧嵌不了。
        */
       let embeddable = false;
       try {
         const u = decodeURIComponent(String(_req.url || '')).toLowerCase();
-        embeddable = u.startsWith('/api/fs/raw') && /\.(?:html?|pdf)(?:$|&)/.test(u);
+        const pathOnly = u.split('?')[0];
+        embeddable = pathOnly === '/'
+          || pathOnly === '/index.html'
+          || (u.startsWith('/api/fs/raw') && /\.(?:html?|pdf)(?:$|&)/.test(u));
       } catch { /* 非法编码：按不可嵌入处理 */ }
       reply.header('X-Frame-Options', embeddable ? 'SAMEORIGIN' : 'DENY');
       reply.header('X-XSS-Protection', '1; mode=block');
@@ -535,7 +540,6 @@ export class HttpWebhookChannel implements ChannelHandler {
     // ui-ws-contract.test.ts。
     const { WebSocketServer } = await import('ws');
     const { UiWsSession } = await import('./ui-ws-session.js');
-    const { randomBytes } = await import('node:crypto');
     const tuiWss = new WebSocketServer({ noServer: true });
     const desktopWss = new WebSocketServer({ noServer: true });
     const uiWss = new WebSocketServer({ noServer: true });
@@ -690,6 +694,39 @@ export class HttpWebhookChannel implements ChannelHandler {
     const previewLoopback = isLoopbackRemoteAddress(
       (req as { socket?: { remoteAddress?: string } } | undefined)?.socket?.remoteAddress,
     );
+
+    // ── 显式会话绑定与占用（多标签）──────────────────────────────
+    // `?session=<id>`：绑定**已存在**的会话（每个并行标签一条 WS、各自一条 loop）。
+    // 不带该参数：维持旧行为铸新 id（新建标签 / 普通刷新）。
+    // 占用失败时先接受升级、回一条 ui.error 再关闭：浏览器 WebSocket 拿不到
+    // HTTP 状态码，只有协议事件能把"为什么连不上"讲给前端。
+    const claims = getSessionClaims();
+    const claimOwner = `ws_${randomBytes(8).toString('hex')}`;
+    const requested = parseSessionParam(req);
+    let effectiveSessionId = sessionId;
+    if (requested) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(requested)) {
+        this.rejectWs(ws, 'INVALID_SESSION', '会话 id 非法');
+        return;
+      }
+      if (!existsSync(this.sessionManager.getSessionDir(requested))) {
+        this.rejectWs(ws, 'SESSION_NOT_FOUND', `会话 "${requested}" 不存在`);
+        return;
+      }
+      effectiveSessionId = requested;
+    }
+    if (!claims.claim(effectiveSessionId, claimOwner)) {
+      this.rejectWs(ws, 'SESSION_IN_USE', `会话 "${effectiveSessionId}" 已在另一个标签中打开`);
+      return;
+    }
+    // close 兜底必须在 initialize **之前**挂上：初始化期间客户端断开也要释放占用，
+    // 否则槽位会泄漏到进程重启（后面的 session.close() 会再做一次，release 幂等）。
+    let sessionRef: { close(): Promise<void> } | null = null;
+    ws.on('close', () => {
+      if (sessionRef) sessionRef.close().catch(() => {});
+      else claims.release(effectiveSessionId, claimOwner);
+    });
+
     try {
       // UiWsSession 与 start() 内为同一模块实例（动态 import 保持与 start 一致）
       const { UiWsSession } = await import('./ui-ws-session.js');
@@ -750,19 +787,53 @@ export class HttpWebhookChannel implements ChannelHandler {
         if (!dir) return [];          // sid 为空且 loop 还没建目录 ⇒ 没有历史可读，别去猜 cwd
         const raw = await readRecentEvents(dir, 5000);
         const events = coalesceEvents(raw).slice(-(limit ?? 50));
-        return events.map((e) => ({
-          type: e.type,
-          content: e.content,
-          name: e.name,
-          id: e.id,
-          input: e.input,
-          toolUseId: e.tool_use_id,
-          message: e.message,
-          reason: e.reason,
-          inputTokens: e.input_tokens,
-          outputTokens: e.output_tokens,
-          timestamp: e.timestamp,
-        }));
+        const mapped = events.map((e) => {
+          // 同一文件里存在两套 tool_call 形状：
+          //   ConversationEvent → { name, id, input }
+          //   SessionEvent      → { tool_name, tool_use_id }（无 input）
+          // 历史回放统一归一化，否则旧形状的事件在 UI 上退化成无名的「工具」卡片。
+          const legacy = e as unknown as { tool_name?: string; tool_use_id?: string };
+          return {
+            type: e.type,
+            content: e.content,
+            name: e.name ?? legacy.tool_name,
+            id: e.id ?? legacy.tool_use_id,
+            input: e.input,
+            toolUseId: e.tool_use_id ?? legacy.tool_use_id,
+            message: e.message,
+            reason: e.reason,
+            inputTokens: e.input_tokens,
+            outputTokens: e.output_tokens,
+            timestamp: e.timestamp,
+          };
+        });
+
+        // 同一次工具调用会被两条链路各记一遍（loop 的 ConversationEvent 带
+        // input，session 事件只有 tool_name）⇒ 旧实现渲染出「空参数 + 有参数」
+        // 两张卡。按 tool_use_id 去重，并保留信息更完整的那条。
+        const score = (m: (typeof mapped)[number]): number =>
+          (m.input && typeof m.input === 'object' && Object.keys(m.input).length ? 2 : 0) +
+          (m.name ? 1 : 0) +
+          (m.content ? 1 : 0);
+        const seen = new Map<string, number>();
+        const out: typeof mapped = [];
+        for (const m of mapped) {
+          if (m.type === 'tool_call' || m.type === 'tool_result') {
+            const key = m.type + ':' + (m.toolUseId || m.id || '');
+            if (key.endsWith(':')) {
+              out.push(m);
+              continue;
+            }
+            const at = seen.get(key);
+            if (at !== undefined) {
+              if (score(m) > score(out[at])) out[at] = m;
+              continue;
+            }
+            seen.set(key, out.length);
+          }
+          out.push(m);
+        }
+        return out;
       };
 
       // 会话统计真实来源：sessionId → sessionDir → stats.json（StatsManager）
@@ -777,6 +848,7 @@ export class HttpWebhookChannel implements ChannelHandler {
         knowledgeBase?: unknown;
         backgroundRegistry?: unknown;
         toolRegistry?: unknown;
+        skillRegistry?: unknown;
         bundleRegistry?: unknown;
         mcpSystem?: unknown;
         pluginManager?: unknown;
@@ -786,11 +858,14 @@ export class HttpWebhookChannel implements ChannelHandler {
         companionSessionManager?: unknown;
       } | null = null;
 
-      const session = new UiWsSession(ws, sessionId, {
+      const session = new UiWsSession(ws, effectiveSessionId, {
         cwd: this.cwd,
         // 连接即登记、**不落盘**：此前这里是"每刷新建一个 0 文件空壳会话"的现场 ✗
         // （首条用户消息到达时由 loop 物化，与 TUI 新建路径一致 ✓）
+        // 目录已存在（?session= 绑定旧会话）时 boot 会走 resume，语义不变 ✓
         lazySession: true,
+        claims,
+        claimOwner,
         configCenter: configCenter as unknown as UiWsSessionBackend['configCenter'],
         sessionStore: this.sessionManager,
         registry,
@@ -835,6 +910,8 @@ export class HttpWebhookChannel implements ChannelHandler {
           (agentComponents?.loop?.bypassManager as import('../../ui-protocol/domains/orchestrator.js').BypassManagerLike | undefined) ?? null,
         getToolRegistry: () =>
           (agentComponents?.toolRegistry as import('../../ui-protocol/domains/tool.js').ToolRegistryLike | undefined) ?? null,
+        getSkillRegistry: () =>
+          (agentComponents?.skillRegistry as import('../../ui-protocol/domains/skill.js').SkillRegistryLike | undefined) ?? null,
         getBundleRegistry: () =>
           (agentComponents?.bundleRegistry as import('../../ui-protocol/domains/bundle.js').BundleRegistryLike | undefined) ?? null,
         getMCP: () =>
@@ -895,6 +972,9 @@ export class HttpWebhookChannel implements ChannelHandler {
         historyProvider,
       });
 
+      // 交给 close 兜底管理（session.close 内释放占用）；放在 initialize 之前，
+      // 初始化期间断开同样会被释放。
+      sessionRef = session;
       if (this.wsAgentFactory) {
         await session.initialize(this.wsAgentFactory);
         // initialize 后 agent 组件就绪：供 kb/process/plugin 等域延迟解析
@@ -902,6 +982,7 @@ export class HttpWebhookChannel implements ChannelHandler {
           knowledgeBase?: unknown;
           backgroundRegistry?: unknown;
           toolRegistry?: unknown;
+          skillRegistry?: unknown;
           bundleRegistry?: unknown;
           mcpSystem?: unknown;
           pluginManager?: unknown;
@@ -913,12 +994,36 @@ export class HttpWebhookChannel implements ChannelHandler {
         logger.warn('UI WS agentFactory not available');
       }
       ws.on('close', () => {
-        session.close().catch(() => {});
-        logger.info('UI WS client disconnected', { sessionId });
+        logger.info('UI WS client disconnected', { sessionId: effectiveSessionId });
       });
     } catch (err) {
       logger.error('UI WS init failed', err instanceof Error ? err : new Error(String(err)));
+      // 初始化失败：会话没建起来 ⇒ 直接归还占用（session.close 未走到时兜底）
+      if (!sessionRef) claims.release(effectiveSessionId, claimOwner);
       try { ws.close(); } catch { /* ignore */ }
     }
+  }
+
+  /**
+   * 拒绝一条 WS 连接：先发协议层 ui.error（浏览器拿不到 HTTP 状态码），
+   * 再用 4409 关闭。前端 embed 模式据此停止自动重连并展示原因。
+   */
+  private rejectWs(ws: import('ws').WebSocket, code: string, message: string): void {
+    try {
+      ws.send(JSON.stringify({ kind: 'event', type: 'ui.error', payload: { code, message } }));
+    } catch { /* socket 可能已断开 */ }
+    try { ws.close(4409, code); } catch { /* ignore */ }
+  }
+}
+
+/** 从升级请求 URL 解析 `?session=`（缺省/空白 → null） */
+function parseSessionParam(req?: { url?: string }): string | null {
+  if (!req?.url) return null;
+  try {
+    const value = new URL(req.url, 'http://localhost').searchParams.get('session');
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  } catch {
+    return null;
   }
 }

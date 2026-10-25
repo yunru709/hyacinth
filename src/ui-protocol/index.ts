@@ -30,6 +30,7 @@ import { createToolDomain } from './domains/tool.js';
 import { createBundleDomain } from './domains/bundle.js';
 import { createMCPDomain } from './domains/mcp.js';
 import { createPluginDomain } from './domains/plugin.js';
+import { createSkillDomain } from './domains/skill.js';
 import { createCompanionDomain } from './domains/companion.js';
 import { createPreviewDomain } from './domains/preview.js';
 import { createSttDomain } from './domains/stt.js';
@@ -92,6 +93,8 @@ export type { SchedulerLike, SchedulerStatusLike, ScheduleDomainOptions } from '
 export { createContextDomain } from './domains/context.js';
 export { createToolDomain } from './domains/tool.js';
 export type { ToolRegistryLike, ToolDomainOptions } from './domains/tool.js';
+export { createSkillDomain } from './domains/skill.js';
+export type { SkillRegistryLike, SkillDomainOptions } from './domains/skill.js';
 export { createBundleDomain } from './domains/bundle.js';
 export type { BundleRegistryLike, BundleDomainOptions } from './domains/bundle.js';
 export { createMCPDomain } from './domains/mcp.js';

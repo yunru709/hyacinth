@@ -2,6 +2,40 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
 import readline from 'node:readline';
+import { createLogger } from '../logging/logger.js';
+
+const log = createLogger('memory/events');
+
+/**
+ * 每个文件的追加队列。
+ *
+ * 为什么必须有：流式链路（orchestrator/stages/llm.ts 等）对 appendEvent 是
+ * **fire-and-forget**（不 await）。若每次都直接 `fs.appendFile`，libuv 的完成
+ * 顺序不受调用顺序约束 ⇒ 同一段思考的逐 token 片段会以随机顺序落盘，
+ * 历史回放（message.history → coalesceEvents）就拼出被字词打乱的正文。
+ *
+ * 队列把「调用顺序」变成「写入顺序」，与调用方是否 await 无关。
+ */
+const writeQueues = new Map<string, Promise<void>>();
+
+function enqueueWrite(filePath: string, task: () => Promise<void>): Promise<void> {
+  const prev = writeQueues.get(filePath) ?? Promise.resolve();
+  const next = prev
+    .then(task)
+    .catch((err: unknown) => {
+      // 持久化失败不阻断主链路；但不能静默（否则历史缺失无从回查）。
+      log.warn('failed to append event', {
+        filePath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  writeQueues.set(filePath, next);
+  void next.finally(() => {
+    // 队列排空后回收，避免会话多了以后 Map 无界增长。
+    if (writeQueues.get(filePath) === next) writeQueues.delete(filePath);
+  });
+  return next;
+}
 
 /**
  * 会话事件持久化单一入口（审计问题 1 合并：原 src/event-store.ts 全量并入）。
@@ -41,7 +75,7 @@ export async function appendEvent(
 ): Promise<void> {
   const filePath = path.join(sessionDir, 'events.jsonl');
   const line = JSON.stringify(event) + '\n';
-  await fs.appendFile(filePath, line, 'utf-8');
+  await enqueueWrite(filePath, () => fs.appendFile(filePath, line, 'utf-8'));
 }
 
 /**
@@ -160,9 +194,12 @@ export class EventStore {
    */
   async append(sessionDir: string, event: SessionEvent | ConversationEvent): Promise<void> {
     const filePath = this.getFilePath(sessionDir);
-    await this.ensureFile(filePath);
     const line = JSON.stringify(event) + '\n';
-    await fs.appendFile(filePath, line, 'utf-8');
+    // 与 appendEvent 共用同一队列：两类事件写同一个文件，必须一起保序。
+    await enqueueWrite(filePath, async () => {
+      await this.ensureFile(filePath);
+      await fs.appendFile(filePath, line, 'utf-8');
+    });
   }
 
   /**

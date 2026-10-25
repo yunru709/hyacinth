@@ -668,14 +668,18 @@
   color: var(--hyacinth-muted-foreground);
 }
 .msg-note {
-  max-width: var(--content-max);
-  margin: 0 auto 12px;
-  padding: 7px 11px;
-  border-left: 2px solid var(--hair-strong);
-  border-radius: 0 6px 6px 0;
-  background: var(--s1);
-  line-height: 1.6;
-}
+      max-width: var(--content-max);
+      margin: 0 auto 12px;
+      padding: 7px 11px;
+      border-left: 2px solid var(--hair-strong);
+      border-radius: 0 6px 6px 0;
+      background: var(--s1);
+      line-height: 1.6;
+      /* 工具结果里常见超长单行（minified JSON / 路径），同样需要强制断行 */
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
 .msg-note.is-error {
   border-left-color: color-mix(in srgb, var(--state-error) 80%, transparent);
   color: color-mix(in srgb, var(--state-error) 85%, var(--hyacinth-foreground));
@@ -1538,10 +1542,16 @@
 .msg-assistant .msg-time { margin-left: 0; }
 
 .thinking-line {
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--hyacinth-muted-foreground);
-}
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--hyacinth-muted-foreground);
+      /* 思考文本常带长路径 / 长标识符（snake_case、URL）。不换行会把
+         .msg-body / .process-body 撑出主容器，右侧被 overflow:hidden 裁掉。 */
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      min-width: 0;
+    }
 
 /* 主题网格里的分组标题：#theme-grid 是 grid，标题要横跨整行 */
 .theme-group-label {
@@ -2478,3 +2488,119 @@
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
+
+/* ── 并行会话标签（chat 视图顶部）────────────────────────────────
+   一条标签 = 一条会话 = 一条独立 /ui WS（独立 UI 协议会话 → 独立 AgentLoop）。
+   第一个标签是本页自己的连接，其余标签是 embed iframe；
+   非活跃标签只是 display:none —— iframe 里的连接与任务照常运行。 */
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.session-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--s1);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.session-tabs-list { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.session-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--hyacinth-foreground) 62%, transparent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.session-tab:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+.session-tab.is-active {
+  background: var(--hyacinth-background);
+  border-color: var(--hair);
+  color: var(--hyacinth-foreground);
+  font-weight: 500;
+}
+.session-tab-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hyacinth-foreground) 30%, transparent);
+}
+.session-tab.is-running .session-tab-dot {
+  background: var(--state-success);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+.session-tab.is-error .session-tab-dot { background: var(--state-error); }
+.session-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-tab-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  opacity: 0.55;
+}
+.session-tab-close:hover { background: var(--s3); opacity: 1; }
+.session-tab-close svg { width: 12px; height: 12px; }
+.session-tab-new {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px dashed var(--hair);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--hyacinth-foreground) 55%, transparent);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.session-tab-new:hover { background: var(--s2); color: var(--hyacinth-foreground); }
+.session-tab-new svg { width: 14px; height: 14px; }
+@keyframes tab-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* 面板容器：只有活跃面板可见；其余仍是活文档（iframe 不卸载） */
+.chat-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.chat-pane { position: absolute; inset: 0; min-height: 0; }
+.chat-pane[hidden] { display: none !important; }
+.chat-pane-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--hyacinth-background);
+}
+
+/* embed 模式：本页作为并行会话标签的 iframe 被内嵌 ⇒ 只保留聊天区
+   （侧栏/顶栏/标签条/遮罩全隐）。用 html.is-embed 而不是 body class：
+   文档加载时 app.js 还没跑，html 上的 class 由脚本第一行加，样式就能立刻生效，
+   避免"先闪一下完整外壳"。 */
+html.is-embed #topbar,
+html.is-embed #sidebar,
+html.is-embed .session-tabs,
+html.is-embed #nav-backdrop { display: none !important; }
+html.is-embed #hyacinth-main { height: 100%; }
+html.is-embed .body-area { height: 100%; }
