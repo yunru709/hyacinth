@@ -281,3 +281,103 @@ describe('配置域', () => {
     expect(server.hasDomain('config')).toBe(true);
   });
 });
+
+// ══════════════════════════════════════════════════════════
+// 敏感键遮蔽（协议边界，防止密钥到前端）
+// ══════════════════════════════════════════════════════════
+// 起因（2026-10-26 实测）：加 voice.tts.online.apiKey 之后用 CDP 抓页面真实 WS 帧，
+// 发现 config.getAll / config.schema / config.change 三处都把密钥明文推给了前端 ——
+// tts.onlineConfig 本身是干净的，但挡不住这三条通道。同一批还波及
+// channels.feishu.appSecret 与 channels.clawbot.botToken。
+// 下面这些是**回归闸门**：谁把遮蔽去掉，这里必须红。
+describe('敏感键遮蔽（协议边界）', () => {
+  const SECRET = 'sk-live-SHOULD-NEVER-REACH-UI';
+
+  it('config.getAll 遮蔽密钥，且不破坏其余字段', async () => {
+    const { client, responses, flush, mock } = setup();
+    mock.set('voice.tts.online.apiKey', SECRET);
+    client.send({ kind: 'request', id: 'r1', method: 'config.getAll' });
+    await flush();
+    const raw = JSON.stringify(responses[0].result);
+    expect(raw).not.toContain(SECRET);
+    const r = responses[0].result as Record<string, any>;
+    expect(r.voice.tts.online.apiKey).toBe('***');
+    // 非敏感字段必须原样保留（遮蔽不能把整包配置搞坏）
+    expect(r.session.maxTurns).toBe(100);
+    expect(r.provider.active).toBe('anthropic');
+  });
+
+  it('config.get 单路径也遮蔽（否则能逐键捞回来）', async () => {
+    const { client, responses, flush, mock } = setup();
+    mock.set('voice.tts.online.apiKey', SECRET);
+    client.send({ kind: 'request', id: 'r1', method: 'config.get', params: { path: 'voice.tts.online.apiKey' } });
+    await flush();
+    expect(responses[0].result).toEqual({ path: 'voice.tts.online.apiKey', value: '***' });
+  });
+
+  it('config.change 事件遮蔽 oldValue/newValue（这条是广播，最危险）', async () => {
+    const { mock, events, flush } = setup();
+    mock.set('voice.tts.online.apiKey', SECRET);
+    await flush();
+    const chg = events.find(
+      (e) => e.type === 'config.change' && (e.payload as { path?: string }).path === 'voice.tts.online.apiKey',
+    );
+    expect(chg).toBeTruthy();
+    expect(JSON.stringify(chg!.payload)).not.toContain(SECRET);
+    expect((chg!.payload as { newValue?: unknown }).newValue).toBe('***');
+  });
+
+  it('config.set 回显也遮蔽（响应会进日志 / 抓包）', async () => {
+    const { client, responses, flush } = setup();
+    client.send({
+      kind: 'request', id: 'r1', method: 'config.set',
+      params: { path: 'voice.tts.online.apiKey', value: SECRET },
+    });
+    await flush();
+    expect(JSON.stringify(responses[0].result)).not.toContain(SECRET);
+    expect((responses[0].result as { value?: unknown }).value).toBe('***');
+  });
+
+  it('config.schema 的 value 遮蔽', async () => {
+    const { client, responses, flush, mock } = setup();
+    mock.set('voice.tts.online.apiKey', SECRET);
+    client.send({ kind: 'request', id: 'r1', method: 'config.schema' });
+    await flush();
+    expect(JSON.stringify(responses[0].result)).not.toContain(SECRET);
+    const entries = (responses[0].result as { entries: Array<{ path: string; value: unknown }> }).entries;
+    const hit = entries.find((e) => e.path === 'voice.tts.online.apiKey');
+    expect(hit?.value).toBe('***');
+  });
+
+  it('空密钥保持空（不遮成 ***，否则用户以为已经配了）', async () => {
+    const { client, responses, flush, mock } = setup();
+    // 必须先显式设成空串：mock 默认配置里没有 voice 键，
+    // 直接 get 会走「路径不存在」分支抛错（我第一版就这么写错的）
+    mock.set('voice.tts.online.apiKey', '');
+    client.send({ kind: 'request', id: 'r1', method: 'config.get', params: { path: 'voice.tts.online.apiKey' } });
+    await flush();
+    expect((responses[0].result as { value?: unknown }).value).toBe('');
+  });
+
+  it('apiKeyEnv / autoRefreshToken 不被误伤（一个是变量名，一个是布尔开关）', async () => {
+    const { client, responses, flush, mock } = setup();
+    mock.set('provider.anthropic.apiKeyEnv', 'ANTHROPIC_API_KEY');
+    mock.set('channels.clawbot.autoRefreshToken', true);
+    client.send({ kind: 'request', id: 'r1', method: 'config.getAll' });
+    await flush();
+    const r = responses[0].result as Record<string, any>;
+    expect(r.provider.anthropic.apiKeyEnv).toBe('ANTHROPIC_API_KEY');
+    expect(r.channels.clawbot.autoRefreshToken).toBe(true);
+  });
+
+  it('appSecret / botToken 同样被遮蔽（同一批泄漏的两个真实例子）', async () => {
+    const { client, responses, flush, mock } = setup();
+    mock.set('channels.feishu.appSecret', 'feishu-secret');
+    mock.set('channels.clawbot.botToken', 'clawbot-token');
+    client.send({ kind: 'request', id: 'r1', method: 'config.getAll' });
+    await flush();
+    const raw = JSON.stringify(responses[0].result);
+    expect(raw).not.toContain('feishu-secret');
+    expect(raw).not.toContain('clawbot-token');
+  });
+});
