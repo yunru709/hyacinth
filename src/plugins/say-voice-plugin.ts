@@ -218,10 +218,17 @@ export function createSayVoicePlugin(
       //   ② 模型文件齐全（缺文件时拉起来只会每条都 500）
       //   ③ 服务未在跑（单例 + 端口硬编码，重复启动会冲突/认领）
       //
+      // ⚠️ 2026-10-26 新增第 ⓪ 条：**当前引擎必须是 cosyvoice3 才预热**。
+      // 之前漏了这条 —— 用户把引擎切到 breeze-tts-2 后，这里照样拉起 Python 服务，
+      // 白占 3.7 GB 显存。实测两者同跑 = 7167/8188 MiB，离 OOM 一步之遥
+      // （breeze 自己就要 3.7 GB，8 GB 卡容不下两份）。
+      // 预热的是「cosyvoice 服务」，与「say 用哪个引擎」必须一致，否则纯属浪费。
+      //
       // 必须 fire-and-forget：加载耗时以分钟计，绝不能阻塞装配链（否则 TUI 起不来）。
       // 失败只留痕不升级：文字交付照常，首句语音会走插件既有的「未就绪」提示。
       // ⚠️ 只在「未注入自定义引擎」时预热 —— 测试注入假引擎时**绝不能** spawn python。
-      if (!services.engine && getConfig<boolean>('voice.say.broadcast') === true) {
+      const engineKind = String(getConfig<string>('voice.tts.engine') ?? 'cosyvoice3');
+      if (!services.engine && engineKind === 'cosyvoice3' && getConfig<boolean>('voice.say.broadcast') === true) {
         void (async () => {
           try {
             const svc = getTtsService();
