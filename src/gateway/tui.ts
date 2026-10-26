@@ -1804,7 +1804,17 @@ export async function runTui(
             if (save) {
               void save.call(cc).catch((err) => console.error('[tui] voice.tts.engine persist failed:', err));
             }
-            chatLog.addSystem(theme.success(`say 引擎 → ${target.label}`));
+            // 切换即落地：当场停掉旧引擎的进程/显存 + 拉起新引擎。
+            // 不这么做的话，切到 breeze 后 cosyvoice 的 Python 仍占着 3.7GB
+            // （实测两者同跑 7167/8188 MiB），要等进程重启才释放。
+            {
+              const { switchTtsEngine } = await import('../tts/index.js');
+              const sw = switchTtsEngine(reader);
+              chatLog.addSystem(theme.success(`say 引擎 → ${target.label}`));
+              if (sw.from !== sw.to) {
+                chatLog.addSystem(theme.dim?.(`已释放 ${sw.from}，拉起 ${sw.to}`) ?? `已释放 ${sw.from}，拉起 ${sw.to}`);
+              }
+            }
             if (!target.ready) {
               // 允许选未就绪的引擎（先选后补模型/密钥），但要说清现在还不能合成
               chatLog.addSystem(theme.warning(`⚠ 该引擎未就绪：${target.detail}`));

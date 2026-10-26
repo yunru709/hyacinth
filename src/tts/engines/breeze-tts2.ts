@@ -38,7 +38,7 @@ import { listVoiceEntries, voicesDir as defaultVoicesDir } from '../voice-dir.js
 // 常驻 server 生命周期（起进程 / 健康检查 / 认领已有实例）。
 // CLI 每句重付 8s 模型加载费（实测整次 9.7s，而 --metrics 说纯合成只 1.9s），
 // 常驻后单次 2.0s —— 这是当前唯一有意义的提速来源。
-import { ensureBreezeServer } from './breeze-server.js';
+import { ensureBreezeServer, stopBreezeServer } from './breeze-server.js';
 import { createLogger } from '../../logging/logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -326,6 +326,17 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     kind: 'local',
     voices,
     synthesize,
+    // 切走时停掉**我们自己起的**常驻 server（认领来的外部实例不碰，见 breeze-server.ts）。
+    // 不停就会和下一个引擎的权重抢同一张 8GB 卡。
+    dispose: () => stopBreezeServer(),
+    // 预热：把 audiocpp_server 提前拉起来，首句不必付 8s 模型加载费。
+    // 只有「配了 serverUrl」或「autoStart 开着」时才有服务可预热；否则是纯 CLI，直接返回。
+    warmup: async () => {
+      const c = conf();
+      if (!c.serverUrl && c.serverAutoStart === false) return;
+      const url = await resolveServerUrl(c);
+      if (!url) throw new Error('Breeze-TTS-2 常驻服务未能就绪（详见日志）');
+    },
     capabilities: (): TtsCapabilities => ({
       voice: true,
       // speed：audio.cpp 的 breeze_tts spec 没有语速项（要变速得改时长参数或后处理），

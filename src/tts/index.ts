@@ -27,6 +27,9 @@ import { createBreezeTts2Engine, type BreezeTts2Config } from './engines/breeze-
 import { createCosyVoiceEngine } from './engines/cosyvoice.js';
 import { createOnlineTtsEngine, type OnlineTtsConfig } from './engines/online.js';
 import type { TtsEngine, TtsVoiceInfo } from './engine.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('tts-index');
 
 export type { TtsCapabilities, TtsEngine, TtsEngineStatus, TtsSynthesizeOptions, TtsVoiceInfo } from './engine.js';
 export { createCosyVoiceEngine } from './engines/cosyvoice.js';
@@ -120,17 +123,61 @@ function engineKey(cfg: TtsConfigReader): string {
   return 'cosyvoice3';
 }
 
+/**
+ * 释放一个引擎持有的进程级资源（子进程 / 显存 / 端口）。
+ *
+ * 【为什么所有换引擎的路径都必须过这里】不停旧的，就会和新的抢同一张卡：
+ * 2026-10-26 实测 cosyvoice(Python 3.7GB) + breeze(常驻 3.7GB) 同驻 = 7167/8188 MiB。
+ * dispose 允许失败（认领来的外部实例 kill 不到），失败只留痕不阻断切换。
+ */
+function disposeEngine(e: TtsEngine | null, why: string): void {
+  if (!e?.dispose) return;
+  try {
+    e.dispose();
+  } catch (err) {
+    logger.warn(`TTS 引擎 ${e.id} 释放失败（${why}）`, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export function getTtsEngine(cfg: TtsConfigReader): TtsEngine {
   const key = engineKey(cfg);
   if (!instance || instanceKey !== key) {
+    const old = instance;
     instance = createTtsEngine(cfg);
     instanceKey = key;
+    // 先建新的再释放旧的：createTtsEngine 很轻（不 spawn），即使 dispose 抛错，
+    // 调用方也一定拿到可用引擎。这是「切引擎不释放旧服务」的兜底修法：
+    // 任何路径（插件代理 / 契约域 / TUI）换引擎，旧进程都会在这里被带走。
+    disposeEngine(old, 'engine key changed');
   }
   return instance;
 }
 
-/** 测试 / 强制换引擎时清缓存 */
+/**
+ * 切换引擎并预热新的 —— TUI `/tts`、设置页 `tts.setEngine` 的落地动作。
+ *
+ * 与 getTtsEngine 的区别：**切换那一刻**就停旧的、拉新的，而不是等下一句 say
+ * 才「顺手」释放。用户点完就能看到显存掉下来、新服务起来。
+ * 预热是 fire-and-forget：本地服务首启以分钟计，绝不能阻塞 UI 交互。
+ */
+export function switchTtsEngine(cfg: TtsConfigReader): { from: string; to: string } {
+  const from = instance?.id ?? '(none)';
+  const eng = getTtsEngine(cfg); // 内部已释放旧引擎
+  if (eng.warmup) {
+    void eng.warmup().catch((err) => {
+      logger.warn(`TTS 引擎 ${eng.id} 预热失败（首句会走「未就绪」提示）`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+  return { from, to: eng.id };
+}
+
+/** 测试 / 强制换引擎时清缓存（顺带释放旧引擎的进程资源） */
 export function resetTtsEngine(): void {
+  disposeEngine(instance, 'resetTtsEngine');
   instance = null;
   instanceKey = '';
 }

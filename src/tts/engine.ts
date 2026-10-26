@@ -65,4 +65,27 @@ export interface TtsEngine {
   capabilities(): TtsCapabilities;
   /** 运行态（可选：在线引擎未配置时就该报出来，而不是等合成失败） */
   status?(): TtsEngineStatus;
+
+  /**
+   * 释放本引擎占用的**进程级资源**（子进程 / 显存 / 端口）。
+   *
+   * 【为什么必须存在】2026-10-26 事故：`voice.tts.engine` 从 cosyvoice3 切到
+   * breeze-tts-2 后，旧引擎的 Python 服务**没人停**，与 breeze 的 3.7GB 权重
+   * 同时驻留，实测 7167/8188 MiB —— 8GB 卡离 OOM 一步。切引擎必须「先放旧的」。
+   *
+   * 约定：
+   *   · **同步优先**：`getTtsEngine` 是同步函数（say 高频调用），不能 await。
+   *   · 认领来的外部实例不该被 kill（见 CosyVoiceService.adopted），尽力而为即可。
+   *   · 无进程资源的引擎（在线 API）**不要实现**这个方法。
+   */
+  dispose?(): void;
+
+  /**
+   * 预热：把本地服务提前拉起来（切换引擎 / 插件挂载时调用）。
+   *
+   * 与 `dispose` 成对：切换引擎时「旧的 dispose、新的 warmup」。
+   * 必须**异步且可失败** —— 调用方 fire-and-forget，失败只留痕不影响回合。
+   * 无本地服务的引擎（在线 API）不要实现。
+   */
+  warmup?(): Promise<void>;
 }

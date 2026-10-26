@@ -506,6 +506,21 @@ export class UiProtocolSession {
         // 与 setSayConfig 同语义：写后持久化（fire-and-forget，失败留痕不阻断）
         const save = (cc as { save?: () => Promise<void> }).save;
         if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.tts.engine persist failed:', err));
+        // 切换即落地：当场释放旧引擎的进程/显存 + 预热新引擎（不等下一句 say）。
+        // 这是「切了引擎但旧服务还占着 3.7GB」的修法 —— 用户点完就该看到显存掉。
+        try {
+          const reader = {
+            get<T>(k: string): T | undefined {
+              try { return cc.get<T>(k); } catch { return undefined; }
+            },
+          };
+          const eng = getTtsEngine(reader);
+          if (eng.warmup) {
+            void eng.warmup().catch((err) => console.error('[ui-protocol] TTS 引擎预热失败:', err));
+          }
+        } catch (err) {
+          console.error('[ui-protocol] TTS 引擎切换失败:', err);
+        }
       },
       // 试听走「当前选中引擎」：切到在线/本地 GGUF 后，设置页试听要听到那家的声音。
       // 不这么做的话，UI 显示已切换、点试听却还是 CosyVoice3 ⇒ 界面对了行为没对。

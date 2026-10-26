@@ -26,6 +26,18 @@ export function createCosyVoiceEngine(): TtsEngine {
     synthesize: (text, opts = {}) =>
       svc.synthesize(text, { voice: opts.voice, speed: opts.speed }),
     capabilities: (): TtsCapabilities => ({ voice: true, speed: true, emotion: false }),
+    // 切走时释放 Python 子进程：它是 3.7GB 显存的持有者。
+    // 【为什么要显式做】2026-10-26 实测：切到 breeze 后没人停它，两份权重同驻
+    // 8GB 卡（7167/8188 MiB）。svc.stop() 只杀自己 spawn 的；认领来的不碰（见其注释）。
+    dispose: () => svc.stop(),
+    // 预热：把 python 服务提前拉起来，首句不必等 ~40s 初始化。
+    // 模型没就绪时**直接抛**（不触发下载）—— 让调用方按"未就绪"处理。
+    warmup: async () => {
+      const st = svc.modelState();
+      if (!st.ready) throw new Error(`CosyVoice3 模型未就绪（缺 ${st.missingFiles.join(', ')}）`);
+      if (svc.serviceState().running) return;
+      await svc.start();
+    },
     status: () => {
       const st = svc.serviceState();
       return {

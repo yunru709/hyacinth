@@ -20,7 +20,7 @@ import type { LoopHooks } from '../orchestrator/loop-hooks.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { SayVoiceOptions } from '../tools/say.js';
 import { UI_EVENT, type SayVoiceEvent } from '../events.js';
-import { getTtsService, listVoices, type TtsVoiceInfo } from '../tts/cosyvoice.js';
+import type { TtsVoiceInfo } from '../tts/cosyvoice.js';
 // 引擎选择交给工厂（voice.tts.engine）：本插件不再写死 CosyVoice3 实现。
 // 契约见 src/tts/engine.ts，可用实现见 src/tts/engines/*。
 import { getTtsEngine } from '../tts/index.js';
@@ -213,34 +213,20 @@ export function createSayVoicePlugin(
       // 才 spawn，会把 1~2 分钟的 torch 初始化 + 权重加载压到用户第一次等语音那一刻，
       // 而那时他已经在等「说完了」——两段等待串联，体感最差。
       //
-      // 三个前置条件，缺一不预热：
-      //   ① 播报总开关开着（关着就没必要白占 8 GB 显存）
-      //   ② 模型文件齐全（缺文件时拉起来只会每条都 500）
-      //   ③ 服务未在跑（单例 + 端口硬编码，重复启动会冲突/认领）
-      //
-      // ⚠️ 2026-10-26 新增第 ⓪ 条：**当前引擎必须是 cosyvoice3 才预热**。
-      // 之前漏了这条 —— 用户把引擎切到 breeze-tts-2 后，这里照样拉起 Python 服务，
-      // 白占 3.7 GB 显存。实测两者同跑 = 7167/8188 MiB，离 OOM 一步之遥
-      // （breeze 自己就要 3.7 GB，8 GB 卡容不下两份）。
-      // 预热的是「cosyvoice 服务」，与「say 用哪个引擎」必须一致，否则纯属浪费。
-      //
+      // 预热「当前选中的那个引擎」，而不是硬编码 cosyvoice。
+      // 交给各引擎自己的 warmup() 决定怎么起（Python 还是 audiocpp_server），插件不关心。
+      // ⚠️ 不要在引擎已是 breeze 时再去拉 Python 服务 —— 实测两者同跑 7167/8188 MiB。
       // 必须 fire-and-forget：加载耗时以分钟计，绝不能阻塞装配链（否则 TUI 起不来）。
       // 失败只留痕不升级：文字交付照常，首句语音会走插件既有的「未就绪」提示。
-      // ⚠️ 只在「未注入自定义引擎」时预热 —— 测试注入假引擎时**绝不能** spawn python。
-      const engineKind = String(getConfig<string>('voice.tts.engine') ?? 'cosyvoice3');
-      if (!services.engine && engineKind === 'cosyvoice3' && getConfig<boolean>('voice.say.broadcast') === true) {
+      // ⚠️ 只在「未注入自定义引擎」时预热 —— 测试注入假引擎时**绝不能** spawn 真实进程。
+      if (!services.engine && getConfig<boolean>('voice.say.broadcast') === true) {
         void (async () => {
           try {
-            const svc = getTtsService();
-            const st = svc.modelState();
-            if (!st.ready) {
-              ctx.logger.info(`say-voice: 跳过 TTS 预热（模型缺 ${st.missingFiles.join(', ')}）`);
-              return;
-            }
-            if (svc.serviceState().running) return;
-            ctx.logger.info('say-voice: 播报已开启，后台预热本地 TTS 服务（约 1~2 分钟）');
-            await svc.start();
-            ctx.logger.info('say-voice: 本地 TTS 服务已就绪');
+            const eng = getTtsEngine({ get: <T>(k: string) => getConfig<T>(k) });
+            if (!eng.warmup) return; // 在线引擎没有本地服务可预热
+            ctx.logger.info(`say-voice: 播报已开启，后台预热 TTS 引擎（${eng.id}）`);
+            await eng.warmup();
+            ctx.logger.info(`say-voice: TTS 引擎就绪（${eng.id}）`);
           } catch (err) {
             ctx.logger.warn('say-voice: TTS 预热失败（文字交付不受影响）', {
               error: err instanceof Error ? err.message : String(err),

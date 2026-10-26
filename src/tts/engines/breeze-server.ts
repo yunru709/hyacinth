@@ -67,6 +67,12 @@ let activePort: number = BREEZE_SERVER_DEFAULT_PORT;
 /** 串行化并发 ensure：多个 say 同时进来时只允许 spawn 一次 */
 let startChain: Promise<unknown> = Promise.resolve();
 let exitHookInstalled = false;
+/**
+ * 代次：每次 stopBreezeServer() 递增。在途的 waitHealthy 靠它判断「我等的那个已被停掉」。
+ * 没有它 → stop 把 proc 置 null 后旧判据失效 → 空等 120s → 堵死 startChain 串行队列
+ * （2026-10-26 生命周期探针：切走再切回，新引擎 60s 起不来）。
+ */
+let generation = 0;
 
 export function breezeServerState(): BreezeServerState {
   const own = proc !== null && !proc.killed;
@@ -130,10 +136,20 @@ function writeServerConfig(o: BreezeServerOptions, port: number): string {
   return cfgPath;
 }
 
-async function waitHealthy(port: number, deadline: number): Promise<boolean> {
+/**
+ * 等 /health 就绪。
+ *
+ * ⚠️ `gen`（代次）是必须的：`stopBreezeServer()` 把 proc 置 null 后，旧版这里只判
+ * `proc && proc.killed` ⇒ proc 为 null 时条件为假 ⇒ 会**空等到 120s 超时**。
+ * 而 `ensureBreezeServer` 用 `startChain` 串行 ⇒ 这个空等会把后续所有 ensure 堵在队列里：
+ * 「切走再切回」时，新引擎 60s 都起不来 —— 2026-10-26 生命周期探针抓到的就是这个。
+ * 现在只要期间被 stop 过（代次变化），本次等待立即作废，后果只是返回 false（调用方已不关心）。
+ */
+async function waitHealthy(port: number, deadline: number, gen: number): Promise<boolean> {
   while (Date.now() < deadline) {
+    if (gen !== generation) return false; // 期间被 stop 过 ⇒ 本次等待作废
     if (await healthy(port)) return true;
-    if (proc && proc.killed) return false; // 进程已经死了，没必要继续等
+    if (!proc || proc.killed) return false; // 进程没了，没必要继续等
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
@@ -157,6 +173,8 @@ export async function ensureBreezeServer(o: BreezeServerOptions): Promise<string
 
   // 并发 ensure 只允许一个真的去 spawn
   const run = async (): Promise<string> => {
+    // 本次 ensure 的代次。stop() 会让它失效 ⇒ 下面的等待立刻作废，别空耗到 120s。
+    const gen = generation;
     // 排队等待期间别人可能已经拉起来了，再确认一次
     if (await healthy(port)) {
       if (!proc) adopted = true;
@@ -164,15 +182,34 @@ export async function ensureBreezeServer(o: BreezeServerOptions): Promise<string
     }
     if (proc && !proc.killed) {
       // 我们起的那个还在加载，继续等就行
-      if (await waitHealthy(port, Date.now() + READY_TIMEOUT_MS)) return url;
+      if (await waitHealthy(port, Date.now() + READY_TIMEOUT_MS, gen)) return url;
+      if (gen !== generation) throw new Error('Breeze-TTS-2 启动已被 stop 取消（引擎已切换）');
       throw new Error(`Breeze-TTS-2 server 已在运行但 ${READY_TIMEOUT_MS / 1000}s 内未就绪`);
     }
 
-    // 端口被占但不是我们的（可能是别的程序）⇒ 不要盲目 spawn，会撞端口
+    // ── 端口占用：别一看到占用就抛错 ──────────────────────────────
+    // 切引擎走的是「停旧的 → 起新的」，而 kill 到进程真正退出、端口真正释放之间
+    // 有个窗口（实测 ~0.3s，Windows 上更久）。旧版在这里直接抛「端口被占用」，
+    // 导致切走再切回来时服务永远起不来 —— 2026-10-26 生命周期探针抓到的就是这个。
+    // 现在给 8s 宽限期：期间变健康 ⇒ 认领；期间端口关了 ⇒ 继续往下 spawn。
     if (await portOpen(port)) {
-      throw new Error(
-        `端口 ${port} 已被占用但不是 Breeze-TTS-2 server（/health 不响应）—— 换 voice.tts.breeze.serverPort 或关掉占用者`,
-      );
+      const grace = Date.now() + 8_000;
+      let becameHealthy = false;
+      while (Date.now() < grace) {
+        if (await healthy(port)) { becameHealthy = true; break; }
+        if (!(await portOpen(port))) break; // 端口已释放（旧进程退干净了）
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (becameHealthy) {
+        if (!proc) adopted = true;
+        lastError = null;
+        return url;
+      }
+      if (await portOpen(port)) {
+        throw new Error(
+          `端口 ${port} 已被占用但不是 Breeze-TTS-2 server（/health 不响应）—— 换 voice.tts.breeze.serverPort 或关掉占用者`,
+        );
+      }
     }
 
     const exe = resolveExePath(o);
@@ -190,18 +227,26 @@ export async function ensureBreezeServer(o: BreezeServerOptions): Promise<string
     lastError = null;
     // windowsHide：别弹控制台窗口。不 detached —— 我们希望它随本进程收尾，
     // 且 exit 钩子负责 kill（Windows 上父进程退出不会自动带走子进程）。
-    proc = spawn(exe, ['--config', cfgPath], {
+    //
+    // ⚠️ 必须留一份 child 引用。旧写法在 exit 回调里无条件 `proc = null`：
+    // 切引擎时旧进程的 exit 事件可能**晚于**新进程的 spawn 到达，于是把新句柄
+    // 抹掉 —— 状态谎报 running:false，且之后 stopBreezeServer 杀不到它（孤儿吃显存）。
+    const child = spawn(exe, ['--config', cfgPath], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    proc.stdout?.on('data', (d) => logger.debug(`[breeze-server] ${String(d).trim()}`));
-    proc.stderr?.on('data', (d) => logger.debug(`[breeze-server] ${String(d).trim()}`));
-    proc.on('exit', (code) => {
+    proc = child;
+    child.stdout?.on('data', (d) => logger.debug(`[breeze-server] ${String(d).trim()}`));
+    child.stderr?.on('data', (d) => logger.debug(`[breeze-server] ${String(d).trim()}`));
+    child.on('exit', (code) => {
       logger.warn(`Breeze-TTS-2 server 退出（code=${code}）`);
-      proc = null;
-      adopted = false;
+      // 只清「还是这个 child」时的 proc（见上面的教训）
+      if (proc === child) {
+        proc = null;
+        adopted = false;
+      }
     });
-    proc.on('error', (err) => {
+    child.on('error', (err) => {
       lastError = err.message;
       logger.warn('Breeze-TTS-2 server 启动失败', { error: err.message });
     });
@@ -219,10 +264,11 @@ export async function ensureBreezeServer(o: BreezeServerOptions): Promise<string
       });
     }
 
-    if (await waitHealthy(port, Date.now() + READY_TIMEOUT_MS)) {
+    if (await waitHealthy(port, Date.now() + READY_TIMEOUT_MS, gen)) {
       logger.info(`Breeze-TTS-2 常驻服务就绪 :${port}`);
       return url;
     }
+    if (gen !== generation) throw new Error('Breeze-TTS-2 启动已被 stop 取消（引擎已切换）');
     const detail = lastError ? `：${lastError}` : '';
     throw new Error(
       `Breeze-TTS-2 server ${READY_TIMEOUT_MS / 1000}s 内未就绪${detail}（详见 ~/.agent 日志）`,
@@ -237,6 +283,9 @@ export async function ensureBreezeServer(o: BreezeServerOptions): Promise<string
 
 /** 停掉**我们自己起的**服务（认领来的不碰） */
 export function stopBreezeServer(): void {
+  // ⚠️ 必须先递增代次再 kill：在途的 waitHealthy 靠它判断「我等的那次已被取消」。
+  // 否则 proc 置 null 后旧判据失效 ⇒ 空等 120s ⇒ 堵死 startChain（切回不来）。
+  generation++;
   if (proc) {
     try {
       proc.kill();
