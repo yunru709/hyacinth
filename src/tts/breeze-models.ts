@@ -20,6 +20,29 @@
  * 【tag 为什么要钉住】用 `releases/latest` 拿 tag 等于把「哪天上游发新版」这件事
  *   接进运行时 —— 上游一次改资产命名，下载器就静默失效。默认钉一个验证过的 tag，
  *   要升级时改这里或走配置覆盖。
+ *
+ * 【接线状态（2026-10-26 明确记录，别当成漏接线）】
+ *   本模块目前**没有任何调用方**，是**有意为之**，不是遗漏。第二档的交付范围就是
+ *   「清单」这一层（对齐 `cosyvoice-models.ts` 的分层：清单可被 UI 直接读来做「缺什么」
+ *   展示，不需要触发 IO；下载执行才是另一层）。
+ *
+ *   执行器写过一版又撤了，原因是**两个真冲突尚未解决**，硬接上去会害人：
+ *    1. **路径语义对立**：本模块的 `ggufReady()` / `runtimeReady()` 只认
+ *       `BREEZE_DIR()`（`<models.root>/tts/breeze-tts-2/`），而运行时实际用的是配置里的
+ *       `voice.tts.breeze.cliPath` / `modelPath`（用户机器上指向 `F:\TTSEngines\...`）。
+ *       两者可以完全不同 ⇒ 在「已装好但在别的盘」的机器上，执行器会判定「全缺」
+ *       并重新下 5GB。必须先统一「受管安装位」与「实际运行位」的语义，
+ *       或者让执行器尊重已配置的 cliPath/modelPath，才谈得上接 UI。
+ *    2. **误触代价大**：GGUF q8_0 = 5.08GB + bin 263MB + cudart 548MB。在磁盘吃紧的
+ *       机器上，一个不该出现的「下载」按钮就是事故。接 UI 前应先保证「已就绪时按钮
+ *       不出现」的判断是对的 —— 而它依赖第 1 条的解决。
+ *
+ *   若将来要接：`stt/download.ts` 的 `downloadFile`（已导出）负责下载，
+ *   `local-model/download-manager.ts` 的 `extractZipToDir` 负责解包（**当前未导出**，
+ *   需导出或复制）。两个 zip 内部都是**根级散放**（2026-10-26 实测中央目录：
+ *   bin 270 条 / cudart 4 条，顶层只有 `(root)` + `tools` + `model_specs`）
+ *   ⇒ 直接解到目标目录，不需要「下钻一层」。**bin 与 cudart 必须解到同一目录**，
+ *   缺 cudart 时 exe 启动即 0xC0000135。
  */
 
 import fs from 'node:fs';
