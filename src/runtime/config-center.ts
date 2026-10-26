@@ -1,6 +1,41 @@
 import EventEmitter from 'node:events';
 import type { FullConfig } from './config-schema.js';
 import type { ConfigManager } from '../setup/config.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('config-center');
+
+/**
+ * 配置变更日志的脱敏规则。
+ *
+ * 为什么需要：配置里有 apiKey / token / secret 这类凭证，原样落日志等于泄漏。
+ * 判据看 **path（键名）** 而不是值 —— 值可以是任何东西，没法靠内容判断敏感性。
+ */
+const SENSITIVE_PATH = /(apikey|api_key|token|secret|password|credential|authorization)/i;
+
+function redactForLog(path: string, value: unknown): unknown {
+  if (!SENSITIVE_PATH.test(path)) return value;
+  if (value === undefined || value === null || value === '') return value;
+  if (typeof value === 'string') return `***(${value.length} chars)`;
+  return '***';
+}
+
+/**
+ * 判断两个配置值是否"真的变了"。
+ *
+ * 为什么用 JSON 字符串而不是 ===：配置值大量是对象/数组（sampling、pipeline 槽位、fallbackChain），
+ * 引用比较会把每次 set 都当成"变了" ⇒ 日志刷屏。
+ * 为什么不用 deepEqual：这里只需要"变没变"，不需要差异详情，JSON 序列化足够且更快。
+ */
+function valueChanged(a: unknown, b: unknown): boolean {
+  if (a === b) return false;
+  try {
+    return JSON.stringify(a) !== JSON.stringify(b);
+  } catch {
+    // 循环引用等极端情况：保守地当作"变了"，宁可多记一条日志也不漏记
+    return true;
+  }
+}
 
 // ============================================================
 // Types
@@ -418,6 +453,18 @@ export class RuntimeConfigCenter {
 
     setByPath(this.runtime, path, value);
 
+    // ── 配置变更日志 ──
+    // 为什么记在 set() 里：它是唯一写入口（TUI 命令 / update_config / 各 wiring 全走这里），
+    // 记一处覆盖全部来源；记在调用方必然漏掉某条路径。
+    // 只记「值真的变了」的改动 —— 很多 wiring 会重复 set 相同值，全记会刷屏。
+    if (valueChanged(oldValue, value)) {
+      logger.info('config.change', {
+        path,
+        old: redactForLog(path, oldValue),
+        new: redactForLog(path, value),
+      });
+    }
+
     const timestamp = new Date().toISOString();
     const event: ConfigChangeEvent = { path, oldValue, newValue: value, timestamp };
 
@@ -468,7 +515,14 @@ export class RuntimeConfigCenter {
     const newValue = this.get(path);
 
     // Only fire if the value actually changed.
-    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+    if (valueChanged(oldValue, newValue)) {
+      // 配置变更日志：reset 的 new 是「回落默认后的值」，不是用户传入的值
+      logger.info('config.reset', {
+        path,
+        old: redactForLog(path, oldValue),
+        new: redactForLog(path, newValue),
+      });
+
       const timestamp = new Date().toISOString();
       const event: ConfigChangeEvent = { path, oldValue, newValue, timestamp };
 
@@ -588,6 +642,13 @@ export class RuntimeConfigCenter {
     const timestamp = new Date().toISOString();
 
     for (const diff of diffs) {
+      // 配置变更日志：merge() 与「整块 reset」都走这里（单键 set/reset 走各自的日志）
+      logger.info('config.change', {
+        path: diff.path,
+        old: redactForLog(diff.path, diff.oldValue),
+        new: redactForLog(diff.path, diff.newValue),
+      });
+
       const event: ConfigChangeEvent = {
         path: diff.path,
         oldValue: diff.oldValue,
