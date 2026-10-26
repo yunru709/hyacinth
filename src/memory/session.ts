@@ -140,20 +140,36 @@ export class SessionManager {
   }
 
   /**
-   * 创建新 session（含物化写入）
+   * 创建新 session。
    * type 为开放 SessionType（内置 normal/companion，插件可扩展）
    *
    * 2026-09-30：会话按**模式分桶** —— 目录＝ `sessions/<模式名>/<sessionId>/`。
    * 分桶即约束：会话与模式一一归属，跨模式切换在结构上就说不通
    * （设施层再补"列表过滤 + 明确拒绝"，两层合力，见 listByMode / loop.switchSession）。
+   *
+   * 2026-10-27（孑遗需求）：新增 `opts.lazy` —— **只铸 id，不落盘**。
+   * 动机：WebUI 点「新建会话」只是想看到一个空对话界面，用户可能马上又切回旧会话
+   * 或只是去改配置，此时在磁盘留一个 0 文件空壳纯属垃圾（历史上累积过 136 个）。
+   * TUI 启动路径早已这么做（boot.ts 的 createLazy 分支），WebUI 走的是本函数 ⇒
+   * 一调 create() 就 materialize ⇒ 空壳必然产生。加 lazy 把两条路径对齐。
+   *
+   * 落盘时机：首条消息到达时由 loop.materializeSessionIfNeeded() 补写
+   * meta.json / session_start / stats（幂等，meta 已存在则跳过）。
    */
-  async create(type: SessionType = 'normal', channel?: string): Promise<Session> {
+  async create(
+    type: SessionType = 'normal',
+    channel?: string,
+    opts?: { lazy?: boolean },
+  ): Promise<Session> {
     // 清理过期 session
     await this.cleanup();
 
     const session = this.createLazy(channel);
     session.type = type;
-    await materializeLazySession(this.dirForNew(type, session.id), session);
+    // lazy ⇒ 不物化。调用方拿到 id 后可以开界面；目录等首条消息再建。
+    if (opts?.lazy !== true) {
+      await materializeLazySession(this.dirForNew(type, session.id), session);
+    }
     return session;
   }
 

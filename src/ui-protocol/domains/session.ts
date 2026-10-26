@@ -37,7 +37,12 @@ export interface BackendSession {
 }
 
 export interface SessionManagerLike {
-  create(type?: SessionType, channel?: string): Promise<BackendSession>;
+  /**
+   * 新建会话。
+   * `opts.lazy` ⇒ 只铸 id、不落盘（目录等首条消息由 loop 物化）。
+   * 见 SessionManager.create 的同名参数说明。
+   */
+  create(type?: SessionType, channel?: string, opts?: { lazy?: boolean }): Promise<BackendSession>;
   resume(sessionId?: string): Promise<BackendSession>;
   list(): Promise<BackendSession[]>;
   getLatest(): Promise<BackendSession | null>;
@@ -232,11 +237,19 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
     },
 
     // ── session.create ─────────────────────────────────────
+    // `lazy: true` ⇒ 只铸 id、不落盘（见 SessionManager.create 的同名参数）。
+    // WebUI 的「新建标签 / 最后一个标签重置」走这条：用户只是想看到空对话界面，
+    // 可能马上切回旧会话或去改配置，不该在磁盘留 0 文件空壳。
+    // 落盘时机 = 首条消息（loop.materializeSessionIfNeeded）。
     async create(params: unknown): Promise<SessionMeta> {
-      const { type, channel } = (params as { type?: SessionType; channel?: string } | undefined) ?? {};
-      const session = await sessionManager.create(type, channel);
+      const { type, channel, lazy } =
+        (params as { type?: SessionType; channel?: string; lazy?: boolean } | undefined) ?? {};
+      const session = await sessionManager.create(type, channel, { lazy });
       const meta = toMeta(session);
-      emit?.(UI_EVENT.SESSION_CHANGE, { action: 'create', session: meta });
+      // lazy 的新会话尚未落盘 ⇒ 不广播 create（列表里查不到它，广播只会让前端困惑）
+      if (lazy !== true) {
+        emit?.(UI_EVENT.SESSION_CHANGE, { action: 'create', session: meta });
+      }
       return meta;
     },
 
