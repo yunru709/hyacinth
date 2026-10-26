@@ -429,6 +429,11 @@ def load_model():
                     os.remove(llm_pt)
                 except OSError:
                     pass
+        # 预注册全部音色（官方 add_zero_shot_spk）：一次性算好参考音特征。
+        # 必须放在 "model ready" 之前 —— 主进程以这行 stdout 作为就绪信号，
+        # 若注册放在其后，第一句请求仍要现算 ~7s 特征，等于白注册。
+        # ⚠️ 只调一次：重复调用会白烧 2×7s（2026-10-26 实测跑了两遍）。
+        _register_voices(_MODEL)
         print("[cosyvoice] model ready", flush=True)
         return _MODEL
 
@@ -477,6 +482,72 @@ def _first_voice_pair():
     return None
 
 
+# ── endofprompt 特殊 token（**必须按码位构造**）────────────────────────
+# 它显示出来是 "[token]"，但那是编辑器/终端的**掩码形态**；直接写字面量会被
+# tokenizer 切成普通 token（87246, 60），导致 `llm.py:479` 的
+# `assert 151646 in text` 失败 ⇒ llm_job 线程崩 ⇒ 只剩 0~3 帧 ⇒ vocoder 报
+# `Kernel size (4) > input size (3)`。
+# 2026-10-25 夜间就是这么把 zero_shot 全体打崩的（bug-1 同源）。
+# ⇒ 全文件只此一处来源，其余地方一律引用 `_ENDOF`。
+_ENDOF = "".join(
+    chr(c) for c in [60, 124, 101, 110, 100, 111, 102, 112, 114, 111, 109, 112, 116, 124, 62]
+)
+
+
+def _all_voice_ids():
+    """列出 voices 目录下所有 (id, wav, txt) 三元组（含 default 若存在）。"""
+    vd = _ARGS.voices_dir
+    if not vd or not os.path.isdir(vd):
+        return []
+    out = []
+    for f in sorted(os.listdir(vd)):
+        if not f.lower().endswith(".wav"):
+            continue
+        vid = f[:-4]
+        wav = os.path.join(vd, f)
+        txt = os.path.join(vd, f"{vid}.txt")
+        if os.path.isfile(txt):
+            out.append((vid, wav, txt))
+    return out
+
+
+def _register_voices(model):
+    """把所有音色预注册进 `frontend.spk2info`（= 官方 `add_zero_shot_spk`）。
+
+    为什么值得注册（2026-10-26）：
+      `add_zero_shot_spk` 一次性算好参考音的 speech_feat / speech_token / embedding；
+      之后 `frontend_zero_shot(..., zero_shot_spk_id=name)` 直接 `{**spk2info[name]}`
+      取现成的，**不再重算**。收益：
+        ① 进程重启后的首句不再付那 ~7 s 特征提取；
+        ② 不再依赖内存版 `_PROMPT_CACHE`（它换个音色就 clear）；
+        ③ 特征口径与官方完全一致（比我们手工拼 model_input 更不容易漂）。
+
+    失败不致命：某音色注册失败只打日志，回退到「现算特征」的老路径。
+    """
+    if os.environ.get("COSYVOICE_PREREGISTER", "1") == "0":
+        print("[cosyvoice] voice pre-registration disabled by env", flush=True)
+        return
+    pairs = _all_voice_ids()
+    if not pairs:
+        print("[cosyvoice] no voice pairs found; skip pre-registration", flush=True)
+        return
+    for vid, wav, txt in pairs:
+        try:
+            with open(txt, "r", encoding="utf-8") as f:
+                prompt_text = f.read().strip() + _ENDOF
+            start = _now()
+            model.add_zero_shot_spk(prompt_text, wav, vid)
+            print(
+                f"[cosyvoice] voice pre-registered: {vid} "
+                f"({os.path.basename(wav)}, {_now() - start:.2f}s)",
+                flush=True,
+            )
+        except Exception as e:
+            # catch 里必须打日志：静默失败会让「首句还是慢」变成无迹可查的谜
+            print(f"[cosyvoice] pre-register failed for {vid} ({type(e).__name__}: {e})", flush=True)
+    print(f"[cosyvoice] available spks: {model.list_available_spks()}", flush=True)
+
+
 # ── 参考音特征缓存（2026-10-25 测速结论）────────────────────────
 # frontend_zero_shot 每次都对 prompt.wav 重算三样**与待合成文本无关**的东西：
 #   speech_feat    feat_extractor（24k 重采样 + 卷积编码）
@@ -493,8 +564,34 @@ _PROMPT_CACHE = {}
 _PROMPT_CACHE_ON = os.environ.get("COSYVOICE_PROMPT_CACHE", "1") != "0"
 
 
-def _prompt_input_cached(model, wav_path, prompt_text):
+def _spk_base(model, spk_id, cross):
+    """从预注册的 `spk2info` 取参考音特征；未注册则返回 None（调用方回退到现算）。
+
+    为什么优先走这里（2026-10-26）：
+      `_register_voices()` 在 load 阶段已用官方 `add_zero_shot_spk` 算好每个音色的
+      speech_feat / speech_token / embedding。这里直接取现成的 ⇒ ① 首句不再付 ~7s
+      ② 特征口径与官方完全一致（不必复刻 24k 下 speech_feat 与 speech_token 的 2× 对齐）。
+    `cross=True` 时额外删掉 prompt 侧四个字段（= 官方 `frontend_cross_lingual` 的做法）。
+    """
+    info = getattr(model.frontend, "spk2info", {}).get(spk_id)
+    if info is None:
+        return None
+    mi = dict(info)
+    mi.pop("text", None)
+    mi.pop("text_len", None)
+    if cross:
+        for k in ("prompt_text", "prompt_text_len",
+                  "llm_prompt_speech_token", "llm_prompt_speech_token_len"):
+            mi.pop(k, None)
+    # clone：tensor 给 model.tts 用，避免原地操作回写 spk2info
+    return {k: (v.clone() if hasattr(v, "clone") else v) for k, v in mi.items()}
+
+
+def _prompt_input_cached(model, wav_path, prompt_text, spk_id=None):
     """参考音 → 除 text/text_len 外的全部 model_input（命中则直接复用）。"""
+    pre = _spk_base(model, spk_id, cross=False) if spk_id else None
+    if pre is not None:
+        return pre
     key = (os.path.abspath(wav_path), os.path.getmtime(wav_path), os.path.getsize(wav_path), prompt_text)
     hit = _PROMPT_CACHE.get(key)
     if hit is None:
@@ -523,7 +620,7 @@ def _prompt_input_cached(model, wav_path, prompt_text):
 _CL_CACHE: dict = {}
 
 
-def _cross_lingual_input_cached(model, wav_path, placeholder):
+def _cross_lingual_input_cached(model, wav_path, placeholder, spk_id=None):
     """cross_lingual 模式的参考音特征（**不含** prompt 的 speech token）。
 
     与 `_prompt_input_cached` 的区别 —— 这正是「英文音色说中文会崩」的根源：
@@ -547,6 +644,9 @@ def _cross_lingual_input_cached(model, wav_path, placeholder):
         os.path.getmtime(wav_path),
         os.path.getsize(wav_path),
     )
+    pre = _spk_base(model, spk_id, cross=True) if spk_id else None
+    if pre is not None:
+        return pre
     hit = _CL_CACHE.get(key)
     if hit is None:
         start = _now()
@@ -698,18 +798,53 @@ def _apply_seed(text: str = "", offset: int = 0):
     set_all_random_seed(base + offset)
 
 
-def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
+def _instruct_input_cached(model, wav_path, instruct_text, spk_id=None):
+    """instruct2 的参考音特征：**保留 prompt_text**（改装指令），删掉参考音的 speech token。
+
+    与另两种模式的本质区别（官方 `frontend.py:209-213`）：
+      · zero_shot     ：prompt_text = 参考音文字稿 + 含参考音的 speech token
+                        ⇒ 模型「接着这个人这段声音往下说」（会继承参考音语言）
+      · cross_lingual ：连 prompt_text 一起删 ⇒ LLM 只有音色，没有任何文本引导
+      · instruct2     ：prompt_text 位置放**指令文本**，但删掉参考音的 speech token
+                        ⇒ 既不受参考音语言干扰，又能接受「怎么说」的指令
+    这就是 emotion / 语气参数的正解（官方 `example.py:57` 用「用四川话说这句话」做方言控制）。
+
+    ⚠️ `instruct_text` 必须自带 endofprompt（`_ENDOF`）—— 断言 `151646 in text` 只认它。
+    """
+    pre = _spk_base(model, spk_id, cross=False) if spk_id else None
+    if pre is not None:
+        pre.pop("llm_prompt_speech_token", None)
+        pre.pop("llm_prompt_speech_token_len", None)
+    else:
+        mi = model.frontend.frontend_instruct2(
+            "", instruct_text, wav_path, model.sample_rate, spk_id or ""
+        )
+        mi.pop("text", None)
+        mi.pop("text_len", None)
+        pre = {k: (v.clone() if hasattr(v, "clone") else v) for k, v in mi.items()}
+    # prompt_text 换成指令文本：预注册那份装的是**参考音文字稿**，直接复用会把
+    # 英文稿当指令喂回去（等于退回 zero_shot 的语言污染）。
+    tok, tok_len = model.frontend._extract_text_token(instruct_text)
+    pre["prompt_text"] = tok
+    pre["prompt_text_len"] = tok_len
+    return pre
+
+
+def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False, spk_id=None, instruct_text=None):
     """等价于 model.inference_zero_shot / inference_cross_lingual(...)，但复用参考音特征。
 
     `cross=True` 时改走 cross_lingual 的参考音特征（不带 prompt 的 speech token），
     用于「参考音语言与目标文本语言不同」的场景 —— 详见 `_cross_lingual_input_cached`。
+    `spk_id` 命中预注册音色时直接取现成特征（省掉重算，见 `_register_voices`）。
     """
     fe = model.frontend
-    base = (
-        _cross_lingual_input_cached(model, wav_path, prompt_text or "。")
-        if cross
-        else _prompt_input_cached(model, wav_path, prompt_text)
-    )
+    # 三选一：instruct2（带语气指令）> cross_lingual（跨语言）> zero_shot（同语言克隆）
+    if instruct_text:
+        base = _instruct_input_cached(model, wav_path, instruct_text, spk_id=spk_id)
+    elif cross:
+        base = _cross_lingual_input_cached(model, wav_path, prompt_text or "。", spk_id=spk_id)
+    else:
+        base = _prompt_input_cached(model, wav_path, prompt_text, spk_id=spk_id)
     try:
         retry_cap = int(_MAX_RETRY)
     except ValueError:
@@ -717,6 +852,12 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
     ratio = _max_token_ratio()
     sr = float(getattr(model, "sample_rate", None) or 24000)
     outs = []
+    if os.environ.get("COSYVOICE_DIAG", "0") == "1":
+        print(
+            f"[diag] zs_cached: text={text[:30]!r} cross={cross} spk={spk_id} "
+            f"instruct={'Y' if instruct_text else 'N'} base_keys={sorted(base.keys())}",
+            flush=True,
+        )
     # 与官方一致：prompt_text 先 normalize（注意它含 [token] ⇒ text_normalize 直接
     # 原样返回，所以这里不重复调用，只在 _prompt_input_cached 里传原文即可）。
     for i in fe.text_normalize(text, split=True, text_frontend=True):
@@ -729,7 +870,9 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
         # ⇒ vocoder 报 `Kernel size (4) > input size (3)`（HTTP 500）。
         # 指纹（tts-diag.log）：`Exception in thread Thread-3 (llm_job): AssertionError`
         # 与主线程的 conv 报错是**两件事**，conv 只是二次事故。
-        tts_text_token, tts_text_token_len = fe._extract_text_token(i + "<|endofprompt|>" if cross else i)
+        tts_text_token, tts_text_token_len = fe._extract_text_token(
+            i + _ENDOF if (cross or instruct_text) else i
+        )
         n_text = int(tts_text_token_len.item())
         max_len = int(n_text * ratio)
         # 期望时长由自然语速反推；speed>1 说得更快 ⇒ 时长按 1/speed 缩放。
@@ -744,6 +887,15 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
             model_input["text"] = tts_text_token
             model_input["text_len"] = tts_text_token_len
             seg = list(model.model.tts(**model_input, stream=False, speed=speed))
+            if os.environ.get("COSYVOICE_DIAG", "0") == "1":
+                # ⚠️ 别写 base.get("prompt_text", torch.zeros(0))：get 的默认值**总会求值**，
+                # 而本作用域没有 import torch ⇒ NameError（诊断代码把正常路径打挂）。
+                _pt = base.get("prompt_text")
+                print(
+                    f"[diag] seg len={len(seg)} base_keys={sorted(base.keys())} "
+                    f"prompt_text={tuple(_pt.shape) if _pt is not None else 'ABSENT'}",
+                    flush=True,
+                )
             n_samples = sum(o["tts_speech"].shape[1] for o in seg)
             dur = n_samples / sr
             hit_cap = _truncated(n_samples, max_len)
@@ -796,7 +948,7 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
     return outs
 
 
-def synthesize(text: str, voice: str = "", speed: float = 1.0) -> bytes:
+def synthesize(text: str, voice: str = "", speed: float = 1.0, emotion: str = "") -> bytes:
     """文本 → WAV 字节。
 
     音色路径（voice 参数选择参考音）：
@@ -839,8 +991,40 @@ def synthesize(text: str, voice: str = "", speed: float = 1.0) -> bytes:
             # 回退：`COSYVOICE_MODE=zero_shot`。
             _mode = os.environ.get("COSYVOICE_MODE", "cross_lingual").strip().lower()
             cross = _mode == "cross_lingual"
+            # ── emotion → instruct2（2026-10-26：让 say 的 emotion 参数真正生效）──
+            # emotion 是简短标签（warm / excited），而 instruct2 吃的是**自然语言指令**
+            # （官方 example.py:57 用「用四川话说这句话」控制方言/风格）⇒ 这里做一次翻译。
+            # 指令文本必须自带 endofprompt（`_ENDOF`），否则 llm.py:479 的
+            # `assert 151646 in text` 会失败（与 cross_lingual 的坑同源）。
+            # ── emotion → 语速微调（2026-10-26 实测定案：instruct2 不可用）──────
+            # 试过官方 example.py:57 的 instruct2 路径：链路能跑通（HTTP 200、时长
+            # 变化 +54%~87%），但 CosyVoice3(rl) 会把**指令本身朗读出来**。STT 铁证：
+            #   无 emotion → 「今天天气不错，适合出门走走。」            (100%)
+            #   温柔       → 「用温柔的语气说这句话，今天天气不错…」     (100%)
+            # ⚠️ 相似度仍是 100% 是因为指令里含原句，**不是**因为语气对了 ——
+            #    这正是「墙上有个洞」型假绿：只看数字会以为成功。
+            # 根因：`frontend_instruct2` 删掉 llm_prompt_speech_token 后，模型失去
+            #   「指令这段已经说过了」的锚点，只能把 prompt_text 当正文念。
+            # ⇒ 退回唯一不影响内容正确性的风格维度：语速。
+            _EMO_SPEED = {"温柔": 0.92, "激动": 1.12, "缓慢": 0.85, "轻快": 1.15, "warm": 0.92, "excited": 1.12}
+            if emotion:
+                _sp = _EMO_SPEED.get(emotion)
+                if _sp:
+                    speed = max(0.5, min(2.0, speed * _sp))
+                    print(f"[cosyvoice] emotion={emotion} → speed×{_sp}", flush=True)
+                else:
+                    print(
+                        f"[cosyvoice] emotion={emotion} 未映射（instruct2 实测会把指令念出来）",
+                        flush=True,
+                    )
+            instruct_text = None
             if _PROMPT_CACHE_ON:
-                outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=cross)
+                outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed,
+                                         cross=cross, spk_id=want, instruct_text=instruct_text)
+            elif instruct_text:
+                outs = model.inference_instruct2(
+                    text, instruct_text, wav_path, stream=False, speed=speed
+                )
             elif cross:
                 outs = model.inference_cross_lingual(text, wav_path, stream=False, speed=speed)
             else:
@@ -913,6 +1097,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         text = (body.get("text") or "").strip()
         voice = (body.get("voice") or "").strip()
+        # emotion（2026-10-26）：非空 ⇒ 走 instruct2（翻译成指令的逻辑在 synthesize 里）
+        emotion = (body.get("emotion") or "").strip()
         try:
             speed = float(body.get("speed") or 1.0)
         except (TypeError, ValueError):
@@ -925,7 +1111,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         # variant 由服务启动参数决定（换 base/rl = 重启服务，Node 侧管理）
         try:
-            wav = synthesize(text, voice, speed)
+            wav = synthesize(text, voice, speed, emotion)
         except Exception as e:
             # 完整 traceback 打到 stdout（Node 侧收进日志）。只回一行 str(e) 时挂死点
             # 无从定位 —— 2026-10-25 实况：六个不同长度用例返回同一句

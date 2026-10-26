@@ -334,7 +334,7 @@ export class CosyVoiceService {
   }
 
   /** 合成语音 → WAV Buffer（推理服务返回 audio/wav）。speed 原生透传（0.5~2）。 */
-  async synthesize(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number } = {}): Promise<Buffer> {
+  async synthesize(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number; emotion?: string } = {}): Promise<Buffer> {
     // 预检走 TCP 层而非 http（health() 的 http.get 在 serve 进程内连接失败时会
     // 无故不触发任何回调 —— 2026-10-24 实况 ✗；net.connect 的 error/超时双保险
     // 可靠）。端口不通 → start() 拉起（就绪信号走 python stdout，见 start()）。
@@ -353,12 +353,14 @@ export class CosyVoiceService {
     });
   }
 
-  private async postTts(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number }): Promise<Buffer> {
+  private async postTts(text: string, opts: { variant?: CosyVoiceVariant; voice?: string; speed?: number; emotion?: string }): Promise<Buffer> {
     // 用 fetch（undici 栈）而非 http.request：serve 进程内 node:http 客户端对
     // 本服务存在「连接失败无回调 / 响应 end 不触发」的挂死实况（2026-10-24 ✗，
     // bash 独立进程同代码正常 —— 疑似进程内 http 栈状态被污染）。undici 是独立
     // 实现，实测稳定；AbortSignal 兜底防一切挂起。
-    const payload = JSON.stringify({ text, variant: opts.variant ?? this.variant, voice: opts.voice ?? '', speed: opts.speed ?? 1 });
+    // emotion 非空时服务端走 instruct2（CosyVoice3 的语气/风格指令通道）；
+    // 空串 = 保持默认路径，行为零变更。
+    const payload = JSON.stringify({ text, variant: opts.variant ?? this.variant, voice: opts.voice ?? '', speed: opts.speed ?? 1, emotion: opts.emotion ?? '' });
     const res = await fetch(`http://127.0.0.1:${COSYVOICE_PORT}/tts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
