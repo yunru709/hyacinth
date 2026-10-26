@@ -23,6 +23,7 @@
  *   配置中心是纯文本 JSON，密钥不该明文落盘；先给环境变量这条免落盘路径，
  *   后续接入密钥库后由 settings 写入即可，读取顺序不变。
  */
+import { createBreezeTts2Engine, type BreezeTts2Config } from './engines/breeze-tts2.js';
 import { createCosyVoiceEngine } from './engines/cosyvoice.js';
 import { createOnlineTtsEngine, type OnlineTtsConfig } from './engines/online.js';
 import type { TtsEngine, TtsVoiceInfo } from './engine.js';
@@ -65,8 +66,23 @@ function readOnlineConfig(cfg: TtsConfigReader): OnlineTtsConfig {
   };
 }
 
+/** 从配置中心拼出本地 GGUF 引擎配置（audio.cpp + breeze-tts-2-q8_0.gguf） */
+function readBreezeTts2Config(cfg: TtsConfigReader): BreezeTts2Config {
+  return {
+    cliPath: cfg.get<string>('voice.tts.breeze.cliPath') || '',
+    modelPath: cfg.get<string>('voice.tts.breeze.modelPath') || '',
+    backend: (cfg.get<string>('voice.tts.breeze.backend') || 'cuda') as BreezeTts2Config['backend'],
+    device: cfg.get<number>('voice.tts.breeze.device') ?? 0,
+    defaultInstruct: cfg.get<string>('voice.tts.breeze.defaultInstruct') || undefined,
+    requestOptions: cfg.get<Record<string, string>>('voice.tts.breeze.requestOptions') || undefined,
+    workDir: cfg.get<string>('voice.tts.breeze.workDir') || undefined,
+    voicesDir: cfg.get<string>('voice.tts.breeze.voicesDir') || undefined,
+    timeoutMs: cfg.get<number>('voice.tts.breeze.timeoutMs') || undefined,
+  };
+}
+
 /** 引擎类型名（配置取值） */
-export type TtsEngineKind = 'cosyvoice3' | 'online';
+export type TtsEngineKind = 'cosyvoice3' | 'breeze-tts-2' | 'online';
 
 /**
  * 创建引擎实例（**不缓存**；需要单例用 getTtsEngine）。
@@ -75,6 +91,7 @@ export type TtsEngineKind = 'cosyvoice3' | 'online';
 export function createTtsEngine(cfg: TtsConfigReader): TtsEngine {
   const kind = (cfg.get<string>('voice.tts.engine') || 'cosyvoice3') as TtsEngineKind;
   if (kind === 'online') return createOnlineTtsEngine(() => readOnlineConfig(cfg));
+  if (kind === 'breeze-tts-2') return createBreezeTts2Engine(() => readBreezeTts2Config(cfg));
   return createCosyVoiceEngine();
 }
 
