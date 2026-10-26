@@ -14,6 +14,7 @@ import { EventEmitter } from 'node:events';
 import { createLogger } from '../logging/logger.js';
 import { getModelCatalogLoader, type ModelCatalogEntry } from '../provider/model-catalog-loader.js';
 import { PROVIDER_META } from '../provider/provider-meta.js';
+import { REASONING_EFFORTS } from '../types.js';
 
 const logger = createLogger('command-registry');
 
@@ -564,12 +565,16 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
                       children: [
                         { name: 'on', description: '开启（模型默认强度）', icon: '✅', category: 'model' as const },
                         { name: 'off', description: '关闭', icon: '❌', category: 'model' as const },
-                        { name: 'high', description: 'high — DeepSeek 系强度', icon: '🔵', category: 'model' as const },
-                        { name: 'max', description: 'max — DeepSeek 系最强', icon: '🔴', category: 'model' as const },
-                        { name: '4k', description: '4K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
-                        { name: '8k', description: '8K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
-                        { name: '16k', description: '16K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
-                        { name: '32k', description: '32K — Anthropic 系预算', icon: '🟢', category: 'model' as const },
+                        // 5 档强度：与 /channel config 的合法值、provider 的 reasoning_effort 同源
+                        // （REASONING_EFFORTS 定义在根级 types.ts）。
+                        // 2026-10-26：这处此前是独立的硬编码 8 档（on/off/high/max/4k/8k/16k/32k），
+                        // 改完 tui-channel-cmds 后面板仍显示旧档位 —— 同一个列表写了两份的典型后果。
+                        ...REASONING_EFFORTS.map((lv) => ({
+                          name: lv,
+                          description: `${lv} — 思考强度`,
+                          icon: lv === 'max' ? '🔴' : lv === 'high' ? '🔵' : '🟢',
+                          category: 'model' as const,
+                        })),
                       ],
                     },
                   ],
