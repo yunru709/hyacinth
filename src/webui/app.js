@@ -3991,9 +3991,42 @@
             ' · 能力：' + (cur.capabilities.emotion ? '情绪✓' : '情绪✗') +
             ' ' + (cur.capabilities.speed ? '语速✓' : '语速✗');
         }
+        // 在线引擎配置表单：只在该引擎被选中时出现（选了在线却无处填 key = 死路）
+        const onlineBlock = $('#tts-online-block');
+        if (onlineBlock) onlineBlock.hidden = eng.active !== 'online';
       }
     } catch (e) {
       // 引擎清单不可用不应影响下面模型/python/服务几个区块的渲染
+    }
+    // 在线引擎配置回填（与引擎清单分开：表单要能独立加载，不因清单失败而不显示）
+    try {
+      if (!$('#tts-online-block')?.hidden) {
+        const oc = await client.request('tts.onlineConfig');
+        const setVal = (sel, v) => { const n = $(sel); if (n && document.activeElement !== n) n.value = v ?? ''; };
+        setVal('#tts-online-provider', oc.provider);
+        setVal('#tts-online-baseurl', oc.baseUrl);
+        setVal('#tts-online-model', oc.model);
+        setVal('#tts-online-voice', oc.voice);
+        setVal('#tts-online-language', oc.language);
+        setVal('#tts-online-format', oc.format);
+        setVal('#tts-online-timeout', oc.timeoutMs || '');
+        // 密钥永不回填明文：只报「有没有 / 从哪来」
+        const keyInput = $('#tts-online-apikey');
+        if (keyInput && document.activeElement !== keyInput) keyInput.value = '';
+        const keyState = $('#tts-online-key-state');
+        if (keyState) {
+          keyState.textContent = oc.hasApiKey
+            ? (oc.apiKeySource === 'config' ? '已配置密钥（config.json）' : '已配置密钥（环境变量 ' + oc.apiKeySource.replace('env:', '') + '）')
+            : '未配置密钥 —— 填下面这一栏才能用在线引擎';
+        }
+        if (keyInput) keyInput.placeholder = oc.hasApiKey ? '留空 = 不修改（已配置）' : '粘贴 API key';
+        // 「清除」只在**配置文件里真有密钥**时出现。
+        // 环境变量来的密钥删不掉（那是 .env / 系统环境），显示按钮只会误导。
+        const clearBtn = $('#tts-online-apikey-clear');
+        if (clearBtn) clearBtn.style.display = oc.apiKeySource === 'config' ? '' : 'none';
+      }
+    } catch (e) {
+      // 与引擎清单同理：在线配置不可用不影响其它区块
     }
     let st = null;
     try { st = await client.request('tts.status'); } catch (e) { st = null; }
@@ -4170,6 +4203,42 @@
       '  </div>' +
       '  <select id="tts-engine" class="settings-input" data-dom-id="tts-engine" aria-label="TTS 引擎"></select>' +
       '</div>' +
+      // ── 在线引擎配置（voice.tts.online.*）──────────────────────────
+      // 只在选中「在线 API」时显示。没有这块，用户选了在线引擎却无处填 key，
+      // 会永远停在「未就绪（缺 apiKey）」—— 等于给了个选不了的选项。
+      // 密钥框**不回填明文**：后端只回 hasApiKey / apiKeySource，留空 = 不修改，
+      // 这样 DOM 属性、截图、前端调试面板里永远不会出现密钥。
+      '<div id="tts-online-block" data-dom-id="tts-online-block" hidden>' +
+      '  <div class="settings-row">' +
+      '    <div class="settings-label">在线引擎配置</div>' +
+      '    <div class="settings-desc" id="tts-online-key-state" data-dom-id="tts-online-key-state" style="margin-left:auto">—</div>' +
+      '  </div>' +
+      '  <div class="settings-row"><div class="settings-label">厂家</div>' +
+      '    <select id="tts-online-provider" class="settings-input" data-dom-id="tts-online-provider" aria-label="在线引擎厂家" style="flex:0 0 260px">' +
+      '      <option value="breeze">breeze（xi-api-key 认证）</option>' +
+      '      <option value="openai-compatible">OpenAI 兼容（Bearer 认证）</option>' +
+      '    </select></div>' +
+      '  <div class="settings-row"><div class="settings-label">API key</div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 260px">' +
+      '      <input id="tts-online-apikey" class="settings-input" data-dom-id="tts-online-apikey" type="password" autocomplete="off" placeholder="留空 = 不修改" style="flex:1 1 auto;min-width:0" />' +
+      '      <button id="tts-online-apikey-clear" data-dom-id="tts-online-apikey-clear" style="cursor:pointer;font-family:inherit;flex:0 0 auto;display:none" title="删除 config.json 里已保存的密钥">清除</button>' +
+      '    </div></div>' +
+      '  <div class="settings-row"><div class="settings-label">Base URL</div>' +
+      '    <input id="tts-online-baseurl" class="settings-input" data-dom-id="tts-online-baseurl" placeholder="https://api.breeze.blue" style="flex:0 0 260px" /></div>' +
+      '  <div class="settings-row"><div class="settings-label">模型</div>' +
+      '    <input id="tts-online-model" class="settings-input" data-dom-id="tts-online-model" placeholder="breeze-tts-2" style="flex:0 0 260px" /></div>' +
+      '  <div class="settings-row"><div class="settings-label">音色 id</div>' +
+      '    <input id="tts-online-voice" class="settings-input" data-dom-id="tts-online-voice" placeholder="空 = 厂家默认" style="flex:0 0 260px" /></div>' +
+      '  <div class="settings-row"><div class="settings-label">语言 / 输出格式</div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 260px">' +
+      '      <input id="tts-online-language" class="settings-input" data-dom-id="tts-online-language" placeholder="zh" style="flex:1 1 auto;min-width:0" />' +
+      '      <input id="tts-online-format" class="settings-input" data-dom-id="tts-online-format" placeholder="wav_24000" style="flex:1 1 auto;min-width:0" />' +
+      '    </div></div>' +
+      '  <div class="settings-row"><div class="settings-label">超时（毫秒）</div>' +
+      '    <input id="tts-online-timeout" class="settings-input" data-dom-id="tts-online-timeout" type="number" min="1000" step="1000" placeholder="60000" style="flex:0 0 260px" /></div>' +
+      '  <div class="settings-row"><div></div>' +
+      '    <button id="tts-online-save" class="settings-input" data-dom-id="tts-online-save" style="cursor:pointer;font-family:inherit;flex:0 0 auto">保存</button></div>' +
+      '</div>' +
       '<div class="settings-row">' +
       '  <div style="min-width:0">' +
       '    <div class="settings-label">模型版本</div>' +
@@ -4230,6 +4299,58 @@
         appendMsg('error', '切换 TTS 引擎失败：' + ((e && e.message) || e));
       }
       void loadTtsSettings();
+    });
+    // 在线引擎配置保存：只发**用户真正填了**的字段。
+    // 密钥框留空 = 不修改（后端从不回填明文，所以空值绝不能当成"清空密钥"发出去，
+    // 否则用户切一次 provider 就把密钥抹了）。
+    const onlineSave = $('#tts-online-save');
+    if (onlineSave) onlineSave.addEventListener('click', async () => {
+      onlineSave.disabled = true;
+      const val = (sel) => ($(sel)?.value ?? '').trim();
+      const patch = {
+        provider: val('#tts-online-provider') || undefined,
+        baseUrl: val('#tts-online-baseurl'),
+        model: val('#tts-online-model'),
+        voice: val('#tts-online-voice'),
+        language: val('#tts-online-language'),
+        format: val('#tts-online-format'),
+      };
+      const key = val('#tts-online-apikey');
+      if (key) patch.apiKey = key; // 空 = 不改（见上）
+      const t = val('#tts-online-timeout');
+      if (t) patch.timeoutMs = Number(t);
+      try {
+        await client.request('tts.setOnlineConfig', patch);
+      } catch (e) {
+        appendMsg('error', '保存在线引擎配置失败：' + ((e && e.message) || e));
+      }
+      onlineSave.disabled = false;
+      void loadTtsSettings();
+    });
+    // 「清除密钥」：显式传空串把 config.json 里的密钥删掉。
+    // 为什么必须单独一个按钮：保存按钮把空值当"不修改"（否则用户切一次 provider
+    // 就会把密钥抹了），于是设错了 key 就再也没有出路 —— 这是死路，必须留显式出口。
+    const keyClear = $('#tts-online-apikey-clear');
+    if (keyClear) keyClear.addEventListener('click', async () => {
+      keyClear.disabled = true;
+      try {
+        // apiKey: '' 是"清除"语义，与保存按钮的空值跳过是两条不同的约定
+        await client.request('tts.setOnlineConfig', { apiKey: '' });
+      } catch (e) {
+        appendMsg('error', '清除密钥失败：' + ((e && e.message) || e));
+      }
+      keyClear.disabled = false;
+      void loadTtsSettings();
+    });
+    // 换厂家 ⇒ 默认端点/格式跟着变，提示一下（不自动改写用户已填的值）
+    const providerSel = $('#tts-online-provider');
+    if (providerSel) providerSel.addEventListener('change', () => {
+      const hint = $('#tts-online-key-state');
+      if (!hint) return;
+      const cur = providerSel.value;
+      hint.textContent = cur === 'breeze'
+        ? 'breeze：认证头 xi-api-key，格式建议 wav_24000'
+        : 'OpenAI 兼容：认证头 Bearer，格式建议 wav / mp3';
     });
     const download = $('#tts-model-download');
     if (download) download.addEventListener('click', async () => {

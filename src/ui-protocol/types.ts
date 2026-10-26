@@ -307,6 +307,9 @@ export const UI_METHOD = {
   // tts 引擎选择（「say 接在哪个」，voice.tts.engine；2026-10-26）
   TTS_ENGINES: 'tts.engines',
   TTS_SET_ENGINE: 'tts.setEngine',
+  // tts 在线引擎配置表单（voice.tts.online.*；apiKey 明文不回传，只回 hasApiKey）
+  TTS_ONLINE_CONFIG: 'tts.onlineConfig',
+  TTS_SET_ONLINE_CONFIG: 'tts.setOnlineConfig',
   // meta（P5-3 版本/能力协商）
   META_GET: 'meta.get',
 } as const;

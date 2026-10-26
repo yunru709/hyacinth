@@ -58,6 +58,9 @@ const r = await send('Runtime.evaluate', {
     await new Promise(r=>setTimeout(r,900));
     const s=document.querySelector('#tts-engine');
     if(!s) return 'NO_SEL';
+    // 记下原始引擎：切到 online 是为了让表单出现，**临走必须还原**
+    // （不还原就会把用户的 voice.tts.engine 改成 online 且没 key ⇒ say 直接失败）
+    window.__origTtsEngine = s.value;
     if(s.value!=='online'){ s.value='online'; s.dispatchEvent(new Event('change',{bubbles:true})); }
     await new Promise(r=>setTimeout(r,1500));
     const inp=document.querySelector('#tts-online-apikey');
@@ -93,11 +96,28 @@ check(!recvAll.includes(SENTINEL), recvAll.includes(SENTINEL) ? '❌❌ 后端�
 check(/hasApiKey"\s*:\s*true/.test(recvAll), 'hasApiKey=true（密钥确实写进配置了）');
 check(recvAll.includes('"apiKeySource"'), '响应带 apiKeySource（来源可辨）');
 
-// 收尾：把密钥清掉
-await send('Runtime.evaluate', {
-  expression: `(async()=>{const inp=document.querySelector('#tts-online-apikey'); const btn=document.querySelector('#tts-online-save'); if(!inp||!btn) return 'NO'; inp.value=''; btn.click(); await new Promise(r=>setTimeout(r,1500)); return 'CLEARED';})()`,
+// 收尾：用**「清除」按钮**删掉配置里的密钥。
+// ⚠️ 不能像第一版那样"把输入框清空再点保存"：前端约定「空 = 不修改」（否则用户切一次
+// provider 就会把密钥抹了），所以那样做等于没清 —— 实测把哨兵留在了用户 config.json 里。
+// 清完再回读确认，自证"确实清干净了"，不靠猜测。
+const cleanup = await send('Runtime.evaluate', {
+  expression: `(async()=>{
+    const clr=document.querySelector('#tts-online-apikey-clear');
+    if(!clr) return 'NO_CLEAR_BTN';
+    clr.click();
+    await new Promise(r=>setTimeout(r,2000));
+    // 还原引擎：切到 online 只是为了露出表单，不走这一步就会把用户的
+    // voice.tts.engine 留在 online（无 key ⇒ say 必失败）
+    const s=document.querySelector('#tts-engine');
+    const orig=window.__origTtsEngine;
+    if(s && orig && s.value!==orig){ s.value=orig; s.dispatchEvent(new Event('change',{bubbles:true})); }
+    await new Promise(r=>setTimeout(r,1500));
+    const st=document.querySelector('#tts-online-key-state');
+    return JSON.stringify({keyState: st?st.textContent:null, engine: s?s.value:null, orig});
+  })()`,
   awaitPromise: true, returnByValue: true,
 });
+console.log('\n[收尾] =', cleanup.result?.result?.value);
 
 ws.close();
 console.log(fail === 0 ? '\n✅ 密钥不泄漏（真实页面 WS 接收帧取证）' : `\n❌ ${fail} 项失败`);

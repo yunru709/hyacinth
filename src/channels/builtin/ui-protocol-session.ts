@@ -518,6 +518,53 @@ export class UiProtocolSession {
         };
         return getTtsEngine(reader).synthesize(text, opts);
       },
+      // ── 在线引擎配置（settings → 语音 → 在线引擎表单）────────────
+      // ⚠️ apiKey 明文不回传：只报 hasApiKey + 来源。密钥可能来自配置或环境变量，
+      //    两种都要能算进去，否则用户明明设了 BREEZE_API_KEY，界面还说"未配置"。
+      getOnlineConfig: () => {
+        const cc = backend.configCenter;
+        const get = <T>(k: string): T | undefined => {
+          try { return cc?.get<T>(k); } catch { return undefined; }
+        };
+        const cfgKey = String(get<string>('voice.tts.online.apiKey') || '');
+        const envBreeze = String(process.env.BREEZE_API_KEY || '');
+        const envTts = String(process.env.TTS_API_KEY || '');
+        const apiKeySource: 'config' | 'env:BREEZE_API_KEY' | 'env:TTS_API_KEY' | 'none' =
+          cfgKey ? 'config' : envBreeze ? 'env:BREEZE_API_KEY' : envTts ? 'env:TTS_API_KEY' : 'none';
+        const provider = get<string>('voice.tts.online.provider');
+        return {
+          provider: provider === 'openai-compatible' ? 'openai-compatible' : 'breeze',
+          baseUrl: String(get<string>('voice.tts.online.baseUrl') || ''),
+          model: String(get<string>('voice.tts.online.model') || ''),
+          voice: String(get<string>('voice.tts.online.voice') || ''),
+          language: String(get<string>('voice.tts.online.language') || ''),
+          format: String(get<string>('voice.tts.online.format') || ''),
+          timeoutMs: Number(get<number>('voice.tts.online.timeoutMs') || 0),
+          hasApiKey: apiKeySource !== 'none',
+          apiKeySource,
+        };
+      },
+      setOnlineConfig: (patch) => {
+        const cc = backend.configCenter;
+        if (!cc) throw new Error('config center not available');
+        const map: Array<[keyof typeof patch, string]> = [
+          ['provider', 'voice.tts.online.provider'],
+          ['baseUrl', 'voice.tts.online.baseUrl'],
+          ['apiKey', 'voice.tts.online.apiKey'],
+          ['model', 'voice.tts.online.model'],
+          ['voice', 'voice.tts.online.voice'],
+          ['language', 'voice.tts.online.language'],
+          ['format', 'voice.tts.online.format'],
+          ['timeoutMs', 'voice.tts.online.timeoutMs'],
+        ];
+        for (const [k, path] of map) {
+          const v = patch[k];
+          if (v !== undefined) cc.set(path, v);
+        }
+        // 与 setSayConfig 同语义：写后持久化（fire-and-forget，失败留痕不阻断）
+        const save = (cc as { save?: () => Promise<void> }).save;
+        if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.tts.online persist failed:', err));
+      },
       getSayConfig: () => {
         try {
           const cc = backend.configCenter;

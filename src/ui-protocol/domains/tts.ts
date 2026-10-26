@@ -104,9 +104,46 @@ export interface SayBroadcastConfig {
   voice: string;
 }
 
+/**
+ * 在线引擎配置（settings → 语音 → 在线引擎表单的数据源）。
+ *
+ * ⚠️ **apiKey 明文绝不越过这个边界**：UI 只需要知道「配没配、从哪来」。
+ * 把明文回传给渲染层 = 密钥出现在 DOM / 截图 / 前端调试面板里，等于泄漏。
+ * 所以只回传 hasApiKey + apiKeySource；写入走 OnlineTtsConfigPatch。
+ */
+export interface OnlineTtsConfigLike {
+  provider: 'breeze' | 'openai-compatible';
+  baseUrl: string;
+  model: string;
+  voice: string;
+  language: string;
+  format: string;
+  timeoutMs: number;
+  /** 是否有可用密钥（配置文件或环境变量任一） */
+  hasApiKey: boolean;
+  /** 密钥来源：config=配置文件；env:*=环境变量兜底；none=都没有 */
+  apiKeySource: 'config' | 'env:BREEZE_API_KEY' | 'env:TTS_API_KEY' | 'none';
+}
+
+/** 在线引擎配置的部分更新（apiKey 传空字符串 = 清除配置文件里的密钥） */
+export interface OnlineTtsConfigPatch {
+  provider?: 'breeze' | 'openai-compatible';
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  voice?: string;
+  language?: string;
+  format?: string;
+  timeoutMs?: number;
+}
+
 export interface TtsDomainOptions {
   /** 获取 TTS 服务（进程级单例；未注入时全部方法报错） */
   getService: () => TtsServiceLike | null;
+  /** 读在线引擎配置（缺省则不暴露 tts.onlineConfig） */
+  getOnlineConfig?: () => OnlineTtsConfigLike;
+  /** 写在线引擎配置并持久化（缺省则不暴露 tts.setOnlineConfig） */
+  setOnlineConfig?: (patch: OnlineTtsConfigPatch) => void;
   /** 引擎清单（缺省则不暴露 tts.engines / tts.setEngine） */
   listEngines?: () => TtsEngineInfoLike[];
   /**
@@ -203,6 +240,59 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
       }
       options.setEngineKind(kind);
       return { ok: true, active: options.getEngineKind?.() ?? kind };
+    },
+
+    // ── tts.onlineConfig / tts.setOnlineConfig ─────────────
+    /**
+     * 读在线引擎配置（设置页表单回填）。
+     *
+     * ⚠️ **不回传 apiKey 明文**：只给 hasApiKey / apiKeySource。
+     * 把密钥送回渲染层 = 它出现在 DOM 属性、截图、前端调试面板里。
+     * 表单里那个输入框留空即「不修改」，用户真要换才填。
+     */
+    onlineConfig() {
+      if (!options.getOnlineConfig) {
+        throw new Error('online config not available（该 UI 通道未接入配置中心）');
+      }
+      return options.getOnlineConfig();
+    },
+
+    /**
+     * 写在线引擎配置（部分更新；写 voice.tts.online.* 并持久化）。
+     *
+     * 生效时机：在线引擎每次合成都现读配置（online.ts 的 getter），无需重启。
+     * 只做**形状**校验（provider 枚举 / timeoutMs 正数），不做连通性校验 ——
+     * 填错的 key 应该由「试听」去暴露，而不是在保存时假装验证过。
+     */
+    setOnlineConfig(params: unknown) {
+      if (!options.setOnlineConfig) {
+        throw new Error('online config not available（该 UI 通道未接入配置中心）');
+      }
+      const p = (params ?? {}) as OnlineTtsConfigPatch;
+      const patch: OnlineTtsConfigPatch = {};
+      if (p.provider !== undefined) {
+        if (p.provider !== 'breeze' && p.provider !== 'openai-compatible') {
+          throw new Error(`未知 provider "${String(p.provider)}"，可选：breeze / openai-compatible`);
+        }
+        patch.provider = p.provider;
+      }
+      for (const k of ['baseUrl', 'apiKey', 'model', 'voice', 'language', 'format'] as const) {
+        const v = p[k];
+        if (v === undefined) continue;
+        if (typeof v !== 'string') throw new Error(`tts.setOnlineConfig: "${k}" 必须是字符串`);
+        patch[k] = v.trim();
+      }
+      if (p.timeoutMs !== undefined) {
+        const n = Number(p.timeoutMs);
+        if (!Number.isFinite(n) || n <= 0) throw new Error('tts.setOnlineConfig: "timeoutMs" 必须是正数');
+        patch.timeoutMs = Math.round(n);
+      }
+      if (Object.keys(patch).length === 0) {
+        throw new Error('tts.setOnlineConfig 没有可写的字段');
+      }
+      options.setOnlineConfig(patch);
+      // 回读（含 hasApiKey 重算），让 UI 一次拿到权威状态
+      return { ok: true, ...(options.getOnlineConfig?.() ?? {}) };
     },
 
     // ── tts.setSayBroadcast ────────────────────────────────
