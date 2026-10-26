@@ -12,6 +12,8 @@ import {
   SayPlaybackQueue,
   wavDurationMs,
   defaultTimeoutMs,
+  prependSilence,
+  SAY_LEAD_SILENCE_MS,
 } from './say-playback-queue.js';
 
 /** 造一个合法的最小 WAV 头（PCM 16bit）—— 只求解析器认，不求能播 */
@@ -272,5 +274,80 @@ describe('SayPlaybackQueue（积压上限）', () => {
     expect(q.pendingCount).toBe(0);
     expect(p.current).toBe('PLAY');   // 正在播的没被中断
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+/**
+ * prependSilence —— 设备唤醒余量。
+ *
+ * 这条的失败模式同样是**静默的**：垫错长度 / 写错长度字段 / 把 PCM 挪歪，
+ * 结果要么播放器直接不播（无报错），要么放出来是噪声。肉眼读代码看不出来。
+ */
+describe('prependSilence（设备唤醒余量）', () => {
+  it('时长增加约 300ms，字节数精确等于 byteRate × ms', () => {
+    const wav = makeWav({ seconds: 1 });            // 24k/mono/16bit ⇒ byteRate 48000
+    const before = wavDurationMs(wav);
+    const out = prependSilence(wav, 300);
+    const after = wavDurationMs(out);
+    expect(out.length - wav.length).toBe(14400);    // 48000 × 0.3
+    expect(after - before).toBe(300);
+  });
+
+  it('RIFF 与 data 的长度字段被同步改写（否则播放器按旧长度读，尾部被截）', () => {
+    const wav = makeWav({ seconds: 1 });
+    const out = prependSilence(wav, 300);
+    expect(out.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(out.toString('ascii', 8, 12)).toBe('WAVE');
+    expect(out.readUInt32LE(4)).toBe(out.length - 8);   // RIFF size
+
+    let pos = 12;
+    let dataOff = -1;
+    let dataSize = 0;
+    while (pos + 8 <= out.length) {
+      const id = out.toString('ascii', pos, pos + 4);
+      const size = out.readUInt32LE(pos + 4);
+      if (id === 'data') { dataOff = pos + 8; dataSize = size; break; }
+      pos += 8 + size + (size % 2);
+    }
+    expect(dataOff).toBe(44);
+    expect(dataSize).toBe(out.length - dataOff);        // data size 覆盖到文件尾
+  });
+
+  it('原始 PCM 一个字节都不丢，只是整体后移；插入区真的是静音', () => {
+    const wav = makeWav({ seconds: 0.1 });          // dataSize 4800
+    for (let i = 0; i < 4800; i++) wav[44 + i] = (i * 37 + 11) & 0xff;  // 填可辨识样本
+    const out = prependSilence(wav, 100);           // 100ms ⇒ 4800 B
+    expect(out.length).toBe(wav.length + 4800);
+    for (let i = 0; i < 4800; i++) {
+      expect(out[44 + 4800 + i]).toBe(wav[44 + i]); // PCM 后移后逐字节一致
+    }
+    for (let i = 0; i < 4800; i++) {
+      expect(out[44 + i]).toBe(0);                  // 16bit 有符号 ⇒ 静音是 0
+    }
+  });
+
+  it('立体声 44.1k：长度按 blockAlign 对齐（不对齐会让样本错位成噪声）', () => {
+    const wav = makeWav({ sampleRate: 44100, channels: 2 });
+    const out = prependSilence(wav, 300);
+    const added = out.length - wav.length;
+    expect(added).toBe(44100 * 4 * 0.3);            // 52920
+    expect(added % 4).toBe(0);                      // blockAlign = 2ch × 2B
+  });
+
+  it('非 WAV / 过短 / ms<=0 一律原样返回（适配失败绝不能阻止整句播放）', () => {
+    const junk = Buffer.from('definitely not a wav file');
+    expect(prependSilence(junk, 300)).toBe(junk);
+    const wav = makeWav({ seconds: 1 });
+    expect(prependSilence(wav, 0)).toBe(wav);
+    expect(prependSilence(wav, -100)).toBe(wav);
+  });
+
+  it('垫过静音后 defaultTimeoutMs 也相应变长（超时不会误杀变长的音频）', () => {
+    // 必须用够长的 wav：短音频两者都会被 MIN_TIMEOUT_MS(30s) 夹住 ⇒ 看起来"没变长"，
+    // 那是下限在起作用，不是 padding 没生效（写测试时踩过这个坑）。
+    const wav = makeWav({ seconds: 30 });
+    const out = prependSilence(wav, 300);
+    expect(defaultTimeoutMs(wav)).toBe(70_000);   // 30000×2+10000
+    expect(defaultTimeoutMs(out)).toBe(70_600);   // (30000+300)×2+10000
   });
 });

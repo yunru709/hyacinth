@@ -88,7 +88,7 @@ import { createTuiAskUser } from './tui-ask-user.js';
 import { showWelcome } from './tui-welcome.js';
 import { createModelLocalCmds } from './tui-model-local.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
-import { SayPlaybackQueue } from './say-playback-queue.js';
+import { SayPlaybackQueue, prependSilence, SAY_LEAD_SILENCE_MS } from './say-playback-queue.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
 import { formatDeclaredToolLinks, getCurrentToolLinks } from '../utils/tool-links.js';
@@ -814,10 +814,16 @@ export async function runTui(
       try {
         const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
         fs.mkdirSync(dir, { recursive: true });
+        // ⚠️ 垫静音（2026-10-26 孑遗实听「听不到第一个字」）：
+        // 每次播放都新起一个 powershell ⇒ 音频设备冷启动要几十~几百毫秒才出声，
+        // 这段唤醒期送进去的音频被吞掉 ⇒ 每句开头都缺一点。
+        // 实测：同一份 wav 直接播听不到「一」，前垫 300ms 静音后完整听到。
+        // （波形已证明合成端清白：开头 0-190ms 的 RMS 是全文件 p90 水平。）
+        const padded = prependSilence(wav, SAY_LEAD_SILENCE_MS);
         // 文件名加随机后缀：Date.now() 在快速连发时会同毫秒撞名，
         // 后者覆盖前者 ⇒ 播的是同一段音频（也是"听着像重复"的一个来源）。
         const file = path.join(dir, `say-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
-        fs.writeFileSync(file, wav);
+        fs.writeFileSync(file, padded);
         // ⚠️ 2026-10-25 修正：原实现用 `start /b` + 静默 catch，播放成败**完全不可知**
         // （say-cache 里的 wav 被删只证明 powershell 起来了，不证明扬声器真出了声）。
         // 违反「catch 里必须打日志」⇒ 改成 spawn + exit code/stderr 留痕。
