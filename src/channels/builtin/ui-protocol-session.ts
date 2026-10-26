@@ -58,6 +58,8 @@ import { createSttDomain } from '../../ui-protocol/domains/stt.js';
 import { createTtsDomain } from '../../ui-protocol/domains/tts.js';
 import { getSttService } from '../../stt/index.js';
 import { getTtsService, listVoices } from '../../tts/cosyvoice.js';
+// 引擎清单与切换：设置页/TUI 的「say 接哪个引擎」（voice.tts.engine）数据源
+import { getTtsEngine, listAvailableEngines } from '../../tts/index.js';
 import { voicesDir } from '../../tts/voice-dir.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
@@ -479,6 +481,43 @@ export class UiProtocolSession {
       },
       getVoices: () => listVoices(),
       getVoicesDir: () => voicesDir(),
+      // ── 「say 接哪个引擎」（voice.tts.engine）──────────────────────
+      // 清单由 TTS 工厂给出：每个实现自报 capabilities（emotion/speed/voice 支不支持）
+      // 与 ready（模型在不在），UI 据此置灰。切换只写配置；工厂按配置指纹重建实例，
+      // 下一回合 say 取引擎时自动换过去，不需要重启进程。
+      listEngines: () => {
+        const cc = backend.configCenter;
+        return listAvailableEngines({
+          get<T>(k: string): T | undefined {
+            try { return cc?.get<T>(k); } catch { return undefined; }
+          },
+        });
+      },
+      getEngineKind: () => {
+        try {
+          const v = backend.configCenter?.get('voice.tts.engine');
+          return typeof v === 'string' && v ? v : 'cosyvoice3';
+        } catch { return 'cosyvoice3'; }
+      },
+      setEngineKind: (kind) => {
+        const cc = backend.configCenter;
+        if (!cc) throw new Error('config center not available');
+        cc.set('voice.tts.engine', kind);
+        // 与 setSayConfig 同语义：写后持久化（fire-and-forget，失败留痕不阻断）
+        const save = (cc as { save?: () => Promise<void> }).save;
+        if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.tts.engine persist failed:', err));
+      },
+      // 试听走「当前选中引擎」：切到在线/本地 GGUF 后，设置页试听要听到那家的声音。
+      // 不这么做的话，UI 显示已切换、点试听却还是 CosyVoice3 ⇒ 界面对了行为没对。
+      synthesizeViaEngine: (text, opts) => {
+        const cc = backend.configCenter;
+        const reader = {
+          get<T>(k: string): T | undefined {
+            try { return cc?.get<T>(k); } catch { return undefined; }
+          },
+        };
+        return getTtsEngine(reader).synthesize(text, opts);
+      },
       getSayConfig: () => {
         try {
           const cc = backend.configCenter;

@@ -124,6 +124,46 @@ const BUILTIN_COMMANDS: SlashCommandDef[] = [
     executeLocal: true,
   },
   {
+    // say 工具背后接哪个 TTS 引擎（voice.tts.engine）。子项动态来自 TTS 工厂，
+    // 每个引擎自报 capabilities/ready ⇒ 这里只负责"摆出来"，切换逻辑在 tui.ts。
+    // 为什么用二级面板而不是带参数：引擎 id 有三个且会变（以后接更多在线厂家），
+    // 让用户从列表里点选，比记 /tts breeze-tts-2 这种拼写更不容易错。
+    name: 'tts',
+    description: '语音合成引擎 — 选择 say 接哪个引擎（切换即生效，无需重启）',
+    icon: '🔊',
+    category: 'model',
+    executeLocal: true,
+    childrenProvider: async () => {
+      const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+      const { listAvailableEngines } = await import('../tts/index.js');
+      const cc = RuntimeConfigCenter.getInstance();
+      const reader = {
+        get<T>(k: string): T | undefined {
+          try { return cc.get<T>(k); } catch { return undefined; }
+        },
+      };
+      try {
+        return listAvailableEngines(reader).map((e) => ({
+          name: e.kind,
+          description: `${e.active ? '● 当前 · ' : ''}${e.ready ? '就绪' : '未就绪'} · ${e.label}` +
+            (e.capabilities.emotion ? ' · 支持情绪' : '') +
+            (e.capabilities.speed ? ' · 支持语速' : ''),
+          icon: e.active ? '●' : '○',
+          category: 'model' as const,
+          executeLocal: true,
+        }));
+      } catch (err) {
+        return [{
+          name: 'error',
+          description: `引擎清单不可用：${(err as Error)?.message ?? err}`,
+          icon: '!',
+          category: 'model' as const,
+          executeLocal: true,
+        }];
+      }
+    },
+  },
+  {
     name: 'session',
     description: '会话管理 — 最近会话 / 新建 / 列表',
     icon: '◉',

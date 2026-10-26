@@ -304,6 +304,9 @@ export const UI_METHOD = {
   TTS_STOP: 'tts.stop',
   TTS_SYNTHESIZE: 'tts.synthesize',
   TTS_SET_SAY_BROADCAST: 'tts.setSayBroadcast',
+  // tts 引擎选择（「say 接在哪个」，voice.tts.engine；2026-10-26）
+  TTS_ENGINES: 'tts.engines',
+  TTS_SET_ENGINE: 'tts.setEngine',
   // meta（P5-3 版本/能力协商）
   META_GET: 'meta.get',
 } as const;

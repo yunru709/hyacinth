@@ -23,7 +23,7 @@ import { UI_EVENT, type SayVoiceEvent } from '../events.js';
 import { getTtsService, listVoices, type TtsVoiceInfo } from '../tts/cosyvoice.js';
 // 引擎选择交给工厂（voice.tts.engine）：本插件不再写死 CosyVoice3 实现。
 // 契约见 src/tts/engine.ts，可用实现见 src/tts/engines/*。
-import { createTtsEngine } from '../tts/index.js';
+import { getTtsEngine } from '../tts/index.js';
 import type { TtsEngine } from '../tts/engine.js';
 
 // UI 卡片契约住在内核原语（plugin-host），此处 re-export 方便插件开发者
@@ -178,9 +178,17 @@ export function createSayVoicePlugin(
     ],
 
     async activate(ctx: PluginContext<Record<string, unknown>, LoopHooks>) {
-      // 引擎由配置决定（voice.tts.engine）：cosyvoice3（默认）/ online。
-      // 不支持的参数由引擎的 capabilities() 声明，调用处照常传、实现自行忽略。
-      const engine = services.engine ?? createTtsEngine({ get: getConfig });
+      // 引擎**每次取用都问工厂**，不是 activate 时定型。
+      // 用户在设置页 / TUI 把 voice.tts.engine 切走后，下一回合 say 就换过去
+      // （工厂按配置指纹重建实例，不重启进程）。若在这里 createTtsEngine 一次并长期持有，
+      // 就会出现"界面显示已切换、实际还在用旧引擎"——界面对了行为没对。
+      const engine: SayVoiceEngine = services.engine ?? {
+        get id() {
+          return getTtsEngine({ get: getConfig }).id;
+        },
+        voices: () => getTtsEngine({ get: getConfig }).voices(),
+        synthesize: (text, opts) => getTtsEngine({ get: getConfig }).synthesize(text, opts),
+      };
       const broadcast = new SayVoiceBroadcast({
         engine,
         getConfig,

@@ -71,6 +71,31 @@ export interface TtsVoiceInfoLike {
   label: string;
 }
 
+/**
+ * 引擎清单条目 —— 「say 接哪个 TTS 引擎」的数据源（设置页下拉 / TUI 面板）。
+ *
+ * 契约层不反向依赖业务层（src/tts/index.ts），所以这里重新声明一份结构；
+ * 两边靠**结构化类型**兼容，字段名必须与 TtsEngineInfo 保持一致。
+ */
+export interface TtsEngineInfoLike {
+  /** 实现自己的 id：cosyvoice3 / breeze-tts-2 / online-breeze */
+  id: string;
+  /** 配置取值，写回 voice.tts.engine 用这个 */
+  kind: string;
+  /** local = 本机推理；remote = 走网络 */
+  kindType: 'local' | 'remote';
+  /** 给人看的一句话说明 */
+  label: string;
+  /** 能力声明：不支持的参数由引擎忽略，UI 据此置灰 */
+  capabilities: { voice: boolean; speed: boolean; emotion: boolean };
+  /** 是否可用（本地看模型在不在，在线看配置全不全） */
+  ready: boolean;
+  /** 就绪 / 缺失详情 */
+  detail: string;
+  /** 是否当前选中 */
+  active: boolean;
+}
+
 /** say 语音播报配置（voice.say.* 配置节；say-voice 插件每回合现读） */
 export interface SayBroadcastConfig {
   /** 总开关（默认 false：模型/环境就绪后由用户打开） */
@@ -82,6 +107,23 @@ export interface SayBroadcastConfig {
 export interface TtsDomainOptions {
   /** 获取 TTS 服务（进程级单例；未注入时全部方法报错） */
   getService: () => TtsServiceLike | null;
+  /** 引擎清单（缺省则不暴露 tts.engines / tts.setEngine） */
+  listEngines?: () => TtsEngineInfoLike[];
+  /**
+   * 用「当前选中的引擎」合成 —— 设置页试听必须走这条。
+   *
+   * 为什么不复用 getService()：那个是 cosyvoice 专属服务对象。若试听仍走它，
+   * 用户切到「在线 API」后点击试听，听到的还是本地 CosyVoice3 的声音，
+   * 会让人以为切换没生效 —— 典型的"界面对了、行为没对"。
+   */
+  synthesizeViaEngine?: (
+    text: string,
+    opts: { voice?: string; speed?: number; emotion?: string },
+  ) => Promise<Buffer>;
+  /** 写引擎选择（voice.tts.engine） */
+  setEngineKind?: (kind: string) => void;
+  /** 读当前引擎选择 */
+  getEngineKind?: () => string;
   /** 读取下载源偏好（config models.mirror：''=auto | hf-mirror | huggingface） */
   getMirrorPref?: () => string | undefined;
   /** 音色目录（<models.root>/voices 参考音对；缺省只报默认音色） */
@@ -128,6 +170,39 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
         voicesDir: options.getVoicesDir?.() ?? '',
         say: options.getSayConfig?.() ?? { broadcast: false, voice: '' },
       };
+    },
+
+    // ── tts.engines / tts.setEngine ────────────────────────
+    /**
+     * 引擎清单 + 当前选中（设置页「say 接在哪个引擎」下拉 / TUI /tts 面板的数据源）。
+     *
+     * 与 status() 分开是有意的：status 依赖 cosyvoice 服务对象，而「该接哪个引擎」
+     * 这件事不该因为没有本地服务而被挡住（选了在线引擎时根本不跑 cosyvoice）。
+     */
+    engines() {
+      if (!options.listEngines) throw new Error('engine list not available（该 UI 通道未接入 TTS 工厂）');
+      return {
+        active: options.getEngineKind?.() ?? 'cosyvoice3',
+        engines: options.listEngines(),
+      };
+    },
+
+    /**
+     * 切换 say 使用的 TTS 引擎（写 voice.tts.engine 并持久化）。
+     *
+     * 生效时机：下一回合 say 取引擎时 —— 工厂按"配置指纹"重建实例，无需重启进程。
+     * 只校验 kind 在清单内，不校验 ready：允许先选中再补模型/密钥（UI 会标「未就绪」）。
+     */
+    setEngine(params: unknown) {
+      const kind = (params as { kind?: string } | undefined)?.kind;
+      if (!kind || typeof kind !== 'string') throw new Error('tts.setEngine requires "kind"');
+      if (!options.setEngineKind) throw new Error('engine switch not available（该 UI 通道未接入配置中心）');
+      const allowed = (options.listEngines?.() ?? []).map((e) => e.kind);
+      if (allowed.length && !allowed.includes(kind)) {
+        throw new Error(`未知引擎 "${kind}"，可选：${allowed.join(' / ')}`);
+      }
+      options.setEngineKind(kind);
+      return { ok: true, active: options.getEngineKind?.() ?? kind };
     },
 
     // ── tts.setSayBroadcast ────────────────────────────────
@@ -213,12 +288,19 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
      * 事件通路）—— 设置页「试听」用它验证真实播报链，而非前端本地播放。
      */
     async synthesize(params: unknown): Promise<{ audioWavBase64: string }> {
-      syncMirror(service());
-      const { text, variant, voice, speed, broadcast } = (params ?? {}) as {
-        text?: string; variant?: 'base' | 'rl'; voice?: string; speed?: number; broadcast?: boolean;
+      const { text, variant, voice, speed, emotion, broadcast } = (params ?? {}) as {
+        text?: string; variant?: 'base' | 'rl'; voice?: string; speed?: number; emotion?: string; broadcast?: boolean;
       };
       if (!text || typeof text !== 'string') throw new Error('tts.synthesize requires "text"');
-      const buf = await service().synthesize(text, { variant, voice, speed });
+      // 优先走「当前选中的引擎」—— 切到在线 API / 本地 GGUF 后，试听要听到那家的声音。
+      // 未注入时退回 cosyvoice 服务（老通道兼容，行为与改动前一致）。
+      let buf: Buffer;
+      if (options.synthesizeViaEngine) {
+        buf = await options.synthesizeViaEngine(text, { voice, speed, emotion });
+      } else {
+        syncMirror(service());
+        buf = await service().synthesize(text, { variant, voice, speed });
+      }
       const audioWavBase64 = buf.toString('base64');
       if (broadcast === true) {
         options.emit?.(UI_EVENT.SAY_VOICE, {

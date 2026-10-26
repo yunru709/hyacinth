@@ -1764,6 +1764,61 @@ export async function runTui(
             updateTokenEstimate();
             return;
           }
+          // ── tts —— 语音合成引擎选择（say 接哪个；2026-10-26）──────────
+          // 裸 /tts 进这里时不弹面板（面板由 command-registry 的 childrenProvider
+          // 负责），而是报当前引擎 + 用法；点选子项后回调 cmdPath = 'tts/<kind>'。
+          // 切换只写 voice.tts.engine：TTS 工厂按配置指纹重建实例 ⇒ 下一回合 say 生效。
+          if (cmdPath === 'tts' || cmdPath.startsWith('tts/')) {
+            const { listAvailableEngines } = await import('../tts/index.js');
+            const { RuntimeConfigCenter } = await import('../runtime/config-center.js');
+            const cc = RuntimeConfigCenter.getInstance();
+            const reader = {
+              get<T>(k: string): T | undefined {
+                try { return cc.get<T>(k); } catch { return undefined; }
+              },
+            };
+            const seg = cmdPath.includes('/') ? cmdPath.slice(cmdPath.indexOf('/') + 1) : '';
+            const engines = listAvailableEngines(reader);
+            if (!seg) {
+              const cur = engines.find((e) => e.active);
+              chatLog.addSystem(
+                theme.success(`当前 TTS 引擎：${cur?.label ?? '未知'}`) +
+                  `（${cur?.ready ? '就绪' : '未就绪'}）`,
+              );
+              chatLog.addSystem(
+                theme.warning('用法：/tts 打开面板点选，或 /tts <kind>=' + engines.map((e) => e.kind).join('|')),
+              );
+              tui.requestRender();
+              return;
+            }
+            const target = engines.find((e) => e.kind === seg);
+            if (!target) {
+              chatLog.addSystem(
+                theme.warning(`未知引擎 "${seg}"。可选：${engines.map((e) => e.kind).join(' / ')}`),
+              );
+              tui.requestRender();
+              return;
+            }
+            cc.set('voice.tts.engine', seg);
+            const save = (cc as { save?: () => Promise<void> }).save;
+            if (save) {
+              void save.call(cc).catch((err) => console.error('[tui] voice.tts.engine persist failed:', err));
+            }
+            chatLog.addSystem(theme.success(`say 引擎 → ${target.label}`));
+            if (!target.ready) {
+              // 允许选未就绪的引擎（先选后补模型/密钥），但要说清现在还不能合成
+              chatLog.addSystem(theme.warning(`⚠ 该引擎未就绪：${target.detail}`));
+            }
+            chatLog.addSystem(
+              theme.success(
+                `能力：${target.capabilities.emotion ? '情绪 ✓' : '情绪 ✗'} · ` +
+                  `${target.capabilities.speed ? '语速 ✓' : '语速 ✗'}`,
+              ),
+            );
+            tui.requestRender();
+            return;
+          }
+
           if (cmdPath.startsWith('compress/')) {
             await compressCmds.handle(cmdPath, restArgs);
             return;

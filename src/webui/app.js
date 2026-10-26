@@ -3971,6 +3971,30 @@
   async function loadTtsSettings() {
     const stateEl = $('#tts-service-state');
     if (!stateEl) return;
+    // 引擎选择（「say 接在哪个」）—— 独立于 cosyvoice 服务状态：
+    // 选了在线引擎时本地服务本来就不该跑，不能因为 status 失败就不显示引擎。
+    try {
+      const eng = await client.request('tts.engines');
+      const sel = $('#tts-engine');
+      const desc = $('#tts-engine-desc');
+      if (sel && eng && Array.isArray(eng.engines)) {
+        if (document.activeElement !== sel) {
+          sel.innerHTML = eng.engines
+            .map((e) => '<option value="' + e.kind + '">' + e.label + (e.ready ? '' : '（未就绪）') + '</option>')
+            .join('');
+          sel.value = eng.active;
+        }
+        const cur = eng.engines.find((e) => e.kind === eng.active);
+        if (desc && cur) {
+          desc.textContent =
+            (cur.ready ? '就绪' : '未就绪') + ' · ' + cur.detail +
+            ' · 能力：' + (cur.capabilities.emotion ? '情绪✓' : '情绪✗') +
+            ' ' + (cur.capabilities.speed ? '语速✓' : '语速✗');
+        }
+      }
+    } catch (e) {
+      // 引擎清单不可用不应影响下面模型/python/服务几个区块的渲染
+    }
     let st = null;
     try { st = await client.request('tts.status'); } catch (e) { st = null; }
     if (!st) {
@@ -4136,7 +4160,16 @@
   function buildTtsCard() {
     const card = el('div', 'settings-card');
     card.innerHTML =
-      '<div class="settings-card-header"><i data-lucide="speech" class="w-4 h-4"></i><span>语音合成（Fun-CosyVoice3）</span><span id="tts-service-state" data-dom-id="tts-service-state" class="settings-desc" style="margin-left:auto">未运行</span></div>' +
+      '<div class="settings-card-header"><i data-lucide="speech" class="w-4 h-4"></i><span>语音合成</span><span id="tts-service-state" data-dom-id="tts-service-state" class="settings-desc" style="margin-left:auto">未运行</span></div>' +
+      // 引擎选择：say 工具实际接到哪个 TTS 实现（voice.tts.engine）。
+      // 切换后写配置即生效，下一回合 say 用新引擎，不需要重启。
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">引擎（say 接在哪个）</div>' +
+      '    <div class="settings-desc" id="tts-engine-desc" data-dom-id="tts-engine-desc">—</div>' +
+      '  </div>' +
+      '  <select id="tts-engine" class="settings-input" data-dom-id="tts-engine" aria-label="TTS 引擎"></select>' +
+      '</div>' +
       '<div class="settings-row">' +
       '  <div style="min-width:0">' +
       '    <div class="settings-label">模型版本</div>' +
@@ -4187,6 +4220,17 @@
   }
 
   function bindTtsCard() {
+    // 引擎切换（「say 接在哪个」）：写 voice.tts.engine ⇒ 下一回合 say 换过去。
+    // 不重启进程：TTS 工厂按"配置指纹"重建实例（见 src/tts/index.ts 的 engineKey）。
+    const engSel = $('#tts-engine');
+    if (engSel) engSel.addEventListener('change', async () => {
+      try {
+        await client.request('tts.setEngine', { kind: engSel.value });
+      } catch (e) {
+        appendMsg('error', '切换 TTS 引擎失败：' + ((e && e.message) || e));
+      }
+      void loadTtsSettings();
+    });
     const download = $('#tts-model-download');
     if (download) download.addEventListener('click', async () => {
       download.disabled = true;
