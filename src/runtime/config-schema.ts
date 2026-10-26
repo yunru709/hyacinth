@@ -278,6 +278,10 @@ export interface FullConfig {
         serverUrl: string;
         /** server config 里给该模型起的 id */
         serverModelId: string;
+        /** 自动托管 server（true ⇒ 适配器自己拉起 audiocpp_server.exe 走 HTTP） */
+        serverAutoStart: boolean;
+        /** 自动托管时监听端口 */
+        serverPort: number;
         /** 单次合成超时（含模型加载） */
         timeoutMs: number;
       };

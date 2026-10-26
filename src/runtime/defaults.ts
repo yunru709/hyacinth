@@ -180,6 +180,14 @@ export function getDefaultConfig(): FullConfig {
           serverUrl: '',
           /** server config 里给该模型起的 id（只在 serverUrl 非空时用） */
           serverModelId: 'breeze-tts-2',
+          /**
+           * 自动托管 server（默认 true）：适配器自己拉起 audiocpp_server.exe 并走 HTTP。
+           * 为什么默认开：CLI 每句重付 8s 加载费（实测 9.7s vs 常驻 2.0s），
+           * 这个提速不该要求用户手工起进程。起不来时退回 CLI（只降速，音频不变）。
+           */
+          serverAutoStart: true,
+          /** 自动托管时监听端口（3178 归 cosyvoice，别抢） */
+          serverPort: 8189,
           /** 单次合成超时（含模型加载，默认 180s） */
           timeoutMs: 180000,
         },

@@ -81,6 +81,8 @@ function readBreezeTts2Config(cfg: TtsConfigReader): BreezeTts2Config {
     // 留空 = 保持原 CLI 行为，老配置不受影响。
     serverUrl: cfg.get<string>('voice.tts.breeze.serverUrl') || undefined,
     serverModelId: cfg.get<string>('voice.tts.breeze.serverModelId') || undefined,
+    serverAutoStart: cfg.get<boolean>('voice.tts.breeze.serverAutoStart') ?? undefined,
+    serverPort: cfg.get<number>('voice.tts.breeze.serverPort') || undefined,
     timeoutMs: cfg.get<number>('voice.tts.breeze.timeoutMs') || undefined,
   };
 }

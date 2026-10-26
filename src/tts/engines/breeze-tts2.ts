@@ -35,8 +35,14 @@ import type { TtsCapabilities, TtsEngine, TtsVoiceInfo } from '../engine.js';
 // 音色目录的**单一真源**（<models.root>/voices，wav+txt 成对才算数）。
 // 不要在这里自己 readdir 一套：cosyvoice 已经在用 voice-dir，两套实现迟早分叉。
 import { listVoiceEntries, voicesDir as defaultVoicesDir } from '../voice-dir.js';
+// 常驻 server 生命周期（起进程 / 健康检查 / 认领已有实例）。
+// CLI 每句重付 8s 模型加载费（实测整次 9.7s，而 --metrics 说纯合成只 1.9s），
+// 常驻后单次 2.0s —— 这是当前唯一有意义的提速来源。
+import { ensureBreezeServer } from './breeze-server.js';
+import { createLogger } from '../../logging/logger.js';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('tts-breeze2');
 
 export interface BreezeTts2Config {
   /** audiocpp_cli.exe 的绝对路径 */
@@ -70,6 +76,15 @@ export interface BreezeTts2Config {
   serverUrl?: string;
   /** server config 里给这个模型起的 id（默认 breeze-tts-2）；只在 serverUrl 非空时用 */
   serverModelId?: string;
+  /**
+   * **自动托管 server**（默认 true）：适配器自己拉起 `audiocpp_server.exe` 并走 HTTP。
+   * 这是让「2 秒」真正发生的开关 —— `serverUrl` 留空 + 本项 true ⇒ 用 `serverPort` 自启。
+   * 起不来时退回 CLI：只降速、音频不变（与「静默换了音色」那种假成功不同，回落会打 warn）。
+   * 显式配了 `serverUrl` 时以 `serverUrl` 为准，本项不参与。
+   */
+  serverAutoStart?: boolean;
+  /** 自动托管时监听端口（默认 8189；3178 归 cosyvoice，别抢） */
+  serverPort?: number;
   timeoutMs?: number;
 }
 
@@ -194,14 +209,44 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     return buf;
   }
 
+  /**
+   * 取 server 基址：显式 `serverUrl` 优先；否则按 `serverAutoStart` 自启。
+   * 返回 null ⇒ 调用方走 CLI。
+   *
+   * 【为什么自启失败不抛错】CLI 是同一模型的完整能力，只是慢。自启失败退回它
+   * 仍能出声；抛错则把「慢」升级成「哑」，得不偿失。
+   * 但**必须 warn 留痕**：否则用户只感到"提速没生效"，无从判断是配置问题还是缺 exe。
+   */
+  async function resolveServerUrl(c: BreezeTts2Config): Promise<string | null> {
+    if (c.serverUrl) return String(c.serverUrl).replace(/\/+$/, '');
+    if (c.serverAutoStart === false) return null;
+    try {
+      return await ensureBreezeServer({
+        modelPath: c.modelPath,
+        cliPath: c.cliPath,
+        backend: c.backend,
+        device: c.device,
+        port: c.serverPort,
+        modelId: c.serverModelId,
+      });
+    } catch (err) {
+      logger.warn('Breeze-TTS-2 常驻服务自启失败，本次退回 CLI（约 9s）', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   async function synthesize(
     text: string,
     opts: { voice?: string; speed?: number; emotion?: string } = {},
   ): Promise<Buffer> {
     const c = conf();
-    // 常驻 server 优先：配了 serverUrl 就走它（快 5 倍）；留空 = 走 CLI（原行为不变）。
+    // 常驻 server 优先：实测 CLI 整次 9.7s（`--metrics` 说纯合成只 1.9s，8s 是进程
+    // 启动+模型加载），常驻后单次 2.0s。显式 serverUrl 或 serverAutoStart 任一成立即走 HTTP。
     // 仍走 serialize：8GB 卡的并发安全边界不变（server 侧 slots 也有限）。
-    if (c.serverUrl) return serialize(() => synthesizeViaHttp(c, text, opts));
+    const serverUrl = await resolveServerUrl(c);
+    if (serverUrl) return serialize(() => synthesizeViaHttp({ ...c, serverUrl }, text, opts));
     if (!c.cliPath || !fs.existsSync(c.cliPath)) {
       throw new Error(`Breeze-TTS-2 未就绪：找不到 audiocpp_cli.exe（${c.cliPath || '未配置'}）`);
     }
