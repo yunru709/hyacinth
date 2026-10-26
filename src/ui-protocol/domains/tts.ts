@@ -173,6 +173,52 @@ export interface TtsDomainOptions {
   setSayConfig?: (cfg: Partial<SayBroadcastConfig>) => void;
   /** 事件广播（tts.model_progress 模型下载进度推送；缺省静默） */
   emit?: (type: string, payload?: unknown) => void;
+  // ── breeze-tts-2 专属配置面（设置页表单）──────────────────────
+  // 为什么单独开一组：breeze 的运行环境（exe 路径 / GGUF 路径 / 端口）此前**只能手改
+  // config.json**，UI 上完全没有入口（全仓 grep cliPath/modelPath 零命中）。
+  // 而它又不是 cosyvoice 那套 python 模型下载流程 —— 复用 tts.download 会下错东西。
+  /** 读 breeze 配置 + 各项存在性（缺省则不暴露 tts.breezeConfig） */
+  getBreezeConfig?: () => BreezeConfigLike;
+  /** 写 breeze 配置（部分更新；缺省则不暴露 tts.setBreezeConfig） */
+  setBreezeConfig?: (patch: Partial<BreezeConfigPatch>) => void;
+  /** 启动 breeze 常驻 server（warmup；缺省则不暴露 tts.breezeStart） */
+  breezeStart?: () => Promise<void>;
+  /** 停止 breeze 常驻 server（dispose；缺省则不暴露 tts.breezeStop） */
+  breezeStop?: () => void;
+}
+
+/**
+ * breeze-tts-2 的配置 + 就绪状态（设置页表单数据源）。
+ *
+ * 【为什么把 "是否存在" 一起返回】用户填错路径是这类表单最常见的失败，
+ * 而"填了"和"能用"是两件事 —— 只回显字符串的话，界面看着正常、点了才报错。
+ * ⇒ 后端当场 stat 一遍，前端据此亮绿灯/红灯，不必等用户点"检测"。
+ */
+export interface BreezeConfigLike {
+  cliPath: string;
+  modelPath: string;
+  backend: string;
+  device: number;
+  serverPort: number;
+  serverAutoStart: boolean;
+  /** audiocpp_cli.exe 是否真实存在 */
+  cliExists: boolean;
+  /** GGUF 是否真实存在 */
+  modelExists: boolean;
+  /** 常驻 server 是否在监听（TCP 探测，非看进程名） */
+  serverRunning: boolean;
+  /** 一句话状态：缺什么 / 就绪 */
+  detail: string;
+}
+
+/** breeze 配置的部分更新（空字符串 = 清空该项） */
+export interface BreezeConfigPatch {
+  cliPath?: string;
+  modelPath?: string;
+  backend?: string;
+  device?: number;
+  serverPort?: number;
+  serverAutoStart?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -402,6 +448,60 @@ export function createTtsDomain(options: TtsDomainOptions): DomainHandler {
         });
       }
       return { audioWavBase64 };
+    },
+
+    // ── breeze-tts-2 配置面（设置页表单）──────────────────────
+    /**
+     * 读 breeze 配置 + 各项存在性。
+     * 存在性由**后端当场 stat**（不是前端猜、也不是缓存），填错路径能立刻看出来。
+     */
+    breezeConfig() {
+      if (!options.getBreezeConfig) throw new Error('breeze config not available（该 UI 通道未接入）');
+      return options.getBreezeConfig();
+    },
+
+    /**
+     * 写 breeze 配置（部分更新，空字符串 = 清空）。
+     *
+     * **只写配置、不自动重启服务**：改路径后要不要拉起是用户的决定
+     * （他可能只是想先填好、下次再启动）。生效时机交给 breezeStart/breezeStop 显式触发。
+     */
+    setBreezeConfig(params: unknown) {
+      if (!options.setBreezeConfig) throw new Error('breeze config not available（该 UI 通道未接入）');
+      const p = (params ?? {}) as Record<string, unknown>;
+      const patch: BreezeConfigPatch = {};
+      if (typeof p.cliPath === 'string') patch.cliPath = p.cliPath.trim();
+      if (typeof p.modelPath === 'string') patch.modelPath = p.modelPath.trim();
+      if (typeof p.backend === 'string' && ['cuda', 'cpu', 'vulkan'].includes(p.backend)) {
+        patch.backend = p.backend;
+      }
+      if (typeof p.device === 'number' && Number.isFinite(p.device)) {
+        patch.device = Math.max(0, Math.trunc(p.device));
+      }
+      if (typeof p.serverPort === 'number' && Number.isFinite(p.serverPort)) {
+        const port = Math.trunc(p.serverPort);
+        // 端口越界在写入前就拒掉：配置里存个 0 或 99999 会让后续每次启动都莫名失败
+        if (port < 1 || port > 65535) throw new Error(`端口超出范围：${port}（应为 1~65535）`);
+        patch.serverPort = port;
+      }
+      if (typeof p.serverAutoStart === 'boolean') patch.serverAutoStart = p.serverAutoStart;
+      if (Object.keys(patch).length === 0) throw new Error('tts.setBreezeConfig 没有可写入的字段');
+      options.setBreezeConfig(patch);
+      return { ok: true, config: options.getBreezeConfig?.() };
+    },
+
+    /** 启动 breeze 常驻 server（内部走 warmup：拉起进程 + 等健康检查通过） */
+    async breezeStart() {
+      if (!options.breezeStart) throw new Error('breeze start not available（该 UI 通道未接入）');
+      await options.breezeStart();
+      return { ok: true, config: options.getBreezeConfig?.() };
+    },
+
+    /** 停止 breeze 常驻 server（内部走 dispose：杀进程 + 等端口释放） */
+    breezeStop() {
+      if (!options.breezeStop) throw new Error('breeze stop not available（该 UI 通道未接入）');
+      options.breezeStop();
+      return { ok: true, config: options.getBreezeConfig?.() };
     },
   };
 }

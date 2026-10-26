@@ -310,6 +310,13 @@ export const UI_METHOD = {
   // tts 在线引擎配置表单（voice.tts.online.*；apiKey 明文不回传，只回 hasApiKey）
   TTS_ONLINE_CONFIG: 'tts.onlineConfig',
   TTS_SET_ONLINE_CONFIG: 'tts.setOnlineConfig',
+  // tts 本地 breeze-tts-2 配置面（voice.tts.breeze.*；2026-10-26 第一档）
+  // 此前 cliPath / modelPath / serverPort 只能手改 config.json，UI 零入口。
+  // breezeConfig 回显时附带 cliExists / modelExists / serverRunning —— 「填了」≠「能用」。
+  TTS_BREEZE_CONFIG: 'tts.breezeConfig',
+  TTS_SET_BREEZE_CONFIG: 'tts.setBreezeConfig',
+  TTS_BREEZE_START: 'tts.breezeStart',
+  TTS_BREEZE_STOP: 'tts.breezeStop',
   // meta（P5-3 版本/能力协商）
   META_GET: 'meta.get',
 } as const;

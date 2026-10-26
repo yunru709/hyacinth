@@ -61,6 +61,15 @@ import { getTtsService, listVoices } from '../../tts/cosyvoice.js';
 // 引擎清单与切换：设置页/TUI 的「say 接哪个引擎」（voice.tts.engine）数据源
 import { getTtsEngine, listAvailableEngines } from '../../tts/index.js';
 import { voicesDir } from '../../tts/voice-dir.js';
+// breeze 常驻服务的状态/启停：设置页第一档要能看「在不在跑」并手动启停。
+// 用 breezeServerState() 而不是自己探测端口 —— 它同时反映「进程是我们 spawn 的」还是
+// 「端口上是个外来实例（adopted，我们不负责 kill）」，UI 才能给对提示。
+import {
+  BREEZE_SERVER_DEFAULT_PORT,
+  breezeServerState,
+  ensureBreezeServer,
+  stopBreezeServer,
+} from '../../tts/engines/breeze-server.js';
 import { getVoiceLibrary } from '../../companion/voice-library.js';
 import { getGeneratedVoiceStore, DEFAULT_KEEP_PER_CHARACTER } from '../../companion/voice-store.js';
 import { getSayHistoryStore } from '../../companion/say-history.js';
@@ -599,6 +608,86 @@ export class UiProtocolSession {
         if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.say persist failed:', err));
       },
       emit: (type, payload) => this.server.broadcast(type, payload),
+
+      // ── breeze-tts-2 配置面（第一档：路径/端口能在 UI 里配）──────────
+      // 此前 cliPath / modelPath / serverPort 只能手改 config.json（UI 零入口）。
+      // 存在性由后端 stat，前端据此亮灯 —— "填了"和"能用"是两件事。
+      getBreezeConfig: () => {
+        const cc = backend.configCenter;
+        const get = <T>(k: string): T | undefined => {
+          try { return cc?.get<T>(k); } catch { return undefined; }
+        };
+        const cliPath = String(get<string>('voice.tts.breeze.cliPath') || '');
+        const modelPath = String(get<string>('voice.tts.breeze.modelPath') || '');
+        const exists = (p: string): boolean => {
+          if (!p) return false;
+          try { return fs.existsSync(p); } catch { return false; }
+        };
+        const st = breezeServerState();
+        const port = Number(get<number>('voice.tts.breeze.serverPort') ?? 0) || BREEZE_SERVER_DEFAULT_PORT;
+        const cliExists = exists(cliPath);
+        const modelExists = exists(modelPath);
+        const missing: string[] = [];
+        if (!cliExists) missing.push('audiocpp_cli.exe');
+        if (!modelExists) missing.push('GGUF 模型');
+        return {
+          cliPath,
+          modelPath,
+          backend: String(get<string>('voice.tts.breeze.backend') || 'cuda'),
+          device: Number(get<number>('voice.tts.breeze.device') ?? 0),
+          serverPort: port,
+          serverAutoStart: get<boolean>('voice.tts.breeze.serverAutoStart') === true,
+          cliExists,
+          modelExists,
+          // adopted（外来实例）也算 running：用户问的是"端口上有人服务吗"
+          serverRunning: st.running,
+          detail:
+            missing.length > 0
+              ? `缺：${missing.join('、')}`
+              : st.running
+                ? `就绪；常驻服务在跑（:${st.port}${st.adopted ? '，外部实例' : ''}）`
+                : `就绪；未起常驻服务（走 CLI 单次约 9s）`,
+        };
+      },
+      setBreezeConfig: (patch) => {
+        const cc = backend.configCenter;
+        if (!cc) throw new Error('config center not available');
+        const map: Array<[keyof typeof patch, string]> = [
+          ['cliPath', 'voice.tts.breeze.cliPath'],
+          ['modelPath', 'voice.tts.breeze.modelPath'],
+          ['backend', 'voice.tts.breeze.backend'],
+          ['device', 'voice.tts.breeze.device'],
+          ['serverPort', 'voice.tts.breeze.serverPort'],
+          ['serverAutoStart', 'voice.tts.breeze.serverAutoStart'],
+        ];
+        for (const [k, path] of map) {
+          const v = patch[k];
+          if (v !== undefined) cc.set(path, v);
+        }
+        const save = (cc as { save?: () => Promise<void> }).save;
+        if (save) void save.call(cc).catch((err) => console.error('[ui-protocol] voice.tts.breeze persist failed:', err));
+      },
+      breezeStart: async () => {
+        const cc = backend.configCenter;
+        const get = <T>(k: string): T | undefined => {
+          try { return cc?.get<T>(k); } catch { return undefined; }
+        };
+        const modelPath = String(get<string>('voice.tts.breeze.modelPath') || '');
+        if (!modelPath) throw new Error('未配置 GGUF 模型路径（voice.tts.breeze.modelPath）');
+        const backendKind = String(get<string>('voice.tts.breeze.backend') || 'cuda') as 'cuda' | 'cpu' | 'vulkan';
+        await ensureBreezeServer({
+          modelPath,
+          cliPath: String(get<string>('voice.tts.breeze.cliPath') || '') || undefined,
+          backend: backendKind,
+          device: Number(get<number>('voice.tts.breeze.device') ?? 0),
+          port: Number(get<number>('voice.tts.breeze.serverPort') ?? 0) || BREEZE_SERVER_DEFAULT_PORT,
+          modelId: String(get<string>('voice.tts.breeze.serverModelId') || '') || undefined,
+          workDir: String(get<string>('voice.tts.breeze.workDir') || '') || undefined,
+        });
+      },
+      breezeStop: () => {
+        stopBreezeServer();
+      },
     }));
     // supervisor 域（S5 可观测面）：uptime/guardian/lastRestart 来自 supervisor/protocol
     // 契约叶；plugins 复用 plugin 域数据源；watchers/git 由 backend 可选注入。

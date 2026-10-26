@@ -3994,6 +3994,39 @@
         // 在线引擎配置表单：只在该引擎被选中时出现（选了在线却无处填 key = 死路）
         const onlineBlock = $('#tts-online-block');
         if (onlineBlock) onlineBlock.hidden = eng.active !== 'online';
+        // breeze 本地引擎配置：同理，只在选中 breeze-tts-2 时出现。
+        // 回填与显隐放在一起（不是另开一个 try）—— 它们本就是「当前选中谁」这一件事。
+        const breezeBlock = $('#tts-breeze-block');
+        if (breezeBlock) {
+          breezeBlock.hidden = eng.active !== 'breeze-tts-2';
+          if (!breezeBlock.hidden) {
+            try {
+              const bc = await client.request('tts.breezeConfig');
+              const setVal = (sel, v) => { const n = $(sel); if (n && document.activeElement !== n) n.value = v ?? ''; };
+              setVal('#tts-breeze-clipath', bc.cliPath);
+              setVal('#tts-breeze-modelpath', bc.modelPath);
+              setVal('#tts-breeze-backend', bc.backend);
+              setVal('#tts-breeze-device', bc.device);
+              setVal('#tts-breeze-port', bc.serverPort);
+              const auto = $('#tts-breeze-autostart');
+              if (auto) auto.checked = bc.serverAutoStart === true;
+              // 路径存在性：绿 ✓ / 红 ✗ —— 「填了」和「能用」是两件事，
+              // 只回显字符串的话界面看着正常、点了才报错。
+              const paint = (id, ok) => {
+                const n = $(id);
+                if (!n) return;
+                n.textContent = ok ? '✓ 存在' : '✗ 找不到';
+                n.style.color = ok ? 'var(--hyacinth-ok,#22c55e)' : 'var(--hyacinth-danger,#ef4444)';
+              };
+              paint('#tts-breeze-cli-flag', bc.cliExists);
+              paint('#tts-breeze-model-flag', bc.modelExists);
+              const bDesc = $('#tts-breeze-desc');
+              if (bDesc) bDesc.textContent = bc.detail;
+            } catch (e) {
+              // breeze 配置读取失败不该拦住下面模型/python/服务区块的渲染
+            }
+          }
+        }
       }
     } catch (e) {
       // 引擎清单不可用不应影响下面模型/python/服务几个区块的渲染
@@ -4239,6 +4272,47 @@
       '  <div class="settings-row"><div></div>' +
       '    <button id="tts-online-save" class="settings-input" data-dom-id="tts-online-save" style="cursor:pointer;font-family:inherit;flex:0 0 auto">保存</button></div>' +
       '</div>' +
+      // ── breeze-tts-2 本地引擎配置（voice.tts.breeze.*）──────────────
+      // 只在选中 breeze-tts-2 时显示。这三项此前**只能手改 config.json**
+      // （UI 层 grep cliPath/modelPath 零命中）⇒ 装了引擎却没法在界面里配。
+      // 路径存在性由后端 stat，绿/红灯当场区分「填了」和「能用」。
+      '<div id="tts-breeze-block" data-dom-id="tts-breeze-block" hidden>' +
+      '  <div class="settings-row">' +
+      '    <div style="min-width:0">' +
+      '      <div class="settings-label">本地 BreezeTTS2</div>' +
+      '      <div class="settings-desc" id="tts-breeze-desc" data-dom-id="tts-breeze-desc">—</div>' +
+      '    </div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 auto">' +
+      '      <button id="tts-breeze-start-btn" class="settings-input" data-dom-id="tts-breeze-start-btn" style="cursor:pointer;font-family:inherit">启动常驻服务</button>' +
+      '      <button id="tts-breeze-stop-btn" class="settings-input" data-dom-id="tts-breeze-stop-btn" style="cursor:pointer;font-family:inherit">停止</button>' +
+      '    </div>' +
+      '  </div>' +
+      '  <div class="settings-row"><div class="settings-label">CLI 路径</div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 340px">' +
+      '      <input id="tts-breeze-clipath" class="settings-input" data-dom-id="tts-breeze-clipath" placeholder="F:\\TTSEngines\\audio-cpp\\audiocpp_cli.exe" style="flex:1 1 auto;min-width:0" />' +
+      '      <span id="tts-breeze-cli-flag" data-dom-id="tts-breeze-cli-flag" class="settings-desc" style="flex:0 0 auto">—</span>' +
+      '    </div></div>' +
+      '  <div class="settings-row"><div class="settings-label">GGUF 模型路径</div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 340px">' +
+      '      <input id="tts-breeze-modelpath" class="settings-input" data-dom-id="tts-breeze-modelpath" placeholder="F:\\TTSEngines\\dl\\breeze-tts-2-q8_0.gguf" style="flex:1 1 auto;min-width:0" />' +
+      '      <span id="tts-breeze-model-flag" data-dom-id="tts-breeze-model-flag" class="settings-desc" style="flex:0 0 auto">—</span>' +
+      '    </div></div>' +
+      '  <div class="settings-row"><div class="settings-label">后端 / 设备 / 端口</div>' +
+      '    <div style="display:flex;gap:8px;flex:0 0 340px">' +
+      '      <select id="tts-breeze-backend" class="settings-input" data-dom-id="tts-breeze-backend" style="flex:0 0 100px">' +
+      '        <option value="cuda">cuda</option><option value="cpu">cpu</option><option value="vulkan">vulkan</option>' +
+      '      </select>' +
+      '      <input id="tts-breeze-device" class="settings-input" data-dom-id="tts-breeze-device" type="number" min="0" placeholder="0" style="flex:0 0 70px" />' +
+      '      <input id="tts-breeze-port" class="settings-input" data-dom-id="tts-breeze-port" type="number" min="1" max="65535" placeholder="8189" style="flex:0 0 90px" />' +
+      '    </div></div>' +
+      '  <div class="settings-row"><div class="settings-label">自动起常驻服务</div>' +
+      '    <label style="display:flex;align-items:center;gap:6px;flex:0 0 auto">' +
+      '      <input id="tts-breeze-autostart" data-dom-id="tts-breeze-autostart" type="checkbox" />' +
+      '      <span class="settings-desc">首次 say 时自动拉起（单次 9s → 2s）</span>' +
+      '    </label></div>' +
+      '  <div class="settings-row"><div></div>' +
+      '    <button id="tts-breeze-save" class="settings-input" data-dom-id="tts-breeze-save" style="cursor:pointer;font-family:inherit;flex:0 0 auto">保存</button></div>' +
+      '</div>' +
       '<div class="settings-row">' +
       '  <div style="min-width:0">' +
       '    <div class="settings-label">模型版本</div>' +
@@ -4408,6 +4482,49 @@
         appendMsg('error', '试听合成失败：' + ((e && e.message) || e));
       }
       test.disabled = false;
+    });
+    // ── breeze 本地引擎配置（第一档：路径/端口在 UI 里配）────────────
+    // 保存只写配置不重启服务：改完路径要不要拉起是用户的决定
+    // （他可能只是想先填好、下次再启动）。生效时机由下面两个按钮显式触发。
+    const bSave = $('#tts-breeze-save');
+    if (bSave) bSave.addEventListener('click', async () => {
+      bSave.disabled = true;
+      const val = (sel) => ($(sel)?.value ?? '').trim();
+      const patch = {
+        cliPath: val('#tts-breeze-clipath'),
+        modelPath: val('#tts-breeze-modelpath'),
+        backend: val('#tts-breeze-backend') || undefined,
+        serverAutoStart: !!$('#tts-breeze-autostart')?.checked,
+      };
+      const dev = val('#tts-breeze-device');
+      if (dev !== '') patch.device = Number(dev);
+      const port = val('#tts-breeze-port');
+      if (port !== '') patch.serverPort = Number(port);
+      try {
+        await client.request('tts.setBreezeConfig', patch);
+      } catch (e) {
+        appendMsg('error', '保存 breeze 配置失败：' + ((e && e.message) || e));
+      }
+      bSave.disabled = false;
+      void loadTtsSettings();
+    });
+    const bStart = $('#tts-breeze-start-btn');
+    if (bStart) bStart.addEventListener('click', async () => {
+      bStart.disabled = true;
+      const d = $('#tts-breeze-desc');
+      if (d) d.textContent = '启动中…（加载 GGUF 到显存，可能需要数十秒）';
+      try {
+        await client.request('tts.breezeStart');
+      } catch (e) {
+        appendMsg('error', 'breeze 常驻服务启动失败：' + ((e && e.message) || e));
+      }
+      bStart.disabled = false;
+      void loadTtsSettings();
+    });
+    const bStop = $('#tts-breeze-stop-btn');
+    if (bStop) bStop.addEventListener('click', async () => {
+      try { await client.request('tts.breezeStop'); } catch (e) { /* ignore */ }
+      void loadTtsSettings();
     });
   }
 
