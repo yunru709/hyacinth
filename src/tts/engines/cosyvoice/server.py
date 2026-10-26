@@ -208,6 +208,85 @@ def _patch_min_len_guard():
         return False
 
 
+def _patch_llm_diag():
+    """诊断补丁：统计 LLM 实际生成数 vs 被 silent 过滤数（`COSYVOICE_DIAG=1` 开启）。
+
+    为什么要它（2026-10-25 cross_lingual bug）：
+      `COSYVOICE_MODE=cross_lingual` 时 HTTP 500：
+        `hifigan/f0_predictor.py → RuntimeError: padded input size (3) < kernel size (4)`
+      即 vocoder 只收到 3 帧 speech token。存在两种完全不同的成因：
+        A. LLM 真的早停 —— EOS 在 min_len 之前被选中（保护失效）
+        B. LLM 生成了 min_len 帧，但大量是 silent token，被 `llm_job` 的
+           `cur_silent_token_num > max_silent_token_num`（=5）分支 `continue` 丢掉
+      读代码区分不了，只能运行时读出这两个数字。
+
+    同时记录 `min_len/max_len`，可一次排除"窗口算成 0"这种可能。
+    """
+    if os.environ.get("COSYVOICE_DIAG", "0") != "1":
+        return False
+    try:
+        from cosyvoice.llm.llm import TransformerLM
+        from cosyvoice.cli.model import CosyVoice2Model
+
+        # ① inference 层：yield 了多少帧（= 模型真正决定说多久）
+        if not getattr(TransformerLM, "_diag_patched", False):
+            orig_inference = TransformerLM.inference
+
+            def inference(self, text, text_len, prompt_text, prompt_text_len,
+                          prompt_speech_token, prompt_speech_token_len, embedding,
+                          sampling=25, max_token_text_ratio=20, min_token_text_ratio=2, uuid=""):
+                min_len = int((text_len - prompt_text_len) * min_token_text_ratio)
+                max_len = int((text_len - prompt_text_len) * max_token_text_ratio)
+                print(
+                    f"[diag] inference: text_len={int(text_len)} prompt_text_len={int(prompt_text_len)} "
+                    f"prompt_speech={int(prompt_speech_token_len)} min_len={min_len} max_len={max_len}",
+                    flush=True,
+                )
+                n = 0
+                for tok in orig_inference(
+                    self, text, text_len, prompt_text, prompt_text_len,
+                    prompt_speech_token, prompt_speech_token_len, embedding,
+                    sampling, max_token_text_ratio, min_token_text_ratio, uuid,
+                ):
+                    n += 1
+                    yield tok
+                print(f"[diag] inference OUT: yielded={n} tokens (min_len={min_len})", flush=True)
+
+            TransformerLM.inference = inference
+            TransformerLM._diag_patched = True
+
+        # ② 该层：最终写进 tts_speech_token_dict 的帧数（= 去掉 silent 之后）
+        if not getattr(CosyVoice2Model, "_diag_patched", False):
+            orig_job = CosyVoice2Model.llm_job
+
+            def llm_job(self, text, prompt_text, llm_prompt_speech_token, llm_embedding, uuid):
+                # `has151646` 是解开 cross_lingual 死锁的钥匙：
+                #   llm.py:479 断言 `151646 in concat(prompt_text, text)`，
+                #   而独立探针显示 "[token]" 字面量被切成 [87246, 60]（不含 151646）。
+                #   ⇒ 必须看运行时真实张量里到底有没有它，以及 zero_shot 为什么能过。
+                _has_text = bool((text == 151646).any()) if text.numel() else False
+                _has_pt = bool((prompt_text == 151646).any()) if prompt_text.numel() else False
+                print(
+                    f"[diag] llm_job IN: text={tuple(text.shape)} has151646={_has_text} | "
+                    f"prompt_text={tuple(prompt_text.shape)} pt_has151646={_has_pt} | "
+                    f"prompt_speech={tuple(llm_prompt_speech_token.shape)} "
+                    f"cls={type(self).__name__}",
+                    flush=True,
+                )
+                orig_job(self, text, prompt_text, llm_prompt_speech_token, llm_embedding, uuid)
+                kept = len(self.tts_speech_token_dict.get(uuid, []))
+                print(f"[diag] llm_job OUT: kept={kept} tokens", flush=True)
+
+            CosyVoice2Model.llm_job = llm_job
+            CosyVoice2Model._diag_patched = True
+
+        print("[cosyvoice] llm diagnostic patched (COSYVOICE_DIAG=1)", flush=True)
+        return True
+    except Exception as e:
+        print(f"[cosyvoice] llm diag patch failed ({type(e).__name__}: {e})", flush=True)
+        return False
+
+
 def _patch_token_ratio():
     """可调 [min_len, max_len] 窗口 —— 治理「短句 EOS 双峰」的实验入口。
 
@@ -326,6 +405,7 @@ def load_model():
         _patch_wetext_offline()
         _patch_min_len_guard()
         _patch_token_ratio()
+        _patch_llm_diag()      # COSYVOICE_DIAG=1：诊断 cross_lingual 只出 3 帧的成因
         print(f"[cosyvoice] loading model from {_ARGS.model_dir} (variant={_ARGS.variant}) ...", flush=True)
         # 官方构造写死载 llm.pt（base 权重）。rl-only 下载场景（llm.pt 缺、llm.rl.pt
         # 在）：先把 rl 权重硬链为 llm.pt（同盘零拷贝）让构造直接载 rl，构造完成后
@@ -439,6 +519,72 @@ def _prompt_input_cached(model, wav_path, prompt_text):
     return {k: (v.clone() if hasattr(v, "clone") else v) for k, v in hit.items()}
 
 
+# cross_lingual 模式的参考音特征缓存（与 _PROMPT_CACHE 分开：字段集不同）
+_CL_CACHE: dict = {}
+
+
+def _cross_lingual_input_cached(model, wav_path, placeholder):
+    """cross_lingual 模式的参考音特征（**不含** prompt 的 speech token）。
+
+    与 `_prompt_input_cached` 的区别 —— 这正是「英文音色说中文会崩」的根源：
+      · zero_shot：把参考音的 **speech token 序列**（`llm_prompt_speech_token`，396 帧）
+        也送进 LLM 上下文，等同告诉模型「接着这个人的这段声音往下说」。
+        参考音是英文时，模型被拽在英文发音空间里 ⇒ 中文输出成无意义音节
+        （STT 闭环实测相似度 0%）。
+      · cross_lingual：官方 `frontend_cross_lingual` 就是 `frontend_zero_shot(tts_text, '', wav, ...)`
+        再把 `prompt_text / prompt_text_len / llm_prompt_speech_token*` 四个字段删掉
+        ⇒ LLM 上下文里**没有参考音的内容**，只剩说话人 embedding + 声学特征
+        ⇒ 只迁移音色，不迁移语言。
+
+    位置无关性：`placeholder` 仅为让 `_extract_text_token` 拿到非空串（随后被 pop 掉），
+    内容不影响结果。
+
+    2026-10-25 依据：同句文本，FlutterShy(英文) 相似度 0%，zh-test(中文) 92.3%
+    ⇒ 证明崩坏来自参考音语言，而非采样/参数。本模式用于验证「音色能否救回」。
+    """
+    key = (
+        os.path.abspath(wav_path),
+        os.path.getmtime(wav_path),
+        os.path.getsize(wav_path),
+    )
+    hit = _CL_CACHE.get(key)
+    if hit is None:
+        start = _now()
+        # ── 诊断：确认 [token] 的真实 id（2026-10-25）──────────────────────
+        # 背景：`llm.py:479` 断言 `151646 in text`。zero_shot 能过（其 prompt_text
+        # 形如「英文稿 + [token]」），但 cross_lingual 缺 prompt_text 就挂。
+        # 而独立探针显示 ASCII 的 "[token]" 被切成普通 token（不含 151646）——
+        # 说明「显示形态」与「special id」不是一回事，必须让**真实 tokenizer** 说话。
+        # ⚠️ 顺带验证 placeholder（=参考音文字稿+[token]）里到底有没有 151646。
+        if os.environ.get("COSYVOICE_DIAG", "0") == "1":
+            try:
+                _t1, _ = model.frontend._extract_text_token("<|endofprompt|>")
+                print(f"[diag] tokenize('[token]') = {_t1.tolist()}", flush=True)
+                _t2, _ = model.frontend._extract_text_token(placeholder)
+                _ids2 = _t2.tolist()[0]
+                print(
+                    f"[diag] tokenize(placeholder) len={len(_ids2)} tail={_ids2[-4:]} "
+                    f"has151646={151646 in _ids2}",
+                    flush=True,
+                )
+            except Exception as _e:
+                print(f"[diag] tokenize probe failed ({type(_e).__name__}: {_e})", flush=True)
+        mi = model.frontend.frontend_cross_lingual(placeholder, wav_path, model.sample_rate, "")
+        mi.pop("text", None)
+        mi.pop("text_len", None)
+        _CL_CACHE.clear()   # 单音色场景：只留最新一份
+        _CL_CACHE[key] = mi
+        hit = mi
+        print(
+            f"[cosyvoice] cross-lingual prompt cached ({os.path.basename(wav_path)}) "
+            f"in {_now() - start:.2f}s: "
+            f"speech_feat={tuple(mi['prompt_speech_feat'].shape)} "
+            f"fields={sorted(mi.keys())}",
+            flush=True,
+        )
+    return {k: (v.clone() if hasattr(v, "clone") else v) for k, v in hit.items()}
+
+
 def _now():
     import time
     return time.time()
@@ -499,8 +645,13 @@ def _max_token_ratio():
 # 代价：只有判定异常时才多跑一次，正常路径零额外开销。
 _MAX_RETRY = os.environ.get("COSYVOICE_MAX_RETRY", "2")
 _SEC_PER_TEXT_TOKEN = 1.0 / 4.5
-_DUR_MIN_FACTOR = 0.55
-_DUR_MAX_FACTOR = 2.50
+# 时长窗口（倍率 × 期望时长）。2026-10-25 起可用环境变量覆盖，便于 A/B 而不改代码：
+#   COSYVOICE_DUR_MIN_FACTOR / COSYVOICE_DUR_MAX_FACTOR
+# ⚠️ 原 `_DUR_MAX_FACTOR = 2.50` 过宽：17 字句 6.40 s（1.7× 期望、语速仅 2.7 字/秒）
+#    被判为 "ok" ⇒ 一次重试都不触发，用户听到明显拖长却无从修正。
+#    收紧之后偏长样本会换种子重试（`_apply_seed(i, attempt)`）。
+_DUR_MIN_FACTOR = float(os.environ.get("COSYVOICE_DUR_MIN_FACTOR", "0.55") or 0.55)
+_DUR_MAX_FACTOR = float(os.environ.get("COSYVOICE_DUR_MAX_FACTOR", "2.5") or 2.5)
 
 
 def _truncated(samples, max_len):
@@ -508,10 +659,57 @@ def _truncated(samples, max_len):
     return max_len > 0 and samples >= (max_len - 1) * 960
 
 
-def _zero_shot_cached(model, text, prompt_text, wav_path, speed):
-    """等价于 model.inference_zero_shot(...)，但复用参考音特征（产出 list）。"""
+def _apply_seed(text: str = "", offset: int = 0):
+    """固定随机种子（`COSYVOICE_SEED`），两种取值：
+
+      · `auto` —— seed = `sha256(文本)[:8字节] + offset`
+        ⇒ **同一句永远得到同一段音频**，不同句各自不同（确定性 TTS）。
+      · 整数 N —— seed = `N + offset`（实验用：跨句固定同一随机流做对比）。
+
+    为什么要有 auto（2026-10-25 实测依据）：
+      同一句在固定种子下跑 5 次 ⇒ 音频时长与字节数**完全一致**（3.28 s / 157484 B，
+      16000 Hz 立体声 157484 B 每字节都对得上）。这证明时长抖动**全部来自采样随机**
+      —— `ras_sampling` 在重复触发后回退到全词表 `multinomial`（见 utils/common.py:138），
+      EOS(6562) 因此成为 1/6561 的抽样事件；不存在 CUDA/fp16 额外不确定性。
+      既然随机源单一，就可以"用确定性换稳定"：让每句话的随机流由文本决定。
+
+    为什么 offset 要参与：
+      `_zero_shot_cached` 在结果不理想（撞顶 / 太短）时会重试。若种子恒定，
+      重试等于原地踏步。让第 k 次 attempt 用 `base + k` ⇒ 首次确定性可复现，
+      失败时换一条随机流，仍有救。
+
+    未设该环境变量时**什么都不做**（零行为变更）。
+    """
+    raw = os.environ.get("COSYVOICE_SEED", "").strip()
+    if not raw:
+        return
+    if raw.lower() == "auto":
+        if not text:
+            return
+        import hashlib
+        base = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
+    else:
+        try:
+            base = int(raw)
+        except ValueError:
+            print(f"[cosyvoice] COSYVOICE_SEED={raw!r} 无法解析（应为整数或 auto），忽略", flush=True)
+            return
+    from cosyvoice.utils.common import set_all_random_seed
+    set_all_random_seed(base + offset)
+
+
+def _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=False):
+    """等价于 model.inference_zero_shot / inference_cross_lingual(...)，但复用参考音特征。
+
+    `cross=True` 时改走 cross_lingual 的参考音特征（不带 prompt 的 speech token），
+    用于「参考音语言与目标文本语言不同」的场景 —— 详见 `_cross_lingual_input_cached`。
+    """
     fe = model.frontend
-    base = _prompt_input_cached(model, wav_path, prompt_text)
+    base = (
+        _cross_lingual_input_cached(model, wav_path, prompt_text or "。")
+        if cross
+        else _prompt_input_cached(model, wav_path, prompt_text)
+    )
     try:
         retry_cap = int(_MAX_RETRY)
     except ValueError:
@@ -522,7 +720,16 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed):
     # 与官方一致：prompt_text 先 normalize（注意它含 [token] ⇒ text_normalize 直接
     # 原样返回，所以这里不重复调用，只在 _prompt_input_cached 里传原文即可）。
     for i in fe.text_normalize(text, split=True, text_frontend=True):
-        tts_text_token, tts_text_token_len = fe._extract_text_token(i)
+        # ── cross_lingual 必须自己补 [token]（2026-10-25 实测定位）──────────
+        # `cosyvoice/llm/llm.py:479`（Qwen2LM.inference）硬断言：
+        #     assert 151646 in text, '[token] not detected in CosyVoice3 text or prompt_text'
+        # zero_shot 能过，是因为 `text = concat(prompt_text, text)` 而 prompt_text
+        # 以 [token] 结尾；cross_lingual 把 prompt_text 删成空 ⇒ 只剩目标文本 ⇒ 断言失败
+        # ⇒ llm_job 线程抛 AssertionError 中断 ⇒ tts_speech_token_dict 只有 0~3 帧
+        # ⇒ vocoder 报 `Kernel size (4) > input size (3)`（HTTP 500）。
+        # 指纹（tts-diag.log）：`Exception in thread Thread-3 (llm_job): AssertionError`
+        # 与主线程的 conv 报错是**两件事**，conv 只是二次事故。
+        tts_text_token, tts_text_token_len = fe._extract_text_token(i + "<|endofprompt|>" if cross else i)
         n_text = int(tts_text_token_len.item())
         max_len = int(n_text * ratio)
         # 期望时长由自然语速反推；speed>1 说得更快 ⇒ 时长按 1/speed 缩放。
@@ -530,6 +737,9 @@ def _zero_shot_cached(model, text, prompt_text, wav_path, speed):
         lo, hi = expect * _DUR_MIN_FACTOR, expect * _DUR_MAX_FACTOR
         best = None   # (排序键, 段结果)；键 = (是否可接受, 与期望的偏差)
         for attempt in range(retry_cap + 1):
+            # 每次重试换一条随机流（seed = base + attempt）：首次确定性、可复现，
+            # 结果不理想时仍有第二次机会。仅设了 COSYVOICE_SEED 时生效。
+            _apply_seed(i, attempt)
             model_input = dict(base)
             model_input["text"] = tts_text_token
             model_input["text_len"] = tts_text_token_len
@@ -615,8 +825,24 @@ def synthesize(text: str, voice: str = "", speed: float = 1.0) -> bytes:
             wav_path, txt_path = pair
             # v3 协议：参考音文字稿须以 [token] 结尾（llm 在此切分 prompt）
             prompt_text = open(txt_path, "r", encoding="utf-8").read().strip() + "<|endofprompt|>"
+            # ── 模式选择（2026-10-26 定案：**默认 cross_lingual**）──────────
+            # zero_shot：把参考音的 speech token 一并塞进 LLM 上下文，等于让模型
+            #   「接着这个人这段声音往下说」。参考音是英文时，模型被拽在英文发音
+            #   空间里 ⇒ 中文输出成一串无意义音节（STT 闭环实测相似度 **0%**）。
+            # cross_lingual：删掉 prompt 的 speech token，只迁移音色/声学特征，
+            #   不迁移语言（同句实测 **88.5%~100%**）。
+            # 为什么把 cross_lingual 设为默认：
+            #   当前唯一音色 FlutterShy 是英文稿 + 44.1kHz，而目标文本是中文 ——
+            #   这正是 zero_shot 必崩的组合，也是孑遗 2026-10-25 实听反馈
+            #   「你刚刚说出来的声音是一段毫无意义的声音」的真正原因。
+            #   中文参考音下两者实测相当（均 80%），故统一默认不引入退化。
+            # 回退：`COSYVOICE_MODE=zero_shot`。
+            _mode = os.environ.get("COSYVOICE_MODE", "cross_lingual").strip().lower()
+            cross = _mode == "cross_lingual"
             if _PROMPT_CACHE_ON:
-                outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed)
+                outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed, cross=cross)
+            elif cross:
+                outs = model.inference_cross_lingual(text, wav_path, stream=False, speed=speed)
             else:
                 outs = model.inference_zero_shot(text, prompt_text, wav_path, stream=False, speed=speed)
             return _to_wav(outs, model.sample_rate)
