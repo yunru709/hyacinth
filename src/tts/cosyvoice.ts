@@ -66,11 +66,12 @@ export interface CosyVoiceServiceState {
   lastError?: string;
 }
 
-/** 音色目录条目（say.voice 参数 / 设置页下拉的数据源） */
-export interface TtsVoiceInfo {
-  id: string;
-  label: string;
-}
+/**
+ * 音色目录条目 —— 定义已上移到 `engine.ts`（多引擎契约的一部分，2026-10-26 解耦）。
+ * 这里 re-export + 本地 import，保持既有 `from '../tts/cosyvoice.js'` 的调用方不用改。
+ */
+import type { TtsVoiceInfo } from './engine.js';
+export type { TtsVoiceInfo };
 
 /**
  * 音色目录 = `<models.root>/voices/` 下的参考音对（<id>.wav + <id>.txt），

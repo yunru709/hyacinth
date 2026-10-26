@@ -21,6 +21,10 @@ import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { SayVoiceOptions } from '../tools/say.js';
 import { UI_EVENT, type SayVoiceEvent } from '../events.js';
 import { getTtsService, listVoices, type TtsVoiceInfo } from '../tts/cosyvoice.js';
+// 引擎选择交给工厂（voice.tts.engine）：本插件不再写死 CosyVoice3 实现。
+// 契约见 src/tts/engine.ts，可用实现见 src/tts/engines/*。
+import { createTtsEngine } from '../tts/index.js';
+import type { TtsEngine } from '../tts/engine.js';
 
 // UI 卡片契约住在内核原语（plugin-host），此处 re-export 方便插件开发者
 export type { PluginUiCard } from '../kernel/plugin-host.js';
@@ -148,16 +152,6 @@ class SayVoiceBroadcast {
   }
 }
 
-// ── 引擎适配（CosyVoice3 本地引擎）───────────────────────────────
-
-function createCosyVoiceEngine(): SayVoiceEngine {
-  return {
-    id: 'cosyvoice3',
-    voices: () => listVoices(),
-    synthesize: (text, opts) => getTtsService().synthesize(text, { voice: opts.voice, speed: opts.speed }),
-  };
-}
-
 // ── 插件定义 ─────────────────────────────────────────────────────
 
 export interface SayVoicePluginServices {
@@ -184,7 +178,9 @@ export function createSayVoicePlugin(
     ],
 
     async activate(ctx: PluginContext<Record<string, unknown>, LoopHooks>) {
-      const engine = services.engine ?? createCosyVoiceEngine();
+      // 引擎由配置决定（voice.tts.engine）：cosyvoice3（默认）/ online。
+      // 不支持的参数由引擎的 capabilities() 声明，调用处照常传、实现自行忽略。
+      const engine = services.engine ?? createTtsEngine({ get: getConfig });
       const broadcast = new SayVoiceBroadcast({
         engine,
         getConfig,

@@ -996,27 +996,23 @@ def synthesize(text: str, voice: str = "", speed: float = 1.0, emotion: str = ""
             # （官方 example.py:57 用「用四川话说这句话」控制方言/风格）⇒ 这里做一次翻译。
             # 指令文本必须自带 endofprompt（`_ENDOF`），否则 llm.py:479 的
             # `assert 151646 in text` 会失败（与 cross_lingual 的坑同源）。
-            # ── emotion → 语速微调（2026-10-26 实测定案：instruct2 不可用）──────
-            # 试过官方 example.py:57 的 instruct2 路径：链路能跑通（HTTP 200、时长
-            # 变化 +54%~87%），但 CosyVoice3(rl) 会把**指令本身朗读出来**。STT 铁证：
-            #   无 emotion → 「今天天气不错，适合出门走走。」            (100%)
-            #   温柔       → 「用温柔的语气说这句话，今天天气不错…」     (100%)
-            # ⚠️ 相似度仍是 100% 是因为指令里含原句，**不是**因为语气对了 ——
-            #    这正是「墙上有个洞」型假绿：只看数字会以为成功。
-            # 根因：`frontend_instruct2` 删掉 llm_prompt_speech_token 后，模型失去
-            #   「指令这段已经说过了」的锚点，只能把 prompt_text 当正文念。
-            # ⇒ 退回唯一不影响内容正确性的风格维度：语速。
-            _EMO_SPEED = {"温柔": 0.92, "激动": 1.12, "缓慢": 0.85, "轻快": 1.15, "warm": 0.92, "excited": 1.12}
+            # ── emotion：本引擎**不支持，直接忽略**（2026-10-26 定案）──────────
+            # 走过两条路，都不可行：
+            # ① instruct2（官方 example.py:57）：链路能跑通（HTTP 200、时长 +54%~87%），
+            #    但 CosyVoice3(rl) 会把**指令本身朗读出来**。STT 铁证：
+            #      无 emotion → 「今天天气不错，适合出门走走。」          100%
+            #      温柔       → 「用温柔的语气说这句话，今天天气不错…」   100%
+            #    ⚠️ 相似度仍 100% 是因为指令里含原句，不是语气对了 —— 典型假绿。
+            #    根因：frontend_instruct2 删掉 llm_prompt_speech_token 后，模型失去
+            #    「指令这段已经说过了」的锚点，只能把 prompt_text 当正文念。
+            # ② 映射成语速（0.92/1.12）：那是"硬上"，用户明确否掉。
+            # ⇒ 能力由 src/tts/engines/cosyvoice.ts 的 capabilities().emotion=false 声明；
+            #    在线引擎（breeze 的 instructions 字段）才真支持情绪。
             if emotion:
-                _sp = _EMO_SPEED.get(emotion)
-                if _sp:
-                    speed = max(0.5, min(2.0, speed * _sp))
-                    print(f"[cosyvoice] emotion={emotion} → speed×{_sp}", flush=True)
-                else:
-                    print(
-                        f"[cosyvoice] emotion={emotion} 未映射（instruct2 实测会把指令念出来）",
-                        flush=True,
-                    )
+                print(
+                    f"[cosyvoice] emotion={emotion} 已忽略（本引擎不支持情绪控制）",
+                    flush=True,
+                )
             instruct_text = None
             if _PROMPT_CACHE_ON:
                 outs = _zero_shot_cached(model, text, prompt_text, wav_path, speed,
