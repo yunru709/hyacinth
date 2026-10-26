@@ -6,20 +6,19 @@
  */
 
 import type { ProviderSampling } from './fields.js';
+import { REASONING_EFFORTS, type ReasoningEffort } from '../types.js';
 
 /**
- * 推理/思考强度档位（OpenAI 兼容层的 `reasoning_effort` 直接透传这个值）。
+ * 推理/思考强度档位 —— **真源已搬到根级 `types.ts`**。
  *
- * 为什么是这五档：上游实际使用的取值集合就是 `minimal|low|medium|high|max`
- * （OpenAI 系有 minimal/low/medium/high，DeepSeek V4 用 high/max），
- * 原先只声明 'high'|'max' 会把"低档"整个表达不出来 —— UI 上的三档里
- * 有两档其实映射不到上游。
+ * 为什么搬家（2026-10-26）：TUI 的 `/channel config <名> thinking <档位>` 也要列这组
+ * 档位，而层规则 5 禁止 gateway 直连 provider；根级文件属 UI_DIRECT_EXCLUDED（豁免）
+ * ⇒ 两边都从 `types.ts` 取同一份，不再各写一份（此前 TUI 只有 high/max、还混进了
+ * Anthropic 专用的 4k/8k/16k/32k，正是三处各写一份导致的漂移）。
  *
- * ⚠️ 这是**能力上限**而不是每个模型都支持：具体某个模型接受哪些值由上游决定，
- * 传不认识的档位会被上游 400。所以 UI 侧只对 `capabilities.thinking` 的模型
- * 显示这组档位，且默认值来自模型目录条目（reasoningEffort）。
+ * 这里保留 re-export，只为不打断既有的 `import ... from './model-types.js'` 调用方。
  */
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max';
+export { REASONING_EFFORTS, type ReasoningEffort };
 
 /** 模型目录条目 */
 export interface ModelCatalogEntry {

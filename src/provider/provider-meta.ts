@@ -206,6 +206,18 @@ export const PROVIDER_META: Record<string, ProviderFactoryMeta> = {
     defaultModel: 'deepseek-v4.1-flash',
     envKey: 'OPENCODE_API_KEY',
     protocol: 'openai',
+    // 思考接线 = deepseek（顶层 thinking:{type} 开关 + reasoning_effort 强度）。
+    //
+    // 为什么不是 effort（2026-10-26 实测，oc_sk_ 走 Go 端点，各 3 次）：
+    //   · thinking:{type:'disabled'}  → reasoning_tokens [0, 0, 0]   ← 真关掉
+    //   · reasoning_effort:'off'      → reasoning_tokens [55, 0, 0]  ← 关不掉
+    //   · 不发任何字段（基线）         → [39, 27, 17]                ← 默认在思考
+    // ⇒ 只有 deepseek 那套写法则能真正关掉思考；effort 的 'off' 对它无效。
+    //
+    // 5 档强度也确认生效（deepseek style，各 3 次 reasoning_tokens 均值）：
+    //   minimal 197 / low 206 / medium 181 / high 278 / max 727
+    // 低三档彼此接近是上游自身特性，high/max 的抬升说明 reasoning_effort 被采纳。
+    thinkingStyle: 'deepseek',
   },
   commandcode: {
     id: 'commandcode',

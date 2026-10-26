@@ -19,7 +19,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ModelChannelRegistry } from './model-channel-registry.js';
+import { ModelChannelRegistry, applyChannelThinking } from './model-channel-registry.js';
+import { REASONING_EFFORTS } from './model-types.js';
 import { ProviderManager } from './manager.js';
 import { getProviderConfigLoader } from './config.js';
 
@@ -226,5 +227,71 @@ describe('ModelChannelRegistry 通道创建失败记录', () => {
     registry.buildFromLegacy(undefined, undefined, 'deepseek');
     registry.initializeChannels();
     expect(registry.getChannelFailures()).toEqual([]);
+  });
+});
+
+/**
+ * applyChannelThinking —— 通道 thinking 配置 → provider.setThinking 的翻译。
+ *
+ * 2026-10-26 契约变更（孑遗定：档位应是 5 档）：
+ *   · 档位集合收敛为 REASONING_EFFORTS 的 5 档（minimal|low|medium|high|max）
+ *   · 移除 '4k'|'8k'|'16k'|'32k'（Anthropic 专用 token 预算）——
+ *     对 OpenAI 兼容 provider 会被当成 reasoning_effort: 4000（数字）发出 ⇒ 上游 400
+ */
+describe('applyChannelThinking 档位翻译', () => {
+  type Call = [boolean, string | number | undefined];
+  function makeSpy(): { provider: { setThinking: (e: boolean, f?: string | number) => void }; calls: Call[] } {
+    const calls: Call[] = [];
+    return {
+      provider: { setThinking: (enabled: boolean, effort?: string | number) => { calls.push([enabled, effort]); } },
+      calls,
+    };
+  }
+
+  it('off / false ⇒ 关闭，且不传强度', () => {
+    for (const v of [false, 'off'] as const) {
+      const { provider, calls } = makeSpy();
+      applyChannelThinking(provider, v);
+      expect(calls).toEqual([[false, undefined]]);
+    }
+  });
+
+  it('on / true ⇒ 开启，不传强度（用 provider 默认）', () => {
+    for (const v of [true, 'on'] as const) {
+      const { provider, calls } = makeSpy();
+      applyChannelThinking(provider, v);
+      expect(calls).toEqual([[true, undefined]]);
+    }
+  });
+
+  it('5 档强度全部透传，一个都不丢', () => {
+    for (const level of REASONING_EFFORTS) {
+      const { provider, calls } = makeSpy();
+      applyChannelThinking(provider, level);
+      expect(calls).toEqual([[true, level]]);
+    }
+  });
+
+  it('REASONING_EFFORTS 恰好是那 5 档（防止有人偷偷增删）', () => {
+    expect([...REASONING_EFFORTS]).toEqual(['minimal', 'low', 'medium', 'high', 'max']);
+  });
+
+  it("旧档位 '4k'/'8k'/'16k'/'32k' 不再被当成 Anthropic 预算 ⇒ 只开、第二参必须 undefined", () => {
+    // 关键回归：绝不能再出现 setThinking(true, 4000) —— 那会让上游 400
+    for (const legacy of ['4k', '8k', '16k', '32k']) {
+      const { provider, calls } = makeSpy();
+      applyChannelThinking(provider, legacy);
+      expect(calls).toEqual([[true, undefined]]);
+    }
+  });
+
+  it('未配置（undefined）⇒ 完全不动 provider（保留其自身默认）', () => {
+    const { provider, calls } = makeSpy();
+    applyChannelThinking(provider, undefined);
+    expect(calls).toEqual([]);
+  });
+
+  it('provider 没有 setThinking ⇒ 静默跳过，不抛错', () => {
+    expect(() => applyChannelThinking({}, 'high')).not.toThrow();
   });
 });

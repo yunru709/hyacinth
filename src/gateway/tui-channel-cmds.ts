@@ -18,6 +18,7 @@
 import type { TUI } from '@earendil-works/pi-tui';
 import type { ChatLog } from '../ui/chat-log.js';
 import { theme } from '../ui/theme.js';
+import { REASONING_EFFORTS } from '../types.js';
 
 /** 单通道信息（registry.getChannelInfo 返回） */
 export interface ChannelInfo {
@@ -336,11 +337,14 @@ export function createChannelCmds(deps: TuiChannelCmdDeps) {
       }
       const value = rest.join(' ');
       if (key === 'thinking') {
-        const LEVELS = ['on', 'off', 'high', 'max', '4k', '8k', '16k', '32k'];
+        // 档位 = 开关 + 5 档强度（REASONING_EFFORTS，与 provider 的 reasoning_effort 同源）。
+        // 不再列 4k/8k/16k/32k：那是 Anthropic 专用 token 预算，对 OpenAI 兼容通道
+        // 会被当成 reasoning_effort 数字（4000）发出 ⇒ 上游 400（2026-10-26 移除）。
+        const LEVELS: string[] = ['on', 'off', ...REASONING_EFFORTS];
         if (!LEVELS.includes(value)) {
           chatLog.addSystem(
-            theme.warning('Usage: /channel config <通道名> thinking <on|off|high|max|4k|8k|16k|32k>')
-            + theme.dim('  on/off＝开关；high/max＝DeepSeek 系强度；4k~32k＝Anthropic 系思考预算'),
+            theme.warning(`Usage: /channel config <通道名> thinking <on|off|${REASONING_EFFORTS.join('|')}>`)
+            + theme.dim('  on/off＝开关；minimal~max＝5 档思考强度（映射到上游 reasoning_effort）'),
           );
           tui.requestRender();
           return;

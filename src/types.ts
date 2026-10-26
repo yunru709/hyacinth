@@ -302,3 +302,25 @@ export interface AgentResult {
   /** 修改的文件列表 */
   filesModified: string[];
 }
+
+// === 思考强度档位（2026-10-26）===
+
+/**
+ * 推理/思考强度档位（OpenAI 兼容层的 `reasoning_effort` 直接透传这个值）。
+ *
+ * 为什么是这五档：上游实际使用的取值集合就是 `minimal|low|medium|high|max`
+ * （OpenAI 系有 minimal/low/medium/high，DeepSeek V4 用 high/max）。
+ * 原先只声明 'high'|'max' 会把"低档"整个表达不出来。
+ *
+ * ⚠️ 这是**能力上限**而不是每个模型都支持：具体某个模型接受哪些值由上游决定，
+ * 传不认识的档位会被上游 400。
+ *
+ * 为什么放在根级 `types.ts` 而不是 `provider/model-types.ts`：
+ * ① 它是 UI 也要用的**中立常量** —— TUI 的 `/channel config <名> thinking <档位>`
+ *    要把档位列给用户看；
+ * ② 规则 5 禁止 gateway 直连 provider，而根级文件属 UI_DIRECT_EXCLUDED（豁免）
+ *    ⇒ 两边都能取到同一份，不必各写一份（曾因此漂移成 TUI 只有 high/max）。
+ */
+export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'max'] as const;
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];

@@ -12,6 +12,7 @@ import { createLogger } from '../logging/logger.js';
 import type { ModelsConfig, LocalModelConfig } from './model-router.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { derivedUserId } from './user-id.js';
+import { REASONING_EFFORTS } from '../types.js';
 
 const logger = createLogger('model-channel-registry');
 
@@ -32,11 +33,12 @@ export interface ChannelConfig {
   userId?: string;
   /**
      * 思考配置（2026-10-01 起归通道所有 —— 思考是「模型怎么被调用」的参数）。
-     *   - false / 'off'             → 关闭
-     *   - true  / 'on' / 未配置      → 开启（用 provider 默认强度）
-     *   - 'high' | 'max'            → DeepSeek 系 reasoning effort
-     *   - '4k' | '8k' | '16k' | '32k' → Anthropic 系 thinking 预算（token）
+     *   - false / 'off'                         → 关闭
+     *   - true  / 'on' / 未配置                  → 开启（用 provider 默认强度）
+     *   - 'minimal'|'low'|'medium'|'high'|'max' → 思考强度（透传上游 reasoning_effort）
      * 档位天然属于通道：通道决定模型，档位的可用集合也就由该模型所属厂商决定。
+     * ⚠️ 2026-10-26 移除 `'4k'|'8k'|'16k'|'32k'`（Anthropic 预算）——
+     * 它对 OpenAI 兼容 provider 会被当成 `reasoning_effort: 4000` 发出 ⇒ 400。
      */
   thinking?: boolean | string;
   /**
@@ -123,12 +125,18 @@ function getGlobalConfigPath(): string {
  * 把通道的 thinking 配置翻译成 provider 的 (enabled, effort?)，并施加。
  *
  * 为什么放在通道层：思考是「这个模型怎么被调用」的参数，不是会话/界面的偏好。
- * 档位集合由**该通道的厂商**决定（DeepSeek 系认 strength 名，Anthropic 系认 token 预算），
- * 但翻译时不做厂商校验 —— 传错档位由 provider 自己忽略（多传的参数无害），
+ * 档位集合 = `REASONING_EFFORTS` 的 5 档（minimal|low|medium|high|max），
+ * 与 provider 的 `reasoning_effort` 是同一套取值（见 model-types.ts）。
+ * 翻译时不做厂商校验 —— 传错档位由 provider 自己忽略（多传的参数无害），
  * 这样切换通道厂商时已设的档位不会突然变成错误。
  *
  * 未配置 ⇒ 不动（保留 provider 默认）；无法识别的值 ⇒ 按「开」处理并告警，
  * 宁可开着也不静默关掉思考。
+ *
+ * ⚠️ 2026-10-26 移除 `'4k'|'8k'|'16k'|'32k'`（Anthropic 专用 token 预算）：
+ * 它们对 OpenAI 兼容 provider 会被当成 `reasoning_effort: 4000`（数字）发出去，
+ * 上游按枚举校验 ⇒ 400。此前 TUI 把两套档位混在一个列表里，用户选中即踩雷。
+ * 需要 Anthropic 预算时走 anthropic 通道自己的默认（10000），不从这里下传。
  */
 export function applyChannelThinking(
   provider: { setThinking?: (enabled: boolean, effort?: string | number) => void },
@@ -137,12 +145,8 @@ export function applyChannelThinking(
   if (thinking === undefined || thinking === null) return;
   if (thinking === false || thinking === 'off') { provider.setThinking?.(false); return; }
   if (thinking === true || thinking === 'on') { provider.setThinking?.(true); return; }
-  const budgets: Record<string, number> = { '4k': 4000, '8k': 8000, '16k': 16000, '32k': 32000 };
-  if (Object.prototype.hasOwnProperty.call(budgets, thinking)) {
-    provider.setThinking?.(true, budgets[thinking]);
-    return;
-  }
-  if (thinking === 'high' || thinking === 'max') {
+  // 5 档强度：直接透传，由 provider 按厂商接线解释（deepseek/effort 等，见 thinking-style.ts）
+  if ((REASONING_EFFORTS as readonly string[]).includes(thinking)) {
     provider.setThinking?.(true, thinking);
     return;
   }
