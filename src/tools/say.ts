@@ -32,6 +32,21 @@ export interface SayVoiceOptions {
   speed?: number;
   /** 情感/语气标签（如 warm/excited；引擎不支持时忽略） */
   emotion?: string;
+  /**
+   * **引擎特有参数**（自由键值）。哪些键有效由当前引擎的 `capabilities().extras` 决定，
+   * 不在白名单里的会被引擎静默丢弃（不会让整句失败）。
+   *
+   * 【为什么要开这个口子】（2026-10-26 孑遗要求）
+   *   不同模型的可调项差别很大：breeze 有 temperature / top_k / seed / guidance_scale /
+   *   text_chunk_mode 等 10 余项，cosyvoice3 只有 num_inference_steps 那几项。
+   *   若做成 say 的固定字段，schema 会被撑爆且每加一个引擎就要改一次 say。
+   *   ⇒ 用一个自由袋子 + 引擎侧白名单过滤，既"把能力都准备好"又不污染主 schema。
+   *
+   * ⚠️ 「笑声」这类非语言效果**不走这里**：实测 `[laughter]` / `<laugh>` 是**文本内标签**
+   *   （需配合 text_chunk_mode=tag_aware 才不被当普通文字切分），直接写进 content 即可，
+   *   引擎会自动识别并切换分块模式。
+   */
+  extras?: Record<string, unknown>;
   /** false = 本次只交付文字、不朗读（默认跟随用户设置的语音播报开关） */
   broadcast?: boolean;
 }
@@ -54,6 +69,16 @@ export function parseSayVoiceOptions(args: Record<string, unknown>): SayVoiceOpt
     opts.speed = Math.min(2, Math.max(0.5, args.speed));
   }
   if (typeof args.emotion === 'string' && args.emotion.trim()) opts.emotion = args.emotion.trim();
+  // extras 只接受**普通对象**（数组/null/标量一律丢弃）。
+  // 不在这里校验键名：白名单属于具体引擎（capabilities().extras），say 层不认识任何引擎，
+  // 在这儿硬编码等于把引擎知识漏进工具层。空对象也丢掉，免得下游白跑一趟过滤。
+  if (args.extras && typeof args.extras === 'object' && !Array.isArray(args.extras)) {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(args.extras as Record<string, unknown>)) {
+      if (v !== undefined && v !== null) clean[k] = v;
+    }
+    if (Object.keys(clean).length > 0) opts.extras = clean;
+  }
   if (args.broadcast === false) opts.broadcast = false;
   return opts;
 }
@@ -80,7 +105,11 @@ export function createSayTool(submit: SaySubmitFn, voiceNotice?: SayVoiceNoticeF
       '**调用后不结束回合**，说完还能继续调用别的工具干活。' +
       '语音侧参数（可选，取决于本地语音引擎能力，不支持的项会被忽略）：' +
       'voice=音色 id、speed=语速 0.5~2、emotion=语气（如 warm）；' +
-      'broadcast=false 表示这次只出文字、不要朗读（比如用户正在开会）。',
+      'extras=引擎特有参数（如 temperature/top_k/seed/text_chunk_mode；具体支持哪些取决于当前引擎，' +
+      '不在白名单里的会被静默丢弃，不影响朗读）；' +
+      'broadcast=false 表示这次只出文字、不要朗读（比如用户正在开会）。' +
+      '**笑声等非语言效果**：直接在 content 里写 [laughter] 或 [laugh] 这类方括号标签，' +
+      '当前引擎若支持会自动合成（实测 BreezeTTS 生效，时长增加约 1.4s）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -99,6 +128,15 @@ export function createSayTool(submit: SaySubmitFn, voiceNotice?: SayVoiceNoticeF
         emotion: {
           type: 'string',
           description: '语气/情感标签（可选，如 warm、excited）。引擎不支持时忽略。',
+        },
+        extras: {
+          type: 'object',
+          description:
+            '引擎特有参数（可选，自由键值）。当前引擎支持哪些由引擎自描述决定，' +
+            '不在白名单里的键会被静默丢弃、不影响朗读。' +
+            '例：breeze 支持 temperature / top_k / top_p / seed / guidance_scale / text_chunk_mode 等；' +
+            'cosyvoice3 支持 num_inference_steps / top_k 等。',
+          additionalProperties: true,
         },
         broadcast: {
           type: 'boolean',

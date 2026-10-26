@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { TtsCapabilities, TtsEngine, TtsVoiceInfo } from '../engine.js';
+import type { TtsCapabilities, TtsEngine, TtsSynthesizeOptions, TtsVoiceInfo } from '../engine.js';
 // 音色目录的**单一真源**（<models.root>/voices，wav+txt 成对才算数）。
 // 不要在这里自己 readdir 一套：cosyvoice 已经在用 voice-dir，两套实现迟早分叉。
 // 2026-10-26 起支持「角色/情绪」两级结构：
@@ -95,6 +95,7 @@ export interface BreezeTts2Config {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+
 /** 串行链：8GB 显存只能容一份权重，并发会 OOM */
 let chain: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
@@ -157,7 +158,7 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
   async function synthesizeViaHttp(
     c: BreezeTts2Config,
     text: string,
-    opts: { voice?: string; speed?: number; emotion?: string },
+    opts: TtsSynthesizeOptions,
   ): Promise<Buffer> {
     const base = String(c.serverUrl).replace(/\/+$/, '');
     const body: Record<string, unknown> = {
@@ -199,8 +200,20 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
       body.reference_text = fs.readFileSync(pick.entry.txtPath, 'utf8').trim();
     }
 
-    if (c.requestOptions && Object.keys(c.requestOptions).length > 0) {
-      body.options = c.requestOptions;
+    // request options 合并：配置级（c.requestOptions）为基底，调用级 extras 覆盖其上。
+    // 调用级更高优先（更具体的一次请求该压过全局默认）。
+    // 白名单外的 extras 键由 pickExtras 丢弃并留 debug（多一个键不该让整句哑掉）。
+    // 文本含非语言标签（[laughter]/<laugh>）且未显式指定分块模式 ⇒ 自动 tag_aware，
+    // 否则长文本按 codepoint 切块时可能把标签切断而静默失效。
+    const mergedOptions: Record<string, unknown> = {
+      ...(c.requestOptions ?? {}),
+      ...pickExtras(opts.extras),
+    };
+    if (!mergedOptions.text_chunk_mode && hasInlineTags(text)) {
+      mergedOptions.text_chunk_mode = 'tag_aware';
+    }
+    if (Object.keys(mergedOptions).length > 0) {
+      body.options = mergedOptions;
     }
 
     const timeout = c.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -260,7 +273,7 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
 
   async function synthesize(
     text: string,
-    opts: { voice?: string; speed?: number; emotion?: string } = {},
+    opts: TtsSynthesizeOptions = {},
   ): Promise<Buffer> {
     const c = conf();
     // 常驻 server 优先：实测 CLI 整次 9.7s（`--metrics` 说纯合成只 1.9s，8s 是进程
@@ -324,7 +337,16 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
       );
     }
 
-    for (const [k, v] of Object.entries(c.requestOptions ?? {})) {
+    // 与 HTTP 路径**完全一致**的合并规则（配置级为基底 + 调用级 extras 覆盖 + 自动 tag_aware）。
+    // 两条路径必须同源，否则"走 server 和走 CLI 表现不同"这种 bug 极难查。
+    const mergedOptions: Record<string, unknown> = {
+      ...(c.requestOptions ?? {}),
+      ...pickExtras(opts.extras),
+    };
+    if (!mergedOptions.text_chunk_mode && hasInlineTags(text)) {
+      mergedOptions.text_chunk_mode = 'tag_aware';
+    }
+    for (const [k, v] of Object.entries(mergedOptions)) {
       args.push('--request-option', `${k}=${v}`);
     }
 
@@ -371,10 +393,14 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     capabilities: (): TtsCapabilities => ({
       voice: true,
       // speed：audio.cpp 的 breeze_tts spec 没有语速项（要变速得改时长参数或后处理），
-      // 如实报 false 而不是假装支持。
+      // 如实报 false 而不是假装支持。server 侧传 speed 直接 500
+      //（`speed is not supported by this model`），CLI 侧同样。
       speed: false,
-      // instruct = style_control，实测定性与内容都对
+      // instruct = style_control，实测定性与内容都对（不念出指令，这点和 cosyvoice3 相反）
       emotion: true,
+      // 额外可调项：直接来自 model_specs/breeze_tts.json 的 request options。
+      // 调用方（say）据此知道能传什么，设置页据此决定渲染哪些输入框。
+      extras: [...BREEZE_EXTRA_KEYS],
     }),
     status: () => {
       const c = conf();
@@ -391,3 +417,78 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     },
   };
 }
+
+// ── extras 白名单（放在文件尾即可：模块加载完才可能被调用）────────────
+
+/**
+ * 本引擎认的 `extras` 键 —— 逐字取自 `model_specs/breeze_tts.json` 的 `options.request`。
+ *
+ * 【为什么要有白名单，而不是把 extras 原样透传】
+ *   audio.cpp 对未知 request option 是**整单失败**，不是忽略：
+ *   实测传 `--language` 得到 `unknown BreezeTTS request option: language`，一句都出不来。
+ *   所以必须"只给我认识的"，多余键静默丢弃（debug 留痕）。
+ *
+ * 【为什么排除了 instruct / reference_text】
+ *   这两个由 voice / emotion 派生，不接受外部直传：
+ *   · instruct 与 emotion 抢同一个通道（寒了 emotion 的表达），直传会互相覆盖
+ *   · reference_text 必须与 voice_ref 成对出现，单独传只会让模型困惑
+ *   要改它们请用 voice / emotion 参数。
+ */
+const BREEZE_EXTRA_KEYS = [
+  'text_chunk_size',
+  'text_chunk_mode',
+  'max_tokens',
+  'guidance_scale',
+  'temperature',
+  'depth_temperature',
+  'top_k',
+  'top_p',
+  'seed',
+  'stream_frames_per_event',
+  'stream_lookahead_margin',
+  'stream_chunk_policy',
+] as const;
+
+/**
+ * 过滤 extras：白名单外的键丢弃并留 debug 日志。
+ * `undefined` / `null` 也跳过 —— 让"传了但没值"等价于"没传"，避免把 null 变成字符串 "null"。
+ *
+ * 导出仅为可测试：纯函数、无副作用（除 debug 日志），不构成对外 API。
+ */
+export function pickExtras(extras: Record<string, unknown> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!extras) return out;
+  const dropped: string[] = [];
+  for (const [k, v] of Object.entries(extras)) {
+    if (v === undefined || v === null) continue;
+    if ((BREEZE_EXTRA_KEYS as readonly string[]).includes(k)) out[k] = v;
+    else dropped.push(k);
+  }
+  if (dropped.length > 0) {
+    logger.debug(`Breeze-TTS-2 丢弃不支持的 extras 键：${dropped.join(', ')}`);
+  }
+  return out;
+}
+
+/**
+ * 文本里是否含非语言标签（`[laughter]` / `<laugh>` 这类）。
+ *
+ * 【tag_aware 到底解决什么 —— 实测修正了一版想当然的假设】（2026-10-26）
+ *   先前以为"default 模式下标签不生效"，于是加了这个探测来验证。结果**否证**：
+ *     A1 无标签+default    = A2 无标签+tag_aware   （2.48s / 119084 B，逐字节相同）
+ *     B1 [laughter]+default= B2 [laughter]+tag_aware（3.84s / 184364 B，逐字节相同）
+ *     C1 <laugh>+default   = C2 <laugh>+tag_aware  （4.32s / 207404 B，逐字节相同）
+ *   ⇒ **标签识别与分块模式无关**，模型自己就认。短文本下 tag_aware 是纯噪声。
+ *
+ *   那还保留它干什么：`text_chunk_mode` 只在**文本长到需要分块**（默认 600 codepoints
+ *   一块）时才起作用。分块点若落在 `[laughter]` 中间 ⇒ 切成 `[lau` + `ghter]`，
+ *   两半都不再是合法标签而退化成普通字音。tag_aware 专门避免在标签内部切。
+ *   ⇒ 这是**长文本保险丝**，短句看不出差别（上面的实测就是短句）。
+ *   成本近乎零（只多设一个参数），故保留；但别再把它的作用说成"让标签生效"。
+ *
+ * ⚠️ 中文全角括号 `（笑）` 实测**无效**（只 +0.16s，属噪声）⇒ 正则只认方/尖括号。
+ */
+export function hasInlineTags(text: string): boolean {
+  return /\[[^\]\n]{1,24}\]|<[^>\n]{1,24}>/.test(text);
+}
+

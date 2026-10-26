@@ -109,5 +109,26 @@ describe('parseSayVoiceOptions', () => {
   it('空串/纯空白字符串参数丢弃', () => {
     expect(parseSayVoiceOptions({ voice: '  ', emotion: '' })).toEqual({});
   });
+
+  it('extras：普通对象原样保留（白名单在引擎侧，say 不做引擎知识判断）', () => {
+    const opts = parseSayVoiceOptions({ extras: { temperature: 0.7, top_k: 20, seed: 42 } });
+    expect(opts.extras).toEqual({ temperature: 0.7, top_k: 20, seed: 42 });
+  });
+
+  it('extras：undefined/null 值的键剔除（"传了但没值" ≡ 没传）', () => {
+    const opts = parseSayVoiceOptions({ extras: { temperature: 0.7, top_k: undefined, seed: null } });
+    expect(opts.extras).toEqual({ temperature: 0.7 });
+  });
+
+  it('extras：非对象（数组/字符串/数字）丢弃', () => {
+    expect(parseSayVoiceOptions({ extras: [1, 2] }).extras).toBeUndefined();
+    expect(parseSayVoiceOptions({ extras: 'temperature=0.7' }).extras).toBeUndefined();
+    expect(parseSayVoiceOptions({ extras: 42 }).extras).toBeUndefined();
+  });
+
+  it('extras：空对象不写入（免得下游白跑一趟过滤）', () => {
+    expect(parseSayVoiceOptions({ extras: {} }).extras).toBeUndefined();
+    expect(parseSayVoiceOptions({ extras: { a: undefined } }).extras).toBeUndefined();
+  });
 });
 

@@ -43,8 +43,15 @@ export interface SayVoiceEngine {
   id: string;
   /** 可用音色目录（LLM 的 voice 参数取值域 + 设置页下拉数据源） */
   voices(): TtsVoiceInfo[];
-  /** 合成 → WAV Buffer。voice 不在目录内时实现可回退默认并注明 */
-  synthesize(text: string, opts: { voice?: string; speed?: number; emotion?: string }): Promise<Buffer>;
+  /**
+   * 合成 → WAV Buffer。voice 不在目录内时实现可回退默认并注明。
+   * `extras` = 引擎特有参数的自由袋子，由**引擎自己**按 capabilities().extras 过滤
+   * （插件层不认识任何具体引擎，不在这里做白名单）。
+   */
+  synthesize(
+    text: string,
+    opts: { voice?: string; speed?: number; emotion?: string; extras?: Record<string, unknown> },
+  ): Promise<Buffer>;
 }
 
 /** 本插件对外服务句柄（宿主注册 'say-voice.api'） */
@@ -131,7 +138,14 @@ class SayVoiceBroadcast {
     const speech = speechTextFromMarkdown(text);
     const voice = opts.voice || String(this.deps.getConfig<string>('voice.say.voice') ?? '') || undefined;
     try {
-      const wav = await this.deps.engine.synthesize(speech, { voice, speed: opts.speed, emotion: opts.emotion });
+      // extras 原样透传给引擎：白名单过滤是**引擎自己的事**（capabilities().extras），
+      // 插件层不认识任何具体引擎，在这里过滤等于把引擎知识漏进来。
+      const wav = await this.deps.engine.synthesize(speech, {
+        voice,
+        speed: opts.speed,
+        emotion: opts.emotion,
+        extras: opts.extras,
+      });
       const payload: SayVoiceEvent = {
         state: 'ready',
         audioWavBase64: wav.toString('base64'),

@@ -33,13 +33,39 @@ export interface TtsSynthesizeOptions {
   speed?: number;
   /** 情绪/语气描述。仅声明 emotion:true 的引擎会用到 */
   emotion?: string;
+  /**
+   * **引擎特有参数**（自由键值）。调用方（say 工具）原样透传，不认识的由引擎丢弃。
+   *
+   * 【为什么需要这个口子】（2026-10-26 孑遗指出）
+   *   不同模型的可调项差别极大 —— breeze 有 14 个 request options（instruct /
+   *   temperature / top_k / seed / text_chunk_mode…），cosyvoice3 只有 template_name /
+   *   num_inference_steps 那几项，index_tts2 又有一套 emotion_alpha/emotion_vector。
+   *   把它们做成 say 的固定字段会把 say 的 schema 撑爆、且每加一个引擎就要改一次 say。
+   *   ⇒ 用**一个自由袋子** + `capabilities().extras` 白名单：调用方照着白名单传，
+   *     引擎按白名单过滤（白名单外的静默丢弃并留 debug 日志，绝不因一个多余的键整句失败）。
+   *
+   * ⚠️ 常见误区：**"笑声"不在这里**。实测 `[laughter]` / `<laugh>` 是**文本内标签**
+   *   （要配合 text_chunk_mode=tag_aware 才不被当普通文字切分），属于 content 的一部分，
+   *   不是参数 —— 详见 breeze-tts2.ts 里 tag_aware 的说明。
+   */
+  extras?: Record<string, unknown>;
 }
 
-/** 引擎能力声明 —— 调用方据此判断某个参数是否有效 */
+/**
+ * 引擎能力声明 —— 调用方据此判断某个参数是否有效。
+ *
+ * 【设计原则：能力自描述】不支持的参数**静默忽略**，绝不"硬上"
+ * （例：cosyvoice3 的 instruct2 会把指令本身念出来，所以它永远不声明 emotion）。
+ */
 export interface TtsCapabilities {
   voice: boolean;
   speed: boolean;
   emotion: boolean;
+  /**
+   * 本引擎额外支持的参数名（`extras` 里认的键）。
+   * 未声明 = 一个都不认。调用方/设置页据此渲染可调项，避免给出"填了没用"的表单。
+   */
+  extras?: string[];
 }
 
 /** 引擎运行态（本地引擎报模型/子进程状态；在线引擎报连通性） */
