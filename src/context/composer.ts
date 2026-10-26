@@ -477,6 +477,18 @@ export class LayeredContextComposer implements ContextComposer {
       }
 
       const content = await resolveSection(sec, ctx);
+      // ⚠️ 空段是**整段丢弃**，不是留空占位 ⇒ 它后面所有段的字节位置整体前移一位
+      // ⇒ 纯前缀缓存从这一格起全废（auto-prefix 对位置极度敏感，内容一字未改也可能全 miss）。
+      //
+      // 已知且已接受的代价（2026-10-26 实测，孑遗决定接受、不修）：
+      //   重启后首轮 `mcp` 段因 MCP server 尚未连上而为空（实测连上比首轮请求晚 4~10s）
+      //   ⇒ 28 token 的 mcp 段消失一格，代价是其后 18.9 万 token 的 history 全部重算
+      //   （该轮命中率 ~1.2%，仅前 5 段约 2.4k token 仍命中）。
+      //   **只赔一轮**：下一轮 MCP 连上、段回来，prefixHash 逐字恢复原值 —— 说明 provider
+      //   侧缓存从未被清，只是那一轮前缀对不上。`cache-trace.jsonl` 里 mcp 段存在性翻转
+      //   14 次，每次都精确对应一次 `kernel assembled`，属重启的固定代价而非偶发故障。
+      //   要根治得动段顺序（把 runtime:mcp 挪到 history 之后，代价降约 60 倍），
+      //   但会改变模型看到 mcp 提示的相对位置，属另一件事，未做。
       if (!content) continue;
       traces.push(this.traceSection(sec.name, zoneKey, content));
 
