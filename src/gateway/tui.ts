@@ -88,6 +88,7 @@ import { createTuiAskUser } from './tui-ask-user.js';
 import { showWelcome } from './tui-welcome.js';
 import { createModelLocalCmds } from './tui-model-local.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
+import { SayPlaybackQueue } from './say-playback-queue.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
 import { formatDeclaredToolLinks, getCurrentToolLinks } from '../utils/tool-links.js';
@@ -801,41 +802,57 @@ export async function runTui(
   // 用 spawn 而不是 execSync：PlaySync 会阻塞到播放结束（4~14 秒），execSync 会把
   // TUI 主线程一起卡住；spawn 异步，且能拿到退出码与 stderr。
   // 位置选 `~/.agent/work/` 而非 %TEMP%：火绒会拦未知 exe 写 %TEMP%（见纪律）。
-  const playLocalWav = (wav: Buffer): void => {
-    try {
-      const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, `say-${Date.now()}.wav`);
-      fs.writeFileSync(file, wav);
-      // ⚠️ 2026-10-25 修正：原实现用 `start /b` + 静默 catch，播放成败**完全不可知**
-      // （say-cache 里的 wav 被删只证明 powershell 起来了，不证明扬声器真出了声）。
-      // 违反「catch 里必须打日志」⇒ 改成 spawn + exit code/stderr 留痕。
-      const ps = spawn(
-        'powershell',
-        [
-          '-NoProfile',
-          '-WindowStyle',
-          'Hidden',
-          '-Command',
-          `$p='${file}'; try { (New-Object Media.SoundPlayer $p).PlaySync() } finally { Remove-Item $p -ErrorAction SilentlyContinue }`,
-        ],
-        { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
-      );
-      let stderr = '';
-      ps.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-      ps.on('error', (e: Error) => {
-        logger.warn('say-voice: 本地播放启动失败', { error: e.message });
-      });
-      ps.on('exit', (code: number | null) => {
-        if (code !== 0) {
-          logger.warn('say-voice: 本地播放失败', { code, stderr: stderr.slice(0, 300) });
-        }
-      });
-    } catch (e) {
-      // 播放器不可用 → 降级但不静默（语音是增强，不打断对话，但必须留痕）
-      logger.warn('say-voice: 本地播放异常', { error: e instanceof Error ? e.message : String(e) });
-    }
-  };
+  //
+  // ⚠️ 2026-10-26 修正（孑遗实听：「同时播放好多个话，一句话没说完另一句就开始了」）：
+  // 原实现收到事件就**直接 spawn 一个 powershell**，多个 say 在一轮里连发时，
+  // 多个 PlaySync 进程**并发发声** ⇒ 声音糊成一片。合成侧本就是串行的，
+  // 问题纯粹在播放侧 ⇒ 包一层 `SayPlaybackQueue`（串行 + 超时兜底 + 积压上限）。
+  // 单测见 `say-playback-queue.test.ts`（串行/保序/不丢/超时不死锁各有断言）。
+  const sayPlayback = new SayPlaybackQueue({
+    logger,
+    play: (wav, done) => {
+      try {
+        const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
+        fs.mkdirSync(dir, { recursive: true });
+        // 文件名加随机后缀：Date.now() 在快速连发时会同毫秒撞名，
+        // 后者覆盖前者 ⇒ 播的是同一段音频（也是"听着像重复"的一个来源）。
+        const file = path.join(dir, `say-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
+        fs.writeFileSync(file, wav);
+        // ⚠️ 2026-10-25 修正：原实现用 `start /b` + 静默 catch，播放成败**完全不可知**
+        // （say-cache 里的 wav 被删只证明 powershell 起来了，不证明扬声器真出了声）。
+        // 违反「catch 里必须打日志」⇒ 改成 spawn + exit code/stderr 留痕。
+        const ps = spawn(
+          'powershell',
+          [
+            '-NoProfile',
+            '-WindowStyle',
+            'Hidden',
+            '-Command',
+            `$p='${file}'; try { (New-Object Media.SoundPlayer $p).PlaySync() } finally { Remove-Item $p -ErrorAction SilentlyContinue }`,
+          ],
+          { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
+        );
+        let stderr = '';
+        ps.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        // done() 幂等（队列内部只认第一次）：error 与 exit 可能都触发，不必自己去重
+        ps.on('error', (e: Error) => {
+          logger.warn('say-voice: 本地播放启动失败', { error: e.message });
+          done();
+        });
+        ps.on('exit', (code: number | null) => {
+          if (code !== 0) {
+            logger.warn('say-voice: 本地播放失败', { code, stderr: stderr.slice(0, 300) });
+          }
+          done();
+        });
+      } catch (e) {
+        // 播放器不可用 → 降级但不静默（语音是增强，不打断对话，但必须留痕）
+        logger.warn('say-voice: 本地播放异常', { error: e instanceof Error ? e.message : String(e) });
+        done();
+      }
+    },
+  });
+  const playLocalWav = (wav: Buffer): void => sayPlayback.enqueue(wav);
 
   // client 端协议事件分发：把协议事件映射回 TUI 渲染/交互
   // （message.* → tuiHandler；permission.request → 权限队列；ask_user → 表单）

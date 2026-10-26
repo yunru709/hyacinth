@@ -1,5 +1,10 @@
-// say-voice 插件单测：Markdown→口播文本清洗 / 播报门控 / 串行队列（忙时留最新）/
-// uiCards 贡献声明 / 服务句柄注册。引擎注入假实现（不触真实 CosyVoice 服务）。
+// say-voice 插件单测：Markdown→口播文本清洗 / 播报门控 / 串行合成队列（FIFO 全保留，
+// 积压超上限才丢最旧）/ uiCards 贡献声明 / 服务句柄注册。
+// 引擎注入假实现（不触真实 CosyVoice 服务）。
+//
+// ⚠️ 2026-10-26 语义变更：原断言是「忙时只留最新（后句替换前句）」，
+// 那正是「一轮连发多句时中间的话被静默丢弃」的 bug（实听确认）。改为 FIFO 全保留后，
+// 本文件的队列用例必须断言「三句全播」而不是「只播首尾」。
 import { describe, it, expect, vi } from 'vitest';
 import { PluginHost } from '../kernel/plugin-host.js';
 import type { LoopHooks } from '../orchestrator/loop-hooks.js';
@@ -116,7 +121,7 @@ describe('say-voice 插件（播报门控与队列）', () => {
     expect((events[0][1] as { message: string }).message).toContain('模型未就绪');
   });
 
-  it('串行队列：忙时只留最新（前一句合成中来的新句替换排队句）', async () => {
+  it('串行合成队列：FIFO 全保留 —— 忙时来的句子排队，一句不丢', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     const calls: string[] = [];
@@ -130,12 +135,44 @@ describe('say-voice 插件（播报门控与队列）', () => {
     api.onSayDelivered('第一句', {}, (t, p) => events.push([t, p]));
     await new Promise((r) => setTimeout(r, 5));
     api.onSayDelivered('第二句', {}, (t, p) => events.push([t, p]));   // 忙时排队
-    api.onSayDelivered('第三句', {}, (t, p) => events.push([t, p]));   // 替换排队（只留最新）
+    api.onSayDelivered('第三句', {}, (t, p) => events.push([t, p]));   // 忙时排队（**不该**替换上一句）
     await new Promise((r) => setTimeout(r, 5));
-    release();   // 放行第一句 → 队列里只剩第三句
-    await new Promise((r) => setTimeout(r, 20));
-    expect(calls).toEqual(['第一句', '第三句']);
-    expect(events.map((e) => (e[1] as { textPreview: string }).textPreview)).toEqual(['第一句', '第三句']);
+    // 前一句没完成前，后两句只是排队，未开始合成
+    expect(calls).toEqual(['第一句']);
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+    // 三句全部按入队顺序合成并各推一条事件
+    expect(calls).toEqual(['第一句', '第二句', '第三句']);
+    expect(events.map((e) => (e[1] as { textPreview: string }).textPreview)).toEqual([
+      '第一句',
+      '第二句',
+      '第三句',
+    ]);
+  });
+
+  it('积压超上限（20）：丢最旧、保最新 —— 不让音频滞后几分钟', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const calls: string[] = [];
+    const synthesize = vi.fn(async (text: string) => {
+      calls.push(text);
+      if (calls.length === 1) await gate;   // 第一句挂起，制造忙态
+      return Buffer.from('w');
+    });
+    const { api } = await mounted({ 'voice.say.broadcast': true }, fakeEngine({ synthesize }));
+    api.onSayDelivered('句0', {}, () => {});
+    await new Promise((r) => setTimeout(r, 5));
+    // 忙态下灌 24 句（句1..句24）⇒ 超过 20 的上限，最旧的 4 句被丢
+    for (let i = 1; i <= 24; i++) api.onSayDelivered(`句${i}`, {}, () => {});
+    release();
+    await new Promise((r) => setTimeout(r, 60));
+    // 句0 已在合成中（不受上限影响）；句1..句4 因积压被丢；句5..句24 全部保留
+    expect(calls[0]).toBe('句0');
+    expect(calls).not.toContain('句1');
+    expect(calls).not.toContain('句4');
+    expect(calls).toContain('句5');
+    expect(calls).toContain('句24');
+    expect(calls).toHaveLength(1 + 20);   // 句中 + 保留的 20 句
   });
 });
 

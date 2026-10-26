@@ -5,9 +5,13 @@
  *   - 引擎面（SayVoiceEngine）：音色目录 + 合成，当前实现 = 本地 CosyVoice3
  *     （src/tts/cosyvoice.ts）。引擎可替换 —— 换 TTS 只需提供新引擎实现，
  *     say 工具 schema 不变（不支持的字段由引擎忽略）。
- *   - 播报面（SayVoiceBroadcast）：loop.sayVoice 钩子的实现方。串行队列
- *     （忙时只留最新一句，同 CompanionVoiceService 语义）、失败静默降级为
- *     一条 error 事件，绝不阻塞回合收尾。
+ *   - 播报面（SayVoiceBroadcast）：loop.sayVoice 钩子的实现方。串行**合成**队列，
+ *     FIFO 全保留（积压超 20 句才丢最旧并留痕）、失败静默降级为一条 error 事件，
+ *     绝不阻塞回合收尾。
+ *     ⚠️ 2026-10-26 语义变更：原设计是「忙时只留最新一句」（对齐 CompanionVoiceService），
+ *     但实听发现这会让「一轮连发多句」时**中间的话被静默丢弃**（发 10 句只播首尾 2 句）。
+ *     say 是聊天里的"嘴"，每句都有意为之 ⇒ 改为 FIFO。注意这里**只保证不丢话**，
+ *     真正防叠音的是播放侧（gateway/say-playback-queue.ts）。
  *   - UI 面（uiCards）：向 webui 声明本插件贡献的设置卡（渲染器 kind +
  *     挂载槽位）——「UI 的变更依靠插件」的最小闭环：卡片出现/消失由插件
  *     挂载状态决定，渲染器本体留在 webui（插件不注入任意 HTML）。
@@ -95,13 +99,27 @@ export function speechTextFromMarkdown(md: string): string {
   return s;
 }
 
-// ── 播报队列（串行；忙时只留最新）────────────────────────────────
+// ── 播报队列（串行合成；FIFO 全保留，积压超上限才丢最旧）──────────────
 
 type NotifyFn = (type: string, payload?: unknown) => void;
 
 class SayVoiceBroadcast {
   private busy = false;
-  private queued: { text: string; opts: SayVoiceOptions; notify: NotifyFn } | null = null;
+  /**
+   * 待合成队列（FIFO）。
+   *
+   * ⚠️ 2026-10-26 修（孑遗实听「同时播放好多个话」时发现的连带问题）：
+   * 原实现是**单槽**（忙时 `this.queued = 最新一句` 直接覆盖），后果是模型一轮
+   * 连发多句时**中间的话被静默丢弃** —— 实测发 10 句，实际只播首尾 2 句。
+   * 「只留最新」对**通知类**播报合理（旧通知过时了），但 say 是聊天里的「嘴」，
+   * 每句都是有意说的 ⇒ 丢话是 bug ⇒ 改成真 FIFO 队列。
+   *
+   * 但仍设上限：超出丢**最旧**并留痕。理由是音频有严重的滞后代价 ——
+   * 一句话合成约 1.7s + 播放 4~14s，积压 20 句意味着用户要听 2 分钟前的旧话。
+   * 宁可少播一句陈年旧话（且留日志），也不要让播报变成"追着念历史"。
+   */
+  private readonly pending: Array<{ text: string; opts: SayVoiceOptions; notify: NotifyFn }> = [];
+  private static readonly MAX_PENDING = 20;
 
   constructor(
     private readonly deps: {
@@ -115,23 +133,30 @@ class SayVoiceBroadcast {
   onSayDelivered(text: string, opts: SayVoiceOptions, notify: NotifyFn): void {
     if (opts.broadcast === false) return;                        // 本次明确不朗读
     if (this.deps.getConfig<boolean>('voice.say.broadcast') !== true) return; // 用户总开关
-    if (this.busy) {
-      this.queued = { text, opts, notify };                      // 忙时只留最新一句
-      return;
+    if (this.pending.length >= SayVoiceBroadcast.MAX_PENDING) {
+      this.pending.shift();                                      // 丢最旧（理由见字段注释）
+      this.deps.logger.warn('say-voice: 播报积压超限，丢弃最早一句', {
+        max: SayVoiceBroadcast.MAX_PENDING,
+      });
     }
+    this.pending.push({ text, opts, notify });
+    if (this.busy) return;                                       // 正在 drain，队列会自己消化
     this.busy = true;
-    void this.drain(text, opts, notify);
+    void this.drain();
   }
 
-  private async drain(text: string, opts: SayVoiceOptions, notify: NotifyFn): Promise<void> {
-    for (;;) {
-      await this.speakOnce(text, opts, notify);
-      const next = this.queued;
-      this.queued = null;
-      if (!next) break;
-      ({ text, opts, notify } = next);
+  private async drain(): Promise<void> {
+    try {
+      for (;;) {
+        const next = this.pending.shift();
+        if (!next) break;
+        await this.speakOnce(next.text, next.opts, next.notify);
+      }
+    } finally {
+      // ⚠️ 必须复位：一旦 busy 卡在 true，之后所有 say 都只进队列不播，
+      // 而且**不会有任何报错**（外部只看到"没声音"）—— 这正是本次 bug 的形态。
+      this.busy = false;
     }
-    this.busy = false;
   }
 
   private async speakOnce(text: string, opts: SayVoiceOptions, notify: NotifyFn): Promise<void> {
