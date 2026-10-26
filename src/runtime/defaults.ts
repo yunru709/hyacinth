@@ -145,6 +145,53 @@ export function getDefaultConfig(): FullConfig {
         /** 默认音色 id（空 = 引擎默认） */
         voice: '',
       },
+      /**
+       * TTS 引擎选择：say 工具实际接到哪个实现（2026-10-26）。
+       * 三选一，切换后下一回合 say 即生效（工厂按配置指纹重建实例，不重启进程）。
+       * 由 TUI `/tts` 或 WebUI 设置页「语音合成」卡选择。
+       */
+      tts: {
+        /** cosyvoice3（默认，本地 python 服务）/ breeze-tts-2（本地 GGUF）/ online（在线 API） */
+        engine: 'cosyvoice3',
+        /**
+         * 本地 GGUF 引擎（audio.cpp 运行时）。
+         * 路径留空 = 未安装 ⇒ 该引擎在 UI 里显示「未就绪」（不会影响其它引擎）。
+         * 安装方式见 breeze-tts2.ts 文件头（需 audiocpp_cli.exe + GGUF + CUDA 的 cudart 归档）。
+         */
+        breeze: {
+          cliPath: '',
+          modelPath: '',
+          /** cuda | cpu | vulkan */
+          backend: 'cuda',
+          device: 0,
+          /** 不传 emotion 时的默认 instruct（空 = 用模型 spec 自带默认） */
+          defaultInstruct: '',
+          /** 参考音目录（<id>.wav 可作 voice-ref 做音色克隆） */
+          voicesDir: '',
+          /** 临时 WAV 目录（空 = 模型同级 tts-work/。**别指到 %TEMP%**：火绒拦新 exe 写） */
+          workDir: '',
+          /** 透传 audio.cpp 的 --request-option（如 max_tokens / guidance_scale） */
+          requestOptions: {},
+          /** 单次合成超时（含模型加载，默认 180s） */
+          timeoutMs: 180000,
+        },
+        /**
+         * 在线引擎（breeze | openai-compatible）。
+         * apiKey 支持环境变量兜底（BREEZE_API_KEY / TTS_API_KEY），避免明文落盘。
+         */
+        online: {
+          provider: 'breeze',
+          baseUrl: 'https://api.breeze.blue',
+          apiKey: '',
+          model: 'breeze-tts-2',
+          voice: '',
+          /** 语言码（breeze: zh | en；openai 兼容留空） */
+          language: 'zh',
+          /** 输出格式（breeze: wav_24000 | mp3_44100_128） */
+          format: 'wav_24000',
+          timeoutMs: 60000,
+        },
+      },
     },
     local: {
       baseUrl: localCfg.baseUrl,

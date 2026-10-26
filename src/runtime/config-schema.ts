@@ -248,6 +248,50 @@ export interface FullConfig {
       /** 默认音色 id（空 = 引擎默认音色；say 的 voice 参数可覆盖） */
       voice: string;
     };
+    /**
+     * TTS 引擎选择（say 接哪个实现）。
+     * 由 TUI `/tts` 或 WebUI 设置页「语音合成」卡写入；切换后下一回合 say 生效
+     * （工厂按配置指纹重建实例，不需要重启进程）。
+     */
+    tts: {
+      /** cosyvoice3（默认，本地 python 服务）/ breeze-tts-2（本地 GGUF）/ online（在线 API） */
+      engine: 'cosyvoice3' | 'breeze-tts-2' | 'online';
+      /** 本地 GGUF 引擎（audio.cpp 运行时）；路径留空 = 未安装，UI 显示未就绪 */
+      breeze: {
+        /** audiocpp_cli.exe 绝对路径 */
+        cliPath: string;
+        /** GGUF 模型绝对路径 */
+        modelPath: string;
+        /** 推理后端 */
+        backend: 'cuda' | 'cpu' | 'vulkan';
+        /** 设备序号 */
+        device: number;
+        /** 不传 emotion 时的默认 instruct（空 = 用模型 spec 自带默认） */
+        defaultInstruct: string;
+        /** 参考音目录（<id>.wav 可作 voice-ref 做音色克隆） */
+        voicesDir: string;
+        /** 临时 WAV 目录（空 = 模型同级 tts-work/。别指到 %TEMP%：火绒拦新 exe 写） */
+        workDir: string;
+        /** 透传 audio.cpp 的 --request-option（如 max_tokens / guidance_scale） */
+        requestOptions: Record<string, string>;
+        /** 单次合成超时（含模型加载） */
+        timeoutMs: number;
+      };
+      /** 在线引擎（breeze | openai-compatible） */
+      online: {
+        provider: 'breeze' | 'openai-compatible';
+        baseUrl: string;
+        /** 支持环境变量兜底（BREEZE_API_KEY / TTS_API_KEY），避免明文落盘 */
+        apiKey: string;
+        model: string;
+        voice: string;
+        /** 语言码（breeze: zh | en） */
+        language: string;
+        /** 输出格式（breeze: wav_24000 | mp3_44100_128） */
+        format: string;
+        timeoutMs: number;
+      };
+    };
   };
 
   local: {
