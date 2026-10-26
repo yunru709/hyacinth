@@ -32,6 +32,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { TtsCapabilities, TtsEngine, TtsVoiceInfo } from '../engine.js';
+// 音色目录的**单一真源**（<models.root>/voices，wav+txt 成对才算数）。
+// 不要在这里自己 readdir 一套：cosyvoice 已经在用 voice-dir，两套实现迟早分叉。
+import { listVoiceEntries, voicesDir as defaultVoicesDir } from '../voice-dir.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -82,18 +85,16 @@ function wavDuration(buf: Buffer): number {
 export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngine {
   const conf = () => getConf();
 
-  /** 音色目录：内置 + 参考音目录里的 wav */
+  /** 音色目录：内置 + 参考音目录里的成对音色（wav + txt） */
   function voices(): TtsVoiceInfo[] {
     const c = conf();
     const out: TtsVoiceInfo[] = [{ id: 'default', label: 'BreezeTTS 2（内置音色）' }];
     try {
-      if (c.voicesDir && fs.existsSync(c.voicesDir)) {
-        for (const f of fs.readdirSync(c.voicesDir)) {
-          if (!f.toLowerCase().endsWith('.wav')) continue;
-          const id = f.replace(/\.wav$/i, '');
-          if (id === 'default') continue;
-          out.push({ id, label: `${id}（参考音克隆）` });
-        }
+      // 复用 voice-dir 的单一真源：只有 wav + txt 成对的才列出来。
+      // 落单的 wav 不能列 —— 克隆必须同时给文字稿，列出来点了必失败。
+      for (const e of listVoiceEntries(c.voicesDir || defaultVoicesDir())) {
+        if (e.id === 'default') continue;
+        out.push({ id: e.id, label: `${e.id}（参考音克隆）` });
       }
     } catch {
       // 目录读不到就当只有内置音色：不能因为音色目录问题让 say 整体不可用
@@ -132,10 +133,24 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     const instruct = opts.emotion || c.defaultInstruct;
     if (instruct) args.push('--instruct', instruct);
 
-    // 参考音克隆：voice 不是 default 且目录里有同名 wav 时带上
-    if (opts.voice && opts.voice !== 'default' && c.voicesDir) {
-      const ref = path.join(c.voicesDir, `${opts.voice}.wav`);
-      if (fs.existsSync(ref)) args.push('--voice-ref', ref);
+    // 参考音克隆：voice 不是 default 时，必须**同时**给 --voice-ref 和 --reference-text。
+    // 实测（2026-10-26）：只给 --voice-ref ⇒ CLI 报 `BreezeTTS clone requires reference_text`
+    // 整单失败（spec 里 reference_text 标注 "required when reference audio codes are used"）。
+    // 用 listVoiceEntries（保证 wav+txt 成对）而不是自己拼路径：落单 wav 克隆不了。
+    // ⚠️ 找不到就**报错，不静默回退默认音色** —— 静默回退正是"以为换了音色、其实没换"的根源
+    // （用户原话：两句都挺像的，其实两句都是模型默认音色）。
+    if (opts.voice && opts.voice !== 'default') {
+      const dir = c.voicesDir || defaultVoicesDir();
+      const entry = listVoiceEntries(dir).find((e) => e.id === opts.voice);
+      if (!entry) {
+        throw new Error(
+          `Breeze-TTS-2 音色「${opts.voice}」不可用：需要 ${dir} 下成对的 ${opts.voice}.wav + ${opts.voice}.txt`,
+        );
+      }
+      args.push(
+        '--voice-ref', entry.wavPath,
+        '--reference-text', fs.readFileSync(entry.txtPath, 'utf8').trim(),
+      );
     }
 
     for (const [k, v] of Object.entries(c.requestOptions ?? {})) {
