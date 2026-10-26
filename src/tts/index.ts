@@ -77,6 +77,10 @@ function readBreezeTts2Config(cfg: TtsConfigReader): BreezeTts2Config {
     requestOptions: cfg.get<Record<string, string>>('voice.tts.breeze.requestOptions') || undefined,
     workDir: cfg.get<string>('voice.tts.breeze.workDir') || undefined,
     voicesDir: cfg.get<string>('voice.tts.breeze.voicesDir') || undefined,
+    // 常驻 server：非空即走 HTTP（实测单次 2.0s vs CLI 9.7s）。
+    // 留空 = 保持原 CLI 行为，老配置不受影响。
+    serverUrl: cfg.get<string>('voice.tts.breeze.serverUrl') || undefined,
+    serverModelId: cfg.get<string>('voice.tts.breeze.serverModelId') || undefined,
     timeoutMs: cfg.get<number>('voice.tts.breeze.timeoutMs') || undefined,
   };
 }

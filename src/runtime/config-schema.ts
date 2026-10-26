@@ -274,6 +274,10 @@ export interface FullConfig {
         workDir: string;
         /** 透传 audio.cpp 的 --request-option（如 max_tokens / guidance_scale） */
         requestOptions: Record<string, string>;
+        /** 常驻 server 地址（空 = 走 CLI；实测 server 模式快 5 倍） */
+        serverUrl: string;
+        /** server config 里给该模型起的 id */
+        serverModelId: string;
         /** 单次合成超时（含模型加载） */
         timeoutMs: number;
       };

@@ -55,6 +55,21 @@ export interface BreezeTts2Config {
   workDir?: string;
   /** 参考音目录：<dir>/<id>.wav 可作为 --voice-ref 供克隆 */
   voicesDir?: string;
+  /**
+   * 常驻 server 地址（如 `http://127.0.0.1:8189`）。**空 = 走 CLI**。
+   *
+   * 【为什么需要它】2026-10-26 实测：CLI 单次 9.7s，但 `--metrics` 报
+   * `wall_ms=1919` —— **纯合成只占 1.9s，另外 8s 全是进程启动 + 模型加载**。
+   * 同一模型经 `audiocpp_server.exe` 常驻后，单次实测 **2.0s**（快 5 倍）。
+   * 所以拿 CLI 做"每句一个新进程"是纯浪费，串行化的价值也只在 CLI 模式成立。
+   *
+   * 走 server 时能力不减：实测 `voice_ref` + `reference_text` 克隆输出
+   * 145964 B（与 CLI 完全一致）、`instructions` 122924 B 正常生效。
+   * 但 `speed` 依旧不支持（server 直接 500 `speed is not supported by this model`）。
+   */
+  serverUrl?: string;
+  /** server config 里给这个模型起的 id（默认 breeze-tts-2）；只在 serverUrl 非空时用 */
+  serverModelId?: string;
   timeoutMs?: number;
 }
 
@@ -102,11 +117,91 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     return out;
   }
 
+  /**
+   * 走常驻 server（audiocpp_server.exe）合成 —— 这是「快 5 倍」的关键路径。
+   *
+   * 【为什么值得单独一条路】2026-10-26 实测：CLI 单次 9.7s，但 `--metrics` 报
+   * `wall_ms=1919` —— **纯合成只占 1.9s，其余 8s 是进程启动 + 模型加载**。
+   * 同一模型常驻后单次实测 **2.0s**。CLI 的"每句一个新进程"纯属浪费。
+   *
+   * 【API 形状：实测确认过，不是猜的】
+   *   POST /v1/audio/speech
+   *   body: { model, input, response_format:'wav', voice_ref?, reference_text?, instructions?, options? }
+   *   ⇒ 200 + audio/wav 原始字节
+   *   ⚠️ `voice_id` 字段**是假的**：传 `voice_id:"FlutterShy"` 返回 107564 B（= 默认音色），
+   *      与 plain 完全一致 ⇒ 克隆**只能**用 `voice_ref`（实测 145964 B 才对）。
+   *   ⚠️ `speed` / `speaking_rate` ⇒ 500 `speed is not supported by this model`
+   *      —— 与 CLI 一致，是模型 spec 没有语速项，不是 server 的锅。
+   */
+  async function synthesizeViaHttp(
+    c: BreezeTts2Config,
+    text: string,
+    opts: { voice?: string; speed?: number; emotion?: string },
+  ): Promise<Buffer> {
+    const base = String(c.serverUrl).replace(/\/+$/, '');
+    const body: Record<string, unknown> = {
+      model: c.serverModelId || 'breeze-tts-2',
+      input: text,
+      response_format: 'wav',
+    };
+
+    // emotion → instructions（模型 spec 的 style_control 通道；实测 122924 B 生效）
+    const instruct = opts.emotion || c.defaultInstruct;
+    if (instruct) body.instructions = instruct;
+
+    if (opts.voice && opts.voice !== 'default') {
+      const dir = c.voicesDir || defaultVoicesDir();
+      const entry = listVoiceEntries(dir).find((e) => e.id === opts.voice);
+      if (!entry) {
+        throw new Error(
+          `Breeze-TTS-2 音色「${opts.voice}」不可用：需要 ${dir} 下成对的 ${opts.voice}.wav + ${opts.voice}.txt`,
+        );
+      }
+      // 克隆必须成对：只给 voice_ref 不给 reference_text 会被拒
+      //（CLI 侧实测报 `BreezeTTS clone requires reference_text`，server 侧同理）
+      body.voice_ref = entry.wavPath;
+      body.reference_text = fs.readFileSync(entry.txtPath, 'utf8').trim();
+    }
+
+    if (c.requestOptions && Object.keys(c.requestOptions).length > 0) {
+      body.options = c.requestOptions;
+    }
+
+    const timeout = c.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetch(`${base}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (err) {
+      // 连不上 ≠ 合成失败：把"server 没起"和"合成本身坏了"分开报，否则用户无从下手
+      throw new Error(
+        `Breeze-TTS-2 server 不可达（${base}）：${err instanceof Error ? err.message : String(err)}` +
+          ` —— 检查 voice.tts.breeze.serverUrl，或留空改走 CLI`,
+      );
+    }
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      throw new Error(`Breeze-TTS-2 server 返回 ${res.status}：${detail}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 64) {
+      throw new Error(`Breeze-TTS-2 server 输出过短（${buf.length} 字节），可能不是有效 WAV`);
+    }
+    return buf;
+  }
+
   async function synthesize(
     text: string,
     opts: { voice?: string; speed?: number; emotion?: string } = {},
   ): Promise<Buffer> {
     const c = conf();
+    // 常驻 server 优先：配了 serverUrl 就走它（快 5 倍）；留空 = 走 CLI（原行为不变）。
+    // 仍走 serialize：8GB 卡的并发安全边界不变（server 侧 slots 也有限）。
+    if (c.serverUrl) return serialize(() => synthesizeViaHttp(c, text, opts));
     if (!c.cliPath || !fs.existsSync(c.cliPath)) {
       throw new Error(`Breeze-TTS-2 未就绪：找不到 audiocpp_cli.exe（${c.cliPath || '未配置'}）`);
     }

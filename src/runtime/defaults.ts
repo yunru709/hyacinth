@@ -172,6 +172,14 @@ export function getDefaultConfig(): FullConfig {
           workDir: '',
           /** 透传 audio.cpp 的 --request-option（如 max_tokens / guidance_scale） */
           requestOptions: {},
+          /**
+           * 常驻 server 地址（如 http://127.0.0.1:8189）。**空 = 走 CLI**。
+           * 实测 CLI 单次 9.7s 中 8s 是进程启动+模型加载，纯合成仅 1.9s；
+           * 同一模型常驻后单次 2.0s。要提速就配这项 + 起 audiocpp_server.exe。
+           */
+          serverUrl: '',
+          /** server config 里给该模型起的 id（只在 serverUrl 非空时用） */
+          serverModelId: 'breeze-tts-2',
           /** 单次合成超时（含模型加载，默认 180s） */
           timeoutMs: 180000,
         },
