@@ -26,7 +26,7 @@ import {
   type CosyVoiceVariant,
 } from './cosyvoice-models.js';
 import { cosyvoiceImportOk, cosyvoicePythonEnv, ensureCosyVoiceDeps } from './cosyvoice-deps.js';
-import { DEFAULT_VOICE_ID, ensureVoicesReady, listVoiceEntries, voicesDir } from './voice-dir.js';
+import { DEFAULT_VOICE_ID, ensureVoicesReady, listVoiceRoles, voicesDir } from './voice-dir.js';
 
 const logger = createLogger('tts-cosyvoice');
 
@@ -74,18 +74,24 @@ import type { TtsVoiceInfo } from './engine.js';
 export type { TtsVoiceInfo };
 
 /**
- * 音色目录 = `<models.root>/voices/` 下的参考音对（<id>.wav + <id>.txt），
- * zero-shot 克隆该音色说话。位置在模型权重目录**之外**（用户资产，详见
- * voice-dir.ts）。id 'default' 固定列在首位：对应 voices/default.wav
- * （缺失时推理服务回退模型内置 sft 音色/明确报错）。
+ * 音色目录 = `<models.root>/voices/` 下的参考音对，zero-shot 克隆该音色说话。
+ * 位置在模型权重目录**之外**（用户资产，详见 voice-dir.ts）。
+ * id 'default' 固定列在首位：对应 voices/default.wav 或 voices/default/（缺失时
+ * 推理服务回退模型内置 sft 音色/明确报错）。
+ *
+ * 【两级结构后的列法】目录是 <角色>/<情绪>.wav，同一角色有多个情绪文件。
+ * 下拉框只列**角色**（情绪是 say 运行时按 emotion 参数选的，不是用户挑的对象），
+ * 所以用 listVoiceRoles 去重 —— 否则一个角色 5 种情绪会让列表里出现 5 个同名项。
+ *
  * 旧位置（模型目录 prompts/ 与 prompt.*）在首次列出时自动搬迁一次。
  */
 export function listVoices(): TtsVoiceInfo[] {
   ensureVoicesReady(COSYVOICE_DIR());
   const out: TtsVoiceInfo[] = [{ id: DEFAULT_VOICE_ID, label: '默认（voices/default.wav）' }];
-  for (const e of listVoiceEntries()) {
-    if (e.id === DEFAULT_VOICE_ID) continue;
-    out.push({ id: e.id, label: `${e.id}（自定义参考音）` });
+  for (const r of listVoiceRoles()) {
+    if (r.id === DEFAULT_VOICE_ID) continue;
+    const emo = r.emotions.length > 1 ? `〔${r.emotions.join('/')}〕` : '';
+    out.push({ id: r.id, label: `${r.id}（自定义参考音）${emo}` });
   }
   return out;
 }

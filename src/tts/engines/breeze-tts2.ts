@@ -34,7 +34,12 @@ import { promisify } from 'node:util';
 import type { TtsCapabilities, TtsEngine, TtsVoiceInfo } from '../engine.js';
 // 音色目录的**单一真源**（<models.root>/voices，wav+txt 成对才算数）。
 // 不要在这里自己 readdir 一套：cosyvoice 已经在用 voice-dir，两套实现迟早分叉。
-import { listVoiceEntries, voicesDir as defaultVoicesDir } from '../voice-dir.js';
+// 2026-10-26 起支持「角色/情绪」两级结构：
+//   voices()      用 listVoiceRoles —— 按**角色**去重（同一角色多情绪只出现一次）
+//   synthesize    用 resolveVoice  —— 按 role+emotion 解析，缺该情绪时沿近似链回退
+// ⚠️ 别再用 `listVoiceEntries(dir).find(e => e.id === voice)`：那句在两级结构下
+//    会静默固定取到 neutral 那份，情绪参数等于没传（类型还全绿，最难查）。
+import { listVoiceRoles, resolveVoice, voicesDir as defaultVoicesDir } from '../voice-dir.js';
 // 常驻 server 生命周期（起进程 / 健康检查 / 认领已有实例）。
 // CLI 每句重付 8s 模型加载费（实测整次 9.7s，而 --metrics 说纯合成只 1.9s），
 // 常驻后单次 2.0s —— 这是当前唯一有意义的提速来源。
@@ -115,16 +120,17 @@ function wavDuration(buf: Buffer): number {
 export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngine {
   const conf = () => getConf();
 
-  /** 音色目录：内置 + 参考音目录里的成对音色（wav + txt） */
+  /** 音色目录：内置 + 参考音目录里的角色（同一角色多情绪只列一次） */
   function voices(): TtsVoiceInfo[] {
     const c = conf();
     const out: TtsVoiceInfo[] = [{ id: 'default', label: 'BreezeTTS 2（内置音色）' }];
     try {
-      // 复用 voice-dir 的单一真源：只有 wav + txt 成对的才列出来。
-      // 落单的 wav 不能列 —— 克隆必须同时给文字稿，列出来点了必失败。
-      for (const e of listVoiceEntries(c.voicesDir || defaultVoicesDir())) {
-        if (e.id === 'default') continue;
-        out.push({ id: e.id, label: `${e.id}（参考音克隆）` });
+      // 用 listVoiceRoles 按**角色**去重：目录结构是 <角色>/<情绪>.wav，
+      // 若按 entry 逐个列，一个角色有 5 种情绪就会在下拉里出现 5 次（同名不同项，选哪个都看不清）。
+      for (const r of listVoiceRoles(c.voicesDir || defaultVoicesDir())) {
+        if (r.id === 'default') continue;
+        const emo = r.emotions.length > 1 ? `〔${r.emotions.join('/')}〕` : '';
+        out.push({ id: r.id, label: `${r.id}（参考音克隆）${emo}` });
       }
     } catch {
       // 目录读不到就当只有内置音色：不能因为音色目录问题让 say 整体不可用
@@ -160,22 +166,37 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
       response_format: 'wav',
     };
 
-    // emotion → instructions（模型 spec 的 style_control 通道；实测 122924 B 生效）
-    const instruct = opts.emotion || c.defaultInstruct;
-    if (instruct) body.instructions = instruct;
-
-    if (opts.voice && opts.voice !== 'default') {
+    // 音色解析：**角色 + 情绪** → 具体那份参考音（缺该情绪时沿近似链回退）。
+    // ⚠️ 必须走 resolveVoice，不能 `listVoiceEntries().find(e => e.id === voice)`：
+    //    两级结构下后者会静默固定取到 neutral 那份，情绪参数等于没传（类型还全绿）。
+    const wantVoice = opts.voice && opts.voice !== 'default' ? opts.voice : '';
+    const pick = wantVoice
+      ? resolveVoice(wantVoice, opts.emotion, c.voicesDir || defaultVoicesDir())
+      : null;
+    if (wantVoice && !pick) {
       const dir = c.voicesDir || defaultVoicesDir();
-      const entry = listVoiceEntries(dir).find((e) => e.id === opts.voice);
-      if (!entry) {
-        throw new Error(
-          `Breeze-TTS-2 音色「${opts.voice}」不可用：需要 ${dir} 下成对的 ${opts.voice}.wav + ${opts.voice}.txt`,
-        );
-      }
+      throw new Error(
+        `Breeze-TTS-2 音色「${wantVoice}」不可用：需要 ${dir} 下 <${wantVoice}>/<情绪>.wav + .txt（或旧的扁平 ${wantVoice}.wav + .txt）`,
+      );
+    }
+
+    // emotion 的两个表达通道 —— 这里是个**取舍**，写清楚免得后人改乱：
+    //   · 命中该情绪的专属参考音 ⇒ 情绪已由**参考音本身**承载（录的就是那个语气），
+    //     不再叠 instructions。双重指定会互相打架：参考音已经在笑，再让它"用开心的语气"
+    //     反而更容易僵（实测同音色下 instructions 会让时长波动 ±20%）。
+    //   · 回退走了（该角色没录这个情绪）⇒ 参考音表达不出来，这时才用 instructions 补。
+    if (pick?.fellBack && opts.emotion) {
+      body.instructions = opts.emotion;
+      logger.info(`Breeze-TTS-2 情绪回退：${wantVoice} 无「${opts.emotion}」参考音，改用「${pick.resolved}」+ instructions 补`, {});
+    } else if (c.defaultInstruct) {
+      body.instructions = c.defaultInstruct;
+    }
+
+    if (pick) {
       // 克隆必须成对：只给 voice_ref 不给 reference_text 会被拒
       //（CLI 侧实测报 `BreezeTTS clone requires reference_text`，server 侧同理）
-      body.voice_ref = entry.wavPath;
-      body.reference_text = fs.readFileSync(entry.txtPath, 'utf8').trim();
+      body.voice_ref = pick.entry.wavPath;
+      body.reference_text = fs.readFileSync(pick.entry.txtPath, 'utf8').trim();
     }
 
     if (c.requestOptions && Object.keys(c.requestOptions).length > 0) {
@@ -276,20 +297,30 @@ export function createBreezeTts2Engine(getConf: () => BreezeTts2Config): TtsEngi
     // 参考音克隆：voice 不是 default 时，必须**同时**给 --voice-ref 和 --reference-text。
     // 实测（2026-10-26）：只给 --voice-ref ⇒ CLI 报 `BreezeTTS clone requires reference_text`
     // 整单失败（spec 里 reference_text 标注 "required when reference audio codes are used"）。
-    // 用 listVoiceEntries（保证 wav+txt 成对）而不是自己拼路径：落单 wav 克隆不了。
+    // 走 resolveVoice：角色 + 情绪 → 具体那份参考音（缺该情绪时沿近似链回退）。
     // ⚠️ 找不到就**报错，不静默回退默认音色** —— 静默回退正是"以为换了音色、其实没换"的根源
     // （用户原话：两句都挺像的，其实两句都是模型默认音色）。
-    if (opts.voice && opts.voice !== 'default') {
+    const wantVoice = opts.voice && opts.voice !== 'default' ? opts.voice : '';
+    const pick = wantVoice
+      ? resolveVoice(wantVoice, opts.emotion, c.voicesDir || defaultVoicesDir())
+      : null;
+    if (wantVoice && !pick) {
       const dir = c.voicesDir || defaultVoicesDir();
-      const entry = listVoiceEntries(dir).find((e) => e.id === opts.voice);
-      if (!entry) {
-        throw new Error(
-          `Breeze-TTS-2 音色「${opts.voice}」不可用：需要 ${dir} 下成对的 ${opts.voice}.wav + ${opts.voice}.txt`,
-        );
-      }
+      throw new Error(
+        `Breeze-TTS-2 音色「${wantVoice}」不可用：需要 ${dir} 下 <${wantVoice}>/<情绪>.wav + .txt（或旧的扁平 ${wantVoice}.wav + .txt）`,
+      );
+    }
+    // 与 server 路径同一取舍：命中情绪专属参考音就不叠 instruct（参考音已经承载了语气），
+    // 只有回退时才用 instruct 补。
+    if (pick?.fellBack && opts.emotion) {
+      args.push('--instruct', opts.emotion);
+    } else if (c.defaultInstruct) {
+      args.push('--instruct', c.defaultInstruct);
+    }
+    if (pick) {
       args.push(
-        '--voice-ref', entry.wavPath,
-        '--reference-text', fs.readFileSync(entry.txtPath, 'utf8').trim(),
+        '--voice-ref', pick.entry.wavPath,
+        '--reference-text', fs.readFileSync(pick.entry.txtPath, 'utf8').trim(),
       );
     }
 
