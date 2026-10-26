@@ -3971,6 +3971,10 @@
   async function loadTtsSettings() {
     const stateEl = $('#tts-service-state');
     if (!stateEl) return;
+    // 引擎信息每轮重测：先清空，失败时才能真退回 cosyvoice 视角。
+    // 不清的话，清理父进程后 dataset 会留着上轮的 breeze，界面拿旧就绪度继续显示。
+    delete stateEl.dataset.engineKind;
+    delete stateEl.dataset.engineReady;
     // 引擎选择（「say 接在哪个」）—— 独立于 cosyvoice 服务状态：
     // 选了在线引擎时本地服务本来就不该跑，不能因为 status 失败就不显示引擎。
     try {
@@ -3991,9 +3995,24 @@
             ' · 能力：' + (cur.capabilities.emotion ? '情绪✓' : '情绪✗') +
             ' ' + (cur.capabilities.speed ? '语速✓' : '语速✗');
         }
+        // 把「当前引擎」与「它是否就绪」带出 try 块 —— 下面的头部徽标和试听按钮
+        // 都要按引擎分流，而 tts.status 返回的是 **cosyvoice 视角**的模型/服务状态。
+        // 不带出来的话，切到 breeze 后会拿 CosyVoice 的「未运行」去禁用试听按钮、
+        // 去点亮头部徽标 —— 明明 breeze 能用，界面却报不可用。
+        if (eng && eng.active) {
+          stateEl.dataset.engineKind = eng.active;
+          const curReady = eng.engines?.find?.((e) => e.kind === eng.active)?.ready;
+          stateEl.dataset.engineReady = curReady ? '1' : '0';
+        }
         // 在线引擎配置表单：只在该引擎被选中时出现（选了在线却无处填 key = 死路）
         const onlineBlock = $('#tts-online-block');
         if (onlineBlock) onlineBlock.hidden = eng.active !== 'online';
+        // CosyVoice3 专属区（模型下载 / python / 推理服务）：只在选中 cosyvoice3 时显示。
+        // 【这是哪个坑的修法】切到 breeze 后，「下载」按钮走 tts.download → cosyvoice 单例，
+        // 点下去会拉 3.7GB 的 CosyVoice3 权重，界面上却毫无提示 —— 用户以为是给当前引擎下模型。
+        // 这些控件对 breeze 完全无效，留着只会误导。
+        const cosyBlock = $('#tts-cosyvoice-block');
+        if (cosyBlock) cosyBlock.hidden = eng.active !== 'cosyvoice3';
         // breeze 本地引擎配置：同理，只在选中 breeze-tts-2 时出现。
         // 回填与显隐放在一起（不是另开一个 try）—— 它们本就是「当前选中谁」这一件事。
         const breezeBlock = $('#tts-breeze-block');
@@ -4125,9 +4144,18 @@
     if (pathInput && py && py.pythonPath && py.pythonPath !== 'python' && document.activeElement !== pathInput) {
       pathInput.value = py.pythonPath;
     }
-    // 服务状态
+    // 服务状态 —— 按**当前引擎**分流，别照搬 cosyvoice 视角
+    //   tts.status 返回的 service/model 都是 CosyVoice 的。切到 breeze 后那个
+    //   「未运行」说的是 CosyVoice 服务，与当前引擎能否出声无关；照它显示会把
+    //   「breeze 就绪可用」误报成不可用。引擎信息由上面 tts.engines 分支写进 dataset，
+    //   拿不到（请求失败）就退回 cosyvoice 视角 —— 默认引擎就是 cosyvoice3。
     const svc = st.service || {};
-    stateEl.textContent = svc.running ? '运行中' : '未运行';
+    const engineKind = stateEl.dataset.engineKind || '';
+    const engineReady = stateEl.dataset.engineReady === '1';
+    const isCosy = engineKind === '' || engineKind === 'cosyvoice3';
+    stateEl.textContent = isCosy
+      ? (svc.running ? '运行中' : '未运行')
+      : (engineReady ? '就绪' : '未就绪');
     const svcDesc = $('#tts-service-desc');
     if (svcDesc) {
       svcDesc.textContent = svc.running
@@ -4138,8 +4166,11 @@
     if (startBtn) startBtn.disabled = !m.ready || !!svc.running;
     const stopBtn = $('#tts-stop-btn');
     if (stopBtn) stopBtn.disabled = !svc.running;
+    // 试听走 synthesizeViaEngine（任何引擎都成立）⇒ 只按**引擎就绪度**禁用。
+    //   cosyvoice 例外：它的 synthesize 直接打本地 3178 服务，服务没起就一定失败，
+    //   所以那一路额外要求 svc.running。
     const testBtn = $('#tts-test-btn');
-    if (testBtn) testBtn.disabled = !svc.running;
+    if (testBtn) testBtn.disabled = isCosy ? !svc.running : !engineReady;
   }
 
   // ── 插件贡献卡（UI 插件化，2026-10-24）──────────────────────────
@@ -4313,6 +4344,13 @@
       '  <div class="settings-row"><div></div>' +
       '    <button id="tts-breeze-save" class="settings-input" data-dom-id="tts-breeze-save" style="cursor:pointer;font-family:inherit;flex:0 0 auto">保存</button></div>' +
       '</div>' +
+      // ── CosyVoice3 专属区（模型权重 / python 依赖 / 推理服务）──────────
+      // 只在选中 cosyvoice3 时显示。切到 breeze 后这些控件全都失去意义，
+      // 其中「下载」最危险：它走 tts.download → cosyvoice 单例，点了会拉
+      // 3.7GB 的 CosyVoice3 权重，而界面上没有任何提示 —— 用户会以为是在给
+      // 当前引擎（breeze）下模型。
+      // 试听**不**放进来：它走 synthesizeViaEngine，对哪个引擎都有效。
+      '<div id="tts-cosyvoice-block" data-dom-id="tts-cosyvoice-block" hidden>' +
       '<div class="settings-row">' +
       '  <div style="min-width:0">' +
       '    <div class="settings-label">模型版本</div>' +
@@ -4328,7 +4366,7 @@
       '    <div class="settings-label">模型文件</div>' +
       '    <div class="settings-desc" id="tts-model-desc" data-dom-id="tts-model-desc">—</div>' +
       '  </div>' +
-      '  <button id="tts-model-download" class="settings-input" data-dom-id="tts-model-download" style="cursor:pointer;font-family:inherit;flex:0 0 auto">下载</button>' +
+      '  <button id="tts-model-download" class="settings-input" data-dom-id="tts-model-download" style="cursor:pointer;font-family:inherit;flex:0 0 auto">下载 CosyVoice3 模型</button>' +
       '</div>' +
       '<div class="settings-row" id="tts-progress-row" hidden>' +
       '  <div style="flex:1 1 auto">' +
@@ -4356,8 +4394,17 @@
       '  <div style="display:flex;gap:8px;flex:0 0 auto">' +
       '    <button id="tts-start-btn" class="settings-input" data-dom-id="tts-start-btn" style="cursor:pointer;font-family:inherit">启动</button>' +
       '    <button id="tts-stop-btn" class="settings-input" data-dom-id="tts-stop-btn" style="cursor:pointer;font-family:inherit">停止</button>' +
-      '    <button id="tts-test-btn" class="settings-input" data-dom-id="tts-test-btn" style="cursor:pointer;font-family:inherit">试听</button>' +
       '  </div>' +
+      '</div>' +
+      '</div>' +
+      // 试听：走当前选中引擎（synthesizeViaEngine），因此对任何引擎都成立，
+      // 不放进上面那个 cosyvoice 专属区。
+      '<div class="settings-row">' +
+      '  <div style="min-width:0">' +
+      '    <div class="settings-label">试听</div>' +
+      '    <div class="settings-desc">用当前选中的引擎合成一句话并播放，验证播报链路</div>' +
+      '  </div>' +
+      '  <button id="tts-test-btn" class="settings-input" data-dom-id="tts-test-btn" style="cursor:pointer;font-family:inherit;flex:0 0 auto">试听</button>' +
       '</div>';
     return card;
   }
