@@ -6480,12 +6480,13 @@
   }
 
   // ── 设计语言（布局范式 + 交互规范，与主题正交）────────────────
-  // 语言决定整体布局与交互（Classic/TUI/Editorial…），主题只是同一语言下的配色。
-  // 现在只有「经典」真实接入；其余标「待接入」，完善后再接（用户 2026-10-27）。
+  // 语言决定整体布局与交互，主题只是同一语言下的配色。
+  // 「经典」= v1 本体（留在此页）；Terminal/Editorial/Brutalist = v3 的三套（点击跳 /v3/?lang=）。
   const DESIGN_LANGUAGES = [
     { id: 'classic', name: '经典', desc: '侧栏 + 三段式 + 气泡（当前 v1 形态）', available: true },
-    { id: 'tui', name: 'TUI', desc: '键盘分面板，终端质感', available: false },
-    { id: 'editorial', name: 'Editorial', desc: '单栏无界面，文字优先', available: false },
+    { id: 'terminal', name: 'Terminal', desc: '终端分面板，等宽 + 绿屏质感（v3）', available: true },
+    { id: 'editorial', name: 'Editorial', desc: '单栏无界面，文字优先（v3）', available: true },
+    { id: 'brutalist', name: 'Brutalist', desc: '粗黑边框 + 撞色黄 + 等宽（v3）', available: true },
   ];
   let currentDesignLanguage = 'classic';
 
@@ -6528,11 +6529,18 @@
       if (!l.available) card.appendChild(el('span', 'design-language-badge', '待接入'));
       card.onclick = () => {
         if (!l.available) return;
-        applyDesignLanguage(l.id);
-        if (connected) {
-          client.request('config.set', { path: 'ui.designLanguage', value: l.id }).catch((e) => {
-            appendMsg('error', '保存设计语言失败: ' + ((e && e.message) || '未知错误'));
-          });
+        if (l.id === 'classic') {
+          // 经典 = 留在 v1（本页）：只记录属性 + 持久化
+          applyDesignLanguage(l.id);
+          if (connected) {
+            client.request('config.set', { path: 'ui.designLanguage', value: l.id }).catch((e) => {
+              appendMsg('error', '保存设计语言失败: ' + ((e && e.message) || '未知错误'));
+            });
+          }
+        } else {
+          // Terminal/Editorial/Brutalist 是 v3 的设计语言 ⇒ 整页跳到 v3 对应语言
+          try { localStorage.setItem('v3.lang', l.id); } catch (e) { /* 隐私模式忽略 */ }
+          location.href = '/v3/?lang=' + encodeURIComponent(l.id);
         }
       };
       grid.appendChild(card);
