@@ -257,3 +257,19 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ── 轮次分隔线 ────────────────────────────────────────────────────
+   原来的区分只有「斜体 + 弱色」，实测扫一眼分不出谁在说话。
+   现在每条提问上方画一条 1px 细线。
+   ⚠️ 直接用 --line，**不要再叠 opacity** —— 它本身就是 rgb(... / 0.10~0.12)，
+      再乘 0.45 只剩 4.5%，等于没画（初次实现踩过这个坑）。
+   只画在 user 段落上 ⇒ assistant 连续输出时不会被切开；
+   线与文字之间靠 margin-bottom 留白，形成「提问—回答」的节律。
+   Editorial 的立场是「界面消失」，所以全界面唯一的装饰就是这条线。 */
+.ed-para--user::before {
+  content: '';
+  display: block;
+  height: 1px;
+  background: var(--line);
+  margin: 0 0 1.15em;
+}
