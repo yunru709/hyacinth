@@ -9,12 +9,63 @@
   <link rel="stylesheet" href="/v3/css/base.css">
   <link rel="stylesheet" href="/v3/css/palettes.css">
 
+  <style>
+    /* 设计语言切换器：固定右上角，所有语言共享的一份 meta 控件。
+       小、半透明、hover 才显眼，尽量不干扰各语言自身布局。 */
+    .v3-lang-switch {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1;
+      color: var(--fg-muted);
+    }
+    .v3-lang-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--line-strong, #444);
+      background: var(--bg-elevated, #1a1a1a);
+      color: var(--fg, #ddd);
+      padding: 5px 9px;
+      cursor: pointer;
+      opacity: 0.55;
+      transition: opacity 120ms ease;
+      font: inherit;
+    }
+    .v3-lang-toggle:hover { opacity: 1; }
+    .v3-lang-menu {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line-strong, #444);
+      background: var(--bg-elevated, #1a1a1a);
+      min-width: 150px;
+    }
+    .v3-lang-menu[hidden] { display: none; }
+    .v3-lang-menu button {
+      border: 0;
+      background: none;
+      color: var(--fg, #ddd);
+      text-align: left;
+      padding: 7px 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .v3-lang-menu button:hover { background: var(--accent, #555); color: var(--accent-fg, #fff); }
+    .v3-lang-menu button.is-current { color: var(--accent, #8a5a2b); font-weight: 700; }
+    .v3-lang-menu button + button { border-top: 1px solid var(--line, #333); }
+  </style>
+
   <script type="module">
     /* ========================================================================
        v3 入口：这里不写任何界面。
 
        ?lang=tui        → 加载 langs/tui/       （终端效率）
        ?lang=editorial  → 加载 langs/editorial/ （文字即界面）
+       ?lang=classic    → 加载 langs/classic/   （v1 经典形态）
 
        为什么用动态加载而不是把两套都打进来：
          两套设计语言的 CSS 会互相打架（都有 .toolbar / .row 这类通用类名），
@@ -24,9 +75,14 @@
          每套语言的骨架完全不同 —— TUI 是分面板，Editorial 是单栏正文。
          让 index.html 提供骨架就等于强行统一，那就不叫设计语言了。
        ======================================================================== */
-    const q = new URLSearchParams(location.search);
-    const LANG = q.get('lang') || 'tui';
     const ALLOWED = ['tui', 'editorial', 'classic'];
+    const LANG_LABEL = { tui: 'TUI · 终端', editorial: 'Editorial · 文字即界面', classic: 'Classic · 经典' };
+    const q = new URLSearchParams(location.search);
+    const fromUrl = q.get('lang');
+    const saved = localStorage.getItem('v3.lang');
+    const LANG = ALLOWED.includes(fromUrl) ? fromUrl : (ALLOWED.includes(saved) ? saved : 'tui');
+    // URL 显式指定 ⇒ 记住它，下次无 lang 打开沿用
+    if (ALLOWED.includes(fromUrl)) localStorage.setItem('v3.lang', fromUrl);
 
     if (!ALLOWED.includes(LANG)) {
       document.getElementById('app').textContent =
@@ -41,11 +97,46 @@
           document.getElementById('app').textContent = '加载失败：' + err.message;
           console.error(err);
         });
+        mountLangSwitcher();
       };
       link.onerror = () => {
         document.getElementById('app').textContent = `找不到样式：/v3/langs/${LANG}/style.css`;
       };
       document.head.appendChild(link);
+    }
+
+    /* 切换设计语言 = 整页换一套（骨架不同），所以切 = 改 URL。
+       切换器放在壳里，三套语言共享；localStorage 记住选择。 */
+    function mountLangSwitcher() {
+      const box = document.createElement('div');
+      box.className = 'v3-lang-switch';
+      box.innerHTML =
+        '<button class="v3-lang-toggle" type="button" title="切换设计语言">◇ <span class="v3-lang-cur"></span></button>' +
+        '<div class="v3-lang-menu" hidden></div>';
+      const toggle = box.querySelector('.v3-lang-toggle');
+      const menu = box.querySelector('.v3-lang-menu');
+      box.querySelector('.v3-lang-cur').textContent = LANG;
+
+      for (const lang of ALLOWED) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.lang = lang;
+        b.textContent = LANG_LABEL[lang] || lang;
+        if (lang === LANG) b.classList.add('is-current');
+        b.addEventListener('click', () => {
+          if (lang === LANG) { menu.hidden = true; return; }
+          localStorage.setItem('v3.lang', lang);
+          // 保留其它 query（如 cb）之外的语义：切语言只换 lang 参数
+          const u = new URL(location.href);
+          u.searchParams.set('lang', lang);
+          location.href = u.toString();
+        });
+        menu.appendChild(b);
+      }
+
+      toggle.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+      document.addEventListener('click', (e) => { if (!box.contains(e.target)) menu.hidden = true; });
+      document.body.appendChild(box);
     }
   </script>
 </head>

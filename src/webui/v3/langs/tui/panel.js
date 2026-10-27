@@ -386,7 +386,7 @@ export function createPanel(app, hooks = {}) {
         '<span class="tui-prow-meta">' + (isDir ? '目录' : fmtSize(e.size)) + '</span>';
       row.addEventListener('click', () => {
         if (isDir) { filesCurPath = e.path; void renderFiles(content); }
-        else if (hooks.insertText) { hooks.insertText(e.path); }
+        else { void openPreview(e.path, e.name); }
       });
       sec.appendChild(row);
     }
@@ -397,6 +397,62 @@ export function createPanel(app, hooks = {}) {
       filesCurPath = filesCurPath.includes('/') ? filesCurPath.slice(0, filesCurPath.lastIndexOf('/')) : '';
       void renderFiles(content);
     });
+  }
+
+  /* 文件查看器：点文件弹出预览浮层（文本 <pre> 原文 / 图片 / PDF iframe），
+     顶部保留「插入路径」把路径塞回输入框。 */
+  async function openPreview(filePath, name) {
+    const old = document.getElementById('tui-preview');
+    if (old) old.remove();
+    const pv = document.createElement('div');
+    pv.className = 'tui-settings';
+    pv.id = 'tui-preview';
+    pv.innerHTML =
+      '<div class="tui-set-box tui-pv-box">' +
+        '<div class="tui-set-head">' +
+          '<span class="tui-set-title">' + esc(name || filePath) + '</span>' +
+          '<span class="tui-grow"></span>' +
+          '<button class="tui-pb2" id="tui-pv-insert" type="button">插入路径</button>' +
+          '<span class="tui-set-close" id="tui-pv-close" role="button" tabindex="0">[ 关闭 ]</span>' +
+        '</div>' +
+        '<div class="tui-set-content" id="tui-pv-body"><div class="tui-set-loading">加载…</div></div>' +
+      '</div>';
+    document.getElementById('app').appendChild(pv);
+    const body = pv.querySelector('#tui-pv-body');
+    pv.querySelector('#tui-pv-close').addEventListener('click', () => pv.remove());
+    pv.querySelector('#tui-pv-insert').addEventListener('click', () => {
+      pv.remove();
+      if (hooks.insertText) hooks.insertText(filePath);
+    });
+
+    const data = await app.fs.read(filePath);
+    if (!data) { body.innerHTML = '<div class="tui-set-loading">无法读取文件内容</div>'; return; }
+    const ext = String(data.ext || '').toLowerCase();
+    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+    const isPdf = ext === 'pdf';
+    body.innerHTML = '';
+    if (data.binary) {
+      const rawUrl = '/api/fs/raw?path=' + encodeURIComponent(filePath);
+      if (isImg) {
+        const img = document.createElement('img');
+        img.className = 'tui-pv-img'; img.src = rawUrl; img.alt = name || filePath;
+        body.appendChild(img);
+      } else if (isPdf) {
+        const ifr = document.createElement('iframe');
+        ifr.className = 'tui-pv-frame'; ifr.src = rawUrl;
+        body.appendChild(ifr);
+      } else {
+        body.innerHTML = '<div class="tui-set-loading">二进制文件，无法预览</div>';
+      }
+    } else {
+      const meta = document.createElement('div');
+      meta.className = 'tui-pnote';
+      meta.textContent = (data.kind || 'text') + (data.lang ? ' · ' + data.lang : '') + ' · ' + (data.content || '').split('\n').length + ' 行';
+      const pre = document.createElement('pre');
+      pre.className = 'tui-pv-pre';
+      pre.textContent = data.content || '';
+      body.append(meta, pre);
+    }
   }
 
   const SECTION_DEFS = [
