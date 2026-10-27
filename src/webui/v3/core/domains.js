@@ -161,8 +161,9 @@ export class VoiceDomain {
     return this.call('tts.status', {});
   }
 
-  async setEngine(engine) {
-    const r = await this.call('tts.setEngine', { engine });
+  async setEngine(kind) {
+    // 后端 tts.setEngine 要 {kind}（不是 id；如 online 的 id=online-breeze 但 kind=online）
+    const r = await this.call('tts.setEngine', { kind });
     return r?.ok === true;
   }
 

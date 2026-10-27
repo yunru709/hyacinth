@@ -592,7 +592,7 @@ export function createPanel(app, hooks = {}) {
       if (!en.active) {
         row.dataset.clickable = 'true';
         row.addEventListener('click', async () => {
-          const ok = await app.voice.setEngine(en.id);
+          const ok = await app.voice.setEngine(en.kind);
           toast(ok ? '已切换到 ' + en.label : '切换失败', ok);
           if (ok) void renderVoice(content);
         });
