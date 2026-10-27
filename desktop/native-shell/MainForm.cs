@@ -75,6 +75,16 @@ public sealed class MainForm : Form
     }
 
     private readonly WebView2 _web = new();
+    private Panel? _splash;
+    // WebView 就绪后、后端就绪前的骨架页（避免空白深色死块，给 spinner 反馈）
+    private const string SKELETON_HTML = @"<!doctype html><html><head><meta charset=""utf-8""><style>
+html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:system-ui,'Segoe UI',sans-serif;}
+.w{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;}
+.b{font-size:13px;letter-spacing:.5em;opacity:.85;padding-left:.5em;}
+.s{width:30px;height:30px;border:2.5px solid rgba(184,178,207,.2);border-top-color:#9B8CE0;border-radius:50%;animation:r .85s linear infinite;}
+@keyframes r{to{transform:rotate(360deg)}}
+.t{font-size:12px;letter-spacing:.15em;opacity:.45;}
+</style></head><body><div class=""w""><div class=""b"">HYACINTH</div><div class=""s""></div><div class=""t"">正在启动</div></div></body></html>";
 
     private Process? _backend;
     private bool _spawnedBackend;
@@ -120,6 +130,9 @@ public sealed class MainForm : Form
 
         _web.Dock = DockStyle.Fill;
         Controls.Add(_web);
+        _splash = BuildSplash();
+        Controls.Add(_splash);
+        _splash.BringToFront();
 
         // 托盘图标在构造期就挂上（而不是等第一次关窗才建）：这样"开启托盘常驻"这件事
         // 在启动后就可见，用户不会因为看不到图标而怀疑开关没生效。
@@ -262,6 +275,22 @@ public sealed class MainForm : Form
     }
 
     /// <summary>显示并激活主窗口（托盘双击 / 菜单「显示主窗口」/ 都走这里）。</summary>
+    /// <summary>启动占位：WebView2 就绪前的 2-3s 显示品牌与「正在启动」，避免纯色死块。</summary>
+    private Panel BuildSplash()
+    {
+        var p = new Panel { Dock = DockStyle.Fill, BackColor = ShellTheme.Default };
+        var lbl = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(0xB8, 0xB2, 0xCF),
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 15F, FontStyle.Regular),
+            Text = "HYACINTH\n正在启动…",
+        };
+        p.Controls.Add(lbl);
+        return p;
+    }
     private void ShowMainWindow()
     {
         // 最小化时必须先还原：直接 Show()+Activate() 的话窗口仍是 Minimized 状态，
@@ -684,6 +713,10 @@ public sealed class MainForm : Form
             };
             var env = await CoreWebView2Environment.CreateAsync(ResolveBrowserRuntime(), userData, options);
             await _web.EnsureCoreWebView2Async(env);
+            // 页面加载期间用深色底避免白闪；WebView 就绪即藏掉启动占位（交给页面）
+            _web.DefaultBackgroundColor = ShellTheme.Default;
+            if (_splash != null) _splash.Visible = false;
+            try { _web.CoreWebView2.NavigateToString(SKELETON_HTML); } catch { }
 
             // 外链交给系统浏览器，别把应用窗口当浏览器使
             _web.CoreWebView2.NewWindowRequested += (_, e) =>
