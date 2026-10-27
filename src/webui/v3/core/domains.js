@@ -175,6 +175,49 @@ export class VoiceDomain {
   async synthesize(text) {
     return this.call('tts.synthesize', { text });
   }
+
+  /* ── STT 模型生命周期（v1 设置页那套）── */
+  async sttRemove() {
+    const r = await this.call('stt.remove', {});
+    return r?.ok === true || r == null ? r : r;
+  }
+
+  /* ── TTS 环境准备 / 模型 / 服务（CosyVoice3 / breeze / online）── */
+  /** {pythonAvailable, cosyvoiceInstalled, pythonPath, hint, …} —— 探测要起子进程，按需调 */
+  async ttsDetectPython() {
+    return this.call('tts.detectPython', {});
+  }
+  async ttsSetPythonPath(path) {
+    const r = await this.call('tts.setPythonPath', { path });
+    return r?.ok === true || !!r;
+  }
+  async ttsDownload() {
+    return this.call('tts.download', {});
+  }
+  async ttsStart() {
+    return this.call('tts.start', {});
+  }
+  async ttsStop() {
+    return this.call('tts.stop', {});
+  }
+  async ttsOnlineConfig() {
+    return this.call('tts.onlineConfig', {});
+  }
+  async ttsSetOnlineConfig(cfg) {
+    return this.call('tts.setOnlineConfig', cfg ?? {});
+  }
+  async ttsBreezeConfig() {
+    return this.call('tts.breezeConfig', {});
+  }
+  async ttsSetBreezeConfig(cfg) {
+    return this.call('tts.setBreezeConfig', cfg ?? {});
+  }
+  async ttsBreezeStart() {
+    return this.call('tts.breezeStart', {});
+  }
+  async ttsBreezeStop() {
+    return this.call('tts.breezeStop', {});
+  }
 }
 
 /* ═══ 能力开关（工具 / 技能 / 插件 / MCP / 工具包）══════════════════════ */

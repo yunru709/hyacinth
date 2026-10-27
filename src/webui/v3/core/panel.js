@@ -455,10 +455,170 @@ export function createPanel(app, hooks = {}) {
     }
   }
 
+  /* ── 语音：STT 模型下载/删除 + TTS 引擎/模型/Python/服务（对齐 v1 设置页那份）── */
+  function pollStt(content) {
+    const tick = async () => {
+      if (!content.querySelector('[data-voice-root]')) return; // 已切走该区，停
+      const s = await app.voice.sttStatus();
+      if (!s) return;
+      const prog = content.querySelector('.stt-prog');
+      if (s.downloading) {
+        const p = s.downloadProgress;
+        if (prog) prog.textContent = '下载中… ' + (p ? (p.percent || 0) + '%' : '准备中');
+        setTimeout(tick, 900);
+      } else {
+        toast(s.modelReady ? 'STT 模型就绪' : 'STT 下载结束', !!s.modelReady);
+        void renderVoice(content);
+      }
+    };
+    setTimeout(tick, 600);
+  }
+  function pollTts(content) {
+    const tick = async () => {
+      if (!content.querySelector('[data-voice-root]')) return;
+      const t = await app.voice.ttsStatus();
+      if (!t) return;
+      const prog = content.querySelector('.tts-prog');
+      const m = t.model || {};
+      if (m.downloading) {
+        const p = m.downloadProgress;
+        if (prog) prog.textContent = '下载中… ' + (p ? (p.percent || 0) + '%' : '准备中');
+        setTimeout(tick, 900);
+      } else {
+        toast(m.ready ? 'TTS 模型就绪' : 'TTS 下载结束', !!m.ready);
+        void renderVoice(content);
+      }
+    };
+    setTimeout(tick, 600);
+  }
+
+  async function renderVoice(content) {
+    content.innerHTML = '<div class="tui-set-loading">加载…</div>';
+    const [stt, tts, eng] = await Promise.all([
+      app.voice.sttStatus(), app.voice.ttsStatus(), app.voice.ttsEngines(),
+    ]);
+    content.innerHTML = '';
+    const root = el('div');
+    root.dataset.voiceRoot = '1';
+
+    /* ── STT（语音输入模型）── */
+    const s1 = el('div', 'tui-psec');
+    s1.appendChild(el('div', 'tui-psec-h', '语音输入模型（STT）'));
+    const sttState = !stt ? '不可用'
+      : stt.modelReady ? '已就绪'
+      : stt.downloading ? '下载中…'
+      : stt.runtimeAvailable ? '未下载' : '运行时不可用';
+    const sttCard = el('div', 'tui-pcard');
+    sttCard.innerHTML =
+      '<div class="tui-pcard-h">SenseVoice</div>' +
+      cardRow('状态', sttState) +
+      cardRow('引擎', stt ? stt.engine : '—') +
+      cardRow('目录', stt ? stt.modelDir : '—');
+    s1.appendChild(sttCard);
+    const sttBar = el('div', 'tui-toolbar');
+    const sttDl = el('button', 'tui-pb2', '下载模型');
+    const sttRm = el('button', 'tui-pbtn', '删除模型');
+    sttDl.type = 'button'; sttRm.type = 'button';
+    sttDl.disabled = !stt || !stt.runtimeAvailable || stt.modelReady || stt.downloading;
+    sttRm.disabled = !stt || !stt.modelReady || stt.downloading;
+    const sttProg = el('span', 'tui-pnote stt-prog', '');
+    sttBar.append(sttDl, sttRm, el('span', 'tui-grow'), sttProg);
+    s1.appendChild(sttBar);
+    sttDl.addEventListener('click', async () => {
+      sttDl.disabled = true; sttProg.textContent = '准备中…';
+      try { await app.voice.sttDownload(); } catch (e) { toast('触发下载失败', false); }
+      pollStt(content);
+    });
+    sttRm.addEventListener('click', async () => {
+      if (!confirm('删除已下载的语音识别模型？可随时重新下载。')) return;
+      await app.voice.sttRemove();
+      toast('已删除', true);
+      void renderVoice(content);
+    });
+    if (stt && stt.downloading) pollStt(content);
+    root.appendChild(s1);
+
+    /* ── TTS（引擎 / 模型 / python / 服务）── */
+    const s2 = el('div', 'tui-psec');
+    s2.appendChild(el('div', 'tui-psec-h', '语音合成（TTS）'));
+    const eCard = el('div', 'tui-pcard');
+    eCard.innerHTML = '<div class="tui-pcard-h">引擎（点选切换）</div>';
+    for (const en of (eng && eng.engines) || []) {
+      const row = el('div', 'tui-prow' + (en.active ? ' is-active' : ''));
+      row.innerHTML =
+        '<span class="tui-prow-name">' + esc(en.label) + '</span>' +
+        '<span class="tui-prow-meta">' + (en.ready ? '就绪' : '未就绪') + (en.active ? ' · 使用中' : '') + '</span>';
+      if (!en.active) {
+        row.dataset.clickable = 'true';
+        row.addEventListener('click', async () => {
+          const ok = await app.voice.setEngine(en.id);
+          toast(ok ? '已切换到 ' + en.label : '切换失败', ok);
+          if (ok) void renderVoice(content);
+        });
+      }
+      eCard.appendChild(row);
+    }
+    s2.appendChild(eCard);
+
+    const m = (tts && tts.model) || {};
+    const py = tts && tts.python;
+    const svc = (tts && tts.service) || {};
+    const mCard = el('div', 'tui-pcard');
+    mCard.innerHTML =
+      '<div class="tui-pcard-h">CosyVoice3 环境（本地 python 引擎）</div>' +
+      cardRow('模型', m.ready ? '已就绪' : m.downloading ? '下载中…' : '未下载') +
+      cardRow('目录', m.modelDir || '—') +
+      cardRow('Python', !py ? '未检测' : py.pythonAvailable ? '可用' + (py.cosyvoiceInstalled ? ' · 依赖已装' : ' · 依赖缺失') : '不可用') +
+      cardRow('推理服务', svc.running ? '运行中 · ' + svc.port : '未启动');
+    s2.appendChild(mCard);
+
+    const ttsBar = el('div', 'tui-toolbar');
+    const pyBtn = el('button', 'tui-pb2', '检测 Python');
+    const dlBtn = el('button', 'tui-pb2', '下载模型');
+    const startBtn = el('button', 'tui-pb2', '启动服务');
+    const stopBtn = el('button', 'tui-pb2', '停止服务');
+    for (const b of [pyBtn, dlBtn, startBtn, stopBtn]) b.type = 'button';
+    dlBtn.disabled = !!m.ready || !!m.downloading;
+    startBtn.disabled = !!svc.running;
+    stopBtn.disabled = !svc.running;
+    const ttsProg = el('span', 'tui-pnote tts-prog', '');
+    ttsBar.append(pyBtn, dlBtn, startBtn, stopBtn, el('span', 'tui-grow'), ttsProg);
+    s2.appendChild(ttsBar);
+
+    pyBtn.addEventListener('click', async () => {
+      pyBtn.disabled = true;
+      toast('检测 Python 环境中…', true);
+      const r = await app.voice.ttsDetectPython();
+      toast(r ? '检测完成' : '检测失败', !!r);
+      void renderVoice(content);
+    });
+    dlBtn.addEventListener('click', async () => {
+      dlBtn.disabled = true; ttsProg.textContent = '准备中…';
+      try { await app.voice.ttsDownload(); } catch (e) { toast('触发下载失败', false); }
+      pollTts(content);
+    });
+    startBtn.addEventListener('click', async () => {
+      toast('启动推理服务…', true);
+      const r = await app.voice.ttsStart();
+      toast(r ? '已请求启动' : '启动失败', !!r);
+      void renderVoice(content);
+    });
+    stopBtn.addEventListener('click', async () => {
+      await app.voice.ttsStop();
+      toast('已停止', true);
+      void renderVoice(content);
+    });
+    if (m.downloading) pollTts(content);
+    root.appendChild(s2);
+
+    content.appendChild(root);
+  }
+
   const SECTION_DEFS = [
     { id: 'model', label: '模型', render: renderModel },
     { id: 'caps', label: '能力', render: renderCaps },
     { id: 'runtime', label: '运行', render: renderRuntime },
+    { id: 'voice', label: '语音', render: renderVoice },
     { id: 'sessions', label: '会话', render: renderSessions },
     { id: 'files', label: '文件', render: renderFiles },
   ];
