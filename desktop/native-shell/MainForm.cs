@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -489,7 +490,11 @@ public sealed class MainForm : Form
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(800) };
+            // ⚠️ 2026-10-27：本机有 MITM/系统代理，.NET HttpClient 默认走系统代理会把 127.0.0.1
+            //   也代理掉 ⇒ /api/health 永远失败 ⇒ EnsureBackendAsync 空转到 45s 超时 ⇒ 白屏。
+            //   强制 UseProxy=false 直连本机后端。
+            using var handler = new HttpClientHandler { UseProxy = false };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(2000) };
             var r = await http.GetAsync($"{BaseUrl}/api/health");
             return r.IsSuccessStatusCode;
         }
@@ -720,7 +725,7 @@ public sealed class MainForm : Form
             // 其余权限种类维持默认行为（不拦截不加白）。
             _web.CoreWebView2.PermissionRequested += (_, e) =>
             {
-                if (e.Kind != CoreWebView2PermissionKind.AudioCapture) return;
+                if (e.PermissionKind != CoreWebView2PermissionKind.Microphone) return;
                 try
                 {
                     var origin = new Uri(e.Uri);
@@ -735,7 +740,10 @@ public sealed class MainForm : Form
             };
 
             await EnsureBackendAsync();
-            _web.Source = new Uri(BaseUrl);
+            // 用 CoreWebView2.Navigate 直接导航到后端（等价 DevTools Page.navigate，实测可靠）。
+            // 注：之前白屏的真因是上面的 EnsureBackendAsync 因系统代理卡死超时、根本没走到这里，
+            //     与 Source/Navigate 写法无关。
+            _web.CoreWebView2.Navigate(BaseUrl);
         }
         catch (Exception ex)
         {
