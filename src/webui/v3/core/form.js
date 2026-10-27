@@ -288,7 +288,7 @@ async function renderItem(item, current, app, afterSave) {
       const LANGS = item.options || [
         { value: 'terminal', label: 'Terminal' },
         { value: 'editorial', label: 'Editorial' },
-        { value: 'classic', label: 'Classic' },
+        { value: 'brutalist', label: 'Brutalist' },
       ];
       const seg = document.createElement('div');
       seg.className = 'sf-seg';

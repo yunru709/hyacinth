@@ -42,59 +42,59 @@ const $ = (id) => document.getElementById(id);
 /* ═══ DOM ═════════════════════════════════════════════════════════════════ */
 
 document.getElementById('app').innerHTML = `
-<div class="cl">
-  <header class="cl-top">
-    <div class="cl-brand">
-      <span class="cl-logo"></span>
-      <span class="cl-title">Hyacinth</span>
+<div class="bru">
+  <header class="bru-top">
+    <div class="bru-brand">
+      <span class="bru-logo"></span>
+      <span class="bru-title">Hyacinth</span>
     </div>
-    <button class="cl-new" id="cl-new" type="button">＋ 新会话</button>
-    <div class="cl-spacer"></div>
-    <div class="cl-conn" id="cl-conn"><span class="cl-dot"></span><span>连接中…</span></div>
-    <button class="cl-iconbtn" id="cl-settings" type="button" title="设置">设置</button>
+    <button class="bru-new" id="bru-new" type="button">＋ 新会话</button>
+    <div class="bru-spacer"></div>
+    <div class="bru-conn" id="bru-conn"><span class="bru-dot"></span><span>连接中…</span></div>
+    <button class="bru-iconbtn" id="bru-settings" type="button" title="设置">设置</button>
   </header>
 
-  <div class="cl-body">
-    <aside class="cl-side">
-      <div class="cl-search-wrap">
-        <input class="cl-search" id="cl-search" type="text" placeholder="搜索会话" />
+  <div class="bru-body">
+    <aside class="bru-side">
+      <div class="bru-search-wrap">
+        <input class="bru-search" id="bru-search" type="text" placeholder="搜索会话" />
       </div>
-      <div class="cl-list" id="cl-list"></div>
+      <div class="bru-list" id="bru-list"></div>
     </aside>
 
-    <main class="cl-main">
-      <div class="cl-stream" id="cl-stream"></div>
-      <div class="cl-composer">
-        <div class="cl-inputbox">
-          <textarea id="cl-input" rows="1" placeholder="发消息…  Enter 发送 · Shift+Enter 换行"></textarea>
-          <button class="cl-mic" id="cl-mic" type="button" title="语音输入（需在设置里启用）" hidden>●</button>
-          <button class="cl-send" id="cl-send" type="button">发送</button>
+    <main class="bru-main">
+      <div class="bru-stream" id="bru-stream"></div>
+      <div class="bru-composer">
+        <div class="bru-inputbox">
+          <textarea id="bru-input" rows="1" placeholder="发消息…  Enter 发送 · Shift+Enter 换行"></textarea>
+          <button class="bru-mic" id="bru-mic" type="button" title="语音输入（需在设置里启用）" hidden>●</button>
+          <button class="bru-send" id="bru-send" type="button">发送</button>
         </div>
-        <div class="cl-hint" id="cl-hint"></div>
+        <div class="bru-hint" id="bru-hint"></div>
       </div>
     </main>
   </div>
 
-  <section class="cl-settings" id="cl-settings-view" hidden>
-    <header class="cl-set-top">
-      <button class="cl-backbtn" id="cl-set-back" type="button">← 返回对话</button>
-      <div class="cl-set-headtitle">设置</div>
-      <div class="cl-spacer"></div>
-      <span class="cl-set-toast" id="cl-set-toast"></span>
+  <section class="bru-settings" id="bru-settings-view" hidden>
+    <header class="bru-set-top">
+      <button class="bru-backbtn" id="bru-set-back" type="button">← 返回对话</button>
+      <div class="bru-set-headtitle">设置</div>
+      <div class="bru-spacer"></div>
+      <span class="bru-set-toast" id="bru-set-toast"></span>
     </header>
-    <div class="cl-set-main">
-      <nav class="cl-set-nav" id="cl-set-nav"></nav>
-      <div class="cl-set-content" id="cl-set-content"></div>
+    <div class="bru-set-main">
+      <nav class="bru-set-nav" id="bru-set-nav"></nav>
+      <div class="bru-set-content" id="bru-set-content"></div>
     </div>
   </section>
 </div>`;
 
-const streamEl = $('cl-stream');
-const listEl = $('cl-list');
-const inputEl = $('cl-input');
-const sendEl = $('cl-send');
-const hintEl = $('cl-hint');
-const connEl = $('cl-conn');
+const streamEl = $('bru-stream');
+const listEl = $('bru-list');
+const inputEl = $('bru-input');
+const sendEl = $('bru-send');
+const hintEl = $('bru-hint');
+const connEl = $('bru-conn');
 
 /* ═══ 小工具 ══════════════════════════════════════════════════════════════ */
 
@@ -129,7 +129,7 @@ function nearBottom() {
 /* ═══ 会话列表 ════════════════════════════════════════════════════════════ */
 
 function renderSessions() {
-  const kw = ($('cl-search').value || '').trim().toLowerCase();
+  const kw = ($('bru-search').value || '').trim().toLowerCase();
   const rows = S.sessionList.filter(
     (s) => !kw || sessions.titleOf(s).toLowerCase().includes(kw),
   );
@@ -137,7 +137,7 @@ function renderSessions() {
   listEl.innerHTML = '';
   if (!rows.length) {
     const empty = document.createElement('div');
-    empty.className = 'cl-list-empty';
+    empty.className = 'bru-list-empty';
     empty.textContent = kw ? '没有匹配的会话' : '还没有会话';
     listEl.appendChild(empty);
     return;
@@ -146,15 +146,15 @@ function renderSessions() {
   for (const s of rows) {
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'cl-item' + (s.id === S.activeId ? ' is-active' : '');
+    row.className = 'bru-item' + (s.id === S.activeId ? ' is-active' : '');
     row.dataset.id = s.id;
 
     const name = document.createElement('span');
-    name.className = 'cl-item-name';
+    name.className = 'bru-item-name';
     name.textContent = sessions.titleOf(s);
 
     const dot = document.createElement('span');
-    dot.className = 'cl-item-dot';
+    dot.className = 'bru-item-dot';
 
     row.append(name, dot);
     row.addEventListener('click', () => openSession(s.id));
@@ -177,10 +177,10 @@ async function loadSessions() {
 /** 一条消息 = 行容器 + 气泡。role: 'user' | 'assistant' | 'error' */
 function bubble(role, text = '') {
   const row = document.createElement('div');
-  row.className = `cl-msg cl-msg--${role}`;
+  row.className = `bru-msg bru-msg--${role}`;
 
   const b = document.createElement('div');
-  b.className = 'cl-bubble';
+  b.className = 'bru-bubble';
   /* 对话正文走 Markdown；工具卡片/提示语仍是纯文本 */
   if (role === 'user' || role === 'assistant') b.innerHTML = renderMarkdown(text);
   else b.textContent = text;
@@ -194,23 +194,23 @@ function bubble(role, text = '') {
     单条工具结果可能是几十 KB，绝不能直接铺在对话里。 */
 function toolCard(name, summary) {
   const card = document.createElement('details');
-  card.className = 'cl-tool';
+  card.className = 'bru-tool';
 
   const head = document.createElement('summary');
-  head.className = 'cl-tool-head';
+  head.className = 'bru-tool-head';
 
   const nm = document.createElement('span');
-  nm.className = 'cl-tool-name';
+  nm.className = 'bru-tool-name';
   nm.textContent = name;
 
   const sm = document.createElement('span');
-  sm.className = 'cl-tool-summary';
+  sm.className = 'bru-tool-summary';
   sm.textContent = summary || '';
 
   head.append(nm, sm);
 
   const body = document.createElement('pre');
-  body.className = 'cl-tool-body';
+  body.className = 'bru-tool-body';
   body.textContent = '运行中…';
 
   card.append(head, body);
@@ -226,14 +226,14 @@ function clearStream() {
 
 function emptyState() {
   const wrap = document.createElement('div');
-  wrap.className = 'cl-empty';
+  wrap.className = 'bru-empty';
 
   const h = document.createElement('div');
-  h.className = 'cl-empty-title';
+  h.className = 'bru-empty-title';
   h.textContent = '开始对话';
 
   const p = document.createElement('div');
-  p.className = 'cl-empty-sub';
+  p.className = 'bru-empty-sub';
   p.textContent = '在下面输入，或从左侧选一个已有会话。';
 
   wrap.append(h, p);
@@ -256,7 +256,7 @@ async function openSession(id) {
   }
 
   const note = document.createElement('div');
-  note.className = 'cl-loading';
+  note.className = 'bru-loading';
   note.textContent = '加载历史…';
   streamEl.appendChild(note);
 
@@ -295,7 +295,7 @@ async function openSession(id) {
     } else if (e.kind === 'result') {
       const card = streamEl.lastElementChild;
       if (card && card.tagName === 'DETAILS') {
-        card.querySelector('.cl-tool-body').textContent = e.text;
+        card.querySelector('.bru-tool-body').textContent = e.text;
       }
     }
   }
@@ -313,7 +313,7 @@ async function submit() {
   autosize();
   setHint('');
 
-  const hadEmpty = streamEl.querySelector('.cl-empty');
+  const hadEmpty = streamEl.querySelector('.bru-empty');
   if (hadEmpty) streamEl.innerHTML = '';
 
   try {
@@ -433,21 +433,21 @@ inputEl.addEventListener('keydown', (e) => {
   }
 });
 sendEl.addEventListener('click', submit);
-$('cl-search').addEventListener('input', renderSessions);
-$('cl-settings').addEventListener('click', () => {
+$('bru-search').addEventListener('input', renderSessions);
+$('bru-settings').addEventListener('click', () => {
   if (isSettingsOpen()) closeSettings();
   else void openSettings();
 });
-$('cl-set-back').addEventListener('click', closeSettings);
+$('bru-set-back').addEventListener('click', closeSettings);
 /* Esc 关闭设置：用户改完想回到对话，不该被迫去找某个按钮 */
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && isSettingsOpen() && !$('cl-drawer')) closeSettings();
+  if (e.key === 'Escape' && isSettingsOpen() && !$('bru-drawer')) closeSettings();
 });
-$('cl-mic').addEventListener('click', () => {
+$('bru-mic').addEventListener('click', () => {
   if (recorder && recorder.state === 'recording') stopRec();
   else startRec();
 });
-$('cl-new').addEventListener('click', () => {
+$('bru-new').addEventListener('click', () => {
   /* 新会话：不预先创建，等第一条消息由后端铸 id（与 core 一致） */
   S.activeId = null;
   clearStream();
@@ -471,20 +471,20 @@ let settingsValues = null;
 let settingsGroupId = null;
 
 function setToast(text, ok) {
-  const t = $('cl-set-toast');
+  const t = $('bru-set-toast');
   t.textContent = text;
-  t.className = 'cl-set-toast ' + (ok ? 'is-ok' : 'is-err');
+  t.className = 'bru-set-toast ' + (ok ? 'is-ok' : 'is-err');
   clearTimeout(t._t);
-  t._t = setTimeout(() => { t.textContent = ''; t.className = 'cl-set-toast'; }, 1600);
+  t._t = setTimeout(() => { t.textContent = ''; t.className = 'bru-set-toast'; }, 1600);
 }
 
 function renderSetNav() {
-  const nav = $('cl-set-nav');
+  const nav = $('bru-set-nav');
   nav.innerHTML = '';
   for (const g of SETTINGS_GROUPS) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'cl-set-navitem' + (g.id === settingsGroupId ? ' is-active' : '');
+    b.className = 'bru-set-navitem' + (g.id === settingsGroupId ? ' is-active' : '');
     b.textContent = g.label;
     b.addEventListener('click', () => {
       if (settingsGroupId === g.id) return;
@@ -498,8 +498,8 @@ function renderSetNav() {
 
 async function renderSetGroup(id) {
   const g = SETTINGS_GROUPS.find((x) => x.id === id);
-  const content = $('cl-set-content');
-  content.innerHTML = '<div class="cl-loading">加载…</div>';
+  const content = $('bru-set-content');
+  content.innerHTML = '<div class="bru-loading">加载…</div>';
   content.scrollTop = 0;
   await renderSettingsGroup(content, {
     group: g,
@@ -513,13 +513,13 @@ async function renderSetGroup(id) {
 }
 
 async function openSettings() {
-  const view = $('cl-settings-view');
+  const view = $('bru-settings-view');
   view.hidden = false;
   settingsGroupId = settingsGroupId || SETTINGS_GROUPS[0].id;
   try {
     if (!settingsValues) settingsValues = await loadValues(app);
   } catch (err) {
-    $('cl-set-content').innerHTML = '<div class="cl-loading">读取配置失败，见控制台。</div>';
+    $('bru-set-content').innerHTML = '<div class="bru-loading">读取配置失败，见控制台。</div>';
     console.warn('[classic] loadValues 失败', err);
     return;
   }
@@ -528,12 +528,12 @@ async function openSettings() {
 }
 
 function closeSettings() {
-  $('cl-settings-view').hidden = true;
+  $('bru-settings-view').hidden = true;
   inputEl.focus();
 }
 
 function isSettingsOpen() {
-  return !$('cl-settings-view').hidden;
+  return !$('bru-settings-view').hidden;
 }
 /* ═══ 语音输入 ════════════════════════════════════════════════════════════ */
 
@@ -541,7 +541,7 @@ let recorder = null;
 let chunks = [];
 
 function syncMicVisibility(enabled) {
-  $('cl-mic').hidden = !enabled;
+  $('bru-mic').hidden = !enabled;
 }
 
 async function startRec() {
@@ -570,7 +570,7 @@ async function startRec() {
       }
     };
     recorder.start();
-    $('cl-mic').classList.add('is-rec');
+    $('bru-mic').classList.add('is-rec');
     setHint('录音中… 再点一次结束');
   } catch (err) {
     setHint('无法访问麦克风：' + (err?.message ?? err));
@@ -579,7 +579,7 @@ async function startRec() {
 
 function stopRec() {
   if (recorder && recorder.state !== 'inactive') recorder.stop();
-  $('cl-mic').classList.remove('is-rec');
+  $('bru-mic').classList.remove('is-rec');
 }
 
 /* ═══ 启动 ═══════════════════════════════════════════════════════════════ */

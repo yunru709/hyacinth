@@ -228,7 +228,7 @@ export const SETTINGS_GROUPS = [
         options: [
           { value: 'terminal', label: 'Terminal' },
           { value: 'editorial', label: 'Editorial' },
-          { value: 'classic', label: 'Classic' },
+          { value: 'brutalist', label: 'Brutalist' },
         ],
       },
       {

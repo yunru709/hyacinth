@@ -25,7 +25,7 @@
        为什么动态加载而非全打进来：多套语言 CSS 会互相打架，一个页面只跑一套。
        ======================================================================== */
     // 语言标识 → 目录名。terminal 复用 langs/tui（目录名与 .tui-* 类名属内部实现，保留）
-    const DIR = { terminal: 'tui', editorial: 'editorial', classic: 'classic' };
+    const DIR = { terminal: 'tui', editorial: 'editorial', brutalist: 'brutalist' };
     const ALIAS = { tui: 'terminal' }; // 旧名兼容：?lang=tui / localStorage='tui' 归一到 terminal
     const ALLOWED = Object.keys(DIR);
     const q = new URLSearchParams(location.search);
