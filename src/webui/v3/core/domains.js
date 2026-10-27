@@ -97,6 +97,12 @@ export class ModelDomain {
     return r?.models ?? [];
   }
 
+  async listModels() {
+    // 具体模型目录（provider+id+上下文+是否思考）；与 providers()（厂商列表）分工不同
+    const r = await this.call('model.listModels', {});
+    return (r && r.models) || [];
+  }
+
   async switchTo(provider, model) {
     const r = await this.call('model.switch', { provider, model });
     return r?.ok === true;

@@ -69,7 +69,7 @@ export function createPanel(app, hooks = {}) {
   /* ---- 各分区渲染 ---- */
 
   async function renderModel(content) {
-    const [active, providers] = await Promise.all([app.model.active(), app.model.providers()]);
+    const [active, models] = await Promise.all([app.model.active(), app.model.listModels()]);
     content.innerHTML = '';
     const a = active || {};
 
@@ -100,20 +100,24 @@ export function createPanel(app, hooks = {}) {
     tsec.appendChild(tseg);
     content.appendChild(tsec);
 
+    // 换模型（点选切换 provider+model；后端 model.switch 是唯一写入口）
     const sec = el('div', 'tui-psec');
-    sec.appendChild(el('div', 'tui-psec-h', '提供商（点已配置的以切换）'));
-    for (const p of providers) {
-      const row = el('div', 'tui-prow' + (p.active ? ' is-active' : '') + (p.configured ? '' : ' is-off'));
+    sec.appendChild(el('div', 'tui-psec-h', '换模型（点选切换）'));
+    if (!models.length) sec.appendChild(el('div', 'tui-pnote', '（无可用模型目录）'));
+    for (const md of models) {
+      const isAct = md.provider === a.provider && (!a.model || md.id === a.model);
+      const ctx = md.contextWindow ? Math.round(md.contextWindow / 1000) + 'K' : '';
+      const row = el('div', 'tui-prow' + (isAct ? ' is-active' : ''));
       row.innerHTML =
-        '<span class="tui-prow-name">' + esc(p.label) + '</span>' +
-        '<span class="tui-prow-desc">' + esc(p.model || '') + '</span>' +
-        '<span class="tui-prow-meta">' + (p.active ? '使用中' : esc(p.status || '')) + '</span>';
-      if (p.configured && !p.active) {
+        '<span class="tui-prow-name">' + esc(md.name) + '</span>' +
+        '<span class="tui-prow-desc">' + esc(md.provider) + (md.reasoning ? ' · 思考' : '') + '</span>' +
+        '<span class="tui-prow-meta">' + (isAct ? '使用中' : ctx) + '</span>';
+      if (!isAct) {
         row.dataset.clickable = 'true';
         row.addEventListener('click', async () => {
           row.dataset.clickable = 'false';
-          const ok = await app.model.switchTo(p.type, p.model);
-          toast(ok ? '已切换到 ' + p.label : '切换失败', ok);
+          const ok = await app.model.switchTo(md.provider, md.id);
+          toast(ok ? '已切换到 ' + md.name : '切换失败', ok);
           if (ok) void renderModel(content);
         });
       }
