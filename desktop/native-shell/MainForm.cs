@@ -76,14 +76,17 @@ public sealed class MainForm : Form
 
     private readonly WebView2 _web = new();
     private Panel? _splash;
+    private Color _themeBg = ShellTheme.Default;
+    private Color _themeFg = Color.White;
+    private Color _themeAccent = Color.White;
     // WebView 就绪后、后端就绪前的骨架页（避免空白深色死块，给 spinner 反馈）
     private const string SKELETON_HTML = @"<!doctype html><html><head><meta charset=""utf-8""><style>
-html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:system-ui,'Segoe UI',sans-serif;}
+html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,'Segoe UI',sans-serif;}
 .w{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;}
 .b{font-size:13px;letter-spacing:.5em;opacity:.85;padding-left:.5em;}
-.s{width:30px;height:30px;border:2.5px solid rgba(184,178,207,.2);border-top-color:#9B8CE0;border-radius:50%;animation:r .85s linear infinite;}
+.s{width:30px;height:30px;border:2.5px solid {ACCENT}55;border-top-color:{ACCENT};border-radius:50%;animation:r .85s linear infinite;}
 @keyframes r{to{transform:rotate(360deg)}}
-.t{font-size:12px;letter-spacing:.15em;opacity:.45;}
+.t{font-size:12px;letter-spacing:.15em;opacity:.55;}
 </style></head><body><div class=""w""><div class=""b"">HYACINTH</div><div class=""s""></div><div class=""t"">正在启动</div></div></body></html>";
 
     private Process? _backend;
@@ -120,7 +123,9 @@ html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:syst
         // 拖拽/缩放/三颗系统按钮/圆角/阴影全部是原生机制。上一版自绘无边框的
         // "蓝标题栏浮出 / 深色热区带"两类问题就出在手工重造 NC 区上，全部退役。
         // BackColor 只在 WebView2 就绪前的一瞬可见，取页面默认主题底色避免白闪。
-        BackColor = ShellTheme.Default;
+        var _pal = ReadThemePalette();
+        _themeBg = _pal.bg; _themeFg = _pal.fg; _themeAccent = _pal.accent;
+        BackColor = _themeBg;
         Width = 1440;
         Height = 900;
         MinimumSize = new Size(1080, 680);
@@ -155,7 +160,7 @@ html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:syst
         // 页面还没报色前先用默认主题色（夜园深色）；页面 applyTheme 后由
         // WebMessageReceived 实时校正（含明暗切换）。Win10 上这些 DWM 属性
         // 不存在 ⇒ 静默保持系统默认标题栏（见 ShellTheme）。
-        ShellTheme.Apply(Handle, ShellTheme.Default, dark: true);
+        ShellTheme.Apply(Handle, _themeBg, IsDark(_themeBg));
         // Win11: 圆角；Win10: E_INVALIDARG 静默直角（标准窗口 + DWM 染色下同样适用）
         ShellTheme.TryApplyRoundedCorners(Handle);
     }
@@ -276,9 +281,51 @@ html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:syst
 
     /// <summary>显示并激活主窗口（托盘双击 / 菜单「显示主窗口」/ 都走这里）。</summary>
     /// <summary>启动占位：WebView2 就绪前的 2-3s 显示品牌与「正在启动」，避免纯色死块。</summary>
+    /// <summary>读 ui.theme + 从 theme.css 提取该主题 背景/文字/强调 色；失败回退深色默认。</summary>
+    private (Color bg, Color fg, Color accent) ReadThemePalette()
+    {
+        var fb = (ShellTheme.Default, Color.FromArgb(0xB8, 0xB2, 0xCF), Color.FromArgb(0x9B, 0x8C, 0xE0));
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var cfg = Path.Combine(home, ".agent", "config.json");
+            string theme = "";
+            if (File.Exists(cfg))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
+                if (doc.RootElement.TryGetProperty("ui", out var ui) && ui.TryGetProperty("theme", out var tv))
+                    theme = tv.GetString() ?? "";
+            }
+            string css = "";
+            foreach (var c in new[] { Path.Combine(AppRoot, "src", "webui", "theme.css"), Path.Combine(AppRoot, "dist", "webui", "theme.css") })
+                if (File.Exists(c)) { css = File.ReadAllText(c); break; }
+            if (css.Length == 0) return fb;
+            string? Block(string sel)
+            {
+                var mm = System.Text.RegularExpressions.Regex.Match(css, System.Text.RegularExpressions.Regex.Escape(sel) + @"\s*\{([^}]*)\}");
+                return mm.Success ? mm.Groups[1].Value : null;
+            }
+            var body = (!string.IsNullOrWhiteSpace(theme) ? Block($"html[data-theme='{theme}']") : null) ?? Block(":root") ?? css;
+            Color Pick(string name, Color def)
+            {
+                var mm = System.Text.RegularExpressions.Regex.Match(body, "--" + name + @":\s*(#[0-9a-fA-F]{6})");
+                if (!mm.Success) return def;
+                var h = mm.Groups[1].Value;
+                return Color.FromArgb(Convert.ToInt32(h.Substring(1, 2), 16), Convert.ToInt32(h.Substring(3, 2), 16), Convert.ToInt32(h.Substring(5, 2), 16));
+            }
+            return (Pick("neutral-50", fb.Item1), Pick("neutral-900", fb.Item2), Pick("accent-500", fb.Item3));
+        }
+        catch { return fb; }
+    }
+
+    private static string Hex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+    private static bool IsDark(Color c) => (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) < 128;
+
+    private string BuildSkeleton()
+        => SKELETON_HTML.Replace("{BG}", Hex(_themeBg)).Replace("{FG}", Hex(_themeFg)).Replace("{ACCENT}", Hex(_themeAccent));
     private Panel BuildSplash()
     {
-        var p = new Panel { Dock = DockStyle.Fill, BackColor = ShellTheme.Default };
+        var p = new Panel { Dock = DockStyle.Fill, BackColor = _themeBg };
         var lbl = new Label
         {
             Dock = DockStyle.Fill,
@@ -714,9 +761,9 @@ html,body{margin:0;height:100%;background:#0A0B14;color:#B8B2CF;font-family:syst
             var env = await CoreWebView2Environment.CreateAsync(ResolveBrowserRuntime(), userData, options);
             await _web.EnsureCoreWebView2Async(env);
             // 页面加载期间用深色底避免白闪；WebView 就绪即藏掉启动占位（交给页面）
-            _web.DefaultBackgroundColor = ShellTheme.Default;
+            _web.DefaultBackgroundColor = _themeBg;
             if (_splash != null) _splash.Visible = false;
-            try { _web.CoreWebView2.NavigateToString(SKELETON_HTML); } catch { }
+            try { _web.CoreWebView2.NavigateToString(BuildSkeleton()); } catch { }
 
             // 外链交给系统浏览器，别把应用窗口当浏览器使
             _web.CoreWebView2.NewWindowRequested += (_, e) =>
