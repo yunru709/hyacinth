@@ -351,11 +351,60 @@ export function createPanel(app, hooks = {}) {
     refresh();
   }
 
+  /* 文件区：工作区浏览（HTTP /api/fs/*）。点文件把相对路径插入输入框。 */
+  let filesCurPath = '';
+  function fmtSize(n) {
+    if (!n) return '';
+    if (n < 1024) return n + 'B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + 'K';
+    return (n / 1048576).toFixed(1) + 'M';
+  }
+  async function renderFiles(content) {
+    content.innerHTML = '<div class="tui-set-loading">加载…</div>';
+    const meta = await app.fs.meta();
+    const data = await app.fs.list(filesCurPath);
+    if (!data) { content.innerHTML = '<div class="tui-set-loading">无法读取文件列表（/api/fs 不可用）</div>'; return; }
+    content.innerHTML = '';
+
+    const bar = el('div', 'tui-toolbar');
+    const up = el('button', 'tui-pb2', '↑ 上级');
+    up.type = 'button';
+    up.disabled = !filesCurPath;
+    const crumb = el('span', 'tui-prow-meta', (meta ? meta.name : '工作区') + (filesCurPath ? ' / ' + filesCurPath : ' /'));
+    bar.append(up, el('span', 'tui-grow'), crumb);
+    content.appendChild(bar);
+
+    const sec = el('div', 'tui-psec');
+    const entries = data.entries || [];
+    if (!entries.length) sec.appendChild(el('div', 'tui-pnote', '（空目录）'));
+    for (const e of entries) {
+      const isDir = e.type === 'dir';
+      const row = el('div', 'tui-prow');
+      row.dataset.clickable = 'true';
+      row.innerHTML =
+        '<span class="tui-prow-name">' + (isDir ? '▸ ' : '· ') + esc(e.name) + '</span>' +
+        '<span class="tui-prow-meta">' + (isDir ? '目录' : fmtSize(e.size)) + '</span>';
+      row.addEventListener('click', () => {
+        if (isDir) { filesCurPath = e.path; void renderFiles(content); }
+        else if (hooks.insertText) { hooks.insertText(e.path); }
+      });
+      sec.appendChild(row);
+    }
+    content.appendChild(sec);
+
+    up.addEventListener('click', () => {
+      if (!filesCurPath) return;
+      filesCurPath = filesCurPath.includes('/') ? filesCurPath.slice(0, filesCurPath.lastIndexOf('/')) : '';
+      void renderFiles(content);
+    });
+  }
+
   const SECTION_DEFS = [
     { id: 'model', label: '模型', render: renderModel },
     { id: 'caps', label: '能力', render: renderCaps },
     { id: 'runtime', label: '运行', render: renderRuntime },
     { id: 'sessions', label: '会话', render: renderSessions },
+    { id: 'files', label: '文件', render: renderFiles },
   ];
   let currentId = 'model';
 

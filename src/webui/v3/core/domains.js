@@ -305,6 +305,27 @@ export class SessionAdminDomain {
   }
 }
 
+/* ═══ 文件系统（工作区浏览）—— 走 HTTP /api/fs/*，不是 WS RPC ═════════════
+   v1 也是直连这些同源端点；--no-auth 下无需 token。失败返回 null 不抛。 */
+export class FsDomain {
+  async _json(url) {
+    try {
+      const r = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) { console.warn('[domains:fs] ' + url + ' HTTP ' + r.status); return null; }
+      return await r.json();
+    } catch (e) {
+      console.warn('[domains:fs] ' + url + ' 失败', e && e.message ? e.message : e);
+      return null;
+    }
+  }
+  /** {root, name, defaultRoot, isCustom, maxListEntries, hidden, …} */
+  async meta() { return this._json('/api/fs/meta'); }
+  /** {path, entries:[{name, path, type:'dir'|'file', size, mtime}]} */
+  async list(path = '') { return this._json('/api/fs/list' + (path ? '?path=' + encodeURIComponent(path) : '')); }
+  /** 读文本文件内容 */
+  async read(path = '') { return this._json('/api/fs/read?path=' + encodeURIComponent(path)); }
+}
+
 /* ═══ 装配 ═══════════════════════════════════════════════════════════════ */
 
 /** 一次性把所有域挂到 app 上。语言层拿到 app 就有全套能力。 */
@@ -317,5 +338,6 @@ export function attachDomains(app) {
     caps: new CapabilityDomain(c),
     runtime: new RuntimeDomain(c),
     sessionAdmin: new SessionAdminDomain(c),
+    fs: new FsDomain(),
   });
 }

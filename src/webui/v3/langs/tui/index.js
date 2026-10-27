@@ -543,6 +543,11 @@ panel = createPanel(app, {
   reloadSessions: loadSessions,
   getSessions: () => S.sessionList,
   titleOf: (s) => sessions.titleOf(s),
+  insertText: (t) => {
+    panel.close();
+    fieldEl.value = (fieldEl.value ? fieldEl.value + ' ' : '') + t;
+    fieldEl.focus();
+  },
 });
 $('tui-panel-btn').addEventListener('click', () => { closeSettings(); panel.open(); });
 
