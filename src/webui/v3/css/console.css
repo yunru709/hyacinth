@@ -296,3 +296,34 @@
 .sf-seg-btn:last-child { border-right: 0; }
 .sf-seg-btn:hover { background: var(--surface-2); }
 .sf-seg-btn.is-on { background: var(--accent); color: var(--accent-fg); }
+
+/* 语音下载进度条（STT/TTS 下载时显示；由 panel.js pollStt/pollTts 驱动） */
+.tui-prog {
+  position: relative;
+  height: 18px;
+  margin-top: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.tui-prog[hidden] { display: none; }
+/* 工具栏内的进度条收窄成一条内联小条 */
+.tui-toolbar .tui-prog { flex: 0 0 160px; height: 16px; margin-top: 0; }
+.tui-prog-bar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0%;
+  background: var(--accent);
+  opacity: 0.3;
+  transition: width 0.3s ease;
+}
+.tui-prog-label {
+  position: relative;
+  display: block;
+  line-height: 18px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.tui-toolbar .tui-prog-label { line-height: 16px; }

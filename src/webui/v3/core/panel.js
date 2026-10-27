@@ -461,12 +461,20 @@ export function createPanel(app, hooks = {}) {
       if (!content.querySelector('[data-voice-root]')) return; // 已切走该区，停
       const s = await app.voice.sttStatus();
       if (!s) return;
-      const prog = content.querySelector('.stt-prog');
+      const bar = content.querySelector('.stt-progbar');
+      const inner = bar && bar.querySelector('.tui-prog-bar');
+      const label = bar && bar.querySelector('.tui-prog-label');
       if (s.downloading) {
         const p = s.downloadProgress;
-        if (prog) prog.textContent = '下载中… ' + (p ? (p.percent || 0) + '%' : '准备中');
+        const pct = p ? (p.percent || 0) : 0;
+        if (bar) {
+          bar.hidden = false;
+          if (inner) inner.style.width = pct + '%';
+          if (label) label.textContent = p ? (pct + '% · ' + (p.speed || '')) : '准备中…';
+        }
         setTimeout(tick, 900);
       } else {
+        if (bar) bar.hidden = true;
         toast(s.modelReady ? 'STT 模型就绪' : 'STT 下载结束', !!s.modelReady);
         void renderVoice(content);
       }
@@ -478,13 +486,21 @@ export function createPanel(app, hooks = {}) {
       if (!content.querySelector('[data-voice-root]')) return;
       const t = await app.voice.ttsStatus();
       if (!t) return;
-      const prog = content.querySelector('.tts-prog');
+      const bar = content.querySelector('.tts-progbar');
+      const inner = bar && bar.querySelector('.tui-prog-bar');
+      const label = bar && bar.querySelector('.tui-prog-label');
       const m = t.model || {};
       if (m.downloading) {
         const p = m.downloadProgress;
-        if (prog) prog.textContent = '下载中… ' + (p ? (p.percent || 0) + '%' : '准备中');
+        const pct = p ? (p.percent || 0) : 0;
+        if (bar) {
+          bar.hidden = false;
+          if (inner) inner.style.width = pct + '%';
+          if (label) label.textContent = p ? (pct + '% · ' + (p.speed || '')) : '准备中…';
+        }
         setTimeout(tick, 900);
       } else {
+        if (bar) bar.hidden = true;
         toast(m.ready ? 'TTS 模型就绪' : 'TTS 下载结束', !!m.ready);
         void renderVoice(content);
       }
@@ -542,7 +558,9 @@ export function createPanel(app, hooks = {}) {
     sttDl.type = 'button'; sttRm.type = 'button';
     sttDl.disabled = !stt || !stt.runtimeAvailable || stt.modelReady || stt.downloading;
     sttRm.disabled = !stt || !stt.modelReady || stt.downloading;
-    const sttProg = el('span', 'tui-pnote stt-prog', '');
+    const sttProg = el('div', 'tui-prog stt-progbar');
+    sttProg.hidden = true;
+    sttProg.innerHTML = '<div class="tui-prog-bar"></div><span class="tui-prog-label"></span>';
     sttBar.append(sttDl, sttRm, el('span', 'tui-grow'), sttProg);
     s1.appendChild(sttBar);
     sttDl.addEventListener('click', async () => {
@@ -591,7 +609,9 @@ export function createPanel(app, hooks = {}) {
     const svc = (tts && tts.service) || {};
     const envCard = el('div', 'tui-pcard');
     const bar = el('div', 'tui-toolbar');
-    const prog = el('span', 'tui-pnote tts-prog', '');
+    const prog = el('div', 'tui-prog tts-progbar');
+    prog.hidden = true;
+    prog.innerHTML = '<div class="tui-prog-bar"></div><span class="tui-prog-label"></span>';
 
     if (activeId === 'cosyvoice3') {
       envCard.innerHTML =
