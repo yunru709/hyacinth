@@ -24,6 +24,9 @@
 
 import { boot, DEMO, toEntries } from '../../core/bridge.js';
 import { renderMarkdown } from '../../core/markdown.js';
+import { createPanel } from '../../core/panel.js';
+import { renderSettingsGroup } from '../../core/form.js';
+import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
 
 const app = boot();
 const { client, sessions, stream, history } = app;
@@ -60,12 +63,29 @@ root.innerHTML = `
   <div class="ed-chrome" id="ed-chrome">
     <button class="ed-tool" id="ed-sessions">会话</button>
     <button class="ed-tool" id="ed-look">外观</button>
+    <button class="ed-tool" id="ed-settings">设置</button>
+    <button class="ed-tool" id="ed-console">控制台</button>
     <span class="ed-tool-sep">·</span>
     <span class="ed-tool-hint">Esc 返回正文</span>
   </div>
 
   <div class="ed-picker" id="ed-picker" hidden>
     <div class="ed-picker-box" id="ed-picker-box"></div>
+  </div>
+
+  <div class="tui-settings" id="ed-settings-panel" hidden>
+    <div class="tui-set-box">
+      <div class="tui-set-head">
+        <span class="tui-set-title">SETTINGS</span>
+        <span class="tui-set-toast" id="ed-set-toast"></span>
+        <span class="tui-grow"></span>
+        <span class="tui-set-close" id="ed-set-close" role="button" tabindex="0">[ 关闭 Esc ]</span>
+      </div>
+      <div class="tui-set-body">
+        <nav class="tui-set-nav" id="ed-set-nav"></nav>
+        <div class="tui-set-content" id="ed-set-content"></div>
+      </div>
+    </div>
   </div>
 `;
 
@@ -334,6 +354,88 @@ function renderEmpty() {
   streamEl.appendChild(e);
 }
 
+/* ═══ 设置 + 控制台（复用 core，外观走共享 .tui-set-* / .sf-*）════════════════ */
+let edSettingsValues = null;
+let edSettingsGroupId = null;
+
+function setEdToast(text, ok) {
+  const t = $('ed-set-toast');
+  t.textContent = text;
+  t.className = 'tui-set-toast ' + (ok ? 'is-ok' : 'is-err');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.textContent = ''; t.className = 'tui-set-toast'; }, 1600);
+}
+
+function renderEdSetNav() {
+  const nav = $('ed-set-nav');
+  nav.innerHTML = '';
+  for (const g of SETTINGS_GROUPS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tui-set-navitem' + (g.id === edSettingsGroupId ? ' is-active' : '');
+    b.textContent = g.label;
+    b.addEventListener('click', () => {
+      if (edSettingsGroupId === g.id) return;
+      edSettingsGroupId = g.id;
+      renderEdSetNav();
+      void renderEdSetGroup(g.id);
+    });
+    nav.appendChild(b);
+  }
+}
+
+async function renderEdSetGroup(id) {
+  const g = SETTINGS_GROUPS.find((x) => x.id === id);
+  const content = $('ed-set-content');
+  content.innerHTML = '<div class="tui-set-loading">加载…</div>';
+  content.scrollTop = 0;
+  await renderSettingsGroup(content, {
+    group: g,
+    values: edSettingsValues,
+    app,
+    onSaved: (_p, _v, ok) => setEdToast(ok ? '已保存' : '保存失败', ok),
+  });
+}
+
+async function openEdSettings() {
+  closePicker();
+  $('ed-settings-panel').hidden = false;
+  edSettingsGroupId = edSettingsGroupId || SETTINGS_GROUPS[0].id;
+  try {
+    if (!edSettingsValues) edSettingsValues = await loadValues(app);
+  } catch (err) {
+    $('ed-set-content').innerHTML = '<div class="tui-set-loading">读取配置失败，见控制台。</div>';
+    console.warn('[editorial] loadValues 失败', err);
+    return;
+  }
+  renderEdSetNav();
+  await renderEdSetGroup(edSettingsGroupId);
+}
+
+function closeEdSettings() {
+  $('ed-settings-panel').hidden = true;
+  inputEl.focus();
+}
+function isEdSettingsOpen() {
+  return !$('ed-settings-panel').hidden;
+}
+
+/* 控制台浮层（core/panel.js：模型/能力/运行/会话/文件） */
+let edPanel = null;
+function initEdPanel() {
+  edPanel = createPanel(app, {
+    reloadSessions: loadSessions,
+    getSessions: () => S.sessionList,
+    titleOf: (s) => sessions.titleOf(s),
+    insertText: (t) => {
+      if (edPanel) edPanel.close();
+      inputEl.value = (inputEl.value ? inputEl.value + ' ' : '') + t;
+      inputEl.focus();
+      autosize();
+    },
+  });
+}
+
 /* ═══ 事件绑定 ═══════════════════════════════════════════════════════════ */
 inputEl.addEventListener('input', autosize);
 inputEl.addEventListener('keydown', (e) => {
@@ -350,10 +452,24 @@ $('ed-picker').addEventListener('click', (e) => {
   if (e.target === $('ed-picker')) closePicker();
 });
 
+/* 设置浮层关闭 + Esc（浮层/控制台优先于 chrome） */
+$('ed-set-close').addEventListener('click', closeEdSettings);
+$('ed-set-close').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeEdSettings(); }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (isEdSettingsOpen()) { e.preventDefault(); closeEdSettings(); }
+  else if (edPanel && edPanel.isOpen()) { e.preventDefault(); edPanel.close(); }
+});
+
 /* ═══ 启动 ═══════════════════════════════════════════════════════════════ */
 autosize();
 setStatus('');
 inputEl.focus();
+initEdPanel();
+$('ed-settings').addEventListener('click', () => { void openEdSettings(); });
+$('ed-console').addEventListener('click', () => { closePicker(); if (edPanel) edPanel.open(); });
 
 if (DEMO.isDemo()) {
   streamEl.innerHTML = '';

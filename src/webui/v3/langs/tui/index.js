@@ -37,7 +37,7 @@ import { boot, DEMO, PALETTE_LABELS, toEntries } from '../../core/bridge.js';
 import { renderMarkdown } from '../../core/markdown.js';
 import { renderSettingsGroup } from '../../core/form.js';
 import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
-import { createPanel } from './panel.js';
+import { createPanel } from '../../core/panel.js';
 
 const app = boot();
 const { client, sessions, stream, history } = app;
