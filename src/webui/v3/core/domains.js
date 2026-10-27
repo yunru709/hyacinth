@@ -254,7 +254,9 @@ export class RuntimeDomain {
 
   async setProfile(profile) {
     const r = await this.call('mode.setProfile', { profile });
-    return r?.ok === true;
+    // ⚠️ mode.setProfile 返回的是 ModeSnapshot {profile, unrestricted, goal}，不是 {ok:true}。
+    // 用 r.ok 判断会永远误报"切换失败"（2026-10-27 实测：后端已切成功、前端却报失败）⇒ 按返回的 profile 判。
+    return !!r && r.profile === profile;
   }
 
   /** { orchestrator: { active, activeAgents } } */

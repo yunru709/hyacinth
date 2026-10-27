@@ -317,3 +317,279 @@
 @media (max-width: 720px) {
   .tui-side { flex-basis: 120px; width: 120px; }
 }
+
+/* ═══ 状态栏按钮（mic / 设置 / 帮助）═══════════════════════════════════════
+   替代已删的 tui-mode 徽标：状态栏右侧的功能入口，纯字面、反色 hover。 */
+.tui-status-btn {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 6px;
+  height: 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.tui-status-btn:hover,
+.tui-status-btn:focus { background: var(--accent); color: var(--accent-fg); outline: none; }
+.tui-status-btn[hidden] { display: none !important; }
+.tui-status-btn.is-rec { background: var(--err); color: var(--bg); }
+
+/* ═══ Markdown 内容（assistant 行内，终端等宽风）════════════════════════════ */
+.tui-line-body p { margin: 0 0 6px; }
+.tui-line-body p:last-child { margin-bottom: 0; }
+.tui-line-body > *:first-child { margin-top: 0; }
+.tui-line-body h1, .tui-line-body h2, .tui-line-body h3, .tui-line-body h4 {
+  margin: 8px 0 4px; font-size: 12px; font-weight: 700; color: var(--fg-strong);
+}
+.tui-line-body ul, .tui-line-body ol { margin: 0 0 6px; padding-left: 18px; }
+.tui-line-body li { margin: 1px 0; }
+.tui-line-body code {
+  font-family: var(--font-mono); background: var(--surface-2); color: var(--fg-strong);
+  padding: 0 3px;
+}
+.tui-line-body pre {
+  margin: 4px 0; padding: 6px 8px; background: var(--surface-2);
+  border: 1px solid var(--line); overflow-x: auto;
+}
+.tui-line-body pre code { background: none; padding: 0; }
+.tui-line-body blockquote {
+  margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--line-strong); color: var(--fg-muted);
+}
+.tui-line-body a { color: var(--accent); text-decoration: underline; }
+.tui-line-body strong { color: var(--fg-strong); font-weight: 700; }
+.tui-line-body hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+.tui-line-body table { border-collapse: collapse; margin: 4px 0; }
+.tui-line-body th, .tui-line-body td { border: 1px solid var(--line); padding: 2px 6px; }
+
+/* ═══ 设置浮层（复用 core/form 的结构，外观走终端方框）═══════════════════════ */
+.tui-settings {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.55);
+}
+.tui-settings[hidden] { display: none !important; }
+
+.tui-set-box {
+  width: min(760px, 92vw);
+  height: min(560px, 88vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-strong);
+}
+
+.tui-set-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.tui-set-title { color: var(--accent); }
+.tui-set-toast { font-size: 11px; letter-spacing: 0; text-transform: none; }
+.tui-set-toast.is-ok { color: var(--ok); }
+.tui-set-toast.is-err { color: var(--err); }
+.tui-set-close { cursor: pointer; letter-spacing: 0; text-transform: none; }
+.tui-set-close:hover, .tui-set-close:focus { color: var(--accent); outline: none; }
+
+.tui-set-body { flex: 1 1 auto; min-height: 0; display: flex; }
+
+.tui-set-nav {
+  flex: 0 0 140px;
+  width: 140px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.tui-set-navitem {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.tui-set-navitem:hover { background: var(--surface-2); }
+.tui-set-navitem.is-active { background: var(--accent); color: var(--accent-fg); }
+
+.tui-set-content { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 8px 14px; }
+.tui-set-loading { color: var(--fg-subtle); padding: 10px 0; }
+
+/* ═══ 设置表单 .sf-*（core/form.js 产出结构，终端风：直角、无阴影）════════════ */
+.sf-group { padding: 8px 0 4px; }
+.sf-group + .sf-group { border-top: 1px solid var(--line); }
+.sf-group-head { margin-bottom: 8px; }
+.sf-group-title { font-size: 12px; font-weight: 700; color: var(--fg-strong); letter-spacing: 0.04em; }
+.sf-group-desc { margin-top: 3px; font-size: 11px; color: var(--fg-subtle); line-height: 1.5; }
+
+.sf-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.sf-item:last-child { border-bottom: 0; }
+.sf-item.is-error .sf-label { color: var(--err); }
+
+.sf-text { flex: 1; min-width: 0; }
+.sf-label { font-size: 12px; color: var(--fg); }
+.sf-hint { margin-top: 2px; font-size: 10.5px; color: var(--fg-subtle); line-height: 1.5; }
+
+.sf-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+  justify-content: flex-end;
+}
+
+/* 开关 */
+.sf-switch {
+  appearance: none;
+  width: 32px;
+  height: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  position: relative;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.sf-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  background: var(--fg-muted);
+  transition: transform 100ms linear, background 100ms linear;
+}
+.sf-switch:checked { background: var(--accent); border-color: var(--accent); }
+.sf-switch:checked::after { transform: translateX(15px); background: var(--accent-fg); }
+
+/* 滑杆 / 数值 */
+.sf-range { width: 110px; accent-color: var(--accent); }
+.sf-value { font-size: 11px; color: var(--fg-muted); min-width: 34px; text-align: right; }
+.sf-number,
+.sf-text-input,
+.sf-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  padding: 2px 6px;
+}
+.sf-number { width: 90px; }
+.sf-text-input { width: 160px; }
+
+/* 只读状态 / 保存提示 */
+.sf-status { font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--fg-muted); }
+.sf-status.is-ok { color: var(--ok); border-color: var(--ok); }
+.sf-status.is-off { color: var(--err); border-color: var(--err); }
+.sf-badge { font-size: 10px; color: var(--fg-subtle); }
+.sf-badge.is-ok { color: var(--ok); }
+.sf-badge.is-err { color: var(--err); }
+
+/* ═══ 控制台面板内容（panel.js 产出：模型/能力/运行/会话）══════════════════════
+   终端风：直角、虚线分隔、反色选中，全部走 palette 变量。 */
+.tui-pcard {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: var(--surface-1);
+}
+.tui-pcard-h {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--fg-subtle); margin-bottom: 6px;
+}
+.tui-pcard-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; }
+.tui-pcard-row > span { color: var(--fg-muted); }
+.tui-pcard-row > b { color: var(--fg-strong); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tui-psec { margin-bottom: 12px; }
+.tui-psec-h {
+  font-size: 11px; font-weight: 700; color: var(--fg-strong);
+  margin: 6px 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--line);
+  letter-spacing: 0.02em;
+}
+
+.tui-prow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; font-size: 12px;
+  border-bottom: 1px dashed var(--line);
+  min-width: 0;
+}
+.tui-prow:last-child { border-bottom: 0; }
+.tui-prow.is-active { background: var(--accent); color: var(--accent-fg); }
+.tui-prow.is-active .tui-prow-name,
+.tui-prow.is-active .tui-prow-desc,
+.tui-prow.is-active .tui-prow-meta { color: var(--accent-fg); }
+.tui-prow.is-off { opacity: 0.5; }
+.tui-prow[data-clickable="true"] { cursor: pointer; }
+.tui-prow[data-clickable="true"]:hover { background: var(--surface-2); }
+.tui-prow-name { flex: 0 0 auto; color: var(--fg); font-weight: 500; }
+.tui-prow-desc {
+  flex: 1 1 auto; min-width: 0; color: var(--fg-subtle); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tui-prow-meta { flex: 0 0 auto; color: var(--fg-muted); font-size: 11px; }
+
+/* 分段按钮组（执行档位） */
+.tui-seg { display: inline-flex; border: 1px solid var(--line-strong); }
+.tui-seg-btn {
+  border: 0; background: none; color: var(--fg);
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 3px 12px; cursor: pointer;
+  border-right: 1px solid var(--line);
+}
+.tui-seg-btn:last-child { border-right: 0; }
+.tui-seg-btn:hover { background: var(--surface-2); }
+.tui-seg-btn.is-on { background: var(--accent); color: var(--accent-fg); }
+
+/* 小开关（技能启停） */
+.tui-sw {
+  appearance: none; width: 28px; height: 15px; flex: 0 0 auto;
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  position: relative; cursor: pointer;
+}
+.tui-sw::after {
+  content: ''; position: absolute; top: 1px; left: 1px;
+  width: 11px; height: 11px; background: var(--fg-muted);
+  transition: transform 100ms linear, background 100ms linear;
+}
+.tui-sw:checked { background: var(--accent); border-color: var(--accent); }
+.tui-sw:checked::after { transform: translateX(13px); background: var(--accent-fg); }
+
+/* 危险按钮（删除/结束） */
+.tui-pbtn {
+  flex: 0 0 auto; border: 1px solid var(--line-strong); background: none;
+  color: var(--err); font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; cursor: pointer;
+}
+.tui-pbtn:hover { background: var(--err); color: var(--bg); }
+
+.tui-pnote { color: var(--fg-subtle); font-size: 11px; padding: 4px 0; }

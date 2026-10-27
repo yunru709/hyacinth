@@ -5,8 +5,9 @@
 
      **外表像终端，交互像普通聊天框。** 易用性优先，不为"像终端"牺牲可用性。
 
-     之前的版本是 vim 式模态（NORMAL/INSERT，要按 i 才能输入、j/k 移动、: 命令）。
-     孑遗判定："点击 i 才输入这难用的，UI 肯定是易用性为首要的" ⇒ 本轮去掉模态。
+     两轮修订：
+       · 去 vim 模态（NORMAL/INSERT/i 输入）——孑遗："点击 i 才输入这难用的"。
+       · 补齐相对 v1/v3-classic 缺失的功能：Markdown 渲染 / 设置面板 / 语音输入。
 
    ══ 与其他语言的差别（不是换色）═══════════════════════════════════════════
 
@@ -17,23 +18,31 @@
      排版    全等宽 12px / 行高 1.4，信息密度最高
      动效    无 —— 任何过渡动画在终端语境里都是噪音
 
-   ══ 为什么用 1px 实线而非字符边框 ═════════════════════════════════════════
+   ══ 功能范围（与 classic 对齐，全部走 core，不自己拼 RPC）═════════════════
 
-     字符边框（┌─┐）需要等宽字体完美对齐，中文混排必然错位。
-     lazygit / btop 这类现代 TUI 都用细实线，视觉上更稳且不会崩。
+     对话 Markdown 渲染 · 历史加载 · 流式输出 · 工具/思考行
+     设置 6 组（模型/上下文/工具/语音/外观/高级），复用 core/form + core/settings
+     语音输入（stt.enabled 控制显隐）· 会话列表/新建/切换
+     配色/主题切换（: 命令已删，改由设置面板驱动）
 
    ══ 交互原则（改这里之前先读）════════════════════════════════════════════
 
      · 输入框永远可编辑，页面加载即 autofocus —— 没有"进入输入模式"这一步。
      · Enter 发送；不劫持 Tab / 方向键 / 字母键。
-     · 键盘快捷键只在输入框**未聚焦**时生效（避免 j/k 顶掉打字）。
-     · 会话切换：鼠标单击即打开（不要求先选中、再双击）。
+     · 快捷键(j/k/?/Esc)只在「没有任何输入框聚焦」时生效（别把设置里的数字框顶掉）。
+     · 会话切换：鼠标单击即打开。
    ========================================================================== */
 
 import { boot, DEMO, PALETTE_LABELS, toEntries } from '../../core/bridge.js';
+import { renderMarkdown } from '../../core/markdown.js';
+import { renderSettingsGroup } from '../../core/form.js';
+import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
+import { createPanel } from './panel.js';
 
 const app = boot();
 const { client, sessions, stream, history } = app;
+/* 调试口：把 app 挂到 window，方便控制台/探针直接调 domains（无害，便于日后排查）。 */
+window.__v3 = app;
 
 /* ═══ 应用主题/配色（TUI 也支持换色，但结构永远是 TUI）═══════════════════════ */
 document.documentElement.setAttribute('data-theme', app.theme);
@@ -84,8 +93,25 @@ root.innerHTML = `
     <span class="tui-conn" id="tui-conn"><span class="tui-dot"></span>offline</span>
     <span class="tui-dim" id="tui-themepal">TUI · ${PALETTE_LABELS[app.palette]}</span>
     <span class="tui-grow"></span>
-    <span class="tui-dim tui-help-link" id="tui-help-link" role="button" tabindex="0"
-          title="快捷键与说明">?</span>
+    <button class="tui-status-btn" id="tui-mic" type="button" title="语音输入（需在设置里启用）" hidden>◉ mic</button>
+    <button class="tui-status-btn" id="tui-panel-btn" type="button" title="控制台（模型/能力/运行/会话）">⊞ 控制台</button>
+    <button class="tui-status-btn" id="tui-settings-btn" type="button" title="设置">⚙ 设置</button>
+    <span class="tui-status-btn" id="tui-help-link" role="button" tabindex="0" title="使用说明">?</span>
+  </div>
+
+  <div class="tui-settings" id="tui-settings" hidden>
+    <div class="tui-set-box">
+      <div class="tui-set-head">
+        <span class="tui-set-title">SETTINGS</span>
+        <span class="tui-set-toast" id="tui-set-toast"></span>
+        <span class="tui-grow"></span>
+        <span class="tui-set-close" id="tui-set-close" role="button" tabindex="0">[ 关闭 Esc ]</span>
+      </div>
+      <div class="tui-set-body">
+        <nav class="tui-set-nav" id="tui-set-nav"></nav>
+        <div class="tui-set-content" id="tui-set-content"></div>
+      </div>
+    </div>
   </div>
 `;
 
@@ -93,6 +119,8 @@ const $ = (id) => document.getElementById(id);
 const listEl = $('tui-list');
 const logEl = $('tui-log');
 const fieldEl = $('tui-field');
+/* 控制台浮层句柄（由 panel.js 在 startup 创建） */
+let panel = null;
 
 /* ═══ 会话列表渲染 ═══════════════════════════════════════════════════════ */
 function renderList() {
@@ -122,7 +150,6 @@ function renderList() {
     mark.textContent = s.id === S.activeSession ? '*' : ' ';
 
     row.append(mark, title);
-    // 单击即打开（普通聊天的直觉：点会话就切过去，不用先选中再双击）
     row.addEventListener('click', () => {
       S.selIndex = i;
       openSession(s);
@@ -139,6 +166,8 @@ function truncate(s, n) {
 /* ═══ 日志区 ═════════════════════════════════════════════════════════════ */
 let currentAssistantEl = null;
 
+/* assistant 行用 Markdown 渲染（代码块/列表/加粗可读）；user/error/sys 保持纯文本，
+   避免用户输入里的符号被渲染成结构。renderMarkdown 内部先 escapeHtml 再套规则，安全。 */
 function appendLine(kind, text) {
   const line = document.createElement('div');
   line.className = `tui-line tui-line--${kind}`;
@@ -147,9 +176,10 @@ function appendLine(kind, text) {
   prefix.className = 'tui-line-prefix';
   prefix.textContent = kind === 'user' ? '`>' : kind === 'assistant' ? '|' : kind === 'error' ? '!' : '.';
 
-  const body = document.createElement('span');
+  const body = document.createElement('div');
   body.className = 'tui-line-body';
-  body.textContent = text;
+  if (kind === 'assistant') body.innerHTML = renderMarkdown(text || '');
+  else body.textContent = text;
 
   line.append(prefix, body);
   logEl.appendChild(line);
@@ -183,13 +213,13 @@ stream.handlers.onAssistantStart = () => {
 
 stream.handlers.onAssistantDelta = (_d, full) => {
   if (!currentAssistantEl) currentAssistantEl = appendLine('assistant', '');
-  currentAssistantEl.textContent = full;
+  currentAssistantEl.innerHTML = renderMarkdown(full || '');
   scrollLog();
 };
 
 stream.handlers.onAssistantDone = (text) => {
   if (!currentAssistantEl) currentAssistantEl = appendLine('assistant', '');
-  currentAssistantEl.textContent = text || '';
+  currentAssistantEl.innerHTML = renderMarkdown(text || '');
   currentAssistantEl = null;
   setBusy(false);
   scrollLog();
@@ -204,7 +234,11 @@ client.handlers.onOpen = () => {
 };
 
 /* 拉数据必须等 onReady（ui.connected）—— 在 onOpen 里拉会被静默丢弃。 */
-client.handlers.onReady = () => { loadSessions(); };
+client.handlers.onReady = () => {
+  loadSessions();
+  // 语音输入是否显示，取决于配置 stt.enabled
+  app.config.get('stt.enabled').then((on) => syncMicVisibility(on === true)).catch(() => {});
+};
 
 client.handlers.onClose = () => {
   S.connected = false;
@@ -254,9 +288,17 @@ async function openSession(s) {
   // TUI 保留工具调用与思考：信息密度优先
   for (const e of toEntries(raw, { tools: true })) appendLine(e.kind, e.text);
   scrollLog();
+  fieldEl.focus();
 }
 
-/* ═══ 键盘：输入优先，快捷键只在未聚焦时生效 ═════════════════════════════ */
+/* ═══ 键盘：输入优先，快捷键只在没有输入框聚焦时生效 ═════════════════════ */
+function isTypingElsewhere() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const tag = ae.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ae.isContentEditable;
+}
+
 function moveSel(delta) {
   if (!S.sessionList.length) return;
   S.selIndex = Math.min(Math.max(S.selIndex + delta, 0), S.sessionList.length - 1);
@@ -264,16 +306,22 @@ function moveSel(delta) {
 }
 
 document.addEventListener('keydown', (e) => {
-  // ── 输入框聚焦：只处理 Enter 发送，其余（字母/方向键/Tab）全交给输入框 ──
-  if (document.activeElement === fieldEl) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  // 浮层（设置 / 控制台）打开时 Esc 关闭（无论焦点在哪）
+  if (e.key === 'Escape') {
+    if (isSettingsOpen()) { e.preventDefault(); closeSettings(); return; }
+    if (panel && panel.isOpen()) { e.preventDefault(); panel.close(); return; }
+  }
+
+  // 有输入框聚焦：只处理「主输入框的 Enter 发送」，其余全交给控件本身
+  if (isTypingElsewhere()) {
+    if (document.activeElement === fieldEl && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       submit();
     }
     return;
   }
 
-  // ── 输入框未聚焦：可选键盘增强（绝不劫持打字，因为此时没在打字）──
+  // 无输入框聚焦：可选键盘增强
   switch (e.key) {
     case 'j':
     case 'ArrowDown':
@@ -295,7 +343,7 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'Escape':
       if (helpEl) closeHelp();
-      else fieldEl.focus(); // Esc 回输入框 —— 任何时候都能立刻接着打字
+      else fieldEl.focus();
       break;
     default:
       break;
@@ -313,6 +361,126 @@ async function submit() {
     setBusy(false);
     appendLine('error', err?.message || '发送失败');
   }
+}
+
+/* ═══ 设置面板（复用 core/form + core/settings，走终端风外观）═══════════════ */
+let settingsValues = null;
+let settingsGroupId = null;
+
+function setSetToast(text, ok) {
+  const t = $('tui-set-toast');
+  t.textContent = text;
+  t.className = 'tui-set-toast ' + (ok ? 'is-ok' : 'is-err');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.textContent = ''; t.className = 'tui-set-toast'; }, 1600);
+}
+
+function renderSetNav() {
+  const nav = $('tui-set-nav');
+  nav.innerHTML = '';
+  for (const g of SETTINGS_GROUPS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tui-set-navitem' + (g.id === settingsGroupId ? ' is-active' : '');
+    b.textContent = g.label;
+    b.addEventListener('click', () => {
+      if (settingsGroupId === g.id) return;
+      settingsGroupId = g.id;
+      renderSetNav();
+      void renderSetGroup(g.id);
+    });
+    nav.appendChild(b);
+  }
+}
+
+async function renderSetGroup(id) {
+  const g = SETTINGS_GROUPS.find((x) => x.id === id);
+  const content = $('tui-set-content');
+  content.innerHTML = '<div class="tui-set-loading">加载…</div>';
+  content.scrollTop = 0;
+  await renderSettingsGroup(content, {
+    group: g,
+    values: settingsValues,
+    app,
+    onSaved: (path, val, ok) => {
+      setSetToast(ok ? '已保存' : '保存失败', ok);
+      if (path === 'stt.enabled') syncMicVisibility(val === true);
+    },
+  });
+}
+
+async function openSettings() {
+  $('tui-settings').hidden = false;
+  settingsGroupId = settingsGroupId || SETTINGS_GROUPS[0].id;
+  try {
+    if (!settingsValues) settingsValues = await loadValues(app);
+  } catch (err) {
+    $('tui-set-content').innerHTML = '<div class="tui-set-loading">读取配置失败，见控制台。</div>';
+    console.warn('[tui] loadValues 失败', err);
+    return;
+  }
+  renderSetNav();
+  await renderSetGroup(settingsGroupId);
+}
+
+function closeSettings() {
+  $('tui-settings').hidden = true;
+  fieldEl.focus();
+}
+
+function isSettingsOpen() {
+  return !$('tui-settings').hidden;
+}
+
+/* ═══ 语音输入（stt.enabled 控制显隐）═══════════════════════════════════════ */
+let recorder = null;
+let recChunks = [];
+
+function syncMicVisibility(enabled) {
+  const mic = $('tui-mic');
+  if (mic) mic.hidden = !enabled;
+}
+
+async function startRec() {
+  try {
+    const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(media);
+    recChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+    recorder.onstop = async () => {
+      media.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(recChunks, { type: recorder.mimeType || 'audio/webm' });
+      const buf = await blob.arrayBuffer();
+      let bin = '';
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      $('tui-mic').textContent = '… 识别中';
+      try {
+        const text = await app.voice.transcribe(btoa(bin), 'webm');
+        if (text) {
+          fieldEl.value = (fieldEl.value ? fieldEl.value + ' ' : '') + text;
+          fieldEl.focus();
+        } else {
+          appendLine('error', '没识别到内容');
+        }
+      } catch (err) {
+        appendLine('error', '识别失败：' + (err?.message ?? err));
+      } finally {
+        $('tui-mic').textContent = '◉ mic';
+        $('tui-mic').classList.remove('is-rec');
+      }
+    };
+    recorder.start();
+    $('tui-mic').classList.add('is-rec');
+    $('tui-mic').textContent = '■ 停止';
+  } catch (err) {
+    appendLine('error', '无法访问麦克风：' + (err?.message ?? err));
+  }
+}
+
+function stopRec() {
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  $('tui-mic').classList.remove('is-rec');
 }
 
 /* ═══ 帮助浮层（点击状态栏 ? 或按 ? 打开）══════════════════════════════════ */
@@ -334,10 +502,10 @@ function toggleHelp() {
   const rows = [
     ['输入框', '点一下就打字，Enter 发送'],
     ['会话', '单击左侧任意会话即切换'],
+    ['⚙ 设置', '模型/语音/参数等 6 组设置'],
+    ['◉ mic', '语音输入（设置里启用后出现）'],
     ['+ new', '开一个新会话'],
     ['j / k', '输入框未聚焦时上下移动'],
-    ['Enter', '输入框未聚焦时打开选中会话'],
-    ['Esc', '回到输入框'],
     ['?', '开关本说明'],
   ];
 
@@ -369,6 +537,24 @@ function closeHelp() {
 
 /* ═══ 启动 ═══════════════════════════════════════════════════════════════ */
 $('tui-new').addEventListener('click', () => openSession({ id: null, title: '新会话' }));
+
+/* 控制台浮层（模型/能力/运行/会话），复用 .tui-set-* 外壳 */
+panel = createPanel(app, {
+  reloadSessions: loadSessions,
+  getSessions: () => S.sessionList,
+  titleOf: (s) => sessions.titleOf(s),
+});
+$('tui-panel-btn').addEventListener('click', () => { closeSettings(); panel.open(); });
+
+$('tui-settings-btn').addEventListener('click', () => { if (panel) panel.close(); openSettings(); });
+$('tui-set-close').addEventListener('click', closeSettings);
+$('tui-set-close').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeSettings(); }
+});
+$('tui-mic').addEventListener('click', () => {
+  if (recorder && recorder.state === 'recording') stopRec();
+  else startRec();
+});
 $('tui-help-link').addEventListener('click', toggleHelp);
 $('tui-help-link').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHelp(); }
