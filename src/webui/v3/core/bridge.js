@@ -265,33 +265,64 @@ export class History {
 export function toEntries(messages, opts = {}) {
   const withTools = opts.tools === true;
   const out = [];
+
+  /**
+   * ⚠️ 必须是**两个独立缓冲**。
+   *   实测真实流是 `thinking → text → thinking → text → …` **交替**的
+   *   （21 条 text 被 20 个 thinking 隔开）。
+   *   若让 thinking 去 flush assistant 缓冲，每个 chunk 都会变成独立段落
+   *   —— 实测把一段话渲染成 19 个碎片。
+   */
+  let aBuf = null;   // assistant 正文
+  let tBuf = null;   // thinking（是否输出由 withTools 决定）
+
+  const flushA = () => { if (aBuf && aBuf.text) out.push(aBuf); aBuf = null; };
+  const flushT = () => { if (tBuf && tBuf.text && withTools) out.push(tBuf); tBuf = null; };
+  /** 顺序：thinking 先于正文（它发生在说话之前） */
+  const flushAll = () => { flushT(); flushA(); };
+
   for (const m of messages || []) {
     switch (m.type) {
       case "user_input":
+        flushAll();
         out.push({ kind: "user", text: m.content || "" });
         break;
+
       case "text":
-        out.push({ kind: "assistant", text: m.content || "" });
+        if (aBuf) aBuf.text += m.content || "";
+        else aBuf = { kind: "assistant", text: m.content || "" };
         break;
+
       case "thinking":
-        if (withTools) out.push({ kind: "thinking", text: m.content || "" });
+        if (!withTools) break;          // 关键：这里**不 flush**
+        if (tBuf) tBuf.text += m.content || "";
+        else tBuf = { kind: "thinking", text: m.content || "" };
         break;
-      case "tool_call":
+
+      case "tool_call": {
+        flushAll();
         if (withTools) {
           const arg = JSON.stringify(m.input ?? {});
           out.push({ kind: "tool", text: (m.name || "tool") + " " + (arg.length > 90 ? arg.slice(0, 90) + "…" : arg) });
         }
         break;
-      case "tool_result":
+      }
+
+      case "tool_result": {
+        flushAll();
         if (withTools) {
           const t = String(m.content ?? "");
           out.push({ kind: "result", text: t.length > 200 ? t.slice(0, 200) + "…" : t });
         }
         break;
+      }
+
       default:
-        break;   // usage / stop / session_start 不渲染
+        flushAll();     // usage / stop / session_start = 轮边界
+        break;
     }
   }
+  flushAll();
   return out;
 }
 /* ═══ 启动助手：所有语言都走这一条路 ═══════════════════════════════════════ */
