@@ -63,7 +63,8 @@ if ($NoShortcut) {
   $ws = New-Object -ComObject WScript.Shell
   $sc = $ws.CreateShortcut($lnk)
   $sc.TargetPath = $deployExe
-  $sc.WorkingDirectory = $deployDir
+  # 开发形态：壳的 cwd 必须是仓库根，否则 ResolveRepoRoot 找不到 dist\index.js（exe 目录里没有）
+  $sc.WorkingDirectory = $repo
   $sc.IconLocation = $deployExe
   $sc.Description = 'Hyacinth'
   $sc.Save()
