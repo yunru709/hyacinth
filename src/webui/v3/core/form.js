@@ -286,6 +286,7 @@ async function renderItem(item, current, app, afterSave) {
         || localStorage.getItem('v3.lang') || 'terminal';
       if (curLang === 'tui') curLang = 'terminal';
       const LANGS = item.options || [
+        { value: 'classic', label: '经典' },
         { value: 'terminal', label: 'Terminal' },
         { value: 'editorial', label: 'Editorial' },
         { value: 'brutalist', label: 'Brutalist' },
@@ -298,6 +299,12 @@ async function renderItem(item, current, app, afterSave) {
         b.className = 'sf-seg-btn' + (o.value === curLang ? ' is-on' : '');
         b.textContent = o.label;
         b.addEventListener('click', () => {
+          if (o.value === 'classic') {
+            // 经典 = v1 本体（不在 v3 目录里）⇒ 整页跳回根 /，并记缓存供 v1 读取
+            try { localStorage.setItem('hyacinth.designLanguage', 'classic'); } catch (e) { /* ignore */ }
+            location.href = '/';
+            return;
+          }
           if (o.value === curLang) return;
           localStorage.setItem('v3.lang', o.value);
           const u = new URL(location.href);

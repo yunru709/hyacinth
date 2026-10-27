@@ -226,6 +226,7 @@ export const SETTINGS_GROUPS = [
         type: 'design-language',
         hint: '整页切换界面范式，切换后重新加载。Terminal 终端 / Editorial 文字即界面 / Classic 经典。',
         options: [
+          { value: 'classic', label: '经典' },
           { value: 'terminal', label: 'Terminal' },
           { value: 'editorial', label: 'Editorial' },
           { value: 'brutalist', label: 'Brutalist' },
