@@ -494,23 +494,44 @@ export function createPanel(app, hooks = {}) {
 
   async function renderVoice(content) {
     content.innerHTML = '<div class="tui-set-loading">加载…</div>';
-    const [stt, tts, eng] = await Promise.all([
+    const [stt, tts, eng, sttEnabled, sayBroadcast] = await Promise.all([
       app.voice.sttStatus(), app.voice.ttsStatus(), app.voice.ttsEngines(),
+      app.config.get('stt.enabled').catch(() => true),
+      app.config.get('voice.say.broadcast').catch(() => true),
     ]);
     content.innerHTML = '';
     const root = el('div');
     root.dataset.voiceRoot = '1';
 
-    /* ── STT（语音输入模型）── */
+    // 复用的「启用」开关行（读/写 config）
+    function toggleRow(label, hint, checked, save) {
+      const row = el('div', 'tui-prow');
+      const meta = el('span', 'tui-prow-meta', checked ? '已启用' : '已停用');
+      const sw = document.createElement('input');
+      sw.type = 'checkbox'; sw.className = 'tui-sw'; sw.checked = checked;
+      if (hint) row.title = hint;
+      sw.addEventListener('change', async () => {
+        const ok = await save(sw.checked);
+        if (!ok) { sw.checked = !sw.checked; toast('保存失败', false); return; }
+        meta.textContent = sw.checked ? '已启用' : '已停用';
+        toast(label + (sw.checked ? ' 已开启' : ' 已关闭'), true);
+      });
+      row.append(el('span', 'tui-prow-name', label), el('span', 'tui-grow'), meta, sw);
+      return row;
+    }
+
+    /* ── STT（语音输入）── */
     const s1 = el('div', 'tui-psec');
-    s1.appendChild(el('div', 'tui-psec-h', '语音输入模型（STT）'));
+    s1.appendChild(el('div', 'tui-psec-h', '语音输入（STT）'));
+    s1.appendChild(toggleRow('启用语音输入', '开启后输入区出现麦克风，录音转文字。', sttEnabled !== false,
+      (v) => app.config.set('stt.enabled', v)));
     const sttState = !stt ? '不可用'
       : stt.modelReady ? '已就绪'
       : stt.downloading ? '下载中…'
       : stt.runtimeAvailable ? '未下载' : '运行时不可用';
     const sttCard = el('div', 'tui-pcard');
     sttCard.innerHTML =
-      '<div class="tui-pcard-h">SenseVoice</div>' +
+      '<div class="tui-pcard-h">SenseVoice 模型</div>' +
       cardRow('状态', sttState) +
       cardRow('引擎', stt ? stt.engine : '—') +
       cardRow('目录', stt ? stt.modelDir : '—');
@@ -538,9 +559,11 @@ export function createPanel(app, hooks = {}) {
     if (stt && stt.downloading) pollStt(content);
     root.appendChild(s1);
 
-    /* ── TTS（引擎 / 模型 / python / 服务）── */
+    /* ── TTS（语音播报）── */
     const s2 = el('div', 'tui-psec');
-    s2.appendChild(el('div', 'tui-psec-h', '语音合成（TTS）'));
+    s2.appendChild(el('div', 'tui-psec-h', '语音播报（TTS）'));
+    s2.appendChild(toggleRow('启用语音播报', '助手回复完成后自动朗读。', sayBroadcast !== false,
+      (v) => app.config.set('voice.say.broadcast', v)));
     const eCard = el('div', 'tui-pcard');
     eCard.innerHTML = '<div class="tui-pcard-h">引擎（点选切换）</div>';
     for (const en of (eng && eng.engines) || []) {
@@ -560,55 +583,57 @@ export function createPanel(app, hooks = {}) {
     }
     s2.appendChild(eCard);
 
+    /* 环境卡跟随「当前活跃引擎」，不再写死 CosyVoice3（孑遗 2026-10-27 指出的矛盾） */
+    const activeId = eng && eng.active;
+    const activeEn = ((eng && eng.engines) || []).find((e) => e.active) || {};
     const m = (tts && tts.model) || {};
     const py = tts && tts.python;
     const svc = (tts && tts.service) || {};
-    const mCard = el('div', 'tui-pcard');
-    mCard.innerHTML =
-      '<div class="tui-pcard-h">CosyVoice3 环境（本地 python 引擎）</div>' +
-      cardRow('模型', m.ready ? '已就绪' : m.downloading ? '下载中…' : '未下载') +
-      cardRow('目录', m.modelDir || '—') +
-      cardRow('Python', !py ? '未检测' : py.pythonAvailable ? '可用' + (py.cosyvoiceInstalled ? ' · 依赖已装' : ' · 依赖缺失') : '不可用') +
-      cardRow('推理服务', svc.running ? '运行中 · ' + svc.port : '未启动');
-    s2.appendChild(mCard);
+    const envCard = el('div', 'tui-pcard');
+    const bar = el('div', 'tui-toolbar');
+    const prog = el('span', 'tui-pnote tts-prog', '');
 
-    const ttsBar = el('div', 'tui-toolbar');
-    const pyBtn = el('button', 'tui-pb2', '检测 Python');
-    const dlBtn = el('button', 'tui-pb2', '下载模型');
-    const startBtn = el('button', 'tui-pb2', '启动服务');
-    const stopBtn = el('button', 'tui-pb2', '停止服务');
-    for (const b of [pyBtn, dlBtn, startBtn, stopBtn]) b.type = 'button';
-    dlBtn.disabled = !!m.ready || !!m.downloading;
-    startBtn.disabled = !!svc.running;
-    stopBtn.disabled = !svc.running;
-    const ttsProg = el('span', 'tui-pnote tts-prog', '');
-    ttsBar.append(pyBtn, dlBtn, startBtn, stopBtn, el('span', 'tui-grow'), ttsProg);
-    s2.appendChild(ttsBar);
-
-    pyBtn.addEventListener('click', async () => {
-      pyBtn.disabled = true;
-      toast('检测 Python 环境中…', true);
-      const r = await app.voice.ttsDetectPython();
-      toast(r ? '检测完成' : '检测失败', !!r);
-      void renderVoice(content);
-    });
-    dlBtn.addEventListener('click', async () => {
-      dlBtn.disabled = true; ttsProg.textContent = '准备中…';
-      try { await app.voice.ttsDownload(); } catch (e) { toast('触发下载失败', false); }
-      pollTts(content);
-    });
-    startBtn.addEventListener('click', async () => {
-      toast('启动推理服务…', true);
-      const r = await app.voice.ttsStart();
-      toast(r ? '已请求启动' : '启动失败', !!r);
-      void renderVoice(content);
-    });
-    stopBtn.addEventListener('click', async () => {
-      await app.voice.ttsStop();
-      toast('已停止', true);
-      void renderVoice(content);
-    });
-    if (m.downloading) pollTts(content);
+    if (activeId === 'cosyvoice3') {
+      envCard.innerHTML =
+        '<div class="tui-pcard-h">CosyVoice3 环境（本地 Python）</div>' +
+        cardRow('模型', m.ready ? '已就绪' : m.downloading ? '下载中…' : '未下载') +
+        cardRow('目录', m.modelDir || '—') +
+        cardRow('Python', !py ? '未检测' : py.pythonAvailable ? '可用' + (py.cosyvoiceInstalled ? ' · 依赖已装' : ' · 依赖缺失') : '不可用') +
+        cardRow('推理服务', svc.running ? '运行中 · ' + svc.port : '未启动');
+      const pyBtn = el('button', 'tui-pb2', '检测 Python'); pyBtn.type = 'button';
+      const dlBtn = el('button', 'tui-pb2', '下载模型'); dlBtn.type = 'button';
+      const startBtn = el('button', 'tui-pb2', '启动服务'); startBtn.type = 'button';
+      const stopBtn = el('button', 'tui-pb2', '停止服务'); stopBtn.type = 'button';
+      dlBtn.disabled = !!m.ready || !!m.downloading;
+      startBtn.disabled = !!svc.running;
+      stopBtn.disabled = !svc.running;
+      pyBtn.addEventListener('click', async () => { pyBtn.disabled = true; toast('检测 Python 环境中…', true); const r = await app.voice.ttsDetectPython(); toast(r ? '检测完成' : '检测失败', !!r); void renderVoice(content); });
+      dlBtn.addEventListener('click', async () => { dlBtn.disabled = true; prog.textContent = '准备中…'; try { await app.voice.ttsDownload(); } catch (e) { toast('触发下载失败', false); } pollTts(content); });
+      startBtn.addEventListener('click', async () => { toast('启动推理服务…', true); const r = await app.voice.ttsStart(); toast(r ? '已请求启动' : '启动失败', !!r); void renderVoice(content); });
+      stopBtn.addEventListener('click', async () => { await app.voice.ttsStop(); toast('已停止', true); void renderVoice(content); });
+      bar.append(pyBtn, dlBtn, startBtn, stopBtn, el('span', 'tui-grow'), prog);
+      if (m.downloading) pollTts(content);
+    } else if (activeId === 'breeze-tts-2') {
+      envCard.innerHTML =
+        '<div class="tui-pcard-h">BreezeTTS2 环境（本地 GGUF）</div>' +
+        cardRow('状态', activeEn.ready ? '服务就绪' : '未就绪') +
+        cardRow('详情', activeEn.detail || '—');
+      const startBtn = el('button', 'tui-pb2', '启动服务'); startBtn.type = 'button';
+      const stopBtn = el('button', 'tui-pb2', '停止服务'); stopBtn.type = 'button';
+      startBtn.disabled = !!activeEn.ready;
+      stopBtn.disabled = !activeEn.ready;
+      startBtn.addEventListener('click', async () => { toast('启动 BreezeTTS2…', true); const r = await app.voice.ttsBreezeStart(); toast(r ? '已请求启动' : '启动失败', !!r); setTimeout(() => void renderVoice(content), 800); });
+      stopBtn.addEventListener('click', async () => { await app.voice.ttsBreezeStop(); toast('已停止', true); setTimeout(() => void renderVoice(content), 500); });
+      bar.append(startBtn, stopBtn, el('span', 'tui-grow'), prog);
+    } else {
+      envCard.innerHTML =
+        '<div class="tui-pcard-h">' + esc(activeEn.label || '在线 API 引擎') + '</div>' +
+        cardRow('状态', activeEn.ready ? '就绪' : '未就绪') +
+        cardRow('详情', activeEn.detail || '—') +
+        cardRow('配置', '在「设置 → 语音」填写 API Key / 端点');
+    }
+    s2.appendChild(envCard);
+    if (bar.childElementCount) s2.appendChild(bar);
     root.appendChild(s2);
 
     content.appendChild(root);

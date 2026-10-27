@@ -135,13 +135,13 @@ export function getDefaultConfig(): FullConfig {
       compression: { source: 'main' },
     },
     stt: {
-      /** 语音输入（麦克风按钮）：默认关，用户在设置页打开 */
-      enabled: false,
+      /** 语音输入（麦克风按钮）：默认开（孑遗 2026-10-27 要求「默认启动」），用户可在设置/控制台关闭 */
+      enabled: true,
     },
     voice: {
       say: {
-        /** say 语音播报总开关（say-voice 插件）：默认关，模型就绪后由用户打开 */
-        broadcast: false,
+        /** say 语音播报总开关（say-voice 插件）：默认开（孑遗 2026-10-27 要求「默认启动」） */
+        broadcast: true,
         /** 默认音色 id（空 = 引擎默认） */
         voice: '',
       },
