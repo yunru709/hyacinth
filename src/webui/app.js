@@ -6110,10 +6110,7 @@
       // 代码高亮配色：ui.codeTheme（同样是用户偏好）
       const codeTheme = getByPath(cfg, 'ui.codeTheme');
       if (typeof codeTheme === 'string' && codeTheme) applyCodeTheme(codeTheme);
-      // 设计语言：ui.designLanguage（布局范式；当前只有经典真实接入）
-      const designLanguage = getByPath(cfg, 'ui.designLanguage');
-      if (typeof designLanguage === 'string' && designLanguage) applyDesignLanguage(designLanguage);
-    }).catch((e) => appendMsg('error', '读取配置失败: ' + ((e && e.message) || '未知错误')));
+          }).catch((e) => appendMsg('error', '读取配置失败: ' + ((e && e.message) || '未知错误')));
   }
 
   // ════════════════════════════════════════════════════════════
@@ -6480,72 +6477,7 @@
   }
 
   // ── 设计语言（布局范式 + 交互规范，与主题正交）────────────────
-  // 语言决定整体布局与交互，主题只是同一语言下的配色。
-  // 「经典」= v1 本体（留在此页）；Terminal/Editorial/Brutalist = v3 的三套（点击跳 /v3/?lang=）。
-  const DESIGN_LANGUAGES = [
-    { id: 'classic', name: '经典', desc: '侧栏 + 三段式 + 气泡（当前 v1 形态）', available: true },
-    { id: 'terminal', name: 'Terminal', desc: '终端分面板，等宽 + 绿屏质感（v3）', available: true },
-    { id: 'editorial', name: 'Editorial', desc: '单栏无界面，文字优先（v3）', available: true },
-    { id: 'brutalist', name: 'Brutalist', desc: '粗黑边框 + 撞色黄 + 等宽（v3）', available: true },
-  ];
-  let currentDesignLanguage = 'classic';
-
-  function applyDesignLanguage(id) {
-    const def = DESIGN_LANGUAGES.find((l) => l.id === id && l.available) || DESIGN_LANGUAGES[0];
-    currentDesignLanguage = def.id;
-    document.documentElement.setAttribute('data-design-language', def.id);
-    try { localStorage.setItem('hyacinth.designLanguage', def.id); } catch (e) { /* 隐私模式忽略 */ }
-    syncDesignLanguageCards(def.id);
-  }
-
-  function syncDesignLanguageCards(id) {
-    const grid = $('#design-language-grid');
-    if (!grid) return;
-    grid.querySelectorAll('.design-language-card').forEach((card) => {
-      card.setAttribute('aria-pressed', card.dataset.lang === id ? 'true' : 'false');
-    });
-  }
-
-  function initDesignLanguageFromCache() {
-    let cached = null;
-    try { cached = localStorage.getItem('hyacinth.designLanguage'); } catch (e) { /* ignore */ }
-    const valid = DESIGN_LANGUAGES.some((l) => l.id === cached && l.available);
-    applyDesignLanguage(valid ? cached : 'classic');
-  }
-
-  function renderDesignLanguages() {
-    const grid = $('#design-language-grid');
-    if (!grid || grid.dataset.rendered === '1') return;
-    grid.dataset.rendered = '1';
-    DESIGN_LANGUAGES.forEach((l) => {
-      const card = el('button', 'design-language-card');
-      card.type = 'button';
-      card.dataset.lang = l.id;
-      card.setAttribute('aria-pressed', l.id === currentDesignLanguage ? 'true' : 'false');
-      if (!l.available) card.setAttribute('disabled', '');
-      card.title = l.desc;
-      card.appendChild(el('span', 'design-language-name', l.name));
-      card.appendChild(el('span', 'design-language-desc', l.desc));
-      if (!l.available) card.appendChild(el('span', 'design-language-badge', '待接入'));
-      card.onclick = () => {
-        if (!l.available) return;
-        if (l.id === 'classic') {
-          // 经典 = 留在 v1（本页）：只记录属性 + 持久化
-          applyDesignLanguage(l.id);
-          if (connected) {
-            client.request('config.set', { path: 'ui.designLanguage', value: l.id }).catch((e) => {
-              appendMsg('error', '保存设计语言失败: ' + ((e && e.message) || '未知错误'));
-            });
-          }
-        } else {
-          // Terminal/Editorial/Brutalist 是 v3 的设计语言 ⇒ 整页跳到 v3 对应语言
-          try { localStorage.setItem('v3.lang', l.id); } catch (e) { /* 隐私模式忽略 */ }
-          location.href = '/v3/?lang=' + encodeURIComponent(l.id);
-        }
-      };
-      grid.appendChild(card);
-    });
-  }
+  
   // 绑定设置视图交互：控件 change → config.set；重置按钮 → config.reset
   function bindSettingsView() {
     // ⚠️ 「默认模式」这里**不再写 localStorage 缓存**（2026-10-16 移除）：它曾与后端配置
@@ -8296,7 +8228,6 @@
   // 主题：先按本地缓存立即应用（避免加载闪烁），再渲染选择器
   initThemeFromCache();
   initCodeThemeFromCache();
-  initDesignLanguageFromCache();
   renderCodeThemes();
   // 主题目录异步加载：拿不到就用手上的兜底，换肤本身不依赖它
   loadThemeCatalog();
@@ -8446,7 +8377,6 @@
 
   bindUI();
   renderThemes();
-  renderDesignLanguages();
   navigate();
   client.connect();
 

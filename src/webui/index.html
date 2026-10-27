@@ -643,15 +643,7 @@
         .theme-check { font-size: 11px; color: var(--hyacinth-primary); display: none; }
         .theme-card[aria-pressed="true"] .theme-check { display: inline; }
 
-        /* 设计语言选择卡片（语言=布局范式，比主题"重"，故含描述行 + 待接入徽标） */
-        .design-language-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-        .design-language-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); cursor: pointer; text-align: left; transition: border-color 120ms ease, box-shadow 120ms ease; }
-        .design-language-card:hover:not([disabled]) { border-color: var(--hyacinth-primary); }
-        .design-language-card[aria-pressed="true"] { border-color: var(--hyacinth-primary); box-shadow: 0 0 0 2px var(--primary-100); }
-        .design-language-card[disabled] { opacity: 0.55; cursor: not-allowed; }
-        .design-language-name { font-size: 13px; font-weight: 600; color: var(--hyacinth-foreground); }
-        .design-language-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); line-height: 1.5; }
-        .design-language-badge { align-self: flex-start; font-size: 10px; color: var(--hyacinth-muted-foreground); border: 1px solid var(--hyacinth-border); border-radius: 4px; padding: 1px 6px; }
+        
         .settings-card { background-color: var(--hyacinth-card); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 16px; }
         .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid transparent; }
@@ -1180,20 +1172,7 @@
 
               <!-- Appearance / 主题 -->
               <div class="settings-panel" id="panel-appearance" data-dom-id="panel-appearance" role="tabpanel" aria-labelledby="label-appearance">
-                <!-- 设计语言 → 主题 两级。设计语言=布局范式+交互规范（一套语言下有多种配色主题）。
-                     具体语言待完善后接入；现在只有「经典」一种真实可用。 -->
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="layers" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">设计语言</h2>
-                  </div>
-                  <div class="settings-row-stack">
-                    <div class="settings-desc">
-                      设计语言决定整体布局范式与交互规范；同一设计语言下可切换多种配色主题。新的设计语言完善后会陆续接入。
-                    </div>
-                    <div id="design-language-grid" class="design-language-grid" data-dom-id="design-language-grid" role="radiogroup" aria-label="设计语言选择"></div>
-                  </div>
-                </section>
+                
                 <section class="settings-card">
                   <div class="settings-card-header">
                     <i data-lucide="palette" class="w-4 h-4 text-primary"></i>
