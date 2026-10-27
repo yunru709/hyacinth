@@ -327,3 +327,15 @@
   white-space: nowrap;
 }
 .tui-toolbar .tui-prog-label { line-height: 16px; }
+
+/* 语音试听输入框（panel.js 语音区 TTS 试听行） */
+.tui-test-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+}

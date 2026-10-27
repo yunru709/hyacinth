@@ -658,6 +658,39 @@ export function createPanel(app, hooks = {}) {
     }
     s2.appendChild(envCard);
     if (bar.childElementCount) s2.appendChild(bar);
+    // 试听：走当前引擎合成（tts.synthesize → WAV base64 → 播放）
+    const testBar = el('div', 'tui-toolbar');
+    const testInput = document.createElement('input');
+    testInput.type = 'text';
+    testInput.className = 'tui-test-input';
+    testInput.placeholder = '试听文本';
+    testInput.value = '你好，这是语音合成试听。';
+    const testBtn = el('button', 'tui-pb2', '试听');
+    testBtn.type = 'button';
+    testBar.append(testInput, testBtn);
+    s2.appendChild(testBar);
+    testBtn.addEventListener('click', async () => {
+      testBtn.disabled = true;
+      toast('合成中…', true);
+      try {
+        const res = await app.voice.synthesize(testInput.value || '你好');
+        const b64 = typeof res === 'string' ? res : (res && res.audioWavBase64);
+        if (!b64) {
+          toast('无音频返回', false);
+        } else {
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+          const audio = new Audio(url);
+          audio.onended = () => URL.revokeObjectURL(url);
+          await audio.play();
+        }
+      } catch (e) {
+        toast('试听失败', false);
+      }
+      testBtn.disabled = false;
+    });
     root.appendChild(s2);
 
     content.appendChild(root);
