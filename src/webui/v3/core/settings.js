@@ -222,6 +222,17 @@ export const SETTINGS_GROUPS = [
     desc: '界面主题与配色。',
     items: [
       {
+        path: 'ui.designLanguage',
+        label: '设计语言',
+        type: 'design-language',
+        hint: '整页切换界面范式，切换后重新加载。TUI 终端 / Editorial 文字即界面 / Classic 经典。',
+        options: [
+          { value: 'tui', label: 'TUI' },
+          { value: 'editorial', label: 'Editorial' },
+          { value: 'classic', label: 'Classic' },
+        ],
+      },
+      {
         path: 'ui.theme',
         label: '主题',
         type: 'select',

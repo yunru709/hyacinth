@@ -232,6 +232,37 @@ async function renderItem(item, current, app, afterSave) {
       break;
     }
 
+    case 'design-language': {
+      /* 设计语言 = 整页换一套（骨架不同）⇒ 不写 config，改 localStorage + URL 重载。
+         当前值以 URL ?lang 优先，其次 localStorage，最后 tui。 */
+      const curLang = new URLSearchParams(location.search).get('lang')
+        || localStorage.getItem('v3.lang') || 'tui';
+      const LANGS = item.options || [
+        { value: 'tui', label: 'TUI' },
+        { value: 'editorial', label: 'Editorial' },
+        { value: 'classic', label: 'Classic' },
+      ];
+      const seg = document.createElement('div');
+      seg.className = 'sf-seg';
+      for (const o of LANGS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'sf-seg-btn' + (o.value === curLang ? ' is-on' : '');
+        b.textContent = o.label;
+        b.addEventListener('click', () => {
+          if (o.value === curLang) return;
+          localStorage.setItem('v3.lang', o.value);
+          const u = new URL(location.href);
+          u.searchParams.set('lang', o.value);
+          location.href = u.toString();
+        });
+        seg.appendChild(b);
+      }
+      right.appendChild(seg);
+      row.appendChild(right);
+      return row; // 这一项不写 config，无需 badge/flash
+    }
+
     default:
       break;
   }

@@ -280,3 +280,19 @@
   border: 0;
   background: var(--bg);
 }
+
+/* 设置里的「设计语言」分段按钮（core/form.js design-language 控件产出） */
+.sf-seg { display: inline-flex; border: 1px solid var(--line-strong); }
+.sf-seg-btn {
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--line);
+}
+.sf-seg-btn:last-child { border-right: 0; }
+.sf-seg-btn:hover { background: var(--surface-2); }
+.sf-seg-btn.is-on { background: var(--accent); color: var(--accent-fg); }
