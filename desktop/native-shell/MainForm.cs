@@ -672,6 +672,7 @@ public sealed class MainForm : Form
     {
         try
         {
+            var backendTask = Task.Run(() => EnsureBackendAsync()); // 后端(约1.7s)与WebView2初始化并行
             var userData = ResolveUserDataDir();
 
             // 诊断用开关：本机 Electron 与 WebView2 同属"嵌入式 Chromium"、两者都起不来，
@@ -739,7 +740,7 @@ public sealed class MainForm : Form
                 catch { /* origin 解析失败：维持默认行为 */ }
             };
 
-            await EnsureBackendAsync();
+            await backendTask;
             // 用 CoreWebView2.Navigate 直接导航到后端（等价 DevTools Page.navigate，实测可靠）。
             // 注：之前白屏的真因是上面的 EnsureBackendAsync 因系统代理卡死超时、根本没走到这里，
             //     与 Source/Navigate 写法无关。
