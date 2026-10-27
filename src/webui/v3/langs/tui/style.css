@@ -593,3 +593,26 @@
 .tui-pbtn:hover { background: var(--err); color: var(--bg); }
 
 .tui-pnote { color: var(--fg-subtle); font-size: 11px; padding: 4px 0; }
+
+/* ═══ 会话批量工具栏（panel.js 会话区）══════════════════════════════════════ */
+.tui-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.tui-chk { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; flex: 0 0 auto; }
+.tui-pb2 {
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tui-pb2:hover { background: var(--surface-2); }
+.tui-pb2:disabled,
+.tui-pbtn:disabled { opacity: 0.4; cursor: not-allowed; }

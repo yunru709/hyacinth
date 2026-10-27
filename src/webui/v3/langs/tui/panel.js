@@ -81,6 +81,25 @@ export function createPanel(app, hooks = {}) {
       cardRow('上下文', (a.maxContextTokens ? Math.round(a.maxContextTokens / 1000) + 'K' : '—') + (a.isLocal ? ' · 本地' : ' · 云端'));
     content.appendChild(card);
 
+    // 思考档位（6 档，off=关闭思考；仅作用于当前生效模型）
+    const THINKING = [['off', '关'], ['minimal', '极低'], ['low', '低'], ['medium', '中'], ['high', '高'], ['max', '最高']];
+    const tsec = el('div', 'tui-psec');
+    tsec.appendChild(el('div', 'tui-psec-h', '思考档位（仅当前模型）'));
+    const tseg = el('div', 'tui-seg');
+    for (const [val, label] of THINKING) {
+      const b = el('button', 'tui-seg-btn', label);
+      b.type = 'button';
+      b.addEventListener('click', async () => {
+        const enabled = val !== 'off';
+        const ok = await app.model.setThinking(enabled, enabled ? val : undefined);
+        toast(ok ? '思考档位：' + label : '设置失败', ok);
+        if (ok) tseg.querySelectorAll('.tui-seg-btn').forEach((x) => x.classList.toggle('is-on', x === b));
+      });
+      tseg.appendChild(b);
+    }
+    tsec.appendChild(tseg);
+    content.appendChild(tsec);
+
     const sec = el('div', 'tui-psec');
     sec.appendChild(el('div', 'tui-psec-h', '提供商（点已配置的以切换）'));
     for (const p of providers) {
@@ -241,15 +260,40 @@ export function createPanel(app, hooks = {}) {
     if (hooks.reloadSessions) await hooks.reloadSessions();
     const list = (hooks.getSessions && hooks.getSessions()) || [];
     content.innerHTML = '';
+
     const s1 = el('div', 'tui-psec');
     s1.appendChild(el('div', 'tui-psec-h', '会话 · ' + list.length + '（删除不可恢复）'));
+
+    // 工具栏：全选 / 选中数 / 导出选中 / 批量删除
+    const bar = el('div', 'tui-toolbar');
+    const chkAll = document.createElement('input');
+    chkAll.type = 'checkbox'; chkAll.className = 'tui-chk'; chkAll.title = '全选';
+    const selCount = el('span', 'tui-pnote', '选中 0');
+    const btnExp = el('button', 'tui-pb2', '导出选中');
+    const btnDel = el('button', 'tui-pbtn', '批量删除');
+    btnExp.type = 'button'; btnDel.type = 'button';
+    btnExp.disabled = true; btnDel.disabled = true;
+    bar.append(chkAll, selCount, el('span', 'tui-grow'), btnExp, btnDel);
+    s1.appendChild(bar);
+
+    const selected = () => [...s1.querySelectorAll('.tui-chk[data-sid]:checked')].map((c) => c.dataset.sid);
+    function refresh() {
+      const n = selected().length;
+      selCount.textContent = '选中 ' + n;
+      btnExp.disabled = n === 0;
+      btnDel.disabled = n === 0;
+      chkAll.checked = n > 0 && n === list.length;
+    }
+
     if (!list.length) s1.appendChild(el('div', 'tui-pnote', '（无会话）'));
     for (const s of list) {
       const title = hooks.titleOf ? hooks.titleOf(s) : (s.title || s.id || '—');
       const row = el('div', 'tui-prow');
-      row.innerHTML =
-        '<span class="tui-prow-name">' + esc(title) + '</span>' +
-        '<span class="tui-prow-meta">' + esc(shortId(s.id)) + '</span>';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox'; chk.className = 'tui-chk'; chk.dataset.sid = s.id || '';
+      chk.addEventListener('change', refresh);
+      const name = el('span', 'tui-prow-name', title);
+      const meta = el('span', 'tui-prow-meta', shortId(s.id));
       const del = el('button', 'tui-pbtn', '删除');
       del.type = 'button';
       del.addEventListener('click', async () => {
@@ -258,10 +302,53 @@ export function createPanel(app, hooks = {}) {
         toast(ok ? '已删除' : '删除失败', ok);
         if (ok) void renderSessions(content);
       });
-      row.appendChild(del);
+      row.append(chk, name, meta, del);
       s1.appendChild(row);
     }
+
+    chkAll.addEventListener('change', () => {
+      s1.querySelectorAll('.tui-chk[data-sid]').forEach((c) => { c.checked = chkAll.checked; });
+      refresh();
+    });
+
+    btnDel.addEventListener('click', async () => {
+      const ids = selected();
+      if (!ids.length) return;
+      if (!confirm('删除选中的 ' + ids.length + ' 个会话？不可恢复。')) return;
+      const ok = await app.sessionAdmin.batchRemove(ids);
+      toast(ok ? '已删除 ' + ids.length + ' 个' : '批量删除失败', ok);
+      if (ok) void renderSessions(content);
+    });
+
+    btnExp.addEventListener('click', async () => {
+      const ids = selected();
+      if (!ids.length) return;
+      btnExp.disabled = true;
+      try {
+        const r = await app.sessionAdmin.exportSessions(ids);
+        if (r && r.data) {
+          // base64 → Blob → 触发下载
+          const bin = atob(r.data);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+          const a = document.createElement('a');
+          a.href = url; a.download = r.filename || 'sessions.zip';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+          toast('已导出 ' + (r.count || ids.length) + ' 个会话', true);
+        } else {
+          toast('导出失败', false);
+        }
+      } catch (e) {
+        toast('导出失败', false);
+      } finally {
+        btnExp.disabled = false;
+      }
+    });
+
     content.appendChild(s1);
+    refresh();
   }
 
   const SECTION_DEFS = [

@@ -102,10 +102,16 @@ export class ModelDomain {
     return r?.ok === true;
   }
 
-  /** 推理强度档位（thinking） */
-  async setThinking(level) {
-    const r = await this.call('model.setThinking', { level });
-    return r?.ok === true;
+  /**
+   * 思考开关 + 强度档位。
+   * ⚠️ 后端 `model.setThinking` 期望 { enabled, effort }，effort ∈ minimal|low|medium|high|max；
+   * 原实现传 { level } ⇒ 后端 "requires enabled" 报错（2026-10-27 修）。
+   * off 档 = enabled:false（不发 effort）。返回 {ok:true, enabled, effort}，故用 r.ok 判断正确。
+   */
+  async setThinking(enabled, effort) {
+    const params = enabled ? { enabled: true, effort } : { enabled: false };
+    const r = await this.call('model.setThinking', params);
+    return !!r && r.ok === true;
   }
 
   async setChannelModel(name, provider, model) {
