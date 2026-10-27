@@ -1,0 +1,359 @@
+/* ============================================================================
+   Hyacinth WebUI v2 — 外壳布局（顶栏 / 侧栏 / 主区）
+
+   布局用「固定高度的顶栏 + 满高的工作区」，工作区内部再分侧栏与主区。
+   关键点：工作区用 min-height:0，否则 flex 子元素内部的滚动区会被撑破 ——
+   旧版正是缺这一条，导致主区一旦内容超高就把整页顶出视口、导航被推走
+   （用户遇到的"进设置出不来"，直接成因就在这里）。
+   ========================================================================== */
+
+#app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── 顶栏 ────────────────────────────────────────────────────────────────
+   48px 固定高。左：侧栏开关 + 面包屑；右：模型状态 + 主题 + 设置。
+   中间用 spacer 顶开，不用 justify-content: space-between（容易在窄屏挤压）。 */
+#topbar {
+  flex: 0 0 var(--topbar-h);
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--hair);
+  position: relative;
+  z-index: var(--z-sticky);
+}
+
+.tb-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--fg-muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tb-btn svg { width: 16px; height: 16px; }
+.tb-btn:hover { background: var(--surface-3); color: var(--fg); }
+.tb-btn:active { background: var(--surface-4); }
+
+.tb-spacer { flex: 1 1 auto; }
+
+/* 面包屑：只显示当前位置，用颜色区分当前层。不做可点击的上层导航
+   （层级只有两层，加可点击反而增加认知负担） */
+.tb-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin-left: var(--sp-2);
+  font-size: var(--text-sm);
+}
+.tb-crumb {
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-crumb.is-current {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+
+/* 模型状态胶囊：常驻可见，让人随时知道自己在用哪个通道 */
+.tb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 26px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--hair);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  max-width: 220px;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tb-chip:hover { background: var(--surface-3); color: var(--fg); }
+.tb-chip span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+  flex: 0 0 auto;
+  transition: background var(--t-base) var(--ease);
+}
+.tb-chip-dot[data-state="online"]  { background: var(--ok-50); }
+.tb-chip-dot[data-state="busy"]    { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.tb-chip-dot[data-state="offline"] { background: var(--err-50); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ── 工作区 ──────────────────────────────────────────────────────────────
+   min-height:0 是整页布局的关键（见文件头注释）。 */
+#workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── 侧栏 ────────────────────────────────────────────────────────────────
+   三段式：头（新建）/ 列表（可滚动，占满）/ 导航 + 脚（固定贴底）。
+   ⚠️ 导航**不能**放进滚动区 —— 旧版把导航放在可滚动区域里，会话一多
+   导航就被推出视口，这是"找不到出口"的直接成因。 */
+#sidebar {
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--hair);
+  transition: margin-left var(--t-slow) var(--ease-out), opacity var(--t-base) var(--ease);
+}
+
+/* 折叠：整体移出而不是 display:none —— 保留布局测量，动画才不会跳 */
+#app[data-sidebar="collapsed"] #sidebar {
+  margin-left: calc(var(--sidebar-w) * -1);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sb-head {
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+}
+
+.sb-new {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border-radius: var(--r-md);
+  background: var(--accent-tint);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.sb-new svg { width: 14px; height: 14px; }
+.sb-new:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.sb-new:active { transform: translateY(0.5px); }
+
+.sb-search {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-3) var(--sp-2);
+  padding: 0 var(--sp-2);
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.sb-search:focus-within { border-color: var(--line); }
+.sb-search svg { width: 13px; height: 13px; color: var(--fg-subtle); }
+.sb-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: var(--text-xs);
+  outline: none;
+}
+.sb-search input::placeholder { color: var(--fg-subtle); }
+/* 去掉 search 类型的原生清除按钮（不同浏览器样式不一致，视觉噪音大） */
+.sb-search input::-webkit-search-cancel-button { display: none; }
+
+/* 会话列表：唯一可滚动区 */
+.sb-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+/* 时间分组标题：小、弱、贴左，组间留出明确呼吸 */
+.sb-group {
+  padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  z-index: 1;
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  text-align: left;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sb-item:hover { background: var(--surface-2); color: var(--fg); }
+.sb-item[aria-current="true"] {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+.sb-item[aria-current="true"] .sb-item-title { font-weight: var(--weight-medium); }
+
+.sb-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-item-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.sb-empty {
+  padding: var(--sp-6) var(--sp-3);
+  text-align: center;
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* 导航：固定贴底，永不滚动 */
+.sb-nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--hair);
+}
+
+.sb-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sb-nav-item svg { width: 14px; height: 14px; }
+.sb-nav-item:hover { background: var(--surface-2); color: var(--fg); }
+.sb-nav-item.is-active {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+
+.sb-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  font-size: var(--text-2xs);
+  color: var(--fg-subtle);
+}
+
+.sb-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.sb-conn::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--err-50);
+  transition: background var(--t-base) var(--ease);
+}
+.sb-conn[data-state="online"]::before { background: var(--ok-50); }
+.sb-conn[data-state="busy"]::before   { background: var(--accent); }
+
+/* ── 主区 ────────────────────────────────────────────────────────────────
+   同样要 min-width/min-height:0，否则内部的滚动区会把主区撑破。 */
+#main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
+.view {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.view[hidden] { display: none !important; }
+
+/* ── 窄屏 ────────────────────────────────────────────────────────────────
+   ≤860px：侧栏改为覆盖式抽屉，主区占满。用 transform 而不是 width 动画
+   （transform 走合成层，不触发重排）。 */
+@media (max-width: 860px) {
+  #sidebar {
+    position: absolute;
+    inset: var(--topbar-h) auto 0 0;
+    z-index: var(--z-overlay);
+    box-shadow: var(--shadow-3);
+  }
+  #app[data-sidebar="collapsed"] #sidebar {
+    margin-left: 0;
+    transform: translateX(-100%);
+    opacity: 1;
+  }
+  #app[data-sidebar="expanded"]::after {
+    content: "";
+    position: fixed;
+    inset: var(--topbar-h) 0 0 0;
+    background: rgb(0 0 0 / 0.5);
+    z-index: calc(var(--z-overlay) - 1);
+  }
+}

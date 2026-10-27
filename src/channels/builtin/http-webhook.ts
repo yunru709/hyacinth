@@ -127,6 +127,14 @@ function isPublicWebUIRoute(url: string): boolean {
     path === '/math.js' ||
     path === '/highlight.js' ||
     path === '/themes.json' ||
+    // v2（2026-10-27 UI 重做）：整目录前缀放行。
+    // 为什么用前缀而不是逐个登记文件名：v2 是模块化的（css 与 js 按视图拆成多文件），
+    // 逐个登记等于每加一个文件都要改后端白名单 —— 迟早漏一个，表现是
+    // 「页面能开、但某个模块 401」⇒ 样式/功能静默缺失，排查成本极高
+    // （旧版就踩过：shell.css 漏登记，配钥匙时整个样式全 401）。
+    // 安全性不变：这里只放行**静态资源读取**，不涉及任何 /api/* 写操作。
+    path.startsWith('/v2/') ||
+    path.startsWith('/v2/') ||
     path.startsWith('/vendor/') ||
     path.startsWith('/assets/')
   );

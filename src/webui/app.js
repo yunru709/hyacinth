@@ -7849,11 +7849,15 @@
   function renderTabs() {
     const list = $('#session-tabs-list');
     if (!list || embedMode) return;
-    // 2026-10-27（C 方案）：标签条**常显**，不再"只有一个就隐藏"。
-    // 旧逻辑假设唯一那条是 primary、不可关也不需要新建入口；现在每条标签都能关、
-    // 都要能看到"我当前在哪条会话"，藏起来反而让人找不到新建按钮与关闭键。
+    // 标签条显隐：**空时隐藏**，有标签才占那一行。
+    //
+    // 2026-10-27（A2 之后再修）：上一版写成"常显"，理由是要让人看到新建按钮。
+    // 但 A2 之后页面初始就是 0 个标签，于是首屏多出一条只有左边一个 + 的空白横条
+    // （实测截图可见）—— 既浪费 30px 视觉重量，又让人以为"这里本该有东西却坏了"。
+    // 正确做法：没有标签就整条不占位；新建入口在侧栏「新会话」按钮与「+」两处都有，
+    // 空态下用户仍能开新会话，不依赖这条空横条。
     const bar = $('#session-tabs');
-    if (bar) bar.hidden = false;
+    if (bar) bar.hidden = tabs.length === 0;
     list.innerHTML = '';
     tabs.forEach((t) => {
       const btn = document.createElement('button');
@@ -7981,7 +7985,16 @@
     if (activeTabId === tabId) {
       // 关的是当前标签 ⇒ 切到相邻的（优先左边，没有就右边）
       const next = tabs[Math.max(0, idx - 1)] || tabs[0];
-      if (next) activateTab(next.id);
+      if (next) {
+        activateTab(next.id);   // 内部会 renderTabs + renderSidebarRecent
+      } else {
+        // ⚠️ 关掉的是**最后一条**：tabs 已空，没有可切换的目标。
+        // 必须显式清 activeTabId 并重绘，否则标签按钮会留在标签栏上
+        // 变成一个点了没反应的死键（2026-10-27 MCP 实测发现）。
+        activeTabId = null;
+        renderTabs();
+        renderSidebarRecent();
+      }
     } else {
       renderTabs();
       renderSidebarRecent();   // 关掉的标签可能正带着「运行中」标记

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-palette="night">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hyacinth</title>
+
+  <!-- 只加载两层：基础尺度 + 配色。结构与交互由设计语言自己带。 -->
+  <link rel="stylesheet" href="/v3/css/base.css">
+  <link rel="stylesheet" href="/v3/css/palettes.css">
+
+  <script type="module">
+    /* ========================================================================
+       v3 入口：这里不写任何界面。
+
+       ?lang=tui        → 加载 langs/tui/       （终端效率）
+       ?lang=editorial  → 加载 langs/editorial/ （文字即界面）
+
+       为什么用动态加载而不是把两套都打进来：
+         两套设计语言的 CSS 会互相打架（都有 .toolbar / .row 这类通用类名），
+         同时加载必然污染。一个页面只跑一套语言，这是设计语言的定义。
+
+       为什么 DOM 是空的：
+         每套语言的骨架完全不同 —— TUI 是分面板，Editorial 是单栏正文。
+         让 index.html 提供骨架就等于强行统一，那就不叫设计语言了。
+       ======================================================================== */
+    const q = new URLSearchParams(location.search);
+    const LANG = q.get('lang') || 'tui';
+    const ALLOWED = ['tui', 'editorial'];
+
+    if (!ALLOWED.includes(LANG)) {
+      document.getElementById('app').textContent =
+        `未知设计语言：${LANG}（可选：${ALLOWED.join(' / ')}）`;
+    } else {
+      // 先挂样式，再执行脚本 —— 顺序反了会先渲染一帧无样式内容
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = `/v3/langs/${LANG}/style.css`;
+      link.onload = () => {
+        import(`/v3/langs/${LANG}/index.js`).catch((err) => {
+          document.getElementById('app').textContent = '加载失败：' + err.message;
+          console.error(err);
+        });
+      };
+      link.onerror = () => {
+        document.getElementById('app').textContent = `找不到样式：/v3/langs/${LANG}/style.css`;
+      };
+      document.head.appendChild(link);
+    }
+  </script>
+</head>
+<body>
+  <!-- 空白骨架：由各设计语言填充 -->
+  <div id="app"></div>
+</body>
+</html>

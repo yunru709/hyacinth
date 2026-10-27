@@ -1,0 +1,369 @@
+/* ============================================================================
+   Hyacinth v3 — 主题层（结构 / 布局 / 交互）
+
+   ══ 两个正交的概念 ═══════════════════════════════════════════════════════
+
+     主题 theme   = 结构与交互范式
+                    输框在哪、消息怎么排、会话栏在哪侧、密度、动效节奏、
+                    发送键是图标还是文字、有没有网格底纹、快捷键提示是否常显
+
+     配色 palette = 颜色
+                    背景/前景/强调/状态色/边框透明度
+
+     两者正交：4 主题 × 4 配色 = 16 种组合，任意组合都成立。
+
+   ══ 为什么必须分开（上一版的实际错误）════════════════════════════════════
+
+     v3 初版把两者揉进一套 [data-theme] 变量里，于是 "paper" 既是浅色
+     又是阅读版式。想给 paper 换深色就得再复制一整套变量，想给 void 加留白
+     就得再复制一遍。组合爆炸。
+
+     现在：
+       html[data-theme="void"|"flow"|"focus"|"console"|"reading"]
+          → 只定义结构变量（--layout-* / --composer-* / --anim-*）
+       html[data-palette="night"|"day"|"sepia"|"mono"|"forest"]
+          → 只定义颜色变量（--bg / --fg / --accent / ...）
+
+     两套变量名不重叠 ⇒ 任何组合都不冲突，也不用写覆盖规则。
+
+   ══ 主题清单（5 套，差异足够大）══════════════════════════════════════════
+
+     void     极简：无框输入、消息居中、会话栏左缘细条、零圆角、极快响应
+     flow     流体：输入框固定在底部中央悬浮、消息流式居中窄栏、动效柔和
+     focus    专注：单栏通宽、输入框贴底通栏、会话栏折叠为顶部横条、无装饰
+     console  终端：等宽字体、命令行输入、会话栏左缘方块、网格底纹、快捷键常显
+     reading  阅读：正文左对齐窄栏、输入框作为"续写线"嵌在正文后、会话栏右移点列
+
+   性能约束（孪遗要求）：主题切换只改 <html> 的两个属性，不重建 DOM、
+   不重排整页 —— 所有差异都由 CSS 变量与少量 data-* flag 驱动。
+   ========================================================================== */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   基础尺度（不随主题/配色变化）
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 20px;
+  --text-xl: 28px;
+
+  --r-pill: 999px;
+
+  --font-ui: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  --font-serif: "Songti SC", "Source Serif Pro", Georgia, serif;
+
+  --z-stripe: 10;
+  --z-status: 20;
+  --z-palette: 50;
+  --z-page: 70;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: void — 极简
+   输入框无框只用下划线；消息居中；会话栏 6px 色条；零圆角；响应最快。
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="void"] {
+  --radius-box: 0px;
+  --radius-btn: 0px;
+
+  --stream-max: 760px;
+  --stream-align: center;
+  --stream-pad-top: 48px;
+  --msg-gap: 24px;
+  --msg-size: 14px;
+  --msg-lh: 1.75;
+  --msg-font: var(--font-ui);
+
+  --composer-shape: underline;
+  --composer-bg: transparent;
+  --composer-border: transparent;
+  --composer-radius: 0px;
+  --composer-pad: 8px 0;
+  --composer-ring: none;
+
+  --side-position: left;
+  --side-width: 6px;
+  --side-expand: 220px;
+  --side-mark: bar;
+  --side-item-h: 44px;
+
+  --status-h: 28px;
+  --status-opacity: 0.45;
+  --status-visual: fade;
+
+  --send-shape: text;
+  --send-label: "SEND";
+  --send-size: 24px;
+  --send-radius: 0px;
+
+  --welcome-align: center;
+  --welcome-pad-top: 0;
+  --welcome-title: 20px;
+  --welcome-weight: 600;
+  --welcome-anim: none;
+
+  --bg-effect: none;
+  --hint-visible: on-focus;
+
+  --t-fast: 90ms;
+  --t-base: 140ms;
+  --t-slow: 220ms;
+  --ease: cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: flow — 流体
+   输入框悬浮在底部中央（圆角卡片+柔影）；消息窄栏居中；动效柔和；
+   会话栏左缘细条但 hover 展开有滑动感。
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="flow"] {
+  --radius-box: 16px;
+  --radius-btn: 10px;
+
+  --stream-max: 720px;
+  --stream-align: center;
+  --stream-pad-top: 40px;
+  --msg-gap: 20px;
+  --msg-size: 14px;
+  --msg-lh: 1.8;
+  --msg-font: var(--font-ui);
+
+  --composer-shape: card;
+  --composer-bg: var(--surface-1);
+  --composer-border: var(--line);
+  --composer-radius: 16px;
+  --composer-pad: 12px 12px 12px 16px;
+  --composer-ring: 0 0 0 4px var(--accent-tint);
+
+  --side-position: left;
+  --side-width: 8px;
+  --side-expand: 240px;
+  --side-mark: pill;
+  --side-item-h: 32px;
+
+  --status-h: 30px;
+  --status-opacity: 0.55;
+  --status-visual: fade;
+
+  --send-shape: icon;
+  --send-size: 30px;
+  --send-radius: 50%;
+
+  --welcome-align: center;
+  --welcome-pad-top: 0;
+  --welcome-title: 24px;
+  --welcome-weight: 500;
+  --welcome-anim: breathe;
+
+  --bg-effect: glow;
+  --hint-visible: on-focus;
+
+  --t-fast: 160ms;
+  --t-base: 260ms;
+  --t-slow: 380ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: focus — 专注
+   单栏通宽，输入框贴底通栏（无最大宽度），会话栏折叠成顶部横条，
+   消息与输入同宽 —— 适合长时间连续工作。
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="focus"] {
+  --radius-box: 8px;
+  --radius-btn: 6px;
+
+  --stream-max: 100%;
+  --stream-align: left;
+  --stream-pad-top: 32px;
+  --msg-gap: 18px;
+  --msg-size: 13.5px;
+  --msg-lh: 1.7;
+  --msg-font: var(--font-ui);
+
+  --composer-shape: bar;
+  --composer-bg: var(--surface-1);
+  --composer-border: var(--line);
+  --composer-radius: 8px;
+  --composer-pad: 10px 14px;
+  --composer-ring: 0 0 0 3px var(--accent-tint);
+
+  /* 会话栏改为顶部横条（由 data-side="top" 驱动布局） */
+  --side-position: top;
+  --side-width: 100%;
+  --side-expand: 100%;
+  --side-mark: tab;
+  --side-item-h: 28px;
+
+  --status-h: 26px;
+  --status-opacity: 0.7;
+  --status-visual: solid;
+
+  --send-shape: icon;
+  --send-size: 26px;
+  --send-radius: 6px;
+
+  --welcome-align: left;
+  --welcome-pad-top: 24px;
+  --welcome-title: 18px;
+  --welcome-weight: 600;
+  --welcome-anim: none;
+
+  --bg-effect: none;
+  --hint-visible: always;
+
+  --t-fast: 100ms;
+  --t-base: 160ms;
+  --t-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: console — 终端
+   等宽字体、命令行输入（$ 提示符）、会话栏左缘方块、网格底纹、
+   快捷键提示常显、消息带 │ / > 前导符。
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="console"] {
+  --radius-box: 2px;
+  --radius-btn: 2px;
+
+  --stream-max: 100%;
+  --stream-align: left;
+  --stream-pad-top: 24px;
+  --msg-gap: 14px;
+  --msg-size: 12.5px;
+  --msg-lh: 1.55;
+  --msg-font: var(--font-mono);
+
+  --composer-shape: cmd;
+  --composer-bg: var(--surface-1);
+  --composer-border: var(--line);
+  --composer-radius: 0px;
+  --composer-pad: 8px 12px;
+  --composer-ring: none;
+
+  --side-position: left;
+  --side-width: 6px;
+  --side-expand: 220px;
+  --side-mark: block;
+  --side-item-h: 30px;
+
+  --status-h: 26px;
+  --status-opacity: 1;
+  --status-visual: solid;
+
+  --send-shape: text;
+  --send-label: "[SEND]";
+  --send-size: 20px;
+  --send-radius: 0px;
+
+  --welcome-align: left;
+  --welcome-pad-top: 28px;
+  --welcome-title: 13px;
+  --welcome-weight: 500;
+  --welcome-anim: none;
+
+  --bg-effect: grid;
+  --grid-size: 32px;
+  --hint-visible: always;
+
+  --t-fast: 60ms;
+  --t-base: 100ms;
+  --t-slow: 160ms;
+  --ease: linear;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME: reading — 阅读
+   正文左对齐窄栏（62ch）、行高最大、输入框是正文末尾的"续写线"、
+   会话栏右移为点列、无状态线、动效最慢。
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-theme="reading"] {
+  --radius-box: 6px;
+  --radius-btn: 4px;
+
+  --stream-max: 640px;
+  --stream-align: left;
+  --stream-pad-top: 64px;
+  --msg-gap: 32px;
+  --msg-size: 15px;
+  --msg-lh: 1.95;
+  --msg-font: var(--font-serif);
+
+  --composer-shape: line;
+  --composer-bg: transparent;
+  --composer-border: transparent;
+  --composer-radius: 0px;
+  --composer-pad: 12px 0;
+  --composer-ring: none;
+
+  --side-position: right;
+  --side-width: 22px;
+  --side-expand: 200px;
+  --side-mark: dot;
+  --side-item-h: 22px;
+
+  --status-h: 0px;
+  --status-opacity: 0;
+  --status-visual: hidden;
+
+  --send-shape: icon;
+  --send-size: 28px;
+  --send-radius: 50%;
+
+  --welcome-align: left;
+  --welcome-pad-top: 18vh;
+  --welcome-title: 30px;
+  --welcome-weight: 400;
+  --welcome-anim: none;
+
+  --bg-effect: none;
+  --hint-visible: on-focus;
+
+  --t-fast: 200ms;
+  --t-base: 300ms;
+  --t-slow: 460ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   动画关键帧（主题通过 --welcome-anim 引用，不按选择器分别定义）
+   ══════════════════════════════════════════════════════════════════════════ */
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-down {
+  from { transform: translateY(-12px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,259 @@
+/* ============================================================================
+   设计语言：Editorial — 样式
+
+   灵魂：界面上没有任何"控件"感的东西。
+     输入框 = 正文的延续（同字号同字体同宽度，无边框无底色）
+     chrome = 只在鼠标移到上下边缘时浮现，2.4s 后自动消失
+     消息   = 段落，不是气泡、不是行、没有前缀符号
+   ========================================================================== */
+
+.ed {
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-serif);
+  overflow-x: hidden;
+}
+
+/* ═══ 页面：单栏居中，窄行宽 ═════════════════════════════════════════════
+   60ch 是阅读舒适区的经验值：再宽眼睛要扫太长，再窄频繁换行。 */
+.ed-page {
+  max-width: 60ch;
+  margin: 0 auto;
+  padding: 14vh 24px 30vh;
+}
+
+/* ═══ 正文流 ═════════════════════════════════════════════════════════════ */
+.ed-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5em;
+}
+
+.ed-para {
+  font-size: 17px;
+  line-height: 1.9;
+  letter-spacing: 0.004em;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 用户段落：斜体 + 弱色。像笔记里的自问，不是"我的消息" */
+.ed-para--user {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.ed-para--error {
+  color: var(--err);
+  font-size: 15px;
+}
+
+.ed-empty {
+  color: var(--fg-subtle);
+  font-size: 17px;
+  line-height: 1.9;
+  font-style: italic;
+}
+
+/* ═══ 输入区：正文的延续 ═════════════════════════════════════════════════
+   关键：无 border、无 background、无 outline、无 shadow。
+   视觉上它就是正文后面的一个光标位置。 */
+.ed-composer {
+  margin-top: 1.5em;
+}
+
+#ed-input {
+  display: block;
+  width: 100%;
+  min-height: 1.9em;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.9;
+  letter-spacing: 0.004em;
+  resize: none;
+  overflow: hidden;
+}
+
+#ed-input::placeholder {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+/* 底部状态：极淡，只在有内容时占位 */
+.ed-foot {
+  margin-top: 2em;
+  min-height: 1.4em;
+}
+
+.ed-status {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  opacity: 0.8;
+}
+
+/* ═══ chrome：默认完全隐藏 ═══════════════════════════════════════════════
+   只在鼠标移到视口上下边缘时浮现。这是 Editorial 的核心交互。 */
+.ed-chrome {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hair);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: opacity 300ms var(--ease), transform 300ms var(--ease);
+  z-index: 20;
+}
+
+.ed.chrome-on .ed-chrome {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.ed-tool {
+  padding: 4px 0;
+  background: none;
+  border: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color 160ms var(--ease);
+}
+
+.ed-tool:hover { color: var(--fg); }
+
+.ed-tool-sep { color: var(--hair); }
+
+.ed-tool-hint {
+  margin-left: auto;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+}
+
+/* ═══ 浮层 ═══════════════════════════════════════════════════════════════
+   也是克制的：无重阴影、无大圆角，像纸上一块浅色区域。 */
+.ed-picker {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 22vh;
+  background: rgb(0 0 0 / 0.28);
+  z-index: 40;
+  animation: ed-fade 200ms var(--ease);
+}
+
+.ed-picker[hidden] { display: none !important; }
+
+@keyframes ed-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ed-picker-box {
+  width: min(440px, calc(100vw - 48px));
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 18px 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  font-family: var(--font-ui);
+  animation: ed-rise 260ms var(--ease);
+}
+
+@keyframes ed-rise {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.ed-picker-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  margin-bottom: 12px;
+}
+
+.ed-picker-sub {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  margin: 14px 0 6px;
+}
+
+.ed-picker-row {
+  display: block;
+  width: 100%;
+  padding: 7px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 140ms var(--ease), padding-left 140ms var(--ease);
+}
+
+.ed-picker-row:hover {
+  color: var(--fg);
+  padding-left: 4px;
+}
+
+.ed-picker-new { color: var(--accent); }
+
+.ed-picker-empty {
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.ed-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ed-chip {
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid var(--hair);
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease), color 140ms var(--ease);
+}
+
+.ed-chip:hover { border-color: var(--line); color: var(--fg); }
+
+.ed-chip[data-on="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
