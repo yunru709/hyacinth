@@ -65,6 +65,7 @@ root.innerHTML = `
     <button class="ed-tool" id="ed-look">外观</button>
     <button class="ed-tool" id="ed-settings">设置</button>
     <button class="ed-tool" id="ed-console">控制台</button>
+    <button class="ed-tool" id="ed-mic" hidden>◉ 语音</button>
     <span class="ed-tool-sep">·</span>
     <span class="ed-tool-hint">Esc 返回正文</span>
   </div>
@@ -470,6 +471,56 @@ inputEl.focus();
 initEdPanel();
 $('ed-settings').addEventListener('click', () => { void openEdSettings(); });
 $('ed-console').addEventListener('click', () => { closePicker(); if (edPanel) edPanel.open(); });
+
+/* ═══ 语音输入（stt.enabled 控制显隐）═══════════════════════════════════════ */
+let edRecorder = null;
+let edRecChunks = [];
+function syncEdMic(enabled) {
+  const m = $('ed-mic');
+  if (m) m.hidden = !enabled;
+}
+async function startEdRec() {
+  const mic = $('ed-mic');
+  try {
+    const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+    edRecorder = new MediaRecorder(media);
+    edRecChunks = [];
+    edRecorder.ondataavailable = (e) => { if (e.data.size) edRecChunks.push(e.data); };
+    edRecorder.onstop = async () => {
+      media.getTracks().forEach((t) => t.stop());
+      mic.textContent = '…'; mic.classList.remove('is-rec');
+      try {
+        const blob = new Blob(edRecChunks, { type: edRecorder.mimeType || 'audio/webm' });
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        const text = await app.voice.transcribe(btoa(bin), 'webm');
+        if (text) {
+          inputEl.value = (inputEl.value ? inputEl.value + ' ' : '') + text;
+          inputEl.focus();
+          autosize();
+        } else {
+          setStatus('没识别到内容');
+        }
+      } catch (err) {
+        setStatus('识别失败：' + (err?.message ?? err));
+      } finally {
+        mic.textContent = '◉ 语音';
+      }
+    };
+    edRecorder.start();
+    mic.classList.add('is-rec');
+    mic.textContent = '■ 停止';
+  } catch (err) {
+    setStatus('无法访问麦克风：' + (err?.message ?? err));
+  }
+}
+$('ed-mic')?.addEventListener('click', () => {
+  if (edRecorder && edRecorder.state === 'recording') edRecorder.stop();
+  else startEdRec();
+});
+app.config.get('stt.enabled').then((on) => syncEdMic(on !== false)).catch(() => {});
 
 if (DEMO.isDemo()) {
   streamEl.innerHTML = '';
