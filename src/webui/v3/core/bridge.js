@@ -340,8 +340,8 @@ export function boot() {
     sessions,
     stream,
     history,
-    /** 当前语言名（来自 ?lang=tui） */
-    lang: q.get('lang') || 'tui',
+    /** 当前语言名（来自 ?lang=terminal） */
+    lang: q.get('lang') || 'terminal',
     /** 初始主题 / 配色（URL 优先，其次 localStorage） */
     theme: q.get('theme') || localStorage.getItem('h3.theme') || 'void',
     palette: q.get('palette') || localStorage.getItem('h3.palette') || 'night',

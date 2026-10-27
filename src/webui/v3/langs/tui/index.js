@@ -91,7 +91,7 @@ root.innerHTML = `
 
   <div class="tui-status">
     <span class="tui-conn" id="tui-conn"><span class="tui-dot"></span>offline</span>
-    <span class="tui-dim" id="tui-themepal">TUI · ${PALETTE_LABELS[app.palette]}</span>
+    <span class="tui-dim" id="tui-themepal">Terminal · ${PALETTE_LABELS[app.palette]}</span>
     <span class="tui-grow"></span>
     <button class="tui-status-btn" id="tui-mic" type="button" title="语音输入（需在设置里启用）" hidden>◉ mic</button>
     <button class="tui-status-btn" id="tui-panel-btn" type="button" title="控制台（模型/能力/运行/会话）">⊞ 控制台</button>

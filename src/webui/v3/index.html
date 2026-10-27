@@ -14,21 +14,26 @@
     /* ========================================================================
        v3 入口：这里不写任何界面。
 
-       ?lang=tui        → 加载 langs/tui/       （终端效率）
+       ?lang=terminal   → 加载 langs/tui/       （终端外观；目录沿用 tui 属内部实现）
        ?lang=editorial  → 加载 langs/editorial/ （文字即界面）
        ?lang=classic    → 加载 langs/classic/   （v1 经典形态）
 
        设计语言切换入口在「设置 → 外观 → 设计语言」（不在此处浮控件）。
-       URL ?lang 优先；否则沿用 localStorage['v3.lang']；否则 tui。
+       URL ?lang 优先；否则沿用 localStorage['v3.lang']；否则 terminal。
        （切换器改 localStorage + URL 后整页重载 —— 骨架不同，无法只换 CSS。）
 
        为什么动态加载而非全打进来：多套语言 CSS 会互相打架，一个页面只跑一套。
        ======================================================================== */
-    const ALLOWED = ['tui', 'editorial', 'classic'];
+    // 语言标识 → 目录名。terminal 复用 langs/tui（目录名与 .tui-* 类名属内部实现，保留）
+    const DIR = { terminal: 'tui', editorial: 'editorial', classic: 'classic' };
+    const ALIAS = { tui: 'terminal' }; // 旧名兼容：?lang=tui / localStorage='tui' 归一到 terminal
+    const ALLOWED = Object.keys(DIR);
     const q = new URLSearchParams(location.search);
-    const fromUrl = q.get('lang');
-    const saved = localStorage.getItem('v3.lang');
-    const LANG = ALLOWED.includes(fromUrl) ? fromUrl : (ALLOWED.includes(saved) ? saved : 'tui');
+    let fromUrl = q.get('lang');
+    if (ALIAS[fromUrl]) fromUrl = ALIAS[fromUrl];
+    let saved = localStorage.getItem('v3.lang');
+    if (ALIAS[saved]) saved = ALIAS[saved];
+    const LANG = ALLOWED.includes(fromUrl) ? fromUrl : (ALLOWED.includes(saved) ? saved : 'terminal');
     // URL 显式指定 ⇒ 记住它，下次无 lang 打开沿用
     if (ALLOWED.includes(fromUrl)) localStorage.setItem('v3.lang', fromUrl);
 
@@ -36,18 +41,19 @@
       document.getElementById('app').textContent =
         `未知设计语言：${LANG}（可选：${ALLOWED.join(' / ')}）`;
     } else {
+      const dir = DIR[LANG];
       // 先挂样式，再执行脚本 —— 顺序反了会先渲染一帧无样式内容
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = `/v3/langs/${LANG}/style.css`;
+      link.href = `/v3/langs/${dir}/style.css`;
       link.onload = () => {
-        import(`/v3/langs/${LANG}/index.js`).catch((err) => {
+        import(`/v3/langs/${dir}/index.js`).catch((err) => {
           document.getElementById('app').textContent = '加载失败：' + err.message;
           console.error(err);
         });
       };
       link.onerror = () => {
-        document.getElementById('app').textContent = `找不到样式：/v3/langs/${LANG}/style.css`;
+        document.getElementById('app').textContent = `找不到样式：/v3/langs/${dir}/style.css`;
       };
       document.head.appendChild(link);
     }

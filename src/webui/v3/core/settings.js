@@ -225,9 +225,9 @@ export const SETTINGS_GROUPS = [
         path: 'ui.designLanguage',
         label: '设计语言',
         type: 'design-language',
-        hint: '整页切换界面范式，切换后重新加载。TUI 终端 / Editorial 文字即界面 / Classic 经典。',
+        hint: '整页切换界面范式，切换后重新加载。Terminal 终端 / Editorial 文字即界面 / Classic 经典。',
         options: [
-          { value: 'tui', label: 'TUI' },
+          { value: 'terminal', label: 'Terminal' },
           { value: 'editorial', label: 'Editorial' },
           { value: 'classic', label: 'Classic' },
         ],

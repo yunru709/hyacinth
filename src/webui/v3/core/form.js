@@ -234,11 +234,12 @@ async function renderItem(item, current, app, afterSave) {
 
     case 'design-language': {
       /* 设计语言 = 整页换一套（骨架不同）⇒ 不写 config，改 localStorage + URL 重载。
-         当前值以 URL ?lang 优先，其次 localStorage，最后 tui。 */
-      const curLang = new URLSearchParams(location.search).get('lang')
-        || localStorage.getItem('v3.lang') || 'tui';
+         当前值以 URL ?lang 优先，其次 localStorage，最后 terminal（旧名 tui 兼容）。 */
+      let curLang = new URLSearchParams(location.search).get('lang')
+        || localStorage.getItem('v3.lang') || 'terminal';
+      if (curLang === 'tui') curLang = 'terminal';
       const LANGS = item.options || [
-        { value: 'tui', label: 'TUI' },
+        { value: 'terminal', label: 'Terminal' },
         { value: 'editorial', label: 'Editorial' },
         { value: 'classic', label: 'Classic' },
       ];
