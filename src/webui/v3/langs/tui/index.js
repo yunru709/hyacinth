@@ -39,7 +39,7 @@ import { renderSettingsGroup } from '../../core/form.js';
 import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
 import { createPanel } from '../../core/panel.js';
 
-const app = boot();
+const app = window.__v3app || (window.__v3app = boot());
 const { client, sessions, stream, history } = app;
 /* 调试口：把 app 挂到 window，方便控制台/探针直接调 domains（无害，便于日后排查）。 */
 window.__v3 = app;
@@ -305,7 +305,7 @@ function moveSel(delta) {
   renderList();
 }
 
-document.addEventListener('keydown', (e) => {
+function __tuiKeydown(e) {
   // 浮层（设置 / 控制台）打开时 Esc 关闭（无论焦点在哪）
   if (e.key === 'Escape') {
     if (isSettingsOpen()) { e.preventDefault(); closeSettings(); return; }
@@ -348,7 +348,8 @@ document.addEventListener('keydown', (e) => {
     default:
       break;
   }
-});
+}
+document.addEventListener('keydown', __tuiKeydown);
 
 async function submit() {
   const text = fieldEl.value.trim();
@@ -582,4 +583,12 @@ if (DEMO.isDemo()) {
 } else {
   renderLogEmpty();
   client.connect();
+}
+
+/* ═══ 卸载（SPA 切语言时由壳调用）═════════════════════════════════════════ */
+export function dispose() {
+  try { document.removeEventListener('keydown', __tuiKeydown); } catch { /* ignore */ }
+  try { if (typeof closeHelp === 'function') closeHelp(); } catch { /* ignore */ }
+  try { if (panel && typeof panel.close === 'function') panel.close(); } catch { /* ignore */ }
+  try { if (root) root.innerHTML = ''; } catch { /* ignore */ }
 }

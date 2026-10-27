@@ -12,51 +12,84 @@
 
   <script type="module">
     /* ========================================================================
-       v3 入口：这里不写任何界面。
+       v3 壳 —— 只做「加载/卸载设计语言」，不写任何界面。
 
-       ?lang=terminal   → 加载 langs/tui/       （终端外观；目录沿用 tui 属内部实现）
-       ?lang=editorial  → 加载 langs/editorial/ （文字即界面）
-       ?lang=classic    → 加载 langs/classic/   （v1 经典形态）
+       ⚠️ 2026-10-27 改为 **SPA 无缝切换**（孑遗："这几个页面不是跳，本来就应该是一体的"）：
+        - 连接只 boot 一次：语言模块用 `window.__v3app || (window.__v3app = boot())` 复用同一条 ws
+        - 切换语言 = dispose 旧语言（清监听/清 #app）→ 换 style.css → 动态 import 新语言
+        - 连接不断、页面不刷新；URL 用 history.replaceState 更新 ?lang=（不追加历史）
+        - 每套语言的 style.css 切换时必须移除旧的，否则多套骨架 CSS 打架
 
-       设计语言切换入口在「设置 → 外观 → 设计语言」（不在此处浮控件）。
-       URL ?lang 优先；否则沿用 localStorage['v3.lang']；否则 terminal。
-       （切换器改 localStorage + URL 后整页重载 —— 骨架不同，无法只换 CSS。）
-
-       为什么动态加载而非全打进来：多套语言 CSS 会互相打架，一个页面只跑一套。
+       语言标识 → 目录：terminal 复用 langs/tui（目录名/类名属内部实现）
+       切换入口仍在「设置 → 外观 → 设计语言」（调 window.__switchLang，不再整页跳）
+       classic（v1）不在此壳内 —— 它是独立整页应用，由设置里的「经典」项 location.href='/' 进入。
        ======================================================================== */
-    // 语言标识 → 目录名。terminal 复用 langs/tui（目录名与 .tui-* 类名属内部实现，保留）
     const DIR = { terminal: 'tui', editorial: 'editorial', brutalist: 'brutalist' };
-    const ALIAS = { tui: 'terminal' }; // 旧名兼容：?lang=tui / localStorage='tui' 归一到 terminal
+    const ALIAS = { tui: 'terminal' };
     const ALLOWED = Object.keys(DIR);
     const q = new URLSearchParams(location.search);
     let fromUrl = q.get('lang');
     if (ALIAS[fromUrl]) fromUrl = ALIAS[fromUrl];
     let saved = localStorage.getItem('v3.lang');
     if (ALIAS[saved]) saved = ALIAS[saved];
-    const LANG = ALLOWED.includes(fromUrl) ? fromUrl : (ALLOWED.includes(saved) ? saved : 'terminal');
-    // URL 显式指定 ⇒ 记住它，下次无 lang 打开沿用
-    if (ALLOWED.includes(fromUrl)) localStorage.setItem('v3.lang', fromUrl);
+    const LANG0 = ALLOWED.includes(fromUrl) ? fromUrl : (ALLOWED.includes(saved) ? saved : 'terminal');
 
-    if (!ALLOWED.includes(LANG)) {
-      document.getElementById('app').textContent =
-        `未知设计语言：${LANG}（可选：${ALLOWED.join(' / ')}）`;
-    } else {
-      const dir = DIR[LANG];
-      // 先挂样式，再执行脚本 —— 顺序反了会先渲染一帧无样式内容
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = `/v3/langs/${dir}/style.css`;
-      link.onload = () => {
-        import(`/v3/langs/${dir}/index.js`).catch((err) => {
-          document.getElementById('app').textContent = '加载失败：' + err.message;
-          console.error(err);
-        });
-      };
-      link.onerror = () => {
-        document.getElementById('app').textContent = `找不到样式：/v3/langs/${dir}/style.css`;
-      };
-      document.head.appendChild(link);
+    const appEl = () => document.getElementById('app');
+    let currentLangKey = null;
+    let currentMod = null;
+    let currentLink = null;
+
+    async function switchLang(name) {
+      if (ALIAS[name]) name = ALIAS[name];
+      if (!ALLOWED.includes(name)) {
+        appEl().textContent = `未知设计语言：${name}（可选：${ALLOWED.join(' / ')}）`;
+        return;
+      }
+      if (name === currentLangKey && currentMod) return; // 已是当前
+
+      // 1) 卸载旧语言（清监听 + 清 #app），但**不动共享 ws**
+      if (currentMod && typeof currentMod.dispose === 'function') {
+        try { currentMod.dispose(); } catch (e) { console.warn('[shell] dispose 失败', e); }
+      }
+      currentMod = null;
+      if (appEl()) appEl().innerHTML = '';
+      if (currentLink && currentLink.parentNode) currentLink.parentNode.removeChild(currentLink);
+      currentLink = null;
+
+      // 2) 挂新语言样式（先样式后脚本，避免先渲染一帧无样式内容）
+      const dir = DIR[name];
+      await new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = `/v3/langs/${dir}/style.css`;
+        link.onload = () => { currentLink = link; resolve(); };
+        link.onerror = () => reject(new Error('样式缺失: ' + link.href));
+        document.head.appendChild(link);
+      }).catch((e) => { console.error(e); });
+
+      // 3) 动态挂载新语言（?t= 强制新实例；复用 window.__v3app 的共享连接）
+      try {
+        const mod = await import(`/v3/langs/${dir}/index.js?t=${Date.now()}`);
+        currentMod = mod;
+        currentLangKey = name;
+      } catch (e) {
+        if (appEl()) appEl().textContent = '加载失败：' + e.message;
+        console.error(e);
+        return;
+      }
+
+      // 4) 记忆 + 改 URL（不整页刷新、不追加历史）
+      localStorage.setItem('v3.lang', name);
+      const u = new URL(location.href);
+      u.searchParams.set('lang', name);
+      history.replaceState(null, '', u.toString());
     }
+
+    // 暴露给「设置 → 外观 → 设计语言」切换器（form.js）调用 —— 不再整页跳
+    window.__switchLang = switchLang;
+    window.__v3Lang = () => currentLangKey;
+
+    switchLang(LANG0);
   </script>
 </head>
 <body>

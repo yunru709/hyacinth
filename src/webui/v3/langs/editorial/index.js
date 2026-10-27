@@ -28,7 +28,7 @@ import { createPanel } from '../../core/panel.js';
 import { renderSettingsGroup } from '../../core/form.js';
 import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
 
-const app = boot();
+const app = window.__v3app || (window.__v3app = boot());
 const { client, sessions, stream, history } = app;
 
 document.documentElement.setAttribute('data-theme', app.theme);
@@ -207,17 +207,19 @@ function hideChrome() {
   root.classList.remove('chrome-on');
 }
 
-document.addEventListener('mousemove', (e) => {
+function __edMouseMove(e) {
   if (e.clientY < 90 || e.clientY > window.innerHeight - 90) showChrome();
-});
+}
+document.addEventListener('mousemove', __edMouseMove);
 
-document.addEventListener('keydown', (e) => {
+function __edKey1(e) {
   if (e.key === 'Escape') {
     if (S.pickerOpen) { closePicker(); return; }
     hideChrome();
     inputEl.focus();
   }
-});
+}
+document.addEventListener('keydown', __edKey1);
 
 /* ═══ 会话浮层 ═══════════════════════════════════════════════════════════ */
 function openPicker(kind) {
@@ -458,11 +460,12 @@ $('ed-set-close').addEventListener('click', closeEdSettings);
 $('ed-set-close').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeEdSettings(); }
 });
-document.addEventListener('keydown', (e) => {
+function __edKey2(e) {
   if (e.key !== 'Escape') return;
   if (isEdSettingsOpen()) { e.preventDefault(); closeEdSettings(); }
   else if (edPanel && edPanel.isOpen()) { e.preventDefault(); edPanel.close(); }
-});
+}
+document.addEventListener('keydown', __edKey2);
 
 /* ═══ 启动 ═══════════════════════════════════════════════════════════════ */
 autosize();
@@ -534,4 +537,14 @@ if (DEMO.isDemo()) {
 } else {
   renderEmpty();
   client.connect();
+}
+
+/* ═══ 卸载（SPA 切语言时由壳调用）═══════════════════════════════════════ */
+export function dispose() {
+  try { document.removeEventListener('mousemove', __edMouseMove); } catch { /* ignore */ }
+  try { document.removeEventListener('keydown', __edKey1); } catch { /* ignore */ }
+  try { document.removeEventListener('keydown', __edKey2); } catch { /* ignore */ }
+  try { if (root) root.innerHTML = ''; } catch { /* ignore */ }
+  try { clearTimeout(hideTimer); } catch { /* ignore */ }
+  try { if (edPanel && typeof edPanel.close === 'function') edPanel.close(); } catch { /* ignore */ }
 }

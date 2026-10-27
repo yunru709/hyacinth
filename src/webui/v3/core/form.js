@@ -306,6 +306,9 @@ async function renderItem(item, current, app, afterSave) {
             return;
           }
           if (o.value === curLang) return;
+          // SPA 无缝切换：壳动态卸载旧语言 / 挂载新语言（连接不断、页面不刷新）
+          if (typeof window.__switchLang === 'function') { window.__switchLang(o.value); return; }
+          // 回退：无壳时仍走 URL 重载
           localStorage.setItem('v3.lang', o.value);
           const u = new URL(location.href);
           u.searchParams.set('lang', o.value);

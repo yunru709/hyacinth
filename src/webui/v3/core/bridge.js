@@ -84,6 +84,15 @@ export class Client {
       this.ws.send(JSON.stringify({ kind: 'request', id, method, params }));
     });
   }
+
+  /** 主动断开并停止自动重连（SPA 卸载语言 / 离开 v3 时调用）。 */
+  dispose() {
+    this.closedByUser = true;
+    try { this.ws?.close(); } catch { /* 可能已关 */ }
+    for (const p of this.pending.values()) { try { p.reject({ message: 'disposed' }); } catch { /* 忽略 */ } }
+    this.pending.clear();
+    this.connected = false;
+  }
 }
 
 /* ═══ 会话数据（与 UI 无关）══════════════════════════════════════════════

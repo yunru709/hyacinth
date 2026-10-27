@@ -23,7 +23,7 @@ import { renderMarkdown } from '../../core/markdown.js';
 import { renderSettingsGroup } from '../../core/form.js';
 import { SETTINGS_GROUPS, loadValues } from '../../core/settings.js';
 
-const app = boot();
+const app = window.__v3app || (window.__v3app = boot());
 const { client, sessions, stream, history } = app;
 
 const S = {
@@ -440,9 +440,10 @@ $('bru-settings').addEventListener('click', () => {
 });
 $('bru-set-back').addEventListener('click', closeSettings);
 /* Esc 关闭设置：用户改完想回到对话，不该被迫去找某个按钮 */
-document.addEventListener('keydown', (e) => {
+function __bruKey1(e) {
   if (e.key === 'Escape' && isSettingsOpen() && !$('bru-drawer')) closeSettings();
-});
+}
+document.addEventListener('keydown', __bruKey1);
 $('bru-mic').addEventListener('click', () => {
   if (recorder && recorder.state === 'recording') stopRec();
   else startRec();
@@ -599,4 +600,11 @@ if (DEMO.isDemo()) {
   client.connect();
   /* 语音输入是否显示，取决于配置 stt.enabled */
   app.config.get('stt.enabled').then((on) => syncMicVisibility(on === true)).catch(() => {});
+}
+
+/* ═══ 卸载（SPA 切语言时由壳调用）═══════════════════════════════════════ */
+export function dispose() {
+  try { document.removeEventListener('keydown', __bruKey1); } catch { /* ignore */ }
+  try { document.getElementById('app').innerHTML = ''; } catch { /* ignore */ }
+
 }
