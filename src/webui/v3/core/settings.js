@@ -43,10 +43,9 @@ export const SETTINGS_GROUPS = [
       },
       {
         path: 'provider.active',
-        label: '当前 Provider',
-        type: 'select',
-        source: 'providers',
-        hint: '切换后新会话生效；已有会话保留原模型。',
+        label: '换模型',
+        type: 'model-picker',
+        hint: '选择具体模型（厂商 + 模型）；切换后新会话生效，已有会话保留原模型。',
       },
       {
         path: 'provider.temperature',

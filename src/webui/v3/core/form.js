@@ -232,6 +232,53 @@ async function renderItem(item, current, app, afterSave) {
       break;
     }
 
+    case 'model-picker': {
+      /* 选具体模型（provider+id）：选项来自 model.listModels，当前值来自 model.active，
+         change 调 model.switchTo（不写普通 config）；path 仅用于生成元素 id。 */
+      const sel = document.createElement('select');
+      sel.className = 'sf-select';
+      sel.id = inputId;
+      try {
+        const [models, active] = await Promise.all([app.model.listModels(), app.model.active()]);
+        const byProv = new Map();
+        for (const m of models) {
+          if (!byProv.has(m.provider)) byProv.set(m.provider, []);
+          byProv.get(m.provider).push(m);
+        }
+        for (const [prov, list] of byProv) {
+          const og = document.createElement('optgroup');
+          og.label = prov;
+          for (const m of list) {
+            const opt = document.createElement('option');
+            opt.value = m.provider + '/' + m.id;
+            opt.textContent = m.name + (m.contextWindow ? ' · ' + Math.round(m.contextWindow / 1000) + 'K' : '');
+            og.appendChild(opt);
+          }
+          sel.appendChild(og);
+        }
+        if (active) {
+          sel.value = active.provider + '/' + (active.model || '');
+          if (!sel.value) { // 当前是厂商默认模型（model 空）⇒ 选中该厂商首个具体模型，避免下拉空白
+            for (const opt of sel.querySelectorAll('option')) {
+              if (opt.value.indexOf(active.provider + '/') === 0) { sel.value = opt.value; break; }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[v3 form] model-picker listModels failed', e);
+      }
+      sel.addEventListener('change', async () => {
+        const i = sel.value.indexOf('/');
+        const prov = sel.value.slice(0, i);
+        const model = sel.value.slice(i + 1);
+        const ok = await app.model.switchTo(prov, model);
+        flash(ok);
+        afterSave(item.path || 'provider.active', sel.value, ok);
+      });
+      right.appendChild(sel);
+      break;
+    }
+
     case 'design-language': {
       /* 设计语言 = 整页换一套（骨架不同）⇒ 不写 config，改 localStorage + URL 重载。
          当前值以 URL ?lang 优先，其次 localStorage，最后 terminal（旧名 tui 兼容）。 */
