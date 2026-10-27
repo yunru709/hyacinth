@@ -26,7 +26,7 @@
        ======================================================================== */
     const q = new URLSearchParams(location.search);
     const LANG = q.get('lang') || 'tui';
-    const ALLOWED = ['tui', 'editorial'];
+    const ALLOWED = ['tui', 'editorial', 'classic'];
 
     if (!ALLOWED.includes(LANG)) {
       document.getElementById('app').textContent =

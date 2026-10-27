@@ -237,8 +237,12 @@
 
 .tui-field::placeholder { color: var(--fg-subtle); }
 
+/* 输入框永远可编辑；聚焦时 caret 用主题色，明确提示"已就绪可打字" */
+.tui-field { caret-color: var(--accent); }
+.tui-field:focus { outline: none; }
+
 /* ═══ 状态栏 ═════════════════════════════════════════════════════════════
-   贴底常显，反色块显示当前模式 —— 这是 TUI 的"系统状态"语义。 */
+   贴底常显 —— 连接状态 / 配色 / 帮助入口。 */
 .tui-status {
   flex: 0 0 auto;
   display: flex;
@@ -253,23 +257,9 @@
   user-select: none;
 }
 
-.tui-mode {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.tui-mode[data-mode="insert"]  { background: var(--ok);   color: var(--bg); }
-.tui-mode[data-mode="command"] { background: var(--warn); color: var(--bg); }
-.tui-mode[data-mode="search"]  { background: var(--warn); color: var(--bg); }
-
 .tui-dim { color: var(--fg-subtle); }
+.tui-help-link { cursor: pointer; padding: 0 4px; }
+.tui-help-link:hover, .tui-help-link:focus { color: var(--accent); outline: none; }
 .tui-grow { flex: 1 1 auto; }
 
 .tui-conn {

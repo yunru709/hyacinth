@@ -225,11 +225,35 @@
   function currentView() {
     // embed 本页 = 并行会话标签的一格：只承担一条会话，忽略 hash（父页 hash 不该泄漏进来）
     if (embedMode) return 'chat';
-    const h = (location.hash || '#/chat').replace(/^#\//, '');
+    let h = (location.hash || '#/chat').replace(/^#\//, '');
+    /* 「模型选择」已并入设置（2026-10-27）：旧书签 / 旧链接 #/model 不再有独立视图，
+       统一落到设置页；具体选中「模型」tab 的逻辑在 applyView 里（那里能安全操作 DOM）。 */
+    if (h === 'model') h = 'settings';
     return VIEWS.includes(h) ? h : 'chat';
   }
 
+  /* 「模型」面板现在挂在设置页的「模型」tab 上（原来它是独立视图）。
+     判"该不该拉模型数据"不能再看 currentView() === 'model' —— 那个值永远不会再出现。
+     ⚠️ 实测坑（2026-10-27）：路由重定向后忘了改这三个补加载点 ⇒ 首屏进入设置页、
+        乃至 ui.connected 到达后，模型数据一次都没拉过，面板永远停在
+        「连接后端后加载提供商…」占位。 */
+  function shouldLoadModel() {
+    if (currentView() !== 'settings') return false;
+    if (location.hash === '#/model') return true;   // 旧链接直达：applyView 会选中该 tab
+    const radio = document.getElementById('tab-model');
+    return !!(radio && radio.checked);
+  }
+
   function applyView(view) {
+    /* 旧链接 #/model 落到设置页时，自动切到「模型」tab，
+       否则用户点旧书签会看到「上下文」面板，以为跳错了。 */
+    if (view === 'settings' && /^#\/model\b/.test(location.hash || '')) {
+      const radio = document.getElementById('tab-model');
+      if (radio && !radio.checked) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
     // 视图 section 显隐
     $$('.view-section').forEach((sec) => {
       sec.hidden = sec.dataset.view !== view;
@@ -254,7 +278,8 @@
     //   把正在流式输出的过程块/交付全部抹掉，只剩磁盘里的旧快照 ——
     //   用户看到的就是「切回来渲染停了，刷新才有」。可见性切换不该触发数据重载 ✓
     // A2：本页不再承担聊天（所有会话在 iframe 内），无需在这里重拉历史
-    if (view === 'model' && connected) loadModel();
+    /* 模型数据现在挂在设置页的「模型」tab 上 ⇒ 进设置时按 tab 状态决定是否拉 */
+    if (view === 'settings' && connected && shouldLoadModel()) loadModel();
     if (view === 'sessions' && connected) loadSessions();
     if (view === 'settings' && connected) loadSettings();
     if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
@@ -858,9 +883,9 @@
         // 模型按钮的文案要等 WS 通了才能拉（bindModelPicker 在连接前就跑过一次，
         // 那次必然失败 ⇒ 不补这一下，按钮会一直停在占位符"模型"）
         void modelPickLoad();
-        if (currentView() === 'model') loadModel();
+        if (shouldLoadModel()) loadModel();
         if (currentView() === 'sessions') loadSessions();
-        if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); loadVoiceManager(); }
+        if (currentView() === 'settings') { loadSettings(); loadToolsAndMCP(); }
         if (currentView() === 'companion') loadCompanion();
         if (currentView() === 'schedule') loadSchedule();   // 定时任务视图（首屏就在该视图时也要加载 ✓）
         if (currentView() === 'plugins') loadPlugins();     // 插件视图
@@ -1027,7 +1052,7 @@
         refreshState();
         // 输入框旁的模型按钮与顶栏 chip 必须同源：TUI 或另一个窗口切了模型，这里跟着变
         void modelPickLoad();
-        if (currentView() === 'model') loadModel();
+        if (shouldLoadModel()) loadModel();
         break;
       case 'config.change':
         if (currentView() === 'settings') loadSettings();
@@ -1270,7 +1295,13 @@
       $$('input[name="reasoning"]').forEach((r) => { r.checked = r.value === modelPick.effort; });
       const rDesc = $('#model-reasoning-desc');
       if (rDesc && REASONING_DESC[modelPick.effort]) rDesc.textContent = REASONING_DESC[modelPick.effort];
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ⚠️ 原来是静默 ignore。实测代价（2026-10-27）：模型面板并入设置页后数据全空
+         （当前模型「—」、提供商只剩「连接后端后加载提供商…」、通道 0 行），而 RPC 本身
+         是通的（手动 model.listProviders 成功）⇒ 渲染环节抛的错被这里吃掉，页面看起来
+         "只是没数据"。catch 必须留日志。 */
+      console.error('[model] loadModel 失败:', (e && (e.message || e.code)) || e);
+    }
   }
 
   function updateActiveCard(act) {
@@ -1867,7 +1898,7 @@
         appendMsg('system', '/' + name + ' ⇒ ' + (text.length > 1200 ? text.slice(0, 1200) + ' …' : text));
         // 命令可能改变配置/模型/会话 ⇒ 顺手刷新一次状态 ✓
         refreshState();
-        if (currentView() === 'model') loadModel();
+        if (shouldLoadModel()) loadModel();
         if (currentView() === 'sessions') loadSessions();
         if (currentView() === 'settings') loadSettings();
       })
@@ -6072,17 +6103,6 @@
           sel.value = current;
         }
       } catch (e) { /* 角色列表拉取失败保留下拉默认项 */ }
-      // 陪伴音色下拉：选项来自协议层 companion.voices（音色库），选中当前角色绑定的音色
-      try {
-        const vs = await client.request('companion.voices');
-        const vsel = $('#select-companion-voice');
-        if (vsel && vs && Array.isArray(vs.voices)) {
-          const boundVoice = vs.voices.find((v) => v.bind === companionDefaultCharacter);
-          vsel.innerHTML = '<option value="">未绑定（用 config 音色）</option>' +
-            vs.voices.map((v) => `<option value="${esc(v.id)}">${esc(v.id)}${v.bind ? '（绑定:' + esc(v.bind) + '）' : ''}</option>`).join('');
-          vsel.value = boundVoice ? boundVoice.id : '';
-        }
-      } catch (e) { /* 音色列表拉取失败保留下拉默认项 */ }
       companionDefaultCharacter = getByPath(cfg, 'companion.defaultCharacter') || '';
       // 主题：ui.theme（用户偏好，存全局配置）
       const theme = getByPath(cfg, 'ui.theme');
@@ -6090,6 +6110,9 @@
       // 代码高亮配色：ui.codeTheme（同样是用户偏好）
       const codeTheme = getByPath(cfg, 'ui.codeTheme');
       if (typeof codeTheme === 'string' && codeTheme) applyCodeTheme(codeTheme);
+      // 设计语言：ui.designLanguage（布局范式；当前只有经典真实接入）
+      const designLanguage = getByPath(cfg, 'ui.designLanguage');
+      if (typeof designLanguage === 'string' && designLanguage) applyDesignLanguage(designLanguage);
     }).catch((e) => appendMsg('error', '读取配置失败: ' + ((e && e.message) || '未知错误')));
   }
 
@@ -6456,6 +6479,65 @@
     }
   }
 
+  // ── 设计语言（布局范式 + 交互规范，与主题正交）────────────────
+  // 语言决定整体布局与交互（Classic/TUI/Editorial…），主题只是同一语言下的配色。
+  // 现在只有「经典」真实接入；其余标「待接入」，完善后再接（用户 2026-10-27）。
+  const DESIGN_LANGUAGES = [
+    { id: 'classic', name: '经典', desc: '侧栏 + 三段式 + 气泡（当前 v1 形态）', available: true },
+    { id: 'tui', name: 'TUI', desc: '键盘分面板，终端质感', available: false },
+    { id: 'editorial', name: 'Editorial', desc: '单栏无界面，文字优先', available: false },
+  ];
+  let currentDesignLanguage = 'classic';
+
+  function applyDesignLanguage(id) {
+    const def = DESIGN_LANGUAGES.find((l) => l.id === id && l.available) || DESIGN_LANGUAGES[0];
+    currentDesignLanguage = def.id;
+    document.documentElement.setAttribute('data-design-language', def.id);
+    try { localStorage.setItem('hyacinth.designLanguage', def.id); } catch (e) { /* 隐私模式忽略 */ }
+    syncDesignLanguageCards(def.id);
+  }
+
+  function syncDesignLanguageCards(id) {
+    const grid = $('#design-language-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.design-language-card').forEach((card) => {
+      card.setAttribute('aria-pressed', card.dataset.lang === id ? 'true' : 'false');
+    });
+  }
+
+  function initDesignLanguageFromCache() {
+    let cached = null;
+    try { cached = localStorage.getItem('hyacinth.designLanguage'); } catch (e) { /* ignore */ }
+    const valid = DESIGN_LANGUAGES.some((l) => l.id === cached && l.available);
+    applyDesignLanguage(valid ? cached : 'classic');
+  }
+
+  function renderDesignLanguages() {
+    const grid = $('#design-language-grid');
+    if (!grid || grid.dataset.rendered === '1') return;
+    grid.dataset.rendered = '1';
+    DESIGN_LANGUAGES.forEach((l) => {
+      const card = el('button', 'design-language-card');
+      card.type = 'button';
+      card.dataset.lang = l.id;
+      card.setAttribute('aria-pressed', l.id === currentDesignLanguage ? 'true' : 'false');
+      if (!l.available) card.setAttribute('disabled', '');
+      card.title = l.desc;
+      card.appendChild(el('span', 'design-language-name', l.name));
+      card.appendChild(el('span', 'design-language-desc', l.desc));
+      if (!l.available) card.appendChild(el('span', 'design-language-badge', '待接入'));
+      card.onclick = () => {
+        if (!l.available) return;
+        applyDesignLanguage(l.id);
+        if (connected) {
+          client.request('config.set', { path: 'ui.designLanguage', value: l.id }).catch((e) => {
+            appendMsg('error', '保存设计语言失败: ' + ((e && e.message) || '未知错误'));
+          });
+        }
+      };
+      grid.appendChild(card);
+    });
+  }
   // 绑定设置视图交互：控件 change → config.set；重置按钮 → config.reset
   function bindSettingsView() {
     // ⚠️ 「默认模式」这里**不再写 localStorage 缓存**（2026-10-16 移除）：它曾与后端配置
@@ -6463,20 +6545,6 @@
     //   （实测：config=normal 而页面停在 #/companion）。
     //   本控件现在只负责写 config（由 SETTINGS_MAP 的通用绑定完成 config.set）；
     //   「启动时进哪个模式」的读取与跳转一律问后端（ui.connected → config.get）。
-    // 陪伴音色：换选 → 绑定为默认陪伴角色的音色（协议 companion.voiceBind）
-    const voiceSel = $('[data-dom-id="select-companion-voice"]');
-    if (voiceSel) {
-      voiceSel.addEventListener('change', () => {
-        const voiceId = voiceSel.value || '';
-        const character = companionDefaultCharacter || companionCharacter;
-        if (!connected || !voiceId || !character) return;
-        client.request('companion.voiceBind', { voiceId, character }).then(() => {
-          appendMsg('system', `音色 ${voiceId} 已绑定为 ${character} 的默认音色`);
-        }).catch((e) => {
-          appendMsg('error', '音色绑定失败: ' + ((e && e.message) || '未知错误'));
-        });
-      });
-    }
     // 陪伴角色：保存配置（SETTINGS_MAP 通用绑定）之外，陪伴中换选 → 立即切换角色
     const charSel = $('[data-dom-id="select-companion-character"]');
     if (charSel) {
@@ -6523,6 +6591,9 @@
     if (resetBtn) {
       resetBtn.onclick = () => {
         if (!connected) return;
+        /* 二次确认：这是**全部**配置恢复出厂，不可撤销。对照——删除语音模型/会话/
+           音色/工具包、断开 MCP 全都 confirm，唯独这个最狠的漏了。 */
+        if (!window.confirm('将所有配置恢复为出厂默认值？\n\n这会重置温度、上下文预算、Zone 开关、工具包等全部设置，且不可撤销。')) return;
         client.request('config.reset').then(() => {
           appendMsg('system', '已恢复默认配置');
           loadSettings();
@@ -7185,132 +7256,7 @@
   }
 
   // ════════════════════════════════════════════════════════════
-  // 声音管理（音色库资产 + 生成语音库缓存治理）
-  // ════════════════════════════════════════════════════════════
-  // 音色=用户资产（不可重建）→ 登记/删除需谨慎；生成语音=缓存 → 可安全清理。
-  // 数据与操作都走协议层：companion.voiceStats / voiceRegister / voiceDelete / voicePrune。
-  function fmtBytes(n) {
-    if (!n || n <= 0) return '0 B';
-    if (n < 1024) return n + ' B';
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-    return (n / 1024 / 1024).toFixed(1) + ' MB';
-  }
-
-  async function loadVoiceManager() {
-    if (!connected) return;
-    try {
-      const st = await client.request('companion.voiceStats');
-      renderVoiceManager(st);
-    } catch (e) {
-      const list = $('#vm-voice-list');
-      if (list) list.innerHTML = '<div class="vm-empty">加载失败（后端未连接或不支持）</div>';
-    }
-  }
-
-  function renderVoiceManager(st) {
-    if (!st) return;
-    const vSum = $('#vm-voices-summary');
-    const gSum = $('#vm-gen-summary');
-    if (vSum) vSum.textContent = `${st.voices.count} 个音色 · ${fmtBytes(st.voices.totalBytes)}`;
-    if (gSum) gSum.textContent = `${st.generated.count} 条 · ${fmtBytes(st.generated.totalBytes)} · 自动保留 ${st.keepPerCharacter}/角色`;
-
-    const vList = $('#vm-voice-list');
-    if (vList) {
-      if (!st.voices.entries.length) {
-        vList.innerHTML = '<div class="vm-empty">还没有登记音色。填入参考音频路径登记一个（如 IndexTTS2 examples 里的 wav）</div>';
-      } else {
-        vList.innerHTML = st.voices.entries.map((v) => `
-          <div class="vm-item ${v.bind ? 'vm-bound' : ''}">
-            <span class="vm-name">${esc(v.id)}${v.bind ? ' <span style="color:var(--hyacinth-primary)">[' + esc(v.bind) + ']</span>' : ''}${v.desc ? ' — ' + esc(v.desc) : ''}</span>
-            <span class="vm-meta">${esc(v.file)} · ${fmtBytes(v.bytes)}</span>
-            <button class="vm-del" data-vm-del="${escAttr(v.id)}" title="删除音色（不可恢复）" type="button">×</button>
-          </div>`).join('');
-        vList.querySelectorAll('[data-vm-del]').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const id = btn.getAttribute('data-vm-del') || '';
-            if (!window.confirm(`删除音色「${id}」？\n参考音频不可重建，删除后无法恢复。`)) return;
-            try {
-              await client.request('companion.voiceDelete', { id });
-              appendMsg('system', `音色 ${id} 已删除`);
-              loadVoiceManager();
-            } catch (e) {
-              appendMsg('error', '删除失败: ' + ((e && e.message) || '未知错误'));
-            }
-          });
-        });
-      }
-    }
-
-    const gList = $('#vm-gen-list');
-    if (gList) {
-      gList.innerHTML = st.generated.byCharacter.length
-        ? st.generated.byCharacter.map((c) => `
-          <div class="vm-item">
-            <span class="vm-name">${esc(c.character)}</span>
-            <span class="vm-meta">${c.count} 条 · ${fmtBytes(c.bytes)}</span>
-          </div>`).join('')
-        : '<div class="vm-empty">还没有生成过语音</div>';
-    }
-
-    // 清理用的角色下拉
-    const pruneSel = $('#vm-prune-char');
-    if (pruneSel) {
-      const cur = pruneSel.value;
-      pruneSel.innerHTML = st.generated.byCharacter.length
-        ? st.generated.byCharacter.map((c) => `<option value="${escAttr(c.character)}">${esc(c.character)}</option>`).join('')
-        : '<option value="">（暂无角色）</option>';
-      if (cur && st.generated.byCharacter.some((c) => c.character === cur)) pruneSel.value = cur;
-    }
-  }
-
-  function bindVoiceManager() {
-    const addBtn = $('#vm-voice-add');
-    if (addBtn) addBtn.addEventListener('click', async () => {
-      const pathEl = $('#vm-voice-path');
-      const idEl = $('#vm-voice-id');
-      const p = (pathEl?.value || '').trim();
-      if (!p) { appendMsg('system', '请填入参考音频的绝对路径'); return; }
-      addBtn.disabled = true;
-      try {
-        const params = { path: p };
-        const id = (idEl?.value || '').trim();
-        if (id) params.id = id;
-        const res = await client.request('companion.voiceRegister', params);
-        appendMsg('system', `音色 ${res.voice.id} 已登记`);
-        if (pathEl) pathEl.value = '';
-        if (idEl) idEl.value = '';
-        loadVoiceManager();
-      } catch (e) {
-        appendMsg('error', '登记失败: ' + ((e && e.message) || '未知错误'));
-      } finally {
-        addBtn.disabled = false;
-      }
-    });
-
-    const pruneBtn = $('#vm-prune');
-    if (pruneBtn) pruneBtn.addEventListener('click', async () => {
-      const sel = $('#vm-prune-char');
-      const keepEl = $('#vm-keep-n');
-      const character = sel?.value || '';
-      if (!character) { appendMsg('system', '暂无可清理的角色'); return; }
-      const params = { character };
-      const keepRaw = keepEl?.value ? parseInt(keepEl.value, 10) : NaN;
-      if (Number.isFinite(keepRaw) && keepRaw >= 0) params.keep = keepRaw;
-      pruneBtn.disabled = true;
-      try {
-        const res = await client.request('companion.voicePrune', params);
-        appendMsg('system', `已清理 ${res.removed} 条（${res.character} 现存 ${res.remaining} 条，保留上限 ${res.keep}）`);
-        loadVoiceManager();
-      } catch (e) {
-        appendMsg('error', '清理失败: ' + ((e && e.message) || '未知错误'));
-      } finally {
-        pruneBtn.disabled = false;
-      }
-    });
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // 工具包 / 工具 / MCP 管理（bundle.* / tool.* / mcp.* 域）
+// 工具包 / 工具 / MCP 管理（bundle.* / tool.* / mcp.* 域）
   // ════════════════════════════════════════════════════════════
   function escAttr(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
@@ -7346,8 +7292,31 @@
       head.appendChild(el('span', 'text-xs text-muted-foreground ml-auto', b.tools.length ? `${b.tools.length} 个工具` : '全量'));
       row.appendChild(head);
       row.appendChild(el('div', 'text-xs text-muted-foreground', b.description || ''));
+      /* 方案 C：不再平铺工具名，改成「展开 N 个工具」按钮 + 按需渲染的明细容器 */
       if (b.tools && b.tools.length) {
-        row.appendChild(el('div', 'text-[11px] font-mono text-muted-foreground leading-relaxed break-all', b.tools.join('、')));
+        const detail = el('div', 'hidden flex-col divide-y divide-border border border-border rounded-lg overflow-hidden mt-1');
+        const toggleBtn = el('button', 'self-start inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-background text-xs hover:bg-muted transition-colors');
+        toggleBtn.type = 'button';
+        toggleBtn.innerHTML = '<i data-lucide="chevron-down" class="w-3 h-3"></i><span>展开 ' + b.tools.length + ' 个工具</span>';
+        let opened = false;
+        toggleBtn.onclick = () => {
+          opened = !opened;
+          if (opened) {
+            renderBundleTools(b.name, detail);
+            detail.classList.remove('hidden');
+            detail.classList.add('flex');
+            toggleBtn.querySelector('span').textContent = '收起工具';
+          } else {
+            detail.classList.add('hidden');
+            detail.classList.remove('flex');
+            toggleBtn.querySelector('span').textContent = '展开 ' + b.tools.length + ' 个工具';
+          }
+          if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+        };
+        row.appendChild(toggleBtn);
+        row.appendChild(detail);
+      } else {
+        row.appendChild(el('div', 'text-[11px] text-muted-foreground', '全量（不限制工具）'));
       }
       const ops = el('div', 'flex items-center gap-2');
       const actBtn = el('button', 'inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-background text-xs hover:bg-muted transition-colors');
@@ -7384,91 +7353,90 @@
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
   }
 
-  // ── 工具列表 ───────────────────────────────────────────────
-  // 工具包列表缓存：「加入工具包」下拉与包名徽章的 × 都依赖它
+  // ── 工具（方案 C：明细挂在各自工具包下，点开包才显示）──────────
+  // 为什么这么做：全局平铺 309 个工具 ⇒ 卡片 13538px、DOM 712KB、约 1500 个可点目标，
+  //   而且那个启停开关是**内存级**（与会话同生命周期），放在「设置」里极易被误认为持久配置。
+  //   改成「只看包 → 点开看明细」，默认视野里只有 16 个包。
   let bundleNamesCache = [];
+  let toolsCache = [];   // tool.list 全量结果，包展开时从这里过滤
 
+  /** 拉一次全量工具数据（供各包展开时过滤），并刷新「未归类」区。不再渲染全局大列表。 */
   async function loadTools() {
-    const listEl = $('#tools-list');
-    if (!listEl) return;
-    const res = await client.request('tool.list');
-    if (!res || !res.tools) return;
-    const rows = res.tools;
-    const countEl = $('#tools-count');
-    if (countEl) countEl.textContent = String(rows.length);
+    try {
+      const res = await client.request('tool.list');
+      if (res && res.tools) toolsCache = res.tools;
+      if (bundleNamesCache.length === 0) {
+        try {
+          const bres = await client.request('tool.bundles');
+          if (bres && bres.bundles) bundleNamesCache = bres.bundles.map((b) => b.name);
+        } catch (e) { /* 忽略：下拉会退化为空 */ }
+      }
+    } catch (e) {
+      console.error('[tools] tool.list 失败:', (e && e.message) || e);
+    }
+    renderUngroupedTools();
+  }
 
-    // 下拉用的包名列表只从 tool.list 的归属里推不出来（不属于任何包的工具也要能加入），
-    // 所以单独取一次；失败不影响主列表渲染
-    if (bundleNamesCache.length === 0) {
-      try {
-        const bres = await client.request('tool.bundles');
-        if (bres && bres.bundles) bundleNamesCache = bres.bundles.map((b) => b.name);
-      } catch (e) { /* 忽略：下拉会退化为空 */ }
+  /** 单个工具行（原 loadTools 的行渲染抽出来，包展开时复用） */
+  function makeToolRow(t) {
+    const row = el('div', 'px-3 py-2 flex items-center gap-2 flex-wrap bg-card');
+    row.appendChild(el('span', 'font-mono text-xs text-foreground w-56 shrink-0 truncate', t.name));
+
+    const source = t.source || 'builtin';
+    if (source !== 'builtin') {
+      row.appendChild(makeBadge(
+        source === 'mcp' ? ('MCP' + (t.mcpServer ? ' · ' + t.mcpServer : '')) : source,
+        source === 'mcp' ? 'var(--hyacinth-accent, var(--state-info))' : 'var(--muted-foreground)',
+      ));
     }
 
-    const q = ($('#tools-filter') && $('#tools-filter').value || '').toLowerCase();
-    const srcFilter = ($('#tools-source-filter') && $('#tools-source-filter').value) || '';
-    const visible = rows.filter((t) => {
-      if (q && !t.name.toLowerCase().includes(q)) return false;
-      if (srcFilter && (t.source || 'builtin') !== srcFilter) return false;
-      return true;
-    });
+    const status = t.bundleFiltered ? '被过滤' : (t.enabled ? '可用' : '已禁用');
+    const statusColor = t.bundleFiltered ? 'var(--state-warning)' : (t.enabled ? 'var(--state-success)' : 'var(--state-error)');
+    row.appendChild(makeBadge(status, statusColor));
 
-    listEl.innerHTML = '';
-    if (!visible.length) {
-      listEl.appendChild(el('div', 'px-3 py-4 text-center text-xs text-muted-foreground', '无匹配工具'));
+    (t.bundles || []).forEach((bname) => { row.appendChild(makeBundleChip(bname, t.name)); });
+    if (t.description) {
+      row.appendChild(el('span', 'text-xs text-muted-foreground flex-1 min-w-[120px] truncate', t.description));
+    }
+    row.appendChild(makeAddToBundleSelect(t.name, t.bundles || []));
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = !!t.enabled;
+    toggle.disabled = t.bundleFiltered;
+    toggle.className = 'w-3.5 h-3.5 accent-[var(--hyacinth-primary)] shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
+    toggle.title = t.bundleFiltered ? '被工具包过滤，无法直接开关（先激活包含它的工具包或回全量模式）' : '';
+    toggle.onchange = () => {
+      if (!connected) return;
+      client.request('tool.toggle', { name: t.name, enabled: toggle.checked })
+        .then(() => { /* keep */ })
+        .catch((e) => { toggle.checked = !toggle.checked; appendMsg('error', '切换失败: ' + (e && e.message)); });
+    };
+    row.appendChild(toggle);
+    return row;
+  }
+
+  /** 把某个包的工具明细渲染进容器（点开包时调用） */
+  function renderBundleTools(bundleName, container) {
+    container.innerHTML = '';
+    const list = toolsCache.filter((t) => (t.bundles || []).includes(bundleName));
+    if (!list.length) {
+      container.appendChild(el('div', 'px-3 py-2 text-xs text-muted-foreground', '该包暂无工具'));
       return;
     }
+    list.forEach((t) => container.appendChild(makeToolRow(t)));
+  }
 
-    visible.forEach((t) => {
-      const row = el('div', 'px-3 py-2 flex items-center gap-2 flex-wrap bg-card');
-
-      // 工具名
-      row.appendChild(el('span', 'font-mono text-xs text-foreground w-56 shrink-0 truncate', t.name));
-
-      // 来源徽章：MCP 工具显示所属服务器，否则显示来源类型
-      const source = t.source || 'builtin';
-      if (source !== 'builtin') {
-        row.appendChild(makeBadge(
-          source === 'mcp' ? ('MCP' + (t.mcpServer ? ' · ' + t.mcpServer : '')) : source,
-          source === 'mcp' ? 'var(--hyacinth-accent, var(--state-info))' : 'var(--muted-foreground)',
-        ));
-      }
-
-      // 状态徽章
-      const status = t.bundleFiltered ? '被过滤' : (t.enabled ? '可用' : '已禁用');
-      const statusColor = t.bundleFiltered ? 'var(--state-warning)' : (t.enabled ? 'var(--state-success)' : 'var(--state-error)');
-      row.appendChild(makeBadge(status, statusColor));
-
-      // 所属工具包：点 × 移出该包
-      (t.bundles || []).forEach((bname) => {
-        row.appendChild(makeBundleChip(bname, t.name));
-      });
-
-      if (t.description) {
-        row.appendChild(el('span', 'text-xs text-muted-foreground flex-1 min-w-[120px] truncate', t.description));
-      }
-
-      // 「加入工具包」下拉
-      row.appendChild(makeAddToBundleSelect(t.name, t.bundles || []));
-
-      // 启停开关
-      const toggle = document.createElement('input');
-      toggle.type = 'checkbox';
-      toggle.checked = !!t.enabled;
-      toggle.disabled = t.bundleFiltered;
-      toggle.className = 'w-3.5 h-3.5 accent-[var(--hyacinth-primary)] shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
-      toggle.title = t.bundleFiltered ? '被工具包过滤，无法直接开关（先激活包含它的工具包或回全量模式）' : '';
-      toggle.onchange = () => {
-        if (!connected) return;
-        client.request('tool.toggle', { name: t.name, enabled: toggle.checked })
-          .then(() => { /* keep */ })
-          .catch((e) => { toggle.checked = !toggle.checked; appendMsg('error', '切换失败: ' + (e && e.message)); });
-      };
-      row.appendChild(toggle);
-
-      listEl.appendChild(row);
-    });
+  /** 未归类工具（不属于任何包）——单独一区，否则它们在设置页里无处可见 */
+  function renderUngroupedTools() {
+    const box = $('#ungrouped-tools');
+    if (!box) return;
+    const card = box.closest('.settings-card');
+    const list = toolsCache.filter((t) => !(t.bundles || []).length);
+    if (!list.length) { if (card) card.style.display = 'none'; return; }
+    if (card) card.style.display = '';
+    box.innerHTML = '';
+    list.forEach((t) => box.appendChild(makeToolRow(t)));
   }
 
   /** 小徽章（颜色一律内联 style：动态 className 不会被 Tailwind JIT 收集） */
@@ -7674,10 +7642,7 @@
         }).catch((e) => appendMsg('error', '创建失败: ' + (e && e.message)));
       };
     }
-    const toolsFilter = $('#tools-filter');
-    if (toolsFilter) toolsFilter.addEventListener('input', loadTools);
-    const toolsSrcFilter = $('#tools-source-filter');
-    if (toolsSrcFilter) toolsSrcFilter.addEventListener('change', loadTools);
+    /* 方案 C：全局搜索/来源筛选已随「工具列表」卡一并移除 */
     const mcpAdd = $('#mcp-add-btn');
     if (mcpAdd) {
       mcpAdd.onclick = () => {
@@ -8095,7 +8060,6 @@
   function bindUI() {
     bindToolsMCP();
     bindSessionTabs();
-    bindVoiceManager();
     bindSettingsPanelSwitch();
     // 侧栏搜索：输入即过滤本地缓存（列表已在内存里，不打后端）
     const sbSearch = $('#session-search');
@@ -8324,6 +8288,7 @@
   // 主题：先按本地缓存立即应用（避免加载闪烁），再渲染选择器
   initThemeFromCache();
   initCodeThemeFromCache();
+  initDesignLanguageFromCache();
   renderCodeThemes();
   // 主题目录异步加载：拿不到就用手上的兜底，换肤本身不依赖它
   loadThemeCatalog();
@@ -8335,8 +8300,145 @@
   //   现在「启动默认模式」的真源 = **后端配置**：ui.connected 后读
   //   `config.get startup.defaultMode` 再决定是否跳转（见 handleEvent 的 ui.connected 分支）。
   //   代价：配置为陪伴时，首屏可能有一瞬 chat 再切到陪伴 —— 用"正确"换掉"不闪" ✓
+
+  // ════════════════════════════════════════════════════════════
+  // 结构修正：把散落在 #app-shell 下的视图收进 #hyacinth-main
+  // ----------------------------------------------------------------
+  // 现象（2026-10-27 实测）：切到「设置 / 模型选择」等视图时，左上角侧栏与
+  //   设置页叠在一起，主内容区整块消失 —— 实测 .body-area 高度 = 0。
+  // 根因：源码里 6 个 <section data-view="…">（model/sessions/schedule/
+  //   plugins/skills/settings）**被浏览器解析成了 #app-shell 的直接子元素**，
+  //   与 .body-area 平级。它们带 `h-full`（height:100%）⇒ 相对 #app-shell
+  //   撑满 824px，把 flex-1 的 .body-area 挤成 0；同时它们从 x=0 铺开，
+  //   与侧栏（0..280）直接重叠。chat 视图在源码里却是嵌在 <main> 内的
+  //   ⇒ 同一份 HTML 混了两套布局范式。
+  // 修法：运行时挪进 #hyacinth-main。h-full 于是相对 main 计算，.body-area
+  //   保回原高度，侧栏重新占位。实测 .body-area 851x0 → 851x776 ✓
+  // ⚠️ 不要"把源码里的 section 挪进 main"来修：浏览器解析结果与源码位置
+  //    不一致，说明上游有嵌套错误，挪源码不一定生效（已实测）。
+  // ⚠️ 必须在 bindUI()/navigate() 之前执行，否则第一次导航拿到的还是坏布局。
+  // ════════════════════════════════════════════════════════════
+  (function normalizeViewSections() {
+    const shell = document.getElementById('app-shell');
+    const main = document.getElementById('hyacinth-main');
+    if (!shell || !main) {
+      console.warn('[layout] app-shell / hyacinth-main 缺失，跳过结构修正');
+      return;
+    }
+    const stray = [...shell.children].filter(
+      (el) => el.tagName === 'SECTION' && el.classList.contains('view-section'),
+    );
+    if (!stray.length) return;
+    for (const sec of stray) main.appendChild(sec);
+    console.info('[layout] 已收进 main 的视图:', stray.map((s2) => s2.dataset.view).join(', '));
+  })();
+
+  // ════════════════════════════════════════════════════════════
+  // 「模型选择」并入「设置」（2026-10-27 用户要求：配置不该分两处）
+  // ----------------------------------------------------------------
+  // 现状：侧栏有独立「模型选择」视图，设置页又有「模型」tab；
+  //   而那个 tab 里**只有生成参数**（温度/TopP…），真正的模型管理
+  //   （当前模型 / 在线提供商 / 推理强度 / 本地模型 / 模型通道）
+  //   都在独立视图的 .model-panel 里 ⇒ 用户要改模型得跑两个地方。
+  // 做法：把 .model-panel 整块搬进 #panel-model（tab 内容区）。
+  //   全部逻辑按 id 取元素 ⇒ 搬家后 loadModel() 等一行不用改。
+  // ════════════════════════════════════════════════════════════
+  (function mergeModelPanelIntoSettings() {
+    const target = document.getElementById('panel-model');
+    const src = document.querySelector('section[data-view="model"] .model-panel');
+    if (!target || !src) {
+      console.warn('[layout] 模型面板合并跳过（缺 panel-model 或 .model-panel）');
+      return;
+    }
+    src.classList.remove('p-6', 'md:p-8');
+    /* 去掉与 tab 标题重复的大标题块（「模型选择」+ 说明） */
+    const h1 = src.querySelector('h1');
+    if (h1) h1.parentElement?.remove();
+    target.insertBefore(src, target.firstChild);
+    console.info('[layout] 模型管理已并入设置页「模型」tab');
+
+    /* ── 子页签：把合并后 3060px 的单一滚动拆成 4 组 ────────────────
+     * 为什么拆：并入后 = 当前启用 + 16 张提供商卡 + 推理 + 本地 + 通道(25 控件)
+     *   + 生成参数 + 模型行为，全部堆在一个 tab 里要滚 3000+px。
+     * 做法：分组只打 data-msub 标记，切换只改 display，**不动 DOM 结构**
+     *   ⇒ loadModel() 里所有 $('#model-xxx') 取元素不受影响。
+     * ⚠️ 必须显式隐藏 .model-panel 包装层：它在「生成参数」组激活时若仍
+     *    display:block，会作为空 flex 子项产生 20px 的 gap 空隙。 */
+    const secByHeading = (id) => src.querySelector(`[aria-labelledby="${id}"]`);
+    const tagGroup = (key, els) => {
+      for (const el of els) if (el) el.dataset.msub = key;
+    };
+    tagGroup('providers', [secByHeading('active-provider-heading'), secByHeading('online-providers-heading')]);
+    tagGroup('reasoning', [secByHeading('reasoning-heading'), secByHeading('local-model-heading')]);
+    tagGroup('channels', [secByHeading('channels-heading')]);
+    tagGroup('params', [...target.querySelectorAll(':scope > .settings-card')]);
+
+    const SUBTABS = [
+      ['providers', '提供商'],
+      ['reasoning', '推理与本地'],
+      ['channels', '通道'],
+      ['params', '生成参数'],
+    ];
+    const bar = document.createElement('div');
+    bar.className = 'model-subtabs';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', '模型子页');
+    for (const [key, label] of SUBTABS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'model-subtab';
+      btn.dataset.msubtab = key;
+      btn.textContent = label;
+      bar.appendChild(btn);
+    }
+    target.insertBefore(bar, target.firstChild);
+
+    const applySub = (key) => {
+      for (const el of target.querySelectorAll('[data-msub]')) {
+        el.style.display = el.dataset.msub === key ? '' : 'none';
+      }
+      /* 包装层只在「提供商/推理/通道」三组时有内容；「生成参数」组全是
+         #panel-model 的直接 settings-card ⇒ 包装层必须整个收起，否则留空隙 */
+      src.style.display = key === 'params' ? 'none' : '';
+      bar.querySelectorAll('.model-subtab').forEach((b) => {
+        const on = b.dataset.msubtab === key;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    };
+    bar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.model-subtab');
+      if (btn) applySub(btn.dataset.msubtab);
+    });
+    applySub('providers');
+    console.info('[layout] 模型 tab 已拆为 4 个子页');
+  })();
+
+  // ════════════════════════════════════════════════════════════
+  // 切到「模型」tab 时拉一次模型数据
+  // ----------------------------------------------------------------
+  // loadModel() 原来挂在"进入 model 视图"（applyView）上。并入设置后，
+  //   在设置页内部切 tab 走的是 radio 的 change，**不经过路由** ⇒ 不触发。
+  //   实测症状：切到「模型」tab 后当前模型显示「—」、提供商只剩一句
+  //   「连接后端后加载提供商…」、模型通道 0 行。
+  // ⚠️ 只绑一次：早先这里重复绑了两份（同一逻辑写了两遍），已合并。
+  // ════════════════════════════════════════════════════════════
+  (function bindModelTabReload() {
+    const radio = document.getElementById('tab-model');
+    if (!radio) {
+      console.warn('[model] 找不到 tab-model，模型 tab 重载监听未绑定');
+      return;
+    }
+    radio.addEventListener('change', () => {
+      /* 诊断日志：定位"切了 tab 但没数据"时用它区分是回调没进还是连接未就绪 */
+      console.info('[model] tab change → checked=', radio.checked, 'connected=', connected);
+      if (radio.checked && connected) loadModel();
+    });
+  })();
+
   bindUI();
   renderThemes();
+  renderDesignLanguages();
   navigate();
   client.connect();
 

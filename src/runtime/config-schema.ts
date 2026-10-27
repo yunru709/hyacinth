@@ -503,6 +503,12 @@ export interface FullConfig {
      * 字段决定（是否让上游思考）；本键只管「收到了思考内容要不要显示」。
      */
     showThinking?: boolean;
+    /**
+     * WebUI 设计语言（布局范式 + 交互规范，与「主题」正交）。
+     * 主题只是同一设计语言下的一套配色；设计语言决定整体结构。
+     * 当前只有 classic 真实接入；tui / editorial 待完善后再接。
+     */
+    designLanguage?: 'classic' | 'tui' | 'editorial';
   };
 }
 

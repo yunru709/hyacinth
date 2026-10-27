@@ -162,10 +162,7 @@
           <i data-lucide="message-square"></i>
           <span>主界面</span>
         </a>
-        <a href="#/model" data-dom-id="nav-models" data-nav-item="models" class="nav-item">
-          <i data-lucide="cpu"></i>
-          <span>模型选择</span>
-        </a>
+
         <a href="#/sessions" data-dom-id="nav-sessions" data-nav-item="sessions" class="nav-item">
           <i data-lucide="folder-clock"></i>
           <span>会话管理</span>
@@ -645,6 +642,16 @@
         .theme-name { font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); }
         .theme-check { font-size: 11px; color: var(--hyacinth-primary); display: none; }
         .theme-card[aria-pressed="true"] .theme-check { display: inline; }
+
+        /* 设计语言选择卡片（语言=布局范式，比主题"重"，故含描述行 + 待接入徽标） */
+        .design-language-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+        .design-language-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 8px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); cursor: pointer; text-align: left; transition: border-color 120ms ease, box-shadow 120ms ease; }
+        .design-language-card:hover:not([disabled]) { border-color: var(--hyacinth-primary); }
+        .design-language-card[aria-pressed="true"] { border-color: var(--hyacinth-primary); box-shadow: 0 0 0 2px var(--primary-100); }
+        .design-language-card[disabled] { opacity: 0.55; cursor: not-allowed; }
+        .design-language-name { font-size: 13px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .design-language-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); line-height: 1.5; }
+        .design-language-badge { align-self: flex-start; font-size: 10px; color: var(--hyacinth-muted-foreground); border: 1px solid var(--hyacinth-border); border-radius: 4px; padding: 1px 6px; }
         .settings-card { background-color: var(--hyacinth-card); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 16px; }
         .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid transparent; }
@@ -724,7 +731,6 @@
         <input type="radio" name="settings-tab" id="tab-turns" class="settings-tab-radio" data-dom-id="tab-turns" aria-label="轮次">
         <input type="radio" name="settings-tab" id="tab-compress" class="settings-tab-radio" data-dom-id="tab-compress" aria-label="压缩">
         <input type="radio" name="settings-tab" id="tab-modes" class="settings-tab-radio" data-dom-id="tab-modes" aria-label="模式">
-        <input type="radio" name="settings-tab" id="tab-companion" class="settings-tab-radio" data-dom-id="tab-companion" aria-label="陪伴模式">
         <input type="radio" name="settings-tab" id="tab-model" class="settings-tab-radio" data-dom-id="tab-model" aria-label="模型">
         <input type="radio" name="settings-tab" id="tab-repair" class="settings-tab-radio" data-dom-id="tab-repair" aria-label="高级">
         <input type="radio" name="settings-tab" id="tab-appearance" class="settings-tab-radio" data-dom-id="tab-appearance" aria-label="外观">
@@ -732,6 +738,7 @@
         <input type="radio" name="settings-tab" id="tab-mcp" class="settings-tab-radio" data-dom-id="tab-mcp" aria-label="MCP">
         <input type="radio" name="settings-tab" id="tab-system" class="settings-tab-radio" data-dom-id="tab-system" aria-label="系统">
         <input type="radio" name="settings-tab" id="tab-voice" class="settings-tab-radio" data-dom-id="tab-voice" aria-label="语音">
+        <input type="radio" name="settings-tab" id="tab-docs" class="settings-tab-radio" data-dom-id="tab-docs" aria-label="文档">
 
         <div class="settings-frame">
           <nav class="settings-tabs" aria-label="设置分类">
@@ -766,10 +773,6 @@
               <i data-lucide="toggle-left" class="w-4 h-4"></i>
               <span>模式</span>
             </label>
-            <label for="tab-companion" class="settings-tab" data-dom-id="label-companion">
-              <i data-lucide="heart" class="w-4 h-4"></i>
-              <span>陪伴模式</span>
-            </label>
             <label for="tab-voice" class="settings-tab" data-dom-id="label-voice">
               <i data-lucide="mic" class="w-4 h-4"></i>
               <span>语音</span>
@@ -779,6 +782,10 @@
               <span>高级</span>
             </label>
             <div class="settings-group-label">系统</div>
+            <label for="tab-docs" class="settings-tab" data-dom-id="label-docs">
+              <i data-lucide="book-open" class="w-4 h-4"></i>
+              <span>文档</span>
+            </label>
             <label for="tab-tools" class="settings-tab" data-dom-id="label-tools">
               <i data-lucide="blocks" class="w-4 h-4"></i>
               <span>工具</span>
@@ -844,21 +851,7 @@
                   </div>
                 </section>
 
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="toggle-left" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">条件与记忆</h2>
-                  </div>
-
-
-
-
-
-
-
-                </section>
-
-                <section class="settings-card">
+<section class="settings-card">
                   <div class="settings-card-header">
                     <i data-lucide="database" class="w-4 h-4 text-primary"></i>
                     <h2 class="text-base font-semibold">上下文预算</h2>
@@ -906,7 +899,334 @@
                   </div>
                 </section>
 
+                              </div>
+
+              <!-- Turns -->
+              <div class="settings-panel" id="panel-turns" data-dom-id="panel-turns" role="tabpanel" aria-labelledby="label-turns">
                 <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="repeat" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">轮次限制</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-turns" class="settings-label">单会话最大轮次</label>
+                    <div class="flex items-center">
+                      <input id="input-max-turns" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-turns" value="100" min="10" max="10000" step="10">
+                      <span class="settings-unit">轮</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-messages-turns" class="settings-label">单会话最大消息数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-messages-turns" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-messages-turns" value="10000" min="100" max="100000" step="100">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+
+
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">显示推理令牌</div>
+                      <div class="settings-desc">在回复下方展示推理过程</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-reasoning-tokens" aria-label="显示推理令牌">
+                  </div>
+
+                </section>
+              </div>
+
+              <!-- Compress -->
+              <div class="settings-panel" id="panel-compress" data-dom-id="panel-compress" role="tabpanel" aria-labelledby="label-compress">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="minimize-2" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">压缩策略</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-compress-threshold" class="settings-label">压缩触发阈值</label>
+                    <div class="flex items-center">
+                      <input id="input-compress-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-compress-threshold" value="0.75" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-emergency-threshold" class="settings-label">紧急压缩阈值</label>
+                    <div class="flex items-center">
+                      <input id="input-emergency-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-emergency-threshold" value="0.92" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-compress-depth" class="settings-label">压缩深度</label>
+                    <div class="flex items-center gap-3">
+                      <input id="input-compress-depth" type="range" class="flex-1" data-dom-id="input-compress-depth" min="0" max="1" step="0.1" value="0.5">
+                      <span class="font-mono text-sm text-muted-foreground w-10 text-right">0.5</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-compress-rounds" class="settings-label">最大压缩轮数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-compress-rounds" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-compress-rounds" value="3" min="1" max="10" step="1">
+                      <span class="settings-unit">轮</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-trim-window" class="settings-label">工具结果保护窗口</label>
+                    <div class="flex items-center">
+                      <input id="input-trim-window" type="number" class="settings-input w-20 text-right" data-dom-id="input-trim-window" value="6" min="0" max="50" step="1">
+                      <span class="settings-unit">条</span>
+                    </div>
+                  </div>
+                </section>
+
+                              </div>
+
+              <!-- Modes -->
+              <div class="settings-panel" id="panel-modes" data-dom-id="panel-modes" role="tabpanel" aria-labelledby="label-modes">
+
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="toggle-left" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">运行模式</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-desc">普通模式与陪伴模式在代码里是并列的两套 Router：
+                        普通模式用主上下文与完整工具，陪伴模式切换人格与会话、只保留表达相关能力。
+                        这里选择启动时进入哪一个（也可通过左上角 ✨ 随时切换）。</div>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">默认模式</div>
+                      <div class="settings-desc">启动时自动进入的模式；也可通过左上角 ✨ 按钮随时切换陪伴模式</div>
+                    </div>
+                    <select id="select-default-context-mode" class="settings-select w-36" data-dom-id="select-default-context-mode">
+                      <option value="normal" selected>标准</option>
+                      <option value="companion">陪伴模式</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">启用旁路 Agent</div>
+                      <div class="settings-desc">允许 orchestrator 等旁路 Agent 在每轮对话前后注入提示并维护记忆</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-bypass-agents" checked aria-label="启用旁路 Agent">
+                  </div>
+                </section>
+                <!-- 陪伴模式（原独立 tab，2026-10-27 并入模式；音色管理已移除，后端待调整） -->
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="heart" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">陪伴模式</h2>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-desc">以下配置只在陪伴模式生效：角色决定人格与会话目录。
+                        音色与声音管理暂移出设置页，待后端调整后重新接入。</div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">陪伴角色</div>
+                      <div class="settings-desc">进入陪伴模式时使用的角色（自动检测 ~/.agent/companion/ 下的人格目录）；陪伴中切换会立即换角色</div>
+                    </div>
+                    <select id="select-companion-character" class="settings-select w-36" data-dom-id="select-companion-character">
+                      <option value="">自动（跟随上次）</option>
+                    </select>
+                  </div>
+                </section>
+              </div>
+              <div class="settings-panel" id="panel-model" data-dom-id="panel-model" role="tabpanel" aria-labelledby="label-model">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="sliders" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">生成参数</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="select-default-mode" class="settings-label">生成预设</label>
+                    <select id="select-default-mode" class="settings-select w-36" data-dom-id="select-default-mode">
+                      <option value="balanced" selected>平衡</option>
+                      <option value="creative">创意</option>
+                      <option value="precise">精确</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-temperature" class="settings-label">温度</label>
+                    <div class="flex items-center">
+                      <input id="input-temperature" type="number" class="settings-input w-20 text-right" data-dom-id="input-temperature" value="0.70" min="0" max="2" step="0.05">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-top-p" class="settings-label">Top P</label>
+                    <div class="flex items-center">
+                      <input id="input-top-p" type="number" class="settings-input w-20 text-right" data-dom-id="input-top-p" value="0.95" min="0" max="1" step="0.01">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-frequency-penalty" class="settings-label">频率惩罚</label>
+                    <div class="flex items-center">
+                      <input id="input-frequency-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-frequency-penalty" value="0.00" min="-2" max="2" step="0.05">
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-presence-penalty" class="settings-label">存在惩罚</label>
+                    <div class="flex items-center">
+                      <input id="input-presence-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-presence-penalty" value="0.00" min="-2" max="2" step="0.05">
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="bot" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">模型行为</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">流式输出</div>
+                      <div class="settings-desc">逐字返回模型生成内容</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-streaming" checked aria-label="流式输出">
+                  </div>
+
+
+
+                </section>
+              </div>
+
+
+
+              <!-- Repair -->
+              <div class="settings-panel" id="panel-repair" data-dom-id="panel-repair" role="tabpanel" aria-labelledby="label-repair">
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="wrench" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">故障恢复</h2>
+                  </div>
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">自动重试</div>
+                      <div class="settings-desc">请求失败时自动重新发送</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-auto-retry" checked aria-label="自动重试">
+                  </div>
+
+                  <div class="settings-row">
+                    <label for="input-max-retries" class="settings-label">最大重试次数</label>
+                    <div class="flex items-center">
+                      <input id="input-max-retries" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-retries" value="3" min="0" max="10" step="1">
+                      <span class="settings-unit">次</span>
+                    </div>
+                  </div>
+
+
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">清理输出</div>
+                      <div class="settings-desc">自动去除 markdown  fence 与多余换行</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-sanitize" checked aria-label="清理输出">
+                  </div>
+
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4 text-error"></i>
+                    <h2 class="text-base font-semibold">重置</h2>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">恢复默认设置</div>
+                      <div class="settings-desc">所有选项将恢复为出厂默认值</div>
+                    </div>
+                    <button type="button" class="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-muted transition-colors" data-dom-id="btn-reset-defaults">重置</button>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="refresh-cw" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">提示词热重载</h2>
+                  </div>
+                  <div class="settings-row">
+                    <div>
+                      <div class="settings-label">允许热重载提示词</div>
+                      <div class="settings-desc">文件变更时自动重新加载 prompt 缓存与 manifest</div>
+                    </div>
+                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-watch-prompts" checked aria-label="允许热重载提示词">
+                  </div>
+                </section>
+
+                              </div>
+
+              <!-- Appearance / 主题 -->
+              <div class="settings-panel" id="panel-appearance" data-dom-id="panel-appearance" role="tabpanel" aria-labelledby="label-appearance">
+                <!-- 设计语言 → 主题 两级。设计语言=布局范式+交互规范（一套语言下有多种配色主题）。
+                     具体语言待完善后接入；现在只有「经典」一种真实可用。 -->
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="layers" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">设计语言</h2>
+                  </div>
+                  <div class="settings-row-stack">
+                    <div class="settings-desc">
+                      设计语言决定整体布局范式与交互规范；同一设计语言下可切换多种配色主题。新的设计语言完善后会陆续接入。
+                    </div>
+                    <div id="design-language-grid" class="design-language-grid" data-dom-id="design-language-grid" role="radiogroup" aria-label="设计语言选择"></div>
+                  </div>
+                </section>
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="palette" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">主题</h2>
+                  </div>
+                  <div class="settings-row-stack">
+                    <div class="settings-desc">
+                      选择界面配色。主题属于用户偏好，保存在全局配置（<code class="font-mono">~/.agent/config.json</code> 的 <code class="font-mono">ui.theme</code>），
+                      切换项目目录不会丢失。
+                    </div>
+                    <div id="theme-grid" class="theme-grid" data-dom-id="theme-grid" role="radiogroup" aria-label="主题选择"></div>
+                  </div>
+                </section>
+
+                <section class="settings-card">
+                  <div class="settings-card-header">
+                    <i data-lucide="braces" class="w-4 h-4 text-primary"></i>
+                    <h2 class="text-base font-semibold">代码高亮配色</h2>
+                  </div>
+                  <div class="settings-row-stack">
+                    <div class="settings-desc">
+                      只影响聊天与预览里的代码块配色，与界面主题分开选择。保存在全局配置
+                      <code class="font-mono">ui.codeTheme</code>；「跟随主题」会随当前主题的明暗自动切换。
+                    </div>
+                    <div id="code-theme-grid" class="code-theme-grid" data-dom-id="code-theme-grid" role="radiogroup" aria-label="代码高亮配色选择"></div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- Tools（工具包 + 工具管理） -->
+              <!-- 文档（原散落在上下文/高级 tab 里的说明卡，收敛成独立 tab） -->
+              <div class="settings-panel" id="panel-docs" data-dom-id="panel-docs" role="tabpanel" aria-labelledby="label-docs">
+<section class="settings-card">
                   <div class="settings-card-header">
                     <i data-lucide="file-text" class="w-4 h-4 text-primary"></i>
                     <h2 class="text-base font-semibold">系统提示组装器</h2>
@@ -1075,339 +1395,8 @@
                       <textarea id="textarea-system-prompt-preview" class="settings-textarea w-full" data-dom-id="textarea-system-prompt-preview" readonly placeholder="点击「刷新预览」查看 Zone 1（Anchor 锚点区）的真实组装内容（persona / tool-rules / skills / agents / mcp / memory 等）。">此处展示后端 LayeredContextComposer 实时组装 Zone 1 的结果。点击右上角「刷新预览」加载。</textarea>
                     </div></div>
                 </section>
-              </div>
 
-              <!-- Turns -->
-              <div class="settings-panel" id="panel-turns" data-dom-id="panel-turns" role="tabpanel" aria-labelledby="label-turns">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="repeat" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">轮次限制</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-max-turns" class="settings-label">单会话最大轮次</label>
-                    <div class="flex items-center">
-                      <input id="input-max-turns" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-turns" value="100" min="10" max="10000" step="10">
-                      <span class="settings-unit">轮</span>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-max-messages-turns" class="settings-label">单会话最大消息数</label>
-                    <div class="flex items-center">
-                      <input id="input-max-messages-turns" type="number" class="settings-input w-24 text-right" data-dom-id="input-max-messages-turns" value="10000" min="100" max="100000" step="100">
-                      <span class="settings-unit">条</span>
-                    </div>
-                  </div>
-
-
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">显示推理令牌</div>
-                      <div class="settings-desc">在回复下方展示推理过程</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-reasoning-tokens" aria-label="显示推理令牌">
-                  </div>
-
-                </section>
-              </div>
-
-              <!-- Compress -->
-              <div class="settings-panel" id="panel-compress" data-dom-id="panel-compress" role="tabpanel" aria-labelledby="label-compress">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="minimize-2" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">压缩策略</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-compress-threshold" class="settings-label">压缩触发阈值</label>
-                    <div class="flex items-center">
-                      <input id="input-compress-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-compress-threshold" value="0.75" min="0" max="1" step="0.01">
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-emergency-threshold" class="settings-label">紧急压缩阈值</label>
-                    <div class="flex items-center">
-                      <input id="input-emergency-threshold" type="number" class="settings-input w-20 text-right" data-dom-id="input-emergency-threshold" value="0.92" min="0" max="1" step="0.01">
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-compress-depth" class="settings-label">压缩深度</label>
-                    <div class="flex items-center gap-3">
-                      <input id="input-compress-depth" type="range" class="flex-1" data-dom-id="input-compress-depth" min="0" max="1" step="0.1" value="0.5">
-                      <span class="font-mono text-sm text-muted-foreground w-10 text-right">0.5</span>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-max-compress-rounds" class="settings-label">最大压缩轮数</label>
-                    <div class="flex items-center">
-                      <input id="input-max-compress-rounds" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-compress-rounds" value="3" min="1" max="10" step="1">
-                      <span class="settings-unit">轮</span>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-trim-window" class="settings-label">工具结果保护窗口</label>
-                    <div class="flex items-center">
-                      <input id="input-trim-window" type="number" class="settings-input w-20 text-right" data-dom-id="input-trim-window" value="6" min="0" max="50" step="1">
-                      <span class="settings-unit">条</span>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="list-tree" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">压缩阶段说明</h2>
-                  </div>
-                  <div class="space-y-2 text-xs text-muted-foreground">
-                    <p><span class="text-primary font-medium">Phase 1</span> — ToolOutputTrimmer：规则裁剪旧工具结果、去重、截断过大 tool_call JSON。</p>
-                    <p><span class="text-primary font-medium">Phase 2</span> — 首次结构化摘要：LLM 将最旧历史压缩为 12 字段结构化摘要。</p>
-                    <p><span class="text-primary font-medium">Phase 3</span> — 增量摘要更新：基于已有摘要合并新内容，避免重复。</p>
-                    <p><span class="text-primary font-medium">Phase 4</span> — 保护区规则兜底：超过安全阈值时强制裁剪最近消息。</p>
-                    <p><span class="text-primary font-medium">Phase 5</span> — 工具消息完整性校验：修复孤立 tool_result / tool_calls。</p>
-                  </div>
-                </section>
-              </div>
-
-              <!-- Modes -->
-              <div class="settings-panel" id="panel-modes" data-dom-id="panel-modes" role="tabpanel" aria-labelledby="label-modes">
-
-
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="toggle-left" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">运行模式</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-desc">普通模式与陪伴模式在代码里是并列的两套 Router：
-                        普通模式用主上下文与完整工具，陪伴模式切换人格与会话、只保留表达相关能力。
-                        这里选择启动时进入哪一个（也可通过左上角 ✨ 随时切换）。</div>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">默认模式</div>
-                      <div class="settings-desc">启动时自动进入的模式；也可通过左上角 ✨ 按钮随时切换陪伴模式</div>
-                    </div>
-                    <select id="select-default-context-mode" class="settings-select w-36" data-dom-id="select-default-context-mode">
-                      <option value="normal" selected>标准</option>
-                      <option value="companion">陪伴模式</option>
-                    </select>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">启用旁路 Agent</div>
-                      <div class="settings-desc">允许 orchestrator 等旁路 Agent 在每轮对话前后注入提示并维护记忆</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-bypass-agents" checked aria-label="启用旁路 Agent">
-                  </div>
-                </section>
-              </div>
-              <div class="settings-panel" id="panel-companion" data-dom-id="panel-companion" role="tabpanel" aria-labelledby="label-companion">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="heart" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">陪伴角色与声音</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-desc">以下配置只在陪伴模式生效：角色决定人格与会话目录，
-                        音色决定「用谁的嗓子说话」，声音管理负责音色库（资产）与生成语音（缓存）。</div>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">陪伴角色</div>
-                      <div class="settings-desc">进入陪伴模式时使用的角色（自动检测 ~/.agent/companion/ 下的人格目录）；陪伴中切换会立即换角色</div>
-                    </div>
-                    <select id="select-companion-character" class="settings-select w-36" data-dom-id="select-companion-character">
-                      <option value="">自动（跟随上次）</option>
-                    </select>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">陪伴音色</div>
-                      <div class="settings-desc">该角色说话用的音色（在下方「声音管理」登记与绑定）；换选立即生效</div>
-                    </div>
-                    <select id="select-companion-voice" class="settings-select w-36" data-dom-id="select-companion-voice">
-                      <option value="">未绑定</option>
-                    </select>
-                  </div>
-
-                  <div class="settings-row" style="align-items: flex-start;">
-                    <div style="flex: 1; min-width: 0;">
-                      <div class="settings-label">声音管理</div>
-                      <div class="settings-desc">音色是你录的真人声音（不可重建，删除前请想清楚）；生成语音是缓存（台词文本仍在），可安全清理</div>
-                      <div class="voice-mgr">
-                        <!-- 音色库（资产） -->
-                        <div class="vm-section">
-                          <div class="vm-head">
-                            <span class="vm-title">音色库</span>
-                            <span id="vm-voices-summary" class="vm-summary"></span>
-                          </div>
-                          <div id="vm-voice-list" class="vm-list"><div class="vm-empty">加载中…</div></div>
-                          <div class="vm-add">
-                            <input id="vm-voice-path" class="settings-input" style="flex: 1; min-width: 0;" placeholder="参考音频绝对路径（wav/mp3，3~10 秒人声）">
-                            <input id="vm-voice-id" class="settings-input" style="width: 110px;" placeholder="音色 id（可留空）">
-                            <button id="vm-voice-add" class="vm-btn" type="button">登记</button>
-                          </div>
-                        </div>
-                        <!-- 生成语音库（缓存） -->
-                        <div class="vm-section">
-                          <div class="vm-head">
-                            <span class="vm-title">生成语音（缓存）</span>
-                            <span id="vm-gen-summary" class="vm-summary"></span>
-                          </div>
-                          <div id="vm-gen-list" class="vm-list"><div class="vm-empty">加载中…</div></div>
-                          <div class="vm-add">
-                            <select id="vm-prune-char" class="settings-select" style="flex: 1; min-width: 0;"></select>
-                            <input id="vm-keep-n" class="settings-input" style="width: 110px;" type="number" min="0" placeholder="保留条数">
-                            <button id="vm-prune" class="vm-btn" type="button">清理</button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-              <div class="settings-panel" id="panel-model" data-dom-id="panel-model" role="tabpanel" aria-labelledby="label-model">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="sliders" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">生成参数</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="select-default-mode" class="settings-label">生成预设</label>
-                    <select id="select-default-mode" class="settings-select w-36" data-dom-id="select-default-mode">
-                      <option value="balanced" selected>平衡</option>
-                      <option value="creative">创意</option>
-                      <option value="precise">精确</option>
-                    </select>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-temperature" class="settings-label">温度</label>
-                    <div class="flex items-center">
-                      <input id="input-temperature" type="number" class="settings-input w-20 text-right" data-dom-id="input-temperature" value="0.70" min="0" max="2" step="0.05">
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-top-p" class="settings-label">Top P</label>
-                    <div class="flex items-center">
-                      <input id="input-top-p" type="number" class="settings-input w-20 text-right" data-dom-id="input-top-p" value="0.95" min="0" max="1" step="0.01">
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-frequency-penalty" class="settings-label">频率惩罚</label>
-                    <div class="flex items-center">
-                      <input id="input-frequency-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-frequency-penalty" value="0.00" min="-2" max="2" step="0.05">
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-presence-penalty" class="settings-label">存在惩罚</label>
-                    <div class="flex items-center">
-                      <input id="input-presence-penalty" type="number" class="settings-input w-20 text-right" data-dom-id="input-presence-penalty" value="0.00" min="-2" max="2" step="0.05">
-                    </div>
-                  </div>
-                </section>
-
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="bot" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">模型行为</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">流式输出</div>
-                      <div class="settings-desc">逐字返回模型生成内容</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-streaming" checked aria-label="流式输出">
-                  </div>
-
-
-
-                </section>
-              </div>
-
-
-
-              <!-- Repair -->
-              <div class="settings-panel" id="panel-repair" data-dom-id="panel-repair" role="tabpanel" aria-labelledby="label-repair">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="wrench" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">故障恢复</h2>
-                  </div>
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">自动重试</div>
-                      <div class="settings-desc">请求失败时自动重新发送</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-auto-retry" checked aria-label="自动重试">
-                  </div>
-
-                  <div class="settings-row">
-                    <label for="input-max-retries" class="settings-label">最大重试次数</label>
-                    <div class="flex items-center">
-                      <input id="input-max-retries" type="number" class="settings-input w-20 text-right" data-dom-id="input-max-retries" value="3" min="0" max="10" step="1">
-                      <span class="settings-unit">次</span>
-                    </div>
-                  </div>
-
-
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">清理输出</div>
-                      <div class="settings-desc">自动去除 markdown  fence 与多余换行</div>
-                    </div>
-                    <input type="checkbox" class="settings-toggle" data-dom-id="toggle-sanitize" checked aria-label="清理输出">
-                  </div>
-
-                </section>
-
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="rotate-ccw" class="w-4 h-4 text-error"></i>
-                    <h2 class="text-base font-semibold">重置</h2>
-                  </div>
-                  <div class="settings-row">
-                    <div>
-                      <div class="settings-label">恢复默认设置</div>
-                      <div class="settings-desc">所有选项将恢复为出厂默认值</div>
-                    </div>
-                    <button type="button" class="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-muted transition-colors" data-dom-id="btn-reset-defaults">重置</button>
-                  </div>
-                </section>
-
-                    <div class="settings-row">
-                      <div>
-                        <div class="settings-label">允许热重载提示词</div>
-                        <div class="settings-desc">文件变更时自动重新加载 prompt 缓存与 manifest</div>
-                      </div>
-                      <input type="checkbox" class="settings-toggle" data-dom-id="toggle-watch-prompts" checked aria-label="允许热重载提示词">
-                    </div>
-
-                <section class="settings-card">
+<section class="settings-card">
                   <div class="settings-card-header">
                     <i data-lucide="terminal" class="w-4 h-4 text-primary"></i>
                     <h2 class="text-base font-semibold">命令快捷方式</h2>
@@ -1473,38 +1462,6 @@
                 </section>
               </div>
 
-              <!-- Appearance / 主题 -->
-              <div class="settings-panel" id="panel-appearance" data-dom-id="panel-appearance" role="tabpanel" aria-labelledby="label-appearance">
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="palette" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">主题</h2>
-                  </div>
-                  <div class="settings-row-stack">
-                    <div class="settings-desc">
-                      选择界面配色。主题属于用户偏好，保存在全局配置（<code class="font-mono">~/.agent/config.json</code> 的 <code class="font-mono">ui.theme</code>），
-                      切换项目目录不会丢失。
-                    </div>
-                    <div id="theme-grid" class="theme-grid" data-dom-id="theme-grid" role="radiogroup" aria-label="主题选择"></div>
-                  </div>
-                </section>
-
-                <section class="settings-card">
-                  <div class="settings-card-header">
-                    <i data-lucide="braces" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">代码高亮配色</h2>
-                  </div>
-                  <div class="settings-row-stack">
-                    <div class="settings-desc">
-                      只影响聊天与预览里的代码块配色，与界面主题分开选择。保存在全局配置
-                      <code class="font-mono">ui.codeTheme</code>；「跟随主题」会随当前主题的明暗自动切换。
-                    </div>
-                    <div id="code-theme-grid" class="code-theme-grid" data-dom-id="code-theme-grid" role="radiogroup" aria-label="代码高亮配色选择"></div>
-                  </div>
-                </section>
-              </div>
-
-              <!-- Tools（工具包 + 工具管理） -->
               <div class="settings-panel" id="panel-tools" data-dom-id="panel-tools" role="tabpanel" aria-labelledby="label-tools">
                 <section class="settings-card">
                   <div class="settings-card-header">
@@ -1536,26 +1493,17 @@
                   </div>
                 </section>
 
-                <section class="settings-card">
+                <!-- 未归类工具：不属于任何包的工具（如 hello）。默认隐藏，有内容才显示。
+                     没有这张卡的话，未归类工具在设置页里就彻底没有入口了。 -->
+                <section class="settings-card" id="ungrouped-tools-card" style="display: none;">
                   <div class="settings-card-header">
                     <i data-lucide="wrench" class="w-4 h-4 text-primary"></i>
-                    <h2 class="text-base font-semibold">工具列表</h2>
+                    <h2 class="text-base font-semibold">未归类工具</h2>
                   </div>
                   <div class="settings-desc mb-3">
-                    已注册的全部工具。启停开关为内存级（与会话同生命周期）。「被过滤」表示当前工具包激活集未包含该工具，LLM 本轮不可用。<br />
-                    包名徽章表示工具所属的工具包，点 <b>×</b> 即可将其移出该包（内置包同样持久生效）。右侧下拉可把工具加入到其他包。
+                    不属于任何工具包的工具。可在这里单独开关，或用右侧下拉加入某个工具包。
                   </div>
-                  <div class="flex items-center gap-2 mb-3 flex-wrap">
-                    <input id="tools-filter" type="text" placeholder="搜索工具名…" class="h-8 px-3 rounded-md bg-card border border-border text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring w-56" />
-                    <select id="tools-source-filter" class="h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="按来源筛选">
-                      <option value="">全部来源</option>
-                      <option value="builtin">内置</option>
-                      <option value="mcp">MCP</option>
-                      <option value="plugin">插件</option>
-                    </select>
-                    <span class="text-xs text-muted-foreground">共 <b id="tools-count" class="font-mono text-foreground">0</b> 个</span>
-                  </div>
-                  <div id="tools-list" class="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden" data-dom-id="tools-list"></div>
+                  <div id="ungrouped-tools" class="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden"></div>
                 </section>
               </div>
 

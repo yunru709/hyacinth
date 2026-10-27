@@ -1,3 +1,4 @@
+import { attachDomains } from './domains.js';
 /* ============================================================================
    Hyacinth v3 — 共用核心（不含任何 UI）
 
@@ -334,7 +335,7 @@ export function boot() {
 
   const q = new URLSearchParams(location.search);
 
-  return {
+  const app = {
     client,
     sessions,
     stream,
@@ -353,6 +354,11 @@ export function boot() {
       document.documentElement.setAttribute('data-palette', name);
     },
   };
+
+  /* 挂上全部功能域（config / model / voice / caps / runtime / sessionAdmin）。
+     ⚠️ 语言层因此不必直接拼 RPC —— 契约坑（config 用 path、history 用 sessionId…）
+        都收在 core/domains.js 里，三套语言共享一份正确。 */
+  return attachDomains(app);
 }
 
 /* ═══ 演示数据（?demo=1）═══════════════════════════════════════════════════

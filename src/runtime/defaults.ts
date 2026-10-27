@@ -323,6 +323,9 @@ export function getDefaultConfig(): FullConfig {
     ui: {
       theme: 'hyacinth',
       showThinking: false,
+      // 设计语言（布局范式+交互规范，与「主题」正交）。当前只有 classic 真实接入，
+      // tui / editorial 待完善后再接。缺这行 ⇒ 全新环境 config.get('ui.designLanguage') 会 not found。
+      designLanguage: 'classic',
     },
   };
 }

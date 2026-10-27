@@ -23,6 +23,7 @@
    ========================================================================== */
 
 import { boot, DEMO, toEntries } from '../../core/bridge.js';
+import { renderMarkdown } from '../../core/markdown.js';
 
 const app = boot();
 const { client, sessions, stream, history } = app;
@@ -80,7 +81,9 @@ let currentAssistant = null;
 function appendPara(kind, text) {
   const p = document.createElement('div');
   p.className = `ed-para ed-para--${kind}`;
-  p.textContent = text;
+  /* 正文走 Markdown；tool 类输出是纯日志，保持原样 */
+  if (kind === 'user' || kind === 'assistant') p.innerHTML = renderMarkdown(text);
+  else p.textContent = text;
   streamEl.appendChild(p);
   scrollToBottom();
   return p;
@@ -115,13 +118,13 @@ stream.handlers.onAssistantStart = () => {
 
 stream.handlers.onAssistantDelta = (_d, full) => {
   if (!currentAssistant) currentAssistant = appendPara('assistant', '');
-  currentAssistant.textContent = full;
+  currentAssistant.innerHTML = renderMarkdown(full);
   scrollToBottom();
 };
 
 stream.handlers.onAssistantDone = (text) => {
   if (!currentAssistant) currentAssistant = appendPara('assistant', '');
-  currentAssistant.textContent = text || '';
+  currentAssistant.innerHTML = renderMarkdown(text || '');
   currentAssistant = null;
   setStatus('');
 };

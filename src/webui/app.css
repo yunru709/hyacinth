@@ -438,6 +438,12 @@
         .settings-group-label:first-of-type { margin-top: 0; }
         /* :first-of-type 实际命中的是「设置」标题（它也是 div）⇒ 首组额外间距要靠相邻选择器消掉 */
         .settings-tabs-header + .settings-group-label { margin-top: 0; }
+        /* 模型 tab 子页签：并入设置后单页高 3060px，按「提供商/推理与本地/通道/生成参数」拆 4 组。
+           显隐由 app.js mergeModelPanelIntoSettings() 里的 applySub() 控制，这里只管外观。 */
+        .model-subtabs { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--hyacinth-border); }
+        .model-subtab { padding: 6px 14px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-muted-foreground); background: transparent; border: 1px solid transparent; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
+        .model-subtab:hover { background-color: var(--hyacinth-muted); color: var(--hyacinth-foreground); }
+        .model-subtab.is-active { background-color: var(--primary-100); color: var(--hyacinth-primary); border-color: var(--hyacinth-primary); font-weight: 600; }
         #tab-context:checked ~ .settings-frame .settings-tabs label[for="tab-context"],
         #tab-turns:checked ~ .settings-frame .settings-tabs label[for="tab-turns"],
         #tab-compress:checked ~ .settings-frame .settings-tabs label[for="tab-compress"],

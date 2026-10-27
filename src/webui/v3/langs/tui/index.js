@@ -1,23 +1,33 @@
 /* ============================================================================
    设计语言：TUI — 终端效率
 
-   ══ 立场 ═══════════════════════════════════════════════════════════════════
+   ══ 立场（2026-10-27 修订）══════════════════════════════════════════════════
 
-     键盘优先，鼠标可选。一屏看到尽可能多的状态，操作零延迟。
+     **外表像终端，交互像普通聊天框。** 易用性优先，不为"像终端"牺牲可用性。
 
-   ══ 与其他语言的差别（不是换色）═════════════════════════════════════════
+     之前的版本是 vim 式模态（NORMAL/INSERT，要按 i 才能输入、j/k 移动、: 命令）。
+     孑遗判定："点击 i 才输入这难用的，UI 肯定是易用性为首要的" ⇒ 本轮去掉模态。
+
+   ══ 与其他语言的差别（不是换色）═══════════════════════════════════════════
 
      布局    全屏分面板，1px 实线分栏，状态栏贴底常显。没有侧栏 —— 是"面板"
-     交互    模态：NORMAL / INSERT / COMMAND / SEARCH / HELP，状态栏显示当前模式
-             全键盘：j k 移动、i 插入、/ 搜索、: 命令、? 帮助、Esc 回退
-     控件    方框、反色选中块、字符进度条 [====   ]，无圆角无阴影
+     交互    普通聊天框：点击输入框即输入，Enter 发送。鼠标点会话即切换
+             （键盘 j/k 等仅在输入框未聚焦时作为"增强"生效，绝不劫持打字）
+     控件    方框、反色选中块、字符进度条，无圆角无阴影
      排版    全等宽 12px / 行高 1.4，信息密度最高
      动效    无 —— 任何过渡动画在终端语境里都是噪音
 
-   ══ 为什么用 1px 实线而非字符边框 ═══════════════════════════════════════
+   ══ 为什么用 1px 实线而非字符边框 ═════════════════════════════════════════
 
      字符边框（┌─┐）需要等宽字体完美对齐，中文混排必然错位。
      lazygit / btop 这类现代 TUI 都用细实线，视觉上更稳且不会崩。
+
+   ══ 交互原则（改这里之前先读）════════════════════════════════════════════
+
+     · 输入框永远可编辑，页面加载即 autofocus —— 没有"进入输入模式"这一步。
+     · Enter 发送；不劫持 Tab / 方向键 / 字母键。
+     · 键盘快捷键只在输入框**未聚焦**时生效（避免 j/k 顶掉打字）。
+     · 会话切换：鼠标单击即打开（不要求先选中、再双击）。
    ========================================================================== */
 
 import { boot, DEMO, PALETTE_LABELS, toEntries } from '../../core/bridge.js';
@@ -25,23 +35,20 @@ import { boot, DEMO, PALETTE_LABELS, toEntries } from '../../core/bridge.js';
 const app = boot();
 const { client, sessions, stream, history } = app;
 
-/* ═══ 应用主题/配色（TUI 也支持换色，但结构永远是 TUI）═══════════════════ */
+/* ═══ 应用主题/配色（TUI 也支持换色，但结构永远是 TUI）═══════════════════════ */
 document.documentElement.setAttribute('data-theme', app.theme);
 document.documentElement.setAttribute('data-palette', app.palette);
 
 /* ═══ 状态 ═══════════════════════════════════════════════════════════════ */
 const S = {
-  mode: 'normal',        // normal | insert | command | search | help
   sessionList: [],
   selIndex: 0,
   activeSession: null,
   running: false,
   connected: false,
-  cmdBuffer: '',
-  searchBuffer: '',
 };
 
-/* ═══ DOM 构建 ═══════════════════════════════════════════════════════════ */
+/* ═══ DOM 构建 ══════════════════════════════════════════════════════════════ */
 const root = document.getElementById('app');
 root.className = 'tui';
 
@@ -69,15 +76,16 @@ root.innerHTML = `
 
   <div class="tui-inputbar">
     <span class="tui-prompt">&gt;</span>
-    <input class="tui-field" id="tui-field" placeholder="i 进入输入 · Enter 发送" readonly>
+    <input class="tui-field" id="tui-field" type="text" autocomplete="off"
+           spellcheck="false" placeholder="输入消息，Enter 发送">
   </div>
 
   <div class="tui-status">
-    <span class="tui-mode" id="tui-mode">NORMAL</span>
-    <span class="tui-dim" id="tui-themepal">TUI · ${PALETTE_LABELS[app.palette]}</span>
     <span class="tui-conn" id="tui-conn"><span class="tui-dot"></span>offline</span>
+    <span class="tui-dim" id="tui-themepal">TUI · ${PALETTE_LABELS[app.palette]}</span>
     <span class="tui-grow"></span>
-    <span class="tui-dim">j/k 移动 · i 输入 · / 搜索 · : 命令 · ? 帮助</span>
+    <span class="tui-dim tui-help-link" id="tui-help-link" role="button" tabindex="0"
+          title="快捷键与说明">?</span>
   </div>
 `;
 
@@ -85,7 +93,6 @@ const $ = (id) => document.getElementById(id);
 const listEl = $('tui-list');
 const logEl = $('tui-log');
 const fieldEl = $('tui-field');
-const modeEl = $('tui-mode');
 
 /* ═══ 会话列表渲染 ═══════════════════════════════════════════════════════ */
 function renderList() {
@@ -115,11 +122,11 @@ function renderList() {
     mark.textContent = s.id === S.activeSession ? '*' : ' ';
 
     row.append(mark, title);
+    // 单击即打开（普通聊天的直觉：点会话就切过去，不用先选中再双击）
     row.addEventListener('click', () => {
       S.selIndex = i;
-      renderList();
+      openSession(s);
     });
-    row.addEventListener('dblclick', () => openSession(s));
     listEl.appendChild(row);
   });
 }
@@ -158,7 +165,7 @@ function renderLogEmpty() {
   logEl.innerHTML = '';
   const hint = document.createElement('div');
   hint.className = 'tui-empty';
-  hint.textContent = '— 无消息。按 i 开始输入 —';
+  hint.textContent = '— 输入消息开始对话 —';
   logEl.appendChild(hint);
 }
 
@@ -217,29 +224,30 @@ async function loadSessions() {
 
 async function openSession(s) {
   S.activeSession = s.id;
-  $("tui-title").textContent = "LOG · " + truncate(sessions.titleOf(s), 28);
-  logEl.innerHTML = "";
+  $('tui-title').textContent = 'LOG · ' + truncate(sessions.titleOf(s), 28);
+  logEl.innerHTML = '';
   renderList();
 
   if (!s.id) {
-    const note = document.createElement("div");
-    note.className = "tui-empty";
-    note.textContent = "— 新会话，按 i 开始输入 —";
+    const note = document.createElement('div');
+    note.className = 'tui-empty';
+    note.textContent = '— 新会话，输入消息开始 —';
     logEl.appendChild(note);
+    fieldEl.focus();
     return;
   }
 
-  const busy = document.createElement("div");
-  busy.className = "tui-empty";
-  busy.textContent = "加载历史…";
+  const busy = document.createElement('div');
+  busy.className = 'tui-empty';
+  busy.textContent = '加载历史…';
   logEl.appendChild(busy);
 
   const raw = await history.load(s.id);
-  logEl.innerHTML = "";
+  logEl.innerHTML = '';
   if (!raw.length) {
-    const note = document.createElement("div");
-    note.className = "tui-empty";
-    note.textContent = "— 该会话没有消息 —";
+    const note = document.createElement('div');
+    note.className = 'tui-empty';
+    note.textContent = '— 该会话没有消息 —';
     logEl.appendChild(note);
     return;
   }
@@ -248,83 +256,47 @@ async function openSession(s) {
   scrollLog();
 }
 
-
-/* ═══ 模态与键盘 ═════════════════════════════════════════════════════════ */
-function setMode(m) {
-  S.mode = m;
-  modeEl.textContent = m.toUpperCase();
-  modeEl.dataset.mode = m;
-
-  if (m === 'insert') {
-    fieldEl.readOnly = false;
-    fieldEl.placeholder = 'Enter 发送 · Esc 退出';
-    fieldEl.focus();
-  } else {
-    fieldEl.readOnly = true;
-    fieldEl.placeholder = 'i 进入输入 · Enter 发送';
-    if (document.activeElement === fieldEl) fieldEl.blur();
-  }
+/* ═══ 键盘：输入优先，快捷键只在未聚焦时生效 ═════════════════════════════ */
+function moveSel(delta) {
+  if (!S.sessionList.length) return;
+  S.selIndex = Math.min(Math.max(S.selIndex + delta, 0), S.sessionList.length - 1);
+  renderList();
 }
 
 document.addEventListener('keydown', (e) => {
-  // INSERT 模式：只处理 Esc 与 Enter，其余交给输入框
-  if (S.mode === 'insert') {
-    if (e.key === 'Escape') { e.preventDefault(); setMode('normal'); return; }
+  // ── 输入框聚焦：只处理 Enter 发送，其余（字母/方向键/Tab）全交给输入框 ──
+  if (document.activeElement === fieldEl) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       submit();
-      return;
     }
     return;
   }
 
-  // 其余模式：全局键
+  // ── 输入框未聚焦：可选键盘增强（绝不劫持打字，因为此时没在打字）──
   switch (e.key) {
     case 'j':
+    case 'ArrowDown':
       e.preventDefault();
-      if (S.sessionList.length) {
-        S.selIndex = Math.min(S.selIndex + 1, S.sessionList.length - 1);
-        renderList();
-      }
+      moveSel(1);
       break;
-
     case 'k':
+    case 'ArrowUp':
       e.preventDefault();
-      S.selIndex = Math.max(S.selIndex - 1, 0);
-      renderList();
+      moveSel(-1);
       break;
-
     case 'Enter':
       e.preventDefault();
       if (S.sessionList[S.selIndex]) openSession(S.sessionList[S.selIndex]);
       break;
-
-    case 'i':
-      e.preventDefault();
-      setMode('insert');
-      break;
-
     case '?':
       e.preventDefault();
       toggleHelp();
       break;
-
-    case ':':
-      e.preventDefault();
-      setMode('command');
-      promptCommand();
-      break;
-
-    case '/':
-      e.preventDefault();
-      setMode('search');
-      promptSearch();
-      break;
-
     case 'Escape':
-      if (S.mode !== 'normal') setMode('normal');
+      if (helpEl) closeHelp();
+      else fieldEl.focus(); // Esc 回输入框 —— 任何时候都能立刻接着打字
       break;
-
     default:
       break;
   }
@@ -332,9 +304,8 @@ document.addEventListener('keydown', (e) => {
 
 async function submit() {
   const text = fieldEl.value.trim();
-  if (!text) { setMode('normal'); return; }
+  if (!text) return;
   fieldEl.value = '';
-  setMode('normal');
   setBusy(true);
   try {
     await stream.send(text);
@@ -344,58 +315,7 @@ async function submit() {
   }
 }
 
-/* ═══ 命令面板（: 唤起）═════════════════════════════════════════════════ */
-const COMMANDS = [
-  { name: 'theme', desc: '切换主题：:theme <void|flow|focus|console|reading>' },
-  { name: 'palette', desc: '切换配色：:palette <night|day|sepia|mono|forest>' },
-  { name: 'new', desc: '新会话' },
-  { name: 'reload', desc: '重载会话列表' },
-  { name: 'help', desc: '显示帮助' },
-  { name: 'q', desc: '关闭帮助' },
-];
-
-function promptCommand() {
-  const raw = window.prompt('命令：');
-  setMode('normal');
-  if (!raw) return;
-
-  const [cmd, ...args] = raw.trim().split(/\s+/);
-  const arg = args.join(' ');
-
-  switch (cmd) {
-    case 'theme':
-      if (arg) { app.setTheme(arg); $('tui-themepal').textContent = `TUI · ${PALETTE_LABELS[arg] || arg}`; }
-      break;
-    case 'palette':
-      if (arg) { app.setPalette(arg); $('tui-themepal').textContent = `${app.theme}/${arg}`; }
-      break;
-    case 'new':
-      openSession({ id: null, title: '新会话' });
-      break;
-    case 'reload':
-      loadSessions();
-      break;
-    case 'help':
-      toggleHelp();
-      break;
-    case 'q':
-      closeHelp();
-      break;
-    default:
-      appendLine('error', `未知命令: ${cmd}（? 查看帮助）`);
-  }
-}
-
-function promptSearch() {
-  const kw = window.prompt('搜索会话：');
-  setMode('normal');
-  if (!kw) return;
-  const hit = S.sessionList.findIndex((s) => (sessions.titleOf(s) || '').includes(kw));
-  if (hit >= 0) { S.selIndex = hit; renderList(); }
-  else appendLine('error', `未找到: ${kw}`);
-}
-
-/* ═══ 帮助浮层 ═══════════════════════════════════════════════════════════ */
+/* ═══ 帮助浮层（点击状态栏 ? 或按 ? 打开）══════════════════════════════════ */
 let helpEl = null;
 
 function toggleHelp() {
@@ -409,16 +329,16 @@ function toggleHelp() {
 
   const h = document.createElement('div');
   h.className = 'tui-help-title';
-  h.textContent = 'KEYS';
+  h.textContent = '使用说明';
 
   const rows = [
-    ['j / k', '上下移动会话'],
-    ['Enter', '打开选中会话'],
-    ['i', '进入输入模式'],
-    ['Esc', '回到 NORMAL'],
-    ['/', '搜索会话'],
-    [':', '命令'],
-    ['?', '开关本帮助'],
+    ['输入框', '点一下就打字，Enter 发送'],
+    ['会话', '单击左侧任意会话即切换'],
+    ['+ new', '开一个新会话'],
+    ['j / k', '输入框未聚焦时上下移动'],
+    ['Enter', '输入框未聚焦时打开选中会话'],
+    ['Esc', '回到输入框'],
+    ['?', '开关本说明'],
   ];
 
   const table = document.createElement('div');
@@ -433,11 +353,11 @@ function toggleHelp() {
     table.append(kr, vr);
   }
 
-  const cmds = document.createElement('div');
-  cmds.className = 'tui-help-cmds';
-  cmds.textContent = COMMANDS.map((c) => ':' + c.name + '  ' + c.desc).join('\n');
+  const close = document.createElement('div');
+  close.className = 'tui-help-cmds';
+  close.textContent = '点任意处关闭 · Esc 回到输入框';
 
-  box.append(h, table, cmds);
+  box.append(h, table, close);
   helpEl.appendChild(box);
   helpEl.addEventListener('click', closeHelp);
   root.appendChild(helpEl);
@@ -445,12 +365,17 @@ function toggleHelp() {
 
 function closeHelp() {
   if (helpEl) { helpEl.remove(); helpEl = null; }
-  if (S.mode === 'help') setMode('normal');
 }
 
 /* ═══ 启动 ═══════════════════════════════════════════════════════════════ */
 $('tui-new').addEventListener('click', () => openSession({ id: null, title: '新会话' }));
-setMode('normal');
+$('tui-help-link').addEventListener('click', toggleHelp);
+$('tui-help-link').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHelp(); }
+});
+
+/* 页面加载即聚焦输入框 —— 用户打开就能直接打字，无需任何"进入"步骤 */
+setTimeout(() => fieldEl.focus(), 0);
 
 /* ?demo=1 时不连后端 —— 空界面无法公平评判设计语言，
    「什么都没画」和「画得不好」在截图里长得一样。 */
