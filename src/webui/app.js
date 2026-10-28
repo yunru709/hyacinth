@@ -2102,6 +2102,14 @@
     const left = el('div', 'min-w-[160px] flex-1');
     left.appendChild(el('div', 'text-sm font-medium text-foreground', t.name || t.id));
     left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', scheduleTypeLabel(t.scheduleType) + ' · 下次 ' + fmtTime(t.nextRunAt)));
+    // 适配当前任务模型：补 模式 / 目标会话 / 标签 / 上次执行（有则显示，无则整行省略）
+    const metaBits = [];
+    const modeLabel = t.mode === 'companion' ? '陪伴' : (t.mode || '');
+    if (modeLabel) metaBits.push('模式 ' + modeLabel);
+    if (t.sessionId) metaBits.push('会话 ' + String(t.sessionId).slice(-10));
+    if (Array.isArray(t.tags) && t.tags.length) metaBits.push('标签 ' + t.tags.join('/'));
+    if (t.lastRunAt) metaBits.push('上次 ' + fmtTime(t.lastRunAt));
+    if (metaBits.length) left.appendChild(el('div', 'text-[11px] text-muted-foreground mt-0.5', metaBits.join(' · ')));
     row.appendChild(left);
     const stat = el('div', 'text-xs text-muted-foreground');
     stat.textContent = '跑了 ' + (t.runCount || 0) + ' 次' + ((t.errorCount || 0) ? ' · 出错 ' + t.errorCount + ' 次' : '') + (t.channel ? ' · 渠道 ' + t.channel : '');
