@@ -46,6 +46,8 @@ export class HeartbeatScheduler {
   private startedAt: Date | null = null;
   private running = false;
   private activeCount = 0;
+  /** 正在执行的任务 id 集合（防重复触发：慢任务在两次 tick 之间被当"仍到期"重复调度，2026-10-28） */
+  private readonly inFlight = new Set<string>();
   private handler: TaskHandler | null = null;
   private config: SchedulerConfig;
   private persistence: SchedulePersistence;
