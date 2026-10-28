@@ -596,14 +596,13 @@ export class CompanionRouter implements IContextRouter {
 
     // 模式真源 = session type：若当前 session 已是普通类型（用户在陪伴期间
     // 显式 new_session/resume 走了），不再回拉旧 normal session —— 尊重用户的切换。
-    const curType = (() => {
-      try {
-        const meta = JSON.parse(readFileSync(path.join(loop.sessionDir, 'meta.json'), 'utf-8'));
-        return typeof meta?.type === 'string' ? meta.type : undefined;
-      } catch { return undefined; }
-    })();
+    // 单一权威状态解析（2026-10-28 架构确定性）：不再就地读 meta.json。
+    const { resolveCompanionState, pickExitNormalSession } =
+      await import('../companion/companion-state.js');
+    const snap = resolveCompanionState(loop);
 
-    if (curType !== 'companion') {
+    if (snap.mode !== 'companion') {
+      // 用户在陪伴期间已显式 new_session/resume 走了 → 只清记录，保持当前 session（尊重切换）
       (loop as any)._normalSessionDir = undefined;
       try {
         const map = readActiveSessions();
@@ -617,14 +616,17 @@ export class CompanionRouter implements IContextRouter {
       return;
     }
 
-    let normalDir = (loop as any)._normalSessionDir as string | undefined;
-    // Fallback 1：loop 被重建 / 内存中无记录时，从持久化状态恢复该渠道切换前的 session
-    if (!normalDir) {
-      const map = readActiveSessions();
-      if (typeof map[channelKey] === 'string' && map[channelKey]) normalDir = map[channelKey];
-    }
-    // Fallback 2：确实没有记录（如从存档恢复的陪伴会话）→ 才创建新 normal session
-    if (!normalDir) {
+    // 退出回到哪个 normal session：确定性三级（内存 → 持久化 → 新建），顺序固定、可追溯。
+    const pick = pickExitNormalSession(snap, channelKey);
+    let normalDir = pick.dir;
+    if (pick.source === 'none') {
+      // 罕见：内存与持久化都无记录（如从存档恢复的陪伴会话）→ 必须新建，但**显式告警**，
+      // 不让"莫名多出一个会话"成为静默副作用。
+      const { createLogger } = await import('../logging/logger.js');
+      createLogger('companion').warn(
+        'onDeactivate: no saved normal session (memory+persisted both empty) → creating fresh normal session',
+        { channelKey, companionSession: snap.sessionBase },
+      );
       const { SessionManager } = await import('../memory/session.js');
       const sm = new SessionManager(process.cwd());
       const session = await sm.create('normal');
