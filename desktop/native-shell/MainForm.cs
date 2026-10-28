@@ -702,10 +702,13 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         // 再弹一个浏览器只会打扰用户（2026-10-16 用户实报："每次启动额外打开一个浏览器"）。
         psi.Environment["HYACINTH_NO_OPEN_BROWSER"] = "1";
 
-        // provider 可用 HYACINTH_PROVIDER 覆盖（默认 deepseek）：
-        // 不带 --provider 时后端会落回 config 里的 anthropic，而环境没配 key ⇒ 启动即崩。
+        // provider 可用 HYACINTH_PROVIDER 覆盖（默认 opencode）。
+        // ⚠️ 2026-10-29 排查修正：旧默认是 "deepseek"，但 `--provider` 定的是"主/default provider"
+        // ⇒ 模型面板"当前启用"/routingInfo/`*` 全显示 deepseek，与实际 chat 通道(opencode)不一致。
+        // 本机主对话走 opencode，故默认改 opencode（仍可被 HYACINTH_PROVIDER 覆盖）。
+        // 不带 --provider 时后端会落回 config 里的 anthropic，而环境没配 key ⇒ 启动即崩（故必须给默认值）。
         var provider = Environment.GetEnvironmentVariable("HYACINTH_PROVIDER");
-        if (string.IsNullOrWhiteSpace(provider)) provider = "deepseek";
+        if (string.IsNullOrWhiteSpace(provider)) provider = "opencode";
 
         foreach (var a in new[] { entry, "webui", "--port", Port.ToString(), "--provider", provider, "--no-auth" })
             psi.ArgumentList.Add(a);

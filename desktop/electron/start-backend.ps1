@@ -22,7 +22,7 @@ Remove-Item $log,$err -Force -ErrorAction SilentlyContinue
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $NodeExe
-$psi.Arguments = '"' + $entry + '" webui --port ' + $Port + ' --provider deepseek --no-auth'
+$psi.Arguments = '"' + $entry + '" webui --port ' + $Port + ' --provider opencode --no-auth'
 $psi.WorkingDirectory = $app
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
