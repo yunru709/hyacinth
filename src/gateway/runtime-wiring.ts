@@ -203,18 +203,11 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
     if (_port && task.sessionPolicy && task.action.type !== 'command' && task.mode !== 'companion') {
       const _channel = (task.channel ?? 'local') as string;
       if (task.sessionPolicy === 'new') {
-        let _eph: string | undefined;
         try {
-          _eph = (await _port.createEphemeralSession(_channel)).sessionId;
-          const _l = await _port.getOrCreateLoop(_channel, _eph);
-          await _l.notifyTaskFired(task.name);
+          // 一次性会话：建临时会话跑任务，结果 append 回 task 原会话，5min 后销毁临时会话
+          await _port.runOneShot({ channel: _channel, taskName: task.name, deliverSessionId: task.sessionId });
         } catch (err) {
           logger.error(`One-shot task failed: ${task.name}`, err instanceof Error ? err : undefined);
-        } finally {
-          if (_eph) {
-            const _sid = _eph;
-            setTimeout(() => { _port.destroySession(_channel, _sid).catch(() => {}); }, 5 * 60_000);
-          }
         }
         return;
       }
