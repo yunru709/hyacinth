@@ -195,6 +195,44 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
   heartbeatScheduler.setHandler(async (task) => {
     logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type, channel: task.channel });
 
+    // ── 会话定向路由（2026-10-28）：sessionPolicy 显式存在才生效（旧任务 undefined ⇒ 走下方旧行为，零回归）──
+    //   'new'  → 新建一次性临时会话跑，5min 后销毁（结果推回原会话=待补）
+    //   'reuse'→ 定位/拉起 task.sessionId 指向的会话再跑（会话被关闭也照样拉起）
+    // companion / command 任务不在此拦，落到下方旧分支。
+    const _port = deps.sessionPort?.() ?? (await import('../schedule/session-port.js')).getSchedulerSessionPort();
+    if (_port && task.sessionPolicy && task.action.type !== 'command' && task.mode !== 'companion') {
+      const _channel = (task.channel ?? 'local') as string;
+      if (task.sessionPolicy === 'new') {
+        let _eph: string | undefined;
+        try {
+          _eph = (await _port.createEphemeralSession(_channel)).sessionId;
+          const _l = await _port.getOrCreateLoop(_channel, _eph);
+          await _l.notifyTaskFired(task.name);
+        } catch (err) {
+          logger.error(`One-shot task failed: ${task.name}`, err instanceof Error ? err : undefined);
+        } finally {
+          if (_eph) {
+            const _sid = _eph;
+            setTimeout(() => { _port.destroySession(_channel, _sid).catch(() => {}); }, 5 * 60_000);
+          }
+        }
+        return;
+      }
+      if (task.sessionPolicy === 'reuse') {
+        const _sid = task.sessionId;
+        if (_sid) {
+          try {
+            const _l = await _port.getOrCreateLoop(_channel, _sid);
+            await _l.notifyTaskFired(task.name);
+            _port.broadcastOpenSession(_channel, _sid);
+          } catch (err) {
+            logger.error(`Task resume-session failed: ${task.name}`, err instanceof Error ? err : undefined);
+          }
+          return;
+        }
+      }
+    }
+
     // 模式隔离：任务标签 = session type（开放域），过滤判据 = 「标签 === 目标 loop 的
     // 当前 session type」（模式真源）。⚠ 不能用进程级聚合的「任一渠道在陪伴」判断——
     // 那会让某个渠道进入陪伴模式后，其它渠道的任务被静默跳过。
