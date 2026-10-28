@@ -50,6 +50,27 @@ export function installSchedulerSessionPort(deps: {
   };
 
   const getLoop = async (channel: string, sessionId: string) => {
+    // 【loop 统一 2026-10-28】先查「开着的 UI loop」注册表：命中 ⇒ 复用标签 loop（同一个 loop，
+    // 不再重复建 ⇒ 不抢 sessionDir 锁）。标签 loop 的 outputHandler 是 ProtocolOutputHandler，
+    // 结果经 WS 推给开着的标签（+ webui 前端播 say），无需 collectHandler/主机播放。
+    try {
+      const { getOpenLoop } = await import('../loop-registry.js');
+      const openLoop = getOpenLoop(channel, sessionId) as {
+        notifyTaskFired?: (n: string) => Promise<void>;
+        run?: (i: string) => Promise<void>;
+      } | null;
+      if (openLoop) {
+        const runTask = (n: string) =>
+          openLoop.notifyTaskFired
+            ? openLoop.notifyTaskFired(n)
+            : openLoop.run
+              ? openLoop.run(`[Scheduled Task] "${n}" triggered.`)
+              : Promise.resolve();
+        return { runTask, getResponse: () => '' };
+      }
+    } catch {
+      /* 注册表查询失败 → 落回新建 */
+    }
     const entry = await sessionService.getOrCreateLoop(channel, sessionId);
     // ⚠️ 2026-10-28：临时/后台 loop 的 collectHandler **没有 onEvent**（createCollectHandler 只实现了
     // onText/onTurnStart 等），而 say 的音频是 `notify = this.outputHandler?.onEvent?.(...)` 发出的
