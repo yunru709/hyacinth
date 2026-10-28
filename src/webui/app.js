@@ -2451,25 +2451,51 @@
       const type = (typeEl && typeEl.value) || 'daily';
       const val = (valEl && valEl.value || '').trim();
       if (!name) { hint('请先填任务名称'); return; }
+      // 按调度类型构造 schedule 对象（5 种：daily / interval / cron / fixed-time / random）
+      let schedule = null;
+      let label = '';
       if (type === 'daily') {
         if (!/^\d{1,2}:\d{2}$/.test(val)) { hint('时间格式应为 HH:mm，例如 09:30'); return; }
-        addBtn.disabled = true;
-        client.request('schedule.addDaily', { name, time: val })
-          .then(() => { hint('已添加：' + name + '（每天 ' + val + '）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
-          .catch((e) => hint('添加失败: ' + (e && e.message)))
-          .finally(() => { addBtn.disabled = false; });
-        return;
+        schedule = { time: val }; label = '每天 ' + val;
+      } else if (type === 'interval') {
+        const mins = Number(val);
+        if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例如 30'); return; }
+        schedule = { intervalMs: Math.round(mins * 60000) }; label = '每 ' + mins + ' 分钟';
+      } else if (type === 'cron') {
+        if (val.split(/\s+/).filter(Boolean).length !== 5) { hint('cron 需 5 字段，例：0 9 * * *'); return; }
+        schedule = { expression: val }; label = 'cron ' + val;
+      } else if (type === 'fixed-time') {
+        let iso;
+        if (/^\d{1,2}:\d{2}$/.test(val)) {
+          const [h, m] = val.split(':').map(Number);
+          const d = new Date(); d.setHours(h, m, 0, 0);
+          if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+          iso = d.toISOString();
+        } else {
+          const d = new Date(val);
+          if (isNaN(d.getTime())) { hint('单次定时请填 HH:mm 或 ISO 时间，例 09:30 / 2026-10-29T09:00'); return; }
+          iso = d.toISOString();
+        }
+        schedule = { runAt: iso }; label = '单次 ' + new Date(iso).toLocaleString();
+      } else if (type === 'random') {
+        const p = val.split(',').map((x) => Number(x.trim()));
+        const periodMin = p[0];
+        if (!Number.isFinite(periodMin) || periodMin <= 0) { hint('随机请填「周期分钟[,次数,最小间隔分钟]」，例 60,5,5'); return; }
+        const count = (Number.isFinite(p[1]) && p[1] > 0) ? Math.floor(p[1]) : 1;
+        const minIntMin = (Number.isFinite(p[2]) && p[2] > 0) ? p[2] : 5;
+        schedule = { periodMs: Math.round(periodMin * 60000), count, minIntervalMs: Math.round(minIntMin * 60000) };
+        label = '每 ' + periodMin + ' 分钟随机 ' + count + ' 次';
+      } else {
+        hint('未知调度类型'); return;
       }
-      const mins = Number(val);
-      if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例如 30'); return; }
       addBtn.disabled = true;
       client.request('schedule.add', {
         name,
-        scheduleType: 'interval',
-        schedule: { intervalMs: Math.round(mins * 60000) },
+        scheduleType: type,
+        schedule,
         action: { type: 'scheduled', target: name, payload: {} },
       })
-        .then(() => { hint('已添加：' + name + '（每 ' + mins + ' 分钟）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
+        .then(() => { hint('已添加：' + name + '（' + label + '）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
         .catch((e) => hint('添加失败: ' + (e && e.message)))
         .finally(() => { addBtn.disabled = false; });
     };
