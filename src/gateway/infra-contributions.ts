@@ -47,8 +47,12 @@ export async function runInfraContributions(
       needs: ['scheduleConfig', 'configCenter'],
       provides: ['heartbeatScheduler'],
       mount: (d) => {
-        const heartbeatScheduler = new HeartbeatScheduler(undefined, d.scheduleConfig as any);
-        heartbeatScheduler.subscribeConfig(d.configCenter as RuntimeConfigCenter);
+        // 进程级共享（2026-10-28）：装配按会话跑，若每会话各 new 一个 scheduler ⇒ N 条心跳
+        // 重复触发同一 tasks.json。改为全进程共用一份（schedule/shared.ts）。
+        const { scheduler: heartbeatScheduler } = acquireSharedScheduler(
+          d.configCenter as RuntimeConfigCenter,
+          d.scheduleConfig as Record<string, unknown> | undefined,
+        );
         return { heartbeatScheduler };
       },
     },
