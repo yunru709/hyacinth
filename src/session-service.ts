@@ -300,6 +300,18 @@ export class SessionService {
     return entry;
   }
 
+  /**
+   * 移除某渠道某会话的 loop（一次性会话销毁 / 会话删除时用；幂等）。
+   * 只摘注册表键，不主动 stop loop 内部资源（如需可另行 dispose）。
+   */
+  removeLoop(channel: string, sessionId: string): void {
+    const policy = this.policy(channel);
+    const key = policy.sharedLoop ? '__shared__' : sessionId;
+    this.loopRegistry.delete(key);
+    const idx = this.loopAccessOrder.indexOf(key);
+    if (idx >= 0) this.loopAccessOrder.splice(idx, 1);
+  }
+
   /** 预注册主 loop（TUI/本地）：记录当前会话 + 注册快照 getter */
   registerMainLoop(channel: string, sessionId: string, loop: SessionLoopRunner): void {
     this.lastUsedByChannel.set(channel, sessionId);
