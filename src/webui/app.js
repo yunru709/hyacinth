@@ -7200,26 +7200,18 @@
   async function toggleCompanion() {
     if (!connected) return;
     try {
-      if (companionActive) {
-        // 退出：调 deactivate → 切回 chat 视图
-        await client.request('companion.deactivate');
-        companionActive = false;
-        companionCharacter = '';
-        updateCompanionButton();
-        goTo('#/chat');
-      } else {
-        // 进入：调 activate（切换 Router + Session + BypassAgent）；带上设置的默认角色
-        const res = await client.request(
-          'companion.activate',
-          companionDefaultCharacter ? { character: companionDefaultCharacter } : {},
-        );
-        companionActive = true;
-        companionCharacter = (res && res.character) || '';
-        updateCompanionButton();
-        goTo('#/companion');
-      }
+      // 方案A：陪伴 = 独立会话标签。进陪伴 = 确保角色会话存在 + 开一个**独立标签**
+      // （不 companion.activate 劫持当前会话）。该标签内 iframe 识别为 companion → 渲染沉浸视图。
+      const res = await client.request(
+        'companion.ensureSession',
+        companionDefaultCharacter ? { character: companionDefaultCharacter } : {},
+      );
+      const char = (res && res.character) || companionDefaultCharacter;
+      if (!char) { appendMsg('error', '没有可用的陪伴角色，请先在 设置→模式 创建'); return; }
+      const tab = openSessionInTab(char);
+      if (!tab) appendMsg('error', '打开陪伴标签失败（可能已达标签上限）');
     } catch (e) {
-      appendMsg('error', '陪伴模式切换失败: ' + ((e && e.message) || '未知错误'));
+      appendMsg('error', '打开陪伴失败: ' + ((e && e.message) || '未知错误'));
     }
   }
 
