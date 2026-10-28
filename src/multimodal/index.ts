@@ -38,37 +38,7 @@ async function runCapture(spec: string): Promise<{ error?: string; base64?: stri
     return { error: `Error: 抓源失败(${spec})(${e instanceof Error ? e.message : String(e)})` };
   }
 }
-Add-Type -AssemblyName System.Drawing
-Add-Type @"
-using System;using System.Text;using System.Runtime.InteropServices;using System.Drawing;using System.Drawing.Imaging;
-public class Cap {
- public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
- [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc e, IntPtr l);
- [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
- [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
- [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
- [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
- [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
- [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
- [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
- public static IntPtr Find(string like){
-   IntPtr found=IntPtr.Zero;
-   EnumWindows((h,l)=>{ if(IsWindowVisible(h)){ var sb=new StringBuilder(256); GetWindowText(h,sb,256); if(sb.ToString().IndexOf(like,StringComparison.OrdinalIgnoreCase)>=0){found=h;return false;} } return true; }, IntPtr.Zero);
-   return found;
- }
- public static bool Grab(IntPtr h, string outPath){
-   if(IsIconic(h)) ShowWindow(h, 9);
-   System.Threading.Thread.Sleep(300);
-   RECT r; if(!GetWindowRect(h, out r)) return false;
-   int w=r.R-r.L, ht=r.B-r.T; if(w<=0||ht<=0) return false;
-   using(var bmp=new Bitmap(w,ht)){ using(var g=Graphics.FromImage(bmp)){ IntPtr dd=g.GetHdc(); bool ok=PrintWindow(h,dd,2u); g.ReleaseHdc(dd); if(!ok) return false; } bmp.Save(outPath,ImageFormat.Png);}
-   return true;
- }
-}
-"@ -ReferencedAssemblies System.Drawing
-$h = [Cap]::Find($TitleLike)
-if($h -eq [IntPtr]::Zero){ Write-Output "NOTFOUND: $TitleLike"; exit 1 }
-if([Cap]::Grab($h,$Out)){ Write-Output "OK $Out" } else { Write-Output "GRABFAIL"; exit 1 }`;
+
 
 // ── MIME 映射 ───────────────────────────────────────────────────────
 
