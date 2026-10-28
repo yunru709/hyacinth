@@ -796,7 +796,7 @@ export class UiProtocolSession {
       // 断开时在 close() 里注销。登记失败不阻断连接。
       try {
         const { registerOpenLoop } = await import('../../loop-registry.js');
-        registerOpenLoop(this.backend.channel ?? 'webui', this.sessionId, this.loop);
+        registerOpenLoop(this.backend.channel ?? 'webui', this.sessionId ?? '', this.loop);
       } catch {
         /* 登记失败不阻断连接 */
       }
