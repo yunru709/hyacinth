@@ -791,6 +791,15 @@ export class UiProtocolSession {
       });
       this.components = result;
       this.loop = (result as { loop: AgentLoop }).loop;
+      // 【loop 统一 2026-10-28】登记「开着的 UI loop」⇒ 调度侧 getLoop 可复用同一 loop，
+      // 不再给开着的会话另建 loop（否则两 loop 抢 sessionDir 锁挂死，见 loop-registry.ts）。
+      // 断开时在 close() 里注销。登记失败不阻断连接。
+      try {
+        const { registerOpenLoop } = await import('../../loop-registry.js');
+        registerOpenLoop(this.backend.channel ?? 'webui', this.sessionId, this.loop);
+      } catch {
+        /* 登记失败不阻断连接 */
+      }
 
       // ask_user 工具 → 协议层：loop 构造时已绑定本会话 ProtocolOutputHandler.onAskUser
       // （emit message.ask_user → UI 表单 → message.askUserResolve → pending.resolve 返回）。
