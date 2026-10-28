@@ -224,7 +224,9 @@
 
   function currentView() {
     // embed 本页 = 并行会话标签的一格：只承担一条会话，忽略 hash（父页 hash 不该泄漏进来）
-    if (embedMode) return 'chat';
+    // 但若该标签绑定的是**陪伴会话** ⇒ 渲染沉浸视图（方案A：陪伴=独立会话标签）；
+    // 否则永远只 chat，会把 companion 的 say 全挡在看不见的陪伴视图里（"发了没反应"）。
+    if (embedMode) return companionActive ? 'companion' : 'chat';
     let h = (location.hash || '#/chat').replace(/^#\//, '');
     /* 「模型选择」已并入设置（2026-10-27）：旧书签 / 旧链接 #/model 不再有独立视图，
        统一落到设置页；具体选中「模型」tab 的逻辑在 applyView 里（那里能安全操作 DOM）。 */
