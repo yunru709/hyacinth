@@ -189,6 +189,13 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
   // 旧飞书会话映射迁移（幂等：仅 session-identity.json 不存在时导入 feishu_chat.json 的 sessions）
   await sessionService.migrateFeishuLegacy();
 
+  // 定时任务会话端口（2026-10-28）：注入 gateway 会话能力（按 sessionId 取/建 loop、
+  // 建/销毁一次性会话、广播）。注册为进程级单例，schedule 侧 handler 经 getSchedulerSessionPort 读取。
+  {
+    const { installSchedulerSessionPort } = await import('./scheduler-session-adapter.js');
+    installSchedulerSessionPort({ sessionManager, sessionService });
+  }
+
   await manager.startAll(agentFactory, sessionService);
 
   console.log(`HTTP API: http://localhost:${port}`);
