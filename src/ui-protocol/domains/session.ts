@@ -226,7 +226,9 @@ export function createSessionDomain(options: SessionDomainOptions): DomainHandle
       const mode = (options.loop as { activeRouter?: { name?: string } } | undefined)?.activeRouter?.name ?? 'normal';
       const sm = sessionManager as unknown as { listByMode?(m: string): Promise<BackendSession[]> };
       const sessions = sm.listByMode ? await sm.listByMode(mode) : await sessionManager.list();
-      return { sessions: sessions.map(toMeta) };
+      // 过滤一次性临时会话（定时任务 sessionPolicy='new' 建的 ephemeral 会话，5min 后自动销毁，列表不展示）
+      const visible = sessions.filter((s) => !(s as { ephemeral?: boolean }).ephemeral);
+      return { sessions: visible.map(toMeta) };
     },
 
     // ── session.resume ─────────────────────────────────────
