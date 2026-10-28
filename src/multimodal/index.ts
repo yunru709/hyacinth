@@ -545,13 +545,17 @@ export function createViewMediaTool(
       required: [], // media_path 或 capture 二选一（execute 里校验）
     },
     async execute(args: Record<string, unknown>): Promise<string> {
-      let target = String(args.media_path || '').trim();
       const captureSpec = String(args.capture || '').trim();
       if (captureSpec) {
-        const capResult = await runCapture(captureSpec);
-        if (capResult.startsWith('Error')) return capResult;
-        target = capResult;
+        // 抓源：base64 直接进内存 imageStore，全程不落盘。
+        const cap = await runCapture(captureSpec);
+        if (cap.error) return cap.error;
+        const b64 = cap.base64!;
+        const imgId = imageStore.store(b64, 'image/png', captureSpec);
+        pendingImageInjections.push({ imgId, data: b64, media_type: 'image/png', origin: captureSpec });
+        return `[Image #${imgId} captured from ${captureSpec}]\nThe image will be visible in the next response.`;
       }
+      let target = String(args.media_path || '').trim();
       if (!target) return 'Error: media_path 或 capture 至少给一个';
       const ext = path.extname(target).toLowerCase().replace('.', '');
 
