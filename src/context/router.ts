@@ -499,18 +499,14 @@ export class CompanionRouter implements IContextRouter {
     // 重启世界引擎（WorldTicker.setInterval 持续写 world.json + 旁白注入）——
     // 即 2026-10-28「陪伴内容泄露到普通会话 / 桌面壳反复刷新」的真因。
     if (!this.activeCompanionName) {
-      let preType = 'normal';
-      try {
-        const preMeta = JSON.parse(readFileSync(path.join(loop.sessionDir, 'meta.json'), 'utf-8'));
-        preType = typeof preMeta?.type === 'string' ? preMeta.type : 'normal';
-      } catch { preType = 'normal'; }
-      if (preType !== 'companion') return; // 普通会话 → 绝不自动起陪伴 / 世界引擎
-      // 续场恢复角色名：**优先用 session 目录名**（陪伴会话位于 ~/.agent/companion/<角色>/，
-      // 目录名即角色名；不依赖全局 .last-character，避免被清空/串台）；回退 .last-character 兼容旧路径。
-      let resumed = '';
-      try { resumed = path.basename(loop.sessionDir || ''); } catch {}
-      if (resumed && resumed !== 'normal' && resumed !== 'companion' && resumed !== 'sessions') {
-        this.activeCompanionName = resumed;
+      // 单一权威状态解析（2026-10-28 架构确定性）：不再就地读 meta.json / 自己算 basename，
+      // 统一走 resolveCompanionState —— 与其它地方共用同一套"mode 真源 = session.meta.type"。
+      const { resolveCompanionState } = await import('./companion-state.js');
+      const snap = resolveCompanionState(loop);
+      if (snap.mode !== 'companion') return; // 普通会话 → 绝不自动起陪伴 / 世界引擎
+      // 续场恢复角色名：优先 session 目录名（=角色名，snap.character 已解析），回退 .last-character。
+      if (snap.character) {
+        this.activeCompanionName = snap.character;
       } else {
         try {
           const last = await fs.readFile(
