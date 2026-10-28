@@ -126,7 +126,7 @@ export function installSchedulerSessionPort(deps: {
             // 就释放为它恢复的后台 loop（会话磁盘历史不动，下次打开 getOrCreateLoop 会重建）。
             // 命中注册表(标签开着)的情况**不释放**——那是标签自己的 loop。
             const { getOpenLoop } = await import('../loop-registry.js');
-            if (!getOpenLoop(sessionId)) {
+            if (!getOpenLoop(channel, sessionId)) {
               try {
                 sessionService.removeLoop(channel, sessionId);
               } catch {
