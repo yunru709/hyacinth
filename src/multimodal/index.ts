@@ -578,6 +578,11 @@ export function createViewMediaTool(
         const loaded = await loadImageFileToStore(target, imageStore);
         if (loaded) {
           pendingImageInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type, origin: target });
+          // 抓源临时文件用完即删（摄像头帧/窗口截图不留在盘上，防累积 + 隐私）。只删本工具产出的 hyacinth-cam-/hyacinth-capture-。
+          const bn = path.basename(target);
+          if (bn.startsWith('hyacinth-cam-') || bn.startsWith('hyacinth-capture-')) {
+            try { fs.unlinkSync(target); } catch { /* ignore */ }
+          }
           return `[Image #${loaded.id} loaded from ${target}]\nThe image will be visible in the next response.`;
         }
         return `Error: 无法读取图片 ${target}`;
