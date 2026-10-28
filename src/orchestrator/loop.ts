@@ -1631,8 +1631,23 @@ export class AgentLoop {
     // Router 提供模式对应的提示词风格（陪伴→自然，正常→系统提示）
     await this.syncRouter();
     const prompt = this.activeRouter.getTaskPrompt(taskName);
-    await this.run(prompt);
-    this.pendingTaskName = null;
+    try {
+      await this.run(prompt);
+    } finally {
+      this.pendingTaskName = null;
+      // ⚠️ 定时任务回合**不经 message.chat RPC** ⇒ 不会自动发 message.turn_info，
+      // 而 turn_start 是 llm.ts 每轮迭代都发（outputHandler.onTurnStart）⇒
+      // 前端收到 turn_start 把 running 置 true 后永远等不到 turn_info 复位 ⇒
+      // 会话卡「进行中」、发送键变终止、新输入进队列（2026-10-28 实报）。
+      // 这里在任务回合结束后补发一次 turn_info（turn_start 的对称收尾），让 UI 复位。
+      // 仅当 outputHandler 实现 onEvent（WebUI 的 ProtocolOutputHandler 有）时生效；
+      // 后台 collectHandler 无 onEvent ⇒ 自动跳过（也无界面需复位）。
+      try {
+        this.outputHandler?.onEvent?.('message.turn_info', this.getTurnInfo(this.currentTurn ?? 0, 0));
+      } catch {
+        /* 通知失败不影响任务本身 */
+      }
+    }
   }
 
   /**
