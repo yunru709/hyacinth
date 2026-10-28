@@ -88,6 +88,7 @@ export function createAddTaskTool(
           tags,
           channel,
           fallback,
+          { reuseByName: false }, // 强制新建（不按 name 复用旧 id，避免"建同名→删旧id 误删新任务"）
         );
 
         // 自动检测并存储当前 sessionId（多会话渠道如飞书需要此字段来回复到正确的聊天）

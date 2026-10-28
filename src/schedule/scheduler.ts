@@ -242,11 +242,28 @@ export class HeartbeatScheduler {
     tags: string[] = [],
     channel?: string,
     fallback?: string[],
+    opts?: { reuseByName?: boolean },
   ): Promise<ScheduledTask> {
     // 【2026-10-28 修（孑遗反馈"add_task 同名复用旧 id"）】
-    // 原实现在此按 name 查找并**复用旧任务**（同名的 add 直接改旧任务、返回旧 id）。陷阱：
-    // add_task 建同名任务时拿到旧 id，紧接着 remove_task(旧 id) 会把"新建的那个"也删掉
-    // （孑遗听声测试差点没任务）。名字不是唯一键 ⇒ **新建永远生成新 uuid**；改名/改参数走 updateTask(id)。
+    // 默认仍按 name **upsert**（有意的契约，见 schedule.test.ts「同名 addTask 更新而非新增」）；
+    // 但 add_task 工具会传 `reuseByName:false` 强制新建——否则"建同名任务→remove 旧 id"会把
+    // 新建的那个一起删掉（孑遗听声测试差点没任务）。改名/改参数本应走 updateTask(id)。
+    if (opts?.reuseByName !== false) {
+      const existing = this.tasks.find(t => t.name === name);
+      if (existing) {
+        existing.scheduleType = scheduleType;
+        existing.schedule = schedule;
+        existing.action = action;
+        existing.tags = tags;
+        existing.channel = channel ?? existing.channel;
+        existing.fallback = fallback ?? existing.fallback;
+        existing.enabled = true;
+        existing.nextRunAt = this.calculateNextRun(existing)?.toISOString() ?? null;
+        await this.persistence.saveTask(existing);
+        return existing;
+      }
+    }
+
     const task: ScheduledTask = {
       id: crypto.randomUUID(),
       name,
