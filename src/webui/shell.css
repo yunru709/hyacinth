@@ -2652,3 +2652,17 @@ html.is-embed .body-area { height: 100%; }
 .askuser-box .au-custom { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
 .askuser-box .au-pencil { color: var(--hyacinth-muted-foreground); }
 .askuser-box .au-custom input { flex: 1 1 auto; border: 0; background: transparent; color: inherit; font-size: 13px; outline: none; }
+
+/* ── 消息队列面板（忙碌时入队，编辑器/删除/立即推送）2026-10-28 ── */
+.composer-queue { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 8px; border: 1px solid var(--hair-strong); border-radius: 12px; background: var(--s1); }
+.composer-queue[hidden] { display: none; }
+.queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--s2); font-size: 13px; }
+.queue-handle { color: var(--hyacinth-muted-foreground); cursor: grab; font-size: 12px; letter-spacing: -2px; flex: 0 0 auto; }
+.queue-thumb { font-size: 11px; color: var(--hyacinth-muted-foreground); flex: 0 0 auto; }
+.queue-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hyacinth-foreground); }
+.queue-edit-input { flex: 1 1 auto; background: transparent; border: 1px solid var(--hair-strong); border-radius: 6px; padding: 3px 6px; color: inherit; font-size: 13px; outline: none; }
+.queue-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+.queue-btn { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; font-size: 14px; line-height: 1; }
+.queue-btn:hover { background: var(--s3, var(--s2)); color: var(--hyacinth-foreground); }
+.queue-btn.queue-sendnow:hover { color: var(--hyacinth-primary); }
+.queue-btn.queue-del:hover { color: #e5484d; }

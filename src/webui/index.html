@@ -233,6 +233,8 @@
         <div id="chat-composer" class="composer">
           <!-- 待发送图片预览（有图才显示；app.js renderAttachments 维护） -->
           <div id="composer-attachments" class="composer-attachments" hidden></div>
+          <!-- 消息队列面板：忙碌时发送的消息在此排队（可编辑/删除/立即推送），回合结束自动发下一条 -->
+          <div id="composer-queue" class="composer-queue" hidden></div>
           <div class="composer-box">
             <textarea
               id="chat-input" placeholder="输入消息…（可粘贴 / 拖入图片）"
