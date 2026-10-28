@@ -475,12 +475,23 @@ export function createViewMediaTool(
           type: 'string' as const,
           description: '本地媒体文件路径（png/jpg/gif/mp4/webm/mov/mp3/wav/m4a…）或已索引图片 ID（img_001）',
         },
+        capture: {
+          type: 'string' as const,
+          description:
+            '抓源(免另跑截图命令)：`window:<标题片段>` 抓指定窗口(自动恢复最小化+置前台再 BitBlt，如 window:Google Chrome)；`camera` 抓摄像头一帧(需 ffmpeg)。给了 capture 则 media_path 可省，抓到的 PNG 走同一注入路径。',
+        },
       },
-      required: ['media_path'],
+      required: [], // media_path 或 capture 二选一（execute 里校验）
     },
     async execute(args: Record<string, unknown>): Promise<string> {
-      const target = String(args.media_path || '').trim();
-      if (!target) return 'Error: media_path 不能为空';
+      let target = String(args.media_path || '').trim();
+      const captureSpec = String(args.capture || '').trim();
+      if (captureSpec) {
+        const capResult = await runCapture(captureSpec);
+        if (capResult.startsWith('Error')) return capResult;
+        target = capResult;
+      }
+      if (!target) return 'Error: media_path 或 capture 至少给一个';
       const ext = path.extname(target).toLowerCase().replace('.', '');
 
       // 图片：ID 或路径（复用 view_image 语义）
