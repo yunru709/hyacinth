@@ -909,7 +909,7 @@ export class UiProtocolSession {
     // 【loop 统一 2026-10-28】注销「开着的 UI loop」——否则断开后被调度侧复用会用到死 loop
     try {
       const { unregisterOpenLoop } = await import('../../loop-registry.js');
-      unregisterOpenLoop(this.backend.channel ?? 'webui', this.sessionId);
+      unregisterOpenLoop(this.backend.channel ?? 'webui', this.sessionId ?? '');
     } catch {
       /* 注销失败忽略 */
     }
