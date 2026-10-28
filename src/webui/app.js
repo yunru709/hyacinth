@@ -6350,9 +6350,17 @@
   let currentTheme = 'hyacinth';
 
   // ── 用户自备背景图（assets/bg/<主题id>.webp|jpg|png）─────────────
-  // 文件存在 → 设为该主题的最上层背景（主题遮罩自动压暗保文字可读）；
-  // 不存在 → 回落到主题自带背景画。探测结果按主题缓存。
+  // build 时 scripts/gen-bg-manifest.cjs 生成 assets/bg/_manifest.json（{id:文件名}）。
+  // 前端先读清单，**只请求存在的图** ⇒ 缺图不再产生 404（2026-10-28 修控制台噪音）。
   const userBgCache = {};
+  let bgManifestPromise = null;
+  function loadBgManifest() {
+    if (!bgManifestPromise) {
+      bgManifestPromise = fetch('assets/bg/_manifest.json', { cache: 'no-cache' })
+        .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+    }
+    return bgManifestPromise;
+  }
 
   function applyUserBg(file) {
     if (file) document.documentElement.style.setProperty('--hyacinth-user-bg', `url("${file}")`);
@@ -6361,17 +6369,17 @@
 
   function probeUserBg(id) {
     if (id in userBgCache) { applyUserBg(userBgCache[id]); return; }
-    const exts = ['webp', 'jpg', 'png'];
-    let i = 0;
-    const tryNext = () => {
-      if (i >= exts.length) { userBgCache[id] = null; applyUserBg(null); return; }
-      const file = `assets/bg/${id}.${exts[i++]}`;
-      const img = new Image();
-      img.onload = () => { userBgCache[id] = file; if (currentTheme === id) applyUserBg(file); };
-      img.onerror = () => tryNext();
-      img.src = file;
-    };
-    tryNext();
+    loadBgManifest().then((manifest) => {
+      const file = manifest && manifest[id];
+      if (file) {
+        const url = `assets/bg/${file}`;
+        userBgCache[id] = url;
+        if (currentTheme === id) applyUserBg(url);
+      } else {
+        userBgCache[id] = null; // 清单里没有 ⇒ 不请求、回落到主题自带背景画
+        if (currentTheme === id) applyUserBg(null);
+      }
+    });
   }
 
   /**
