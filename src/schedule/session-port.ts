@@ -37,6 +37,12 @@ export interface SchedulerSessionPort {
    * 无前端连接时为 no-op（不影响后台跑）。
    */
   broadcastOpenSession(channel: string, sessionId: string): void;
+
+  /**
+   * 一次性会话跑任务并交付（sessionPolicy='new' 用）：
+   * 建临时会话(标记 ephemeral) → 跑任务 → 把输出 append 回 deliverSessionId 会话 → 5min 后销毁临时会话。
+   */
+  runOneShot(opts: { channel: string; taskName: string; deliverSessionId?: string }): Promise<void>;
 }
 
 // ── 进程级端口注册 ──────────────────────────────────────────────

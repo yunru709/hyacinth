@@ -2,16 +2,18 @@
 //
 // ⚠️ 放在 schedule 层（业务核心）：因为它需要 `import { setSchedulerSessionPort }`
 // （schedule 的值导入）。若放 gateway/（UI 层）会违反 verify:layers 规则5「UI 不得直连业务核心」。
-// SessionService / SessionManager 只 `import type`（靠注入实例，不做静态运行时依赖）。
+// SessionService / SessionManager / ConversationStore 只 `import type` 或用注入实例，不做 gateway 静态依赖。
 //
 // 在 gateway 层（server.ts）调用 installSchedulerSessionPort({sessionManager, sessionService}) 注册。
-// v1 取舍（见桌面 handoff）：broadcastOpenSession=no-op；createEphemeralSession 先只建会话。
+// v1 取舍（见桌面 handoff）：broadcastOpenSession=no-op（UiProtocolServer 非全局，暂无法跨标签广播）。
 
-import { rm } from 'node:fs/promises';
+import { rm, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { setSchedulerSessionPort } from './session-port.js';
 import type { SchedulerSessionPort } from './session-port.js';
 import type { SessionService } from '../session-service.js';
 import type { SessionManager } from '../memory/session.js';
+import { ConversationStore } from '../memory/conversation.js';
 
 export function installSchedulerSessionPort(deps: {
   sessionManager: SessionManager;
@@ -19,41 +21,86 @@ export function installSchedulerSessionPort(deps: {
 }): void {
   const { sessionManager, sessionService } = deps;
 
+  // 销毁会话：摘 loop + 删目录（幂等）
+  const destroySession = async (channel: string, sessionId: string): Promise<void> => {
+    try {
+      sessionService.removeLoop(channel, sessionId);
+    } catch {
+      /* 幂等：loop 可能已不在 */
+    }
+    try {
+      await rm(sessionManager.getSessionDir(sessionId), { recursive: true, force: true });
+    } catch {
+      /* 幂等：目录可能已删 */
+    }
+  };
+
+  // 建临时会话 + 标记 ephemeral（列表过滤用；readSessionAt 会读 meta.ephemeral）
+  const createEphemeral = async (channel: string): Promise<string> => {
+    const s = await sessionManager.create('normal', channel, { lazy: false });
+    try {
+      const metaPath = path.join(sessionManager.getSessionDir(s.id), 'meta.json');
+      const meta = JSON.parse(await readFile(metaPath, 'utf-8'));
+      meta.ephemeral = true;
+      await writeFile(metaPath, JSON.stringify(meta), 'utf-8');
+    } catch {
+      /* meta 写失败不致命：只是列表可能短暂可见 */
+    }
+    return s.id;
+  };
+
+  const getLoop = async (channel: string, sessionId: string) => {
+    const entry = await sessionService.getOrCreateLoop(channel, sessionId);
+    const loop = entry.loop as unknown as {
+      notifyTaskFired?: (n: string) => Promise<void>;
+      run: (i: string) => Promise<void>;
+    };
+    const runTask = (n: string) =>
+      loop.notifyTaskFired ? loop.notifyTaskFired(n) : loop.run(`[Scheduled Task] "${n}" triggered.`);
+    const getResponse = () => (entry.collectHandler as unknown as { getResponse?: () => string })?.getResponse?.() ?? '';
+    return { runTask, getResponse };
+  };
+
   const port: SchedulerSessionPort = {
     async getOrCreateLoop(channel, sessionId) {
-      const entry = await sessionService.getOrCreateLoop(channel, sessionId);
-      const loop = entry.loop as unknown as {
-        notifyTaskFired?: (n: string) => Promise<void>;
-        run: (i: string) => Promise<void>;
-      };
-      return {
-        notifyTaskFired: (n) =>
-          loop.notifyTaskFired
-            ? loop.notifyTaskFired(n)
-            : loop.run(`[Scheduled Task] "${n}" triggered.`),
-      };
+      const h = await getLoop(channel, sessionId);
+      return { notifyTaskFired: (n) => h.runTask(n) };
     },
 
     async createEphemeralSession(channel) {
-      const s = await sessionManager.create('normal', channel, { lazy: false });
-      return { sessionId: s.id };
+      const sessionId = await createEphemeral(channel);
+      return { sessionId };
     },
 
     async destroySession(channel, sessionId) {
-      try {
-        sessionService.removeLoop(channel, sessionId);
-      } catch {
-        /* 幂等：loop 可能已不在 */
-      }
-      try {
-        await rm(sessionManager.getSessionDir(sessionId), { recursive: true, force: true });
-      } catch {
-        /* 幂等：目录可能已删 */
-      }
+      await destroySession(channel, sessionId);
     },
 
     broadcastOpenSession() {
       // v1 no-op（UiProtocolServer 非全局单例，暂无可跨标签广播"开标签"的对象）
+    },
+
+    async runOneShot({ channel, taskName, deliverSessionId }) {
+      const ephId = await createEphemeral(channel);
+      try {
+        const h = await getLoop(channel, ephId);
+        await h.runTask(taskName);
+        // 交付：把本次运行收集到的输出 append 回「任务原会话」，避免临时会话销毁后结果丢失
+        const output = h.getResponse().trim();
+        if (deliverSessionId && output) {
+          try {
+            await new ConversationStore().append(sessionManager.getSessionDir(deliverSessionId), {
+              role: 'assistant',
+              content: `[定时任务 ${taskName}]\n${output}`,
+            } as never);
+          } catch {
+            /* 交付失败不阻断销毁 */
+          }
+        }
+      } finally {
+        const sid = ephId;
+        setTimeout(() => void destroySession(channel, sid), 5 * 60_000);
+      }
     },
   };
 
