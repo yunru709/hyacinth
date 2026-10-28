@@ -13,7 +13,7 @@
 import { AssemblyRunner } from './assembly-runner.js';
 import type { AssemblyResults } from './assembly-runner.js';
 import { MemoryStore } from '../memory/memory-store.js';
-import { HeartbeatScheduler } from '../schedule/scheduler.js';
+import { acquireSharedScheduler } from '../schedule/shared.js';
 import { acquireSharedMcpSystem } from '../mcp/shared.js';
 import { trackMcpSystemForShutdown } from '../mcp/shutdown.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
