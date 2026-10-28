@@ -21,19 +21,14 @@ async function runCapture(spec: string): Promise<string> {
   if (spec.startsWith('window:')) {
     const titleLike = spec.slice('window:'.length).trim();
     if (!titleLike) return 'Error: capture=window:<标题片段> 需要标题片段';
-    const psPath = path.join(os.tmpdir(), `hyacinth-capture-${Date.now()}.ps1`);
+    // 走 WGC（Windows.Graphics.Capture）：不抢焦点、GPU 窗口(Chrome等)也能抓、可抓被遮挡。
+    const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
+    if (!fs.existsSync(exe)) return 'Error: 窗口抓取组件缺失（~/.agent/bin/WgcCap.exe 未构建）';
     try {
-      fs.writeFileSync(psPath, CAPTURE_WINDOW_PS, 'utf-8');
-      await execFileAsync(
-        'powershell',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psPath, '-TitleLike', titleLike, '-Out', tmpPng],
-        { timeout: 20000, windowsHide: true },
-      );
+      await execFileAsync(exe, ['win', titleLike, tmpPng], { timeout: 20000, windowsHide: true });
     } catch (e) {
-      try { fs.unlinkSync(psPath); } catch { /* ignore */ }
       return `Error: 抓窗口失败(${e instanceof Error ? e.message : String(e)}): 窗口「${titleLike}」找不到或抓取异常`;
     }
-    try { fs.unlinkSync(psPath); } catch { /* ignore */ }
     if (!fs.existsSync(tmpPng)) return `Error: 抓窗口无输出(窗口「${titleLike}」没找到?)`;
     return tmpPng;
   }
