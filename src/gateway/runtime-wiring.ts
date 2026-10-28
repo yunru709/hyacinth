@@ -182,6 +182,11 @@ export interface SchedulerHandlerDeps {
   channelLoops: ChannelRegistries['channelLoops'];
   resolveChannelLoop: (task: import('../schedule/types.js').ScheduledTask) => ResolvedChannelLoop;
   configCenter: RuntimeConfigCenter;
+  /**
+   * 会话端口（2026-10-28 定时任务重构）：由 gateway 注入，提供「按 sessionId 取/建 loop、
+   * 建一次性会话、销毁会话、广播开标签」。缺失时 handler 退回旧行为（跑当前 loop）——向后兼容。
+   */
+  sessionPort?: () => import('../schedule/session-port.js').SchedulerSessionPort | undefined;
 }
 
 /** 定时任务处理器：任务触发时根据 channel + 降级链路由到对应渠道的 Loop */
