@@ -117,7 +117,25 @@ export function installSchedulerSessionPort(deps: {
   const port: SchedulerSessionPort = {
     async getOrCreateLoop(channel, sessionId) {
       const h = await getLoop(channel, sessionId);
-      return { notifyTaskFired: (n) => h.runTask(n) };
+      return {
+        notifyTaskFired: async (n: string) => {
+          try {
+            await h.runTask(n);
+          } finally {
+            // 2026-10-29「拉起跑完自动释放」：任务跑完，若该会话**当前没有开着的标签**，
+            // 就释放为它恢复的后台 loop（会话磁盘历史不动，下次打开 getOrCreateLoop 会重建）。
+            // 命中注册表(标签开着)的情况**不释放**——那是标签自己的 loop。
+            const { getOpenLoop } = await import('../loop-registry.js');
+            if (!getOpenLoop(sessionId)) {
+              try {
+                sessionService.removeLoop(channel, sessionId);
+              } catch {
+                /* 幂等：loop 可能已不在 */
+              }
+            }
+          }
+        },
+      };
     },
 
     async createEphemeralSession(channel) {
