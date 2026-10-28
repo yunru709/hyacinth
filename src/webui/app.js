@@ -946,17 +946,16 @@
         if (currentView() === 'skills') loadSkills();       // 技能视图（连接建立后补拉）
         refreshState();
         // 同步陪伴模式状态（后端可能因 startup.defaultMode='companion' 已激活）
-        // embed 标签内**不**接受陪伴态：那会把 message.text/say 全部挡在看不见的陪伴视图里，
-        // 标签就变成"发了没反应"。
-        if (!embedMode) {
-          client.request('companion.get').then((res) => {
-            if (res && res.active) {
-              companionActive = true;
-              companionCharacter = res.character || '';
-              updateCompanionButton();
-            }
-          }).catch(() => {});
-        }
+        // 方案A：embed 标签若绑定的是 companion 会话 ⇒ 必须渲染沉浸视图（applyView 内含 loadCompanion），
+        //   否则 companion 的 say 全被挡在看不见的陪伴视图里（"发了没反应"）。
+        client.request('companion.get').then((res) => {
+          if (res && res.active) {
+            companionActive = true;
+            companionCharacter = res.character || '';
+            updateCompanionButton();
+            if (embedMode) applyView('companion');
+          }
+        }).catch(() => {});
         // 主题真源在后端（ui.theme）：启动时先按 localStorage 缓存应用以避免闪烁，
         // 连上后必须**主动**对齐一次后端值。旧实现只在 loadSettings() 里读它 ⇒
         // localStorage 丢失（清缓存 / 换机器 / 被旧版本回落值污染）时，用户会一直
