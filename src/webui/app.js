@@ -268,7 +268,10 @@
     // 实测：切到 #/settings 后整页被它遮成一片白（截图取色 244,244,246，
     // 而 DOM computed 背景是 #111319，两者矛盾正是因为盖了一层）。
     const stage = $('#companion-stage');
-    if (stage && view !== 'companion') stage.hidden = true;
+    // 对称显隐（2026-10-28 方案A 修复）：进入 companion 必须**显式显示** stage ——
+    // 它初始/上次 applyView('chat') 会把 hidden 置 true，旧代码只 hide 不 show ⇒
+    // 从 chat 进陪伴时 stage 恒 hidden、沉浸视图全空（backdrop 0×0）。这里改成 hidden = (view!=='companion')。
+    if (stage) stage.hidden = view !== 'companion';
     // 导航高亮
     $$('[data-nav-item]').forEach((a) => {
       a.classList.toggle('nav-active', a.dataset.navItem === NAV_BY_VIEW[view]);
