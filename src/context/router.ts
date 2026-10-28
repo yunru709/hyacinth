@@ -501,7 +501,7 @@ export class CompanionRouter implements IContextRouter {
     if (!this.activeCompanionName) {
       // 单一权威状态解析（2026-10-28 架构确定性）：不再就地读 meta.json / 自己算 basename，
       // 统一走 resolveCompanionState —— 与其它地方共用同一套"mode 真源 = session.meta.type"。
-      const { resolveCompanionState } = await import('./companion-state.js');
+      const { resolveCompanionState } = await import('../companion/companion-state.js');
       const snap = resolveCompanionState(loop);
       if (snap.mode !== 'companion') return; // 普通会话 → 绝不自动起陪伴 / 世界引擎
       // 续场恢复角色名：优先 session 目录名（=角色名，snap.character 已解析），回退 .last-character。
@@ -565,6 +565,23 @@ export class CompanionRouter implements IContextRouter {
       await bypassMgr.activateForMode('companion', { sessionType: 'companion' });
       // 获取激活后的 WorldEngine 引用
       this.worldEngineAgent = bypassMgr.getAgent('world-engine') as WorldEngine | null;
+    }
+
+    // 不变量自检（2026-10-28 架构确定性）：onActivate 完成后应处于一致态（companion 模式 /
+    // 角色名在 / 世界引擎只在 companion 跑 / router 与 session 一致）。任何违规都是
+    // "陪伴态 desync"的早期信号 —— 记日志（不抛，不阻断切换）。⚠️只在稳定点断言，
+    // 别在 onDeactivate（转移中途 router 已不再是 companion）里断。
+    try {
+      const { resolveCompanionState, checkCompanionInvariants, formatInvariantViolations } =
+        await import('../companion/companion-state.js');
+      const viol = checkCompanionInvariants(resolveCompanionState(loop));
+      if (viol.length) {
+        const { createLogger } = await import('../logging/logger.js');
+        createLogger('companion').warn('companion invariant violation after onActivate: ' + formatInvariantViolations(viol));
+      }
+    } catch (e) {
+      const { createLogger } = await import('../logging/logger.js');
+      createLogger('companion').warn('invariant self-check threw (non-fatal)', { error: String(e) });
     }
   }
 
