@@ -38,3 +38,19 @@ export interface SchedulerSessionPort {
    */
   broadcastOpenSession(channel: string, sessionId: string): void;
 }
+
+// ── 进程级端口注册 ──────────────────────────────────────────────
+// 简化注入：gateway 在 server.ts 建好适配器后 setSchedulerSessionPort；
+// schedule 侧 handler 通过 getSchedulerSessionPort 读取。
+// 避免把端口穿透 factory / CreateAgentOptions / agent-assembly 多层（那会很脏，
+// 且 agent-assembly 是**按会话**多次创建，穿透会重复注入）。单一进程单例最干净。
+let activePort: SchedulerSessionPort | undefined;
+
+export function setSchedulerSessionPort(port: SchedulerSessionPort | undefined): void {
+  activePort = port;
+}
+
+export function getSchedulerSessionPort(): SchedulerSessionPort | undefined {
+  return activePort;
+}
+
