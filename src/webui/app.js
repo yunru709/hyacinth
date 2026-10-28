@@ -1056,16 +1056,22 @@
           appendMsg('error', (payload && payload.message) || '未知错误');
         }
         break;
-      case 'message.interrupt':
+      case 'message.interrupt': {
         showThinking(false);
+        // 去重：只有「确实还在 busy」时才算一次有效中断。重复的 interrupt 事件（双击/连点/双发）
+        // 此时 chatBusy 已为 false，只复位不再刷「已中断」⇒ 避免一串重复的「已中断」。
+        const wasBusy = chatBusy;
         setBusy(false);
         wsPostToParent({ type: 'hyacinth:pane-status', sessionId: currentSessionId, running: false });
-        if (currentView() === 'companion') {
-          companionSetDialogue('⏹ 已中断');
-        } else {
-          appendMsg('system', '⏹ 已中断');
+        if (wasBusy) {
+          if (currentView() === 'companion') {
+            companionSetDialogue('⏹ 已中断');
+          } else {
+            appendMsg('system', '⏹ 已中断');
+          }
         }
         break;
+      }
       case 'message.flush':
         showThinking(false);
         if (currentView() === 'companion') companionResetDialogue(companionDialogueBuf);
