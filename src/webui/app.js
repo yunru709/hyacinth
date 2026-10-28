@@ -5101,6 +5101,13 @@
   }
 
   function bindPreviewDock() {
+    // 结构自愈（2026-10-28 修「文件查看器跑到左下」）：预览栏必须是 .body-area 的 flex 子项
+    // （.body-area 是 flex-row，它应是最右列）。HTML 解析曾把 .body-area 提前闭合，令
+    // #preview-dock 沦为 #app-shell（flex-column）的子项 ⇒ 掉到左下/底部。这里发现父节点
+    // 不是 .body-area 就挪回末尾（幂等：正常结构下是 no-op）。
+    const baEl = document.querySelector('.body-area');
+    const dockEl0 = document.getElementById('preview-dock');
+    if (baEl && dockEl0 && dockEl0.parentElement !== baEl) baEl.appendChild(dockEl0);
     pvLoadPrefs();
     const dock = $('#preview-dock');
     if (!dock) return;
