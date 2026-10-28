@@ -108,7 +108,19 @@ export async function boot(options: BootOptions): Promise<BootResult> {
     //   刷新一次就在 ~/.agent/sessions 留一个 0 文件空壳（实测累积 136 个）✗
     //   ⇒ 与 TUI 新建路径一致：推迟到首条消息由 loop.materializeSessionIfNeeded() 物化 ✓
     // 目录已存在（同 id 重连/旧会话）⇒ 仍走 resume，语义不变 ✓
-    if (options.lazySession && !existsSync(sessionManager.getSessionDir(sessionId))) {
+    // ── 陪伴会话作为一等会话直接打开（2026-10-28 P1）──────────────────────────
+    // webui「开 companion 会话标签」带 ?session=<角色名>；角色名不是 sessions/ 桶里的 id，
+    // 而是 ~/.agent/companion/<角色>/ 目录。命中则解析到该目录、类型=companion，让陪伴会话
+    // 像普通会话一样在自己的 loop 里跑（不再靠 switchSession 劫持当前会话）。
+    const { homedir } = await import('node:os');
+    const pathMod = await import('node:path');
+    const companionDir = pathMod.join(homedir(), '.agent', 'companion', sessionId);
+    if (existsSync(pathMod.join(companionDir, 'meta.json'))) {
+      sessionDir = companionDir;
+      currentSessionId = sessionId;
+      sessionType = 'companion';
+      logger.info('Opened companion session as first-class session', { sessionId });
+    } else if (options.lazySession && !existsSync(sessionManager.getSessionDir(sessionId))) {
       sessionDir = sessionManager.getSessionDir(sessionId);
       currentSessionId = sessionId;
       sessionType = 'normal';
