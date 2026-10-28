@@ -146,7 +146,10 @@ export function installSchedulerSessionPort(deps: {
           try {
             await new ConversationStore().append(sessionManager.getSessionDir(deliverSessionId), {
               role: 'assistant',
-              content: `[定时任务 ${taskName}]\n${output}`,
+              // ⚠️ 2026-10-28 修：content 必须是**块数组**（conversation 正常格式）；存成字符串会让下游
+              // composer.ts `for (const b of content)` 逐字符遍历 + `'cache_control' in b` 抛
+              // "Cannot use 'in' operator ... in [定时任务…]"——重启加载该会话即崩。
+              content: [{ type: 'text', text: `[定时任务 ${taskName}]\n${output}` }],
             } as never);
           } catch {
             /* 交付失败不阻断销毁 */
