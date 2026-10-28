@@ -8288,6 +8288,14 @@
     $$('a[href^="#/"]').forEach((a) => {
       a.addEventListener('click', (e) => {
         const href = a.getAttribute('href');
+        // 方案A：陪伴入口（品牌/companion-entry，href="#/companion"）⇒ 开一个独立陪伴会话标签，
+        // 不再 goTo 外层 companion 视图（外层 loop 不是 companion，那视图是空的）。
+        if (href === '#/companion' && !embedMode) {
+          e.preventDefault();
+          toggleCompanion();
+          setNavDrawer(false);
+          return;
+        }
         if (href && href === location.hash) {
           e.preventDefault();
           navigate();
