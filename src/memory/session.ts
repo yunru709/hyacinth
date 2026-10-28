@@ -316,6 +316,7 @@ export class SessionManager {
       let sessionType: SessionType | undefined;
       let projectKey = '';
       let channel: string | undefined;
+      let ephemeral: boolean | undefined;
       try {
         const metaRaw = await fs.readFile(path.join(sessionDir, 'meta.json'), 'utf-8');
         const meta = JSON.parse(metaRaw);
@@ -323,6 +324,7 @@ export class SessionManager {
         if (typeof meta.type === 'string' && meta.type.length > 0) sessionType = meta.type as SessionType;
         projectKey = meta.projectKey ?? '';
         channel = meta.channel;
+        if (meta.ephemeral === true) ephemeral = true; // 一次性临时会话（定时任务 new）
       } catch { /* 旧 session 没有 meta.json，默认为 normal */ }
       return {
         id,
@@ -331,6 +333,7 @@ export class SessionManager {
         updatedAt: stat.mtime.toISOString(),
         type: sessionType ?? 'normal',
         channel,
+        ephemeral,
       };
     } catch {
       return null; // 无法访问的目录 → 跳过

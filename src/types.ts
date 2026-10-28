@@ -147,6 +147,8 @@ export interface Session {
   type?: SessionType;
   /** 创建此 session 的渠道：'webui' | 'tui' | 'feishu' 等 */
   channel?: string;
+  /** 一次性临时会话（定时任务 sessionPolicy='new' 建的）——列表应隐藏，5min 后销毁 */
+  ephemeral?: boolean;
 }
 
 export interface SessionStats {
