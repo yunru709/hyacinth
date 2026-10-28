@@ -770,11 +770,16 @@ export class HttpWebhookChannel implements ChannelHandler {
     const requested = parseSessionParam(req);
     let effectiveSessionId = sessionId;
     if (requested) {
-      if (!/^[A-Za-z0-9._-]{1,64}$/.test(requested)) {
+      // 陪伴会话（2026-10-28 P1）：id = 角色目录名，落在 ~/.agent/companion/<id>/（可能含中文），
+      // 不在 sessions/ 桶里 ⇒ 先按 companion 目录判定放行（不受 id 正则限制），再看普通桶。
+      const { homedir: _h } = await import('node:os');
+      const { join: _j } = await import('node:path');
+      const isCompanionSession = existsSync(_j(_h(), '.agent', 'companion', requested, 'meta.json'));
+      if (!isCompanionSession && !/^[A-Za-z0-9._-]{1,64}$/.test(requested)) {
         this.rejectWs(ws, 'INVALID_SESSION', '会话 id 非法');
         return;
       }
-      if (!existsSync(this.sessionManager.getSessionDir(requested))) {
+      if (!isCompanionSession && !existsSync(this.sessionManager.getSessionDir(requested))) {
         this.rejectWs(ws, 'SESSION_NOT_FOUND', `会话 "${requested}" 不存在`);
         return;
       }
