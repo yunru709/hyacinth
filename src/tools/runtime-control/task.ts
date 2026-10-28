@@ -104,6 +104,12 @@ export function createAddTaskTool(
           await scheduler.updateTask(task.id, { mode } as any);
         }
 
+        // 会话策略（默认 reuse）：决定触发时跑在哪个会话。
+        // 新任务显式落该字段 ⇒ handler 走「会话定向路由」；旧任务不带(undefined) ⇒ 保持旧行为。
+        const sessionPolicy = (args.sessionPolicy as 'reuse' | 'new' | undefined) ?? 'reuse';
+        task.sessionPolicy = sessionPolicy;
+        await scheduler.updateTask(task.id, { sessionPolicy } as any);
+
         const nextRun = task.nextRunAt
           ? new Date(task.nextRunAt).toLocaleString()
           : 'N/A';
