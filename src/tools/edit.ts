@@ -113,19 +113,31 @@ export class EditTool implements Tool {
     // 门控强度随模式而变（见 read-gate.ts 的安全边界表）：
     //   - 字符串模式：old_string 可自校验（猜错就匹配不上 → 当场拒绝）→ 完整或部分读过都算；
     //   - 行模式（line_start，无锚点）：改动可落在**没看到过的行**上 → 与 write 同等严格，只认完整读过。
-    const lastRead = oldString ? getAnyReadTime(filePath) : getLastReadTime(filePath);
-    if (lastRead === null) {
-      return refuseEditUnread(filePath, content, oldString, 'unread');
+    // 【2026-10-28 放宽（孑遗反馈"edit 门禁回合成本高"）】
+    // 字符串模式且 old_string 在当前内容里**确实命中**时跳过门禁：old_string 锚定替换 + content 是
+    // 本轮刚读的新鲜内容（上面 L104），命中即自证"你看到的就是你要改的"；而 bash/Get-Content 读过的
+    // 内容不计入 file-tracker 的 read ⇒ 旧逻辑会误拒、逼模型重发一轮。仅"未命中（假设错误）/行模式
+    // （无锚点，改动可落在没看过的行上）"仍走门禁。
+    let gateForced = true;
+    if (oldString) {
+      const probe = applyEol(oldString, detectEol(content));
+      if (this.countOccurrences(content, probe) > 0) gateForced = false;
     }
-    try {
-      const stat = await fs.stat(filePath);
-      // 注意：stat.mtimeMs 是高精度（带小数），Date.now() 是整数毫秒。
-      // 同一毫秒内 read 后 edit 时，mtimeMs 小数部分会让它 > lastRead，误判为"外部修改"。
-      // 加 50ms 容差吸收精度差异；真正的并发外部修改通常间隔更久。
-      if (stat.mtimeMs > lastRead + 50) {
-        return refuseEditUnread(filePath, content, oldString, 'stale');
+    if (gateForced) {
+      const lastRead = oldString ? getAnyReadTime(filePath) : getLastReadTime(filePath);
+      if (lastRead === null) {
+        return refuseEditUnread(filePath, content, oldString, 'unread');
       }
-    } catch {}
+      try {
+        const stat = await fs.stat(filePath);
+        // 注意：stat.mtimeMs 是高精度（带小数），Date.now() 是整数毫秒。
+        // 同一毫秒内 read 后 edit 时，mtimeMs 小数部分会让它 > lastRead，误判为"外部修改"。
+        // 加 50ms 容差吸收精度差异；真正的并发外部修改通常间隔更久。
+        if (stat.mtimeMs > lastRead + 50) {
+          return refuseEditUnread(filePath, content, oldString, 'stale');
+        }
+      } catch {}
+    }
 
     // TODO: 回收站机制 — edit 替换前把旧文件备份到 {sessionDir}/.recycle/{filename}.{timestamp}.bak
     //       当前 session 目录删除时（delete_session / cleanup 过期）回收站自动随 session 一起清掉，无需额外维护。
