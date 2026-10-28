@@ -9,9 +9,9 @@ import type { MessageContent } from '../types.js';
 import { extractFrames } from './ffmpeg.js';
 import { recordMediaFile } from '../media/index.js';
 
-// ── view_media 的 `capture` 抓源（2026-10-29，全程不落盘）────────────────
-// window:<标题片段> / camera → spawn WgcCap.exe <cmd> -（WGC / WinRT MediaCapture，base64 写 stdout）
-// → 直接进内存 imageStore，磁盘上不留任何 png。
+// ── view_media 的 `capture` 抓源（2026-10-29，不落盘版）──────────────────
+// spawn `~/.agent/bin/WgcCap.exe`：camera→`cam -`、window:<标题>→`win <标题> -`；
+// `-` ⇒ PNG 以 base64 写 stdout，这里读进内存直进 imageStore，全程不产生临时文件。
 async function runCapture(spec: string): Promise<{ error?: string; base64?: string }> {
   const os = await import('node:os');
   const { execFile } = await import('node:child_process');
@@ -19,34 +19,25 @@ async function runCapture(spec: string): Promise<{ error?: string; base64?: stri
   const execFileAsync = promisify(execFile);
   const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
   if (!fs.existsSync(exe)) return { error: 'Error: 抓源组件缺失（~/.agent/bin/WgcCap.exe 未构建）' };
-  let exeArgs: string[] | null = null;
-  if (spec.startsWith('window:')) {
+  let args: string[];
+  if (spec === 'camera') {
+    args = ['cam', '-'];
+  } else if (spec.startsWith('window:')) {
     const titleLike = spec.slice('window:'.length).trim();
     if (!titleLike) return { error: 'Error: capture=window:<标题片段> 需要标题片段' };
-    exeArgs = ['win', titleLike, '-'];
-  } else if (spec === 'camera') {
-    exeArgs = ['cam', '-'];
+    args = ['win', titleLike, '-'];
   } else {
     return { error: `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）` };
   }
   try {
-    const { stdout } = await execFileAsync(exe, exeArgs, {
-      timeout: 20000,
-      windowsHide: true,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const b64 = String(stdout || '').trim();
-    if (b64.length < 100) return { error: `Error: 抓源失败(${spec})：无有效输出（窗口没找到 / 摄像头被占用?）` };
+    const { stdout } = await execFileAsync(exe, args, { timeout: 20000, windowsHide: true, maxBuffer: 128 * 1024 * 1024, encoding: 'utf8' });
+    const b64 = (stdout || '').trim();
+    if (!b64 || b64.length < 100) return { error: `Error: 抓源失败(${spec})：无有效图像输出（窗口没找到 / 相机被占用?）` };
     return { base64: b64 };
   } catch (e) {
     return { error: `Error: 抓源失败(${spec})(${e instanceof Error ? e.message : String(e)})` };
   }
 }
-
-// 抓窗口 PS：EnumWindows 找标题 → 若最小化 SW_RESTORE → PrintWindow(flag2 抓窗口自身渲染，不依赖前台/不抢焦点) → 存 PNG。
-// 注：PrintWindow 对普通窗口可靠；Chrome 这类 GPU 窗口可能仍是黑图（那需 Windows Graphics Capture，另议）。
-const CAPTURE_WINDOW_PS = String.raw`param([string]$TitleLike, [string]$Out)
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;using System.Text;using System.Runtime.InteropServices;using System.Drawing;using System.Drawing.Imaging;
