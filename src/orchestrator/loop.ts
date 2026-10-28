@@ -1027,14 +1027,27 @@ export class AgentLoop {
     const prevRouter = this.activeRouter;
     const prevType = this._sessionType;
 
-    // 切出旧 Router
+    // 切出旧 Router —— ⚠️ 必须先把 _sessionType 置成**目标**再调 onDeactivate：
+    // onDeactivate 内部会 switchSession(目标模式的会话)，而 switchSession 的跨模式闸门用
+    // currentMode = this._sessionType 判定；若此刻仍停在旧模式名，闸门会以「目标(如 normal)
+    // ≠ 当前(companion)」拒绝 ⇒ 陪伴"出不来"。前置后闸门判据正确（2026-10-28 修复）。
+    this._sessionType = targetRouter.name as SessionType;
     if (prevRouter) {
-      await prevRouter.onDeactivate?.(this);
+      try {
+        await prevRouter.onDeactivate?.(this);
+      } catch (err) {
+        this._sessionType = prevType;   // onDeactivate 失败 → 回滚，退化成 no-op
+        this.logger?.warn?.('syncRouter: onDeactivate threw — rolling back', {
+          from: prevRouter.name,
+          to: targetRouter.name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     }
 
     // 切入新 Router（其 onActivate 负责切到对应类型的 session）
     this.activeRouter = targetRouter;
-    this._sessionType = targetRouter.name as SessionType;
     try {
       await this.activeRouter.onActivate?.(this);
     } catch (err) {

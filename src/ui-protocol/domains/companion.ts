@@ -313,7 +313,11 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
     async ensureSession(params: unknown): Promise<{ character: string }> {
       const p = params as { character?: string } | undefined;
       let charName = p?.character || '';
-      if (!charName) charName = readLastCharacter();
+      if (!charName) {
+        // 只认仍存在的角色：陈旧 .last-character（角色目录已删）不能拿来造幽灵会话
+        const lc = readLastCharacter();
+        if (lc && availableCharacters().includes(lc)) charName = lc;
+      }
       if (!charName) {
         const available = availableCharacters();
         if (available.length === 1) charName = available[0];
