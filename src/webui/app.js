@@ -926,6 +926,10 @@
         connected = true;
         setOnline('connected');
         resetReconnect();
+        // 【2026-10-29 修「重启后会话卡运行中」】后端 restart 会打断进行中的回合 ⇒ 那一轮永远
+        // 不再来 message.turn_info ⇒ chatBusy 永久 true、新消息只进队列、必须点「终止」才解锁。
+        // 重连（ui.connected）即复位 busy（若队列里有消息会被 drain 发出去）。
+        setBusy(false);
         loadHistory();
         if (!embedMode) loadSidebarRecent();  // embed 标签没有侧栏：省掉这次列表请求
         // 冷启/重载后无标签时，自动重开上次会话 —— 免手点，也是"重启后继续"能自动触发的关键（2026-10-28）
