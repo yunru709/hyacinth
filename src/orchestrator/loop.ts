@@ -2763,6 +2763,9 @@ export class AgentLoop {
   /** 释放资源：停路由器（含 WorldEngine）+ 停调度器 */
   async shutdown(): Promise<void> {
     await this.activeRouter.onDeactivate?.(this).catch(() => {});
+    // 兜底：无论 onDeactivate 是否异常/未覆盖到，强制停所有旁路 Agent（含 WorldEngine 的
+    // WorldTicker.setInterval）——否则 ticker 会比 loop 活得更久、持续写 world.json（2026-10-28 硬化）
+    try { await this.bypassManager?.deactivateAll(); } catch { /* ignore */ }
     await this.scheduler?.stop();
   }
 

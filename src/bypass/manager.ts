@@ -88,10 +88,17 @@ export class BypassManager {
     this.active = this.active.filter(a => a.name !== name);
   }
 
-  /** 根据模式名激活对应的旁路Agent */
-  async activateForMode(modeName: string): Promise<void> {
+  /** 根据模式名激活对应的旁路Agent。
+   *  opts.sessionType 提供时做纵深断言（2026-10-28 硬化）：陪伴专用 agent（如 world-engine，
+   *  modes=['companion']）绝不允许在非 companion 会话里被激活——即便调用方漏判也在此兜底拒绝。 */
+  async activateForMode(modeName: string, opts?: { sessionType?: string }): Promise<void> {
     // 先停用当前活跃的
     await this.deactivateAll();
+
+    if (modeName === 'companion' && opts?.sessionType && opts.sessionType !== 'companion') {
+      logger.warn(`activateForMode('companion') blocked: sessionType=${opts.sessionType}（非 companion 会话禁止激活陪伴专用旁路 agent）`);
+      return;
+    }
 
     const toActivate: BypassAgent[] = [];
     for (const agent of this.registry.values()) {

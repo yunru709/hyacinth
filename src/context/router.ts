@@ -492,15 +492,34 @@ export class CompanionRouter implements IContextRouter {
   }
 
   async onActivate(loop: any): Promise<void> {
-    // 角色名未设置时，尝试从 .last-character 恢复上次使用的角色
+    // 角色名未设置时的兜底恢复：**只允许「本来就是 companion 的会话」（resume/restart 续场）
+    // 从 .last-character 自动恢复**；从普通会话进入陪伴，必须由**显式激活**驱动
+    // （mode-switch 会带 params.activeCompanionName → 不进入本块）。
+    // 否则残留的 .last-character / .active-sessions.json 会让普通会话"幽灵复活"成陪伴、
+    // 重启世界引擎（WorldTicker.setInterval 持续写 world.json + 旁白注入）——
+    // 即 2026-10-28「陪伴内容泄露到普通会话 / 桌面壳反复刷新」的真因。
     if (!this.activeCompanionName) {
+      let preType = 'normal';
       try {
-        const last = await fs.readFile(
-          path.join(os.homedir(), '.agent', 'companion', '.last-character'), 'utf-8'
-        );
-        const restored = last.trim();
-        if (restored) this.activeCompanionName = restored;
-      } catch {}
+        const preMeta = JSON.parse(readFileSync(path.join(loop.sessionDir, 'meta.json'), 'utf-8'));
+        preType = typeof preMeta?.type === 'string' ? preMeta.type : 'normal';
+      } catch { preType = 'normal'; }
+      if (preType !== 'companion') return; // 普通会话 → 绝不自动起陪伴 / 世界引擎
+      // 续场恢复角色名：**优先用 session 目录名**（陪伴会话位于 ~/.agent/companion/<角色>/，
+      // 目录名即角色名；不依赖全局 .last-character，避免被清空/串台）；回退 .last-character 兼容旧路径。
+      let resumed = '';
+      try { resumed = path.basename(loop.sessionDir || ''); } catch {}
+      if (resumed && resumed !== 'normal' && resumed !== 'companion' && resumed !== 'sessions') {
+        this.activeCompanionName = resumed;
+      } else {
+        try {
+          const last = await fs.readFile(
+            path.join(os.homedir(), '.agent', 'companion', '.last-character'), 'utf-8'
+          );
+          const restored = last.trim();
+          if (restored) this.activeCompanionName = restored;
+        } catch {}
+      }
     }
     if (!this.activeCompanionName) return;
     const name = this.activeCompanionName;
@@ -541,12 +560,13 @@ export class CompanionRouter implements IContextRouter {
           | ((name: string, opts?: { worldDir?: string }) => WorldEngine)
           | undefined;
         if (createAgent) {
-          // 世界数据落本陪伴 session 目录的 world/ 子目录（与角色目录同根）
-          bypassMgr.register(createAgent(name, { worldDir: companionDir }));
+          // 世界数据落**本 session 目录**的 world/ 子目录（switchSession 后 sessionDir==companionDir；
+          // 显式用 sessionDir 保证 session 级隔离、绝不回退全局角色目录）——2026-10-28 硬化
+          bypassMgr.register(createAgent(name, { worldDir: loop.sessionDir }));
         }
       }
-      // 激活陪伴模式的旁路Agent
-      await bypassMgr.activateForMode('companion');
+      // 激活陪伴模式的旁路Agent（带 sessionType 断言：非 companion 会话会被 BypassManager 拒绝）
+      await bypassMgr.activateForMode('companion', { sessionType: 'companion' });
       // 获取激活后的 WorldEngine 引用
       this.worldEngineAgent = bypassMgr.getAgent('world-engine') as WorldEngine | null;
     }
