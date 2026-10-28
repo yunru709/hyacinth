@@ -130,6 +130,11 @@ export interface AgentFactory {
      */
     lazySession?: boolean;
   }): Promise<{ loop: ChannelSessionRunner }>;
+  /**
+   * 重启续工取用器（gateway 装配层注入）：消费 .restart-continuation，匹配当前会话/渠道则返回 message。
+   * UI 会话建好 loop 后调用它实现“重启后继续”；UI 侧不直连 supervisor（规则5）。
+   */
+  takeRestartContinuation?: (ctx: { launchChannel?: string; sessionId?: string }) => { message?: string; skippedChannel?: string };
 }
 
 /** 回复函数类型 */

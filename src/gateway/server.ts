@@ -18,7 +18,7 @@ import type { ChannelsInfo } from '../env/env-collector.js';
 import type { AgentFactory } from '../channels/interface.js';
 import { watchFile } from 'node:fs';
 import path from 'node:path';
-import { RESTART_SESSION_MARKER, removeMarker } from '../supervisor/protocol.js';
+import { RESTART_SESSION_MARKER, removeMarker, readMarker, parseRestartContinuation, takeRestartContinuation, RESTART_CONTINUATION_MARKER } from '../supervisor/protocol.js';
 
 const logger = createLogger('server');
 
@@ -163,6 +163,18 @@ export async function startServer(options: ServerOptions): Promise<ServerInstanc
         sessionManager,
         lazySession: options.lazySession,
       });
+    },
+    // 重启续工取用器：UI 会话建好 loop 调用；仅当续工属本会话+本渠道时消费并返回 message（2026-10-28）
+    takeRestartContinuation: (ctx) => {
+      try {
+        const raw = readMarker(RESTART_CONTINUATION_MARKER);
+        if (!raw) return {};
+        const cont = parseRestartContinuation(raw);
+        if (cont.channel && ctx.launchChannel && cont.channel !== ctx.launchChannel) return {};
+        if (cont.sessionId && ctx.sessionId && cont.sessionId !== ctx.sessionId) return {};
+        const taken = takeRestartContinuation({ launchChannel: ctx.launchChannel, sessionId: ctx.sessionId });
+        return { message: taken.message };
+      } catch { return {}; }
     },
   };
 

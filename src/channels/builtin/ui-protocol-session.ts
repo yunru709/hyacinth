@@ -839,6 +839,19 @@ export class UiProtocolSession {
       this.server.attach(this.adapter);
       this.server.broadcast('ui.connected', { sessionId: this.sessionId });
 
+      // 重启续工注入（webui 版“重启后继续”）：restart 工具 exit 42 前写 .restart-continuation{channel,sessionId,message}；
+      // 壳重拉后端、WebUI 重连到本会话这一刻，经 agentFactory 注入的取用器一次性取用、按“用户发消息”续跑 loop。
+      // 匹配/消费在装配层(server.ts)实现，UI 侧不直连 supervisor（守规则5）。
+      try {
+        const ch = this.backend.channel ?? 'webui';
+        const taken = agentFactory.takeRestartContinuation?.({ launchChannel: ch, sessionId: this.sessionId ?? undefined });
+        if (taken?.message) {
+          const msg = taken.message;
+          logger.info('restart-continuation injected', { sessionId: this.sessionId });
+          void Promise.resolve().then(() => this.loop?.run(msg)).catch(() => { /* 续工注入失败不影响连接 */ });
+        }
+      } catch { /* 续工注入失败不阻断连接 */ }
+
       // 陪伴场景推送：scene_render 落盘（被动产物、无事件源）⇒ UI 侧监视目录，
       // 变化即广播 COMPANION_SCENE，前端据此即时换背景（替代此前的 15s 轮询）。
       // 监视不可用 ⇒ 句柄 inactive，记一条 warn（前端仍有首次 loadCompanionScene 兜底），
