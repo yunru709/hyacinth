@@ -113,6 +113,13 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
     );
   }
 
+  // ── ask_user：交互式提问表单 ──────────────────────────────────────
+  // ⚠️ 2026-10-28 修：此前只在文件头 import（L27）却**从未 register** ⇒ 工具集里
+  //    根本没有 ask_user，agent 永远调不到、前端 showAskUser 永远等不到
+  //    message.ask_user 事件（"表单弹不出来 / 点不动"的真因就是它没注册）。
+  //    handler 按 loop 实例注入：loop.getAskUserHandler()（loop.ts 已就绪）。
+  toolRegistry.register(createAskUserTool(() => loop.getAskUserHandler()));
+
   // ── goal 模式工具（2026-10-10）─────────────────────────────────────
   // 进入（/goal 命令是用户路径；enter_goal 是 agent「应用户要求」的路径）与
   // 提交验收（finish_goal → 审查子 agent）。业务全在 loop 侧，工具零依赖。
