@@ -43,7 +43,8 @@ async function runCapture(spec: string): Promise<string> {
   return `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）`;
 }
 
-// 抓窗口 PS：EnumWindows 找标题 → 若最小化 SW_RESTORE → SW_SHOW+SetForegroundWindow → sleep400ms → 屏幕 BitBlt 按 rect → 存 PNG
+// 抓窗口 PS：EnumWindows 找标题 → 若最小化 SW_RESTORE → PrintWindow(flag2 抓窗口自身渲染，不依赖前台/不抢焦点) → 存 PNG。
+// 注：PrintWindow 对普通窗口可靠；Chrome 这类 GPU 窗口可能仍是黑图（那需 Windows Graphics Capture，另议）。
 const CAPTURE_WINDOW_PS = String.raw`param([string]$TitleLike, [string]$Out)
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -56,10 +57,7 @@ public class Cap {
  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
- [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
- [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
- [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
- [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst,int x,int y,int w,int h,IntPtr src,int sx,int sy,int rop);
+ [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
  public static IntPtr Find(string like){
    IntPtr found=IntPtr.Zero;
@@ -68,13 +66,10 @@ public class Cap {
  }
  public static bool Grab(IntPtr h, string outPath){
    if(IsIconic(h)) ShowWindow(h, 9);
-   ShowWindow(h, 5);
-   SetForegroundWindow(h);
-   System.Threading.Thread.Sleep(400);
+   System.Threading.Thread.Sleep(300);
    RECT r; if(!GetWindowRect(h, out r)) return false;
    int w=r.R-r.L, ht=r.B-r.T; if(w<=0||ht<=0) return false;
-   using(var bmp=new Bitmap(w,ht)){ using(var g=Graphics.FromImage(bmp)){ IntPtr dd=g.GetHdc(); IntPtr sd=GetDC(IntPtr.Zero);
-     BitBlt(dd,0,0,w,ht,sd,r.L,r.T,0x00CC0020); ReleaseDC(IntPtr.Zero,sd); g.ReleaseHdc(dd);} bmp.Save(outPath,ImageFormat.Png);}
+   using(var bmp=new Bitmap(w,ht)){ using(var g=Graphics.FromImage(bmp)){ IntPtr dd=g.GetHdc(); bool ok=PrintWindow(h,dd,2u); g.ReleaseHdc(dd); if(!ok) return false; } bmp.Save(outPath,ImageFormat.Png);}
    return true;
  }
 }
