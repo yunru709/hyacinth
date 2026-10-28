@@ -141,6 +141,14 @@ export interface ScheduledTask {
    */
   sessionId?: string;
   /**
+   * 会话策略（2026-10-28 定时任务重构）：
+   * - 'reuse'（默认）：跑在 `sessionId` 指向的会话；若该会话已被关闭，触发时按需
+   *   拉起它的 loop 再跑（`getOrCreateLoop`）。
+   * - 'new'：每次触发新建一个**临时会话**跑完即弃（完成后 5 分钟销毁），
+   *   结果推回创建时的渠道/会话，且不出现在会话列表里。
+   */
+  sessionPolicy?: 'reuse' | 'new';
+  /**
    * 渠道降级链（可选）。
    * 当 `channel` 指定的渠道离线时，按此数组顺序尝试降级。
    * 例：["webui", "tui"] → 先试 webui，再试 tui。
