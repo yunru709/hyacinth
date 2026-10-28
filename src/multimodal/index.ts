@@ -9,43 +9,39 @@ import type { MessageContent } from '../types.js';
 import { extractFrames } from './ffmpeg.js';
 import { recordMediaFile } from '../media/index.js';
 
-// ── view_media 的 `capture` 抓源（2026-10-29）──────────────────────────
-// window:<标题片段> → PowerShell Win32 抓指定窗口(恢复最小化+置前台+屏幕BitBlt)；
-// camera            → 需 ffmpeg（本机未装），暂返回提示。
-async function runCapture(spec: string): Promise<string> {
+// ── view_media 的 `capture` 抓源（2026-10-29，全程不落盘）────────────────
+// window:<标题片段> / camera → spawn WgcCap.exe <cmd> -（WGC / WinRT MediaCapture，base64 写 stdout）
+// → 直接进内存 imageStore，磁盘上不留任何 png。
+async function runCapture(spec: string): Promise<{ error?: string; base64?: string }> {
   const os = await import('node:os');
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const execFileAsync = promisify(execFile);
-  const tmpPng = path.join(os.tmpdir(), `hyacinth-capture-${Date.now()}.png`);
+  const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
+  if (!fs.existsSync(exe)) return { error: 'Error: 抓源组件缺失（~/.agent/bin/WgcCap.exe 未构建）' };
+  let exeArgs: string[] | null = null;
   if (spec.startsWith('window:')) {
     const titleLike = spec.slice('window:'.length).trim();
-    if (!titleLike) return 'Error: capture=window:<标题片段> 需要标题片段';
-    // 走 WGC（Windows.Graphics.Capture）：不抢焦点、GPU 窗口(Chrome等)也能抓、可抓被遮挡。
-    const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
-    if (!fs.existsSync(exe)) return 'Error: 窗口抓取组件缺失（~/.agent/bin/WgcCap.exe 未构建）';
-    try {
-      await execFileAsync(exe, ['win', titleLike, tmpPng], { timeout: 20000, windowsHide: true });
-    } catch (e) {
-      return `Error: 抓窗口失败(${e instanceof Error ? e.message : String(e)}): 窗口「${titleLike}」找不到或抓取异常`;
-    }
-    if (!fs.existsSync(tmpPng)) return `Error: 抓窗口无输出(窗口「${titleLike}」没找到?)`;
-    return tmpPng;
+    if (!titleLike) return { error: 'Error: capture=window:<标题片段> 需要标题片段' };
+    exeArgs = ['win', titleLike, '-'];
+  } else if (spec === 'camera') {
+    exeArgs = ['cam', '-'];
+  } else {
+    return { error: `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）` };
   }
-  if (spec === 'camera') {
-    // 相机：spawn 原生 WinRT 抓帧组件（Windows.Media.Capture），无需 ffmpeg。
-    const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
-    if (!fs.existsSync(exe)) return 'Error: 相机抓帧组件缺失（~/.agent/bin/WgcCap.exe 未构建）';
-    const camPng = path.join(os.tmpdir(), `hyacinth-cam-${Date.now()}.png`);
-    try {
-      await execFileAsync(exe, ['cam', camPng], { timeout: 15000, windowsHide: true });
-    } catch (e) {
-      return `Error: 相机抓帧失败(${e instanceof Error ? e.message : String(e)})`;
-    }
-    if (!fs.existsSync(camPng)) return 'Error: 相机抓帧无输出（摄像头被占用或权限不足?）';
-    return camPng;
+  try {
+    const { stdout } = await execFileAsync(exe, exeArgs, {
+      timeout: 20000,
+      windowsHide: true,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const b64 = String(stdout || '').trim();
+    if (b64.length < 100) return { error: `Error: 抓源失败(${spec})：无有效输出（窗口没找到 / 摄像头被占用?）` };
+    return { base64: b64 };
+  } catch (e) {
+    return { error: `Error: 抓源失败(${spec})(${e instanceof Error ? e.message : String(e)})` };
   }
-  return `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）`;
 }
 
 // 抓窗口 PS：EnumWindows 找标题 → 若最小化 SW_RESTORE → PrintWindow(flag2 抓窗口自身渲染，不依赖前台/不抢焦点) → 存 PNG。
