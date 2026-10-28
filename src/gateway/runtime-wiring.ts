@@ -211,13 +211,19 @@ export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
         }
         return;
       }
-      // ⚠️ 2026-10-28 回退 reuse（孑遗实报「任务跑完会话仍卡进行中」）：
-      //   `SessionService.getOrCreateLoop` 会给「已开着的 webui 会话」建**第二个 loop**
-      //   （webui 标签 loop 由 http-webhook / ui-protocol-session 用 createAgent 直接建，不进
-      //   SessionService 注册表）⇒ 两 loop 抢同一 sessionDir ⇒ 用户那一轮卡在锁上永不返回
-      //   ⇒ turn_info 不来 ⇒ 前端输入锁死成终止键、新输入进队列。
-      //   故 reuse **暂不在此处理**，落到下方旧行为（resolveChannelLoop → 本地/渠道 loop），消除重复 loop。
-      //   「触发时拉起已关闭会话」需先把 loop 统一成「每 session 单 loop」再做（否则必重复建）。
+      // reuse（2026-10-28 借 loop 统一重新启用）：定位 task.sessionId 指向的会话再跑。
+      //   - 会话**开着** → loop-registry 命中 ⇒ 复用该标签的 loop（同一个 loop，不再重复建 ⇒ 无 sessionDir 锁冲突）；
+      //   - 会话**已关闭** → getOrCreateLoop 恢复该会话的 loop 后跑（即"拉起已关闭会话"）。
+      // step1/step2 的注册表让适配器 getOrCreateLoop 先命中开着的 loop，故不会像旧实现那样重复建导致挂死。
+      if (task.sessionPolicy === 'reuse' && task.sessionId) {
+        try {
+          const target = await _port.getOrCreateLoop(_channel, task.sessionId);
+          await target.notifyTaskFired(task.name);
+        } catch (err) {
+          logger.error(`Reuse task failed: ${task.name}`, err instanceof Error ? err : undefined);
+        }
+        return;
+      }
     }
 
     // 模式隔离：任务标签 = session type（开放域），过滤判据 = 「标签 === 目标 loop 的
