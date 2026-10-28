@@ -556,9 +556,10 @@ export class CompanionRouter implements IContextRouter {
           | ((name: string, opts?: { worldDir?: string }) => WorldEngine)
           | undefined;
         if (createAgent) {
-          // 世界数据落**本 session 目录**的 world/ 子目录（switchSession 后 sessionDir==companionDir；
-          // 显式用 sessionDir 保证 session 级隔离、绝不回退全局角色目录）——2026-10-28 硬化
-          bypassMgr.register(createAgent(name, { worldDir: loop.sessionDir }));
+          // 世界数据落**本陪伴会话目录**的 world/ 子目录。⚠️switchSession 是「登记 pendingSessionDir、
+          // 轮次边界才落地」，此刻 loop.sessionDir 仍是旧 normal 目录 ⇒ **必须用目标 companionDir**，
+          // 否则 world 数据会写进错误会话目录（2026-10-28 独立调试发现）。
+          bypassMgr.register(createAgent(name, { worldDir: companionDir }));
         }
       }
       // 激活陪伴模式的旁路Agent（带 sessionType 断言：非 companion 会话会被 BypassManager 拒绝）

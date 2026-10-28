@@ -61,7 +61,10 @@ function readMetaType(sessionDir: string): string {
  * 其余字段从明确真源派生；**不**从 `.last-character`/全局文件"猜"当前角色（那是历史恢复路径的坑）。
  */
 export function resolveCompanionState(loop: any): CompanionSnapshot {
-  const sessionDir = String(loop?.sessionDir || '');
+  // ⚠️ switchSession 是「登记 pendingSessionDir、轮次边界才落地」⇒ onActivate/onDeactivate 期间
+  // loop.sessionDir 仍是旧目录。必须**以 pendingSessionDir 为有效 session**，否则状态会在转移中途错判
+  // （2026-10-28 独立调试实测：I3 因读到旧 sessionDir 而假阳性）。
+  const sessionDir = String((loop as any)?.pendingSessionDir || loop?.sessionDir || '');
   const sessionBase = sessionDir ? path.basename(sessionDir) : '';
   const sessionType = readMetaType(sessionDir);
   const mode: CompanionMode = sessionType === 'companion' ? 'companion' : 'normal';

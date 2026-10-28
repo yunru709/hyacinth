@@ -48,6 +48,11 @@ describe('resolveCompanionState', () => {
     const s = resolveCompanionState({ sessionDir: emptyDir, activeRouter: { name: 'normal' } });
     expect(s.mode).toBe('normal');
   });
+  it('pendingSessionDir 指向 companion → 视为 companion（切换未落地的有效态）', () => {
+    const s = resolveCompanionState({ sessionDir: normalDir, pendingSessionDir: compCharDir, activeRouter: { name: 'companion', activeCompanionName: 'alice' } });
+    expect(s.mode).toBe('companion');
+    expect(s.character).toBe('alice');
+  });
 });
 
 describe('checkCompanionInvariants', () => {
