@@ -1314,12 +1314,109 @@
       .catch((e) => appendMsg('error', `ask_user 应答失败: ${e && e.message}`));
   }
 
-  // ── 发送/停止按钮状态 ──
+  // ── 发送/停止按钮状态 + 消息队列（忙碌时入队，回合结束自动发下一条）──
+  let chatBusy = false;
+  /** 前端发送队列：忙碌时发送的消息先入队（不硬插进对话），回合结束逐条发。item={id,text,images} */
+  const sendQueue = [];
   function setBusy(busy) {
+    chatBusy = !!busy;
     const send = $('#chat-send-btn');
     const stop = $('#chat-stop-btn');
     if (send) send.hidden = busy;
     if (stop) stop.hidden = !busy;
+    if (!busy) drainSendQueue(); // 回合结束 → 尝试发下一条排队消息
+  }
+
+  /** 真正发送一条消息（原 sendChat 的发送主体：回显用户 + 斜杠分流 + message.chat） */
+  function dispatchChat(text, images) {
+    images = images || [];
+    appendMsg('user', text, images);
+    if (!connected) { appendMsg('error', '尚未连接后端，无法发送'); return; }
+    if (!images.length && text.startsWith('/')) {
+      if (cmdDropdown) cmdDropdown.hidden = true;
+      runSlashCommand(text);
+      return;
+    }
+    setBusy(true);
+    const content = text || '请看这张图。';
+    const payload = images.length ? { content, images } : { content };
+    client.request('message.chat', payload).catch((e) => {
+      setBusy(false);
+      appendMsg('error', `发送失败: ${(e && e.message) || '未知错误'}`);
+    });
+  }
+
+  /** 忙碌时入队（不立刻发，渲染到输入框上方队列面板） */
+  function enqueueSend(text, images) {
+    sendQueue.push({ id: 'q' + Date.now() + Math.random().toString(36).slice(2, 6), text, images: images || [] });
+    renderQueuePanel();
+  }
+
+  /** 回合结束：当前不忙且队列非空 ⇒ 发队首 */
+  function drainSendQueue() {
+    if (chatBusy || !sendQueue.length) return;
+    const item = sendQueue.shift();
+    renderQueuePanel();
+    dispatchChat(item.text, item.images);
+  }
+
+  /** 渲染输入框上方的队列面板（每条：拖动柄/文本 + 立即发送/编辑/删除） */
+  function renderQueuePanel() {
+    const box = $('#composer-queue');
+    if (!box) return;
+    if (!sendQueue.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '';
+    sendQueue.forEach((item) => {
+      const row = el('div', 'queue-item');
+      row.dataset.id = item.id;
+      row.appendChild(el('span', 'queue-handle', '⋮⋮'));
+      if (item.images && item.images.length) row.appendChild(el('span', 'queue-thumb', '🖼' + item.images.length));
+      const txt = el('span', 'queue-text', item.text || '（图片）');
+      txt.title = item.text || '';
+      row.appendChild(txt);
+      const acts = el('div', 'queue-acts');
+      const mk = (cls, icon, title, fn) => {
+        const b = el('button', 'queue-btn ' + cls); b.type = 'button'; b.title = title; b.innerHTML = icon;
+        b.addEventListener('click', fn); return b;
+      };
+      acts.appendChild(mk('queue-sendnow', '↑', '立即发送（打断当前回合并优先发送）', () => queueSendNow(item.id)));
+      acts.appendChild(mk('queue-edit', '✎', '编辑', () => queueEdit(item.id, row, txt)));
+      acts.appendChild(mk('queue-del', '✕', '删除', () => queueDelete(item.id)));
+      row.appendChild(acts);
+      box.appendChild(row);
+    });
+  }
+
+  function queueDelete(id) {
+    const i = sendQueue.findIndex((x) => x.id === id);
+    if (i >= 0) sendQueue.splice(i, 1);
+    renderQueuePanel();
+  }
+
+  function queueEdit(id, row, txtEl) {
+    const item = sendQueue.find((x) => x.id === id);
+    if (!item || row.querySelector('input.queue-edit-input')) return;
+    const inp = el('input', 'queue-edit-input'); inp.type = 'text'; inp.value = item.text;
+    txtEl.replaceWith(inp);
+    inp.focus();
+    const save = () => { item.text = inp.value.trim() || item.text; renderQueuePanel(); };
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } else if (e.key === 'Escape') { renderQueuePanel(); } });
+    inp.addEventListener('blur', save);
+  }
+
+  function queueSendNow(id) {
+    const i = sendQueue.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const [item] = sendQueue.splice(i, 1);
+    sendQueue.unshift(item); // 提到队首
+    renderQueuePanel();
+    if (chatBusy) {
+      // 打断当前回合 → message.stop → 之后 setBusy(false) 自动 drain 队首（即本条）
+      client.request('message.stop').catch(() => {});
+    } else {
+      drainSendQueue();
+    }
   }
 
   async function refreshState() {
@@ -5302,31 +5399,12 @@
     const text = input.value.trim();
     const images = pendingImages.slice();
     if (!text && !images.length) return;
-    appendMsg('user', text, images);
     input.value = '';
     pendingImages = [];
     renderAttachments();
-    if (!connected) {
-      appendMsg('error', '尚未连接后端，无法发送');
-      return;
-    }
-    // 斜杠命令 ⇒ 分流（此前整域闲置 ⇒ `/命令` 会被当普通消息发给模型 ✗ 已修 ✓）
-    // 带图时不走斜杠（命令不吃图，静默丢弃会让用户以为图发出去了）
-    if (!images.length && text.startsWith('/')) {
-      if (cmdDropdown) cmdDropdown.hidden = true;
-      runSlashCommand(text);
-      return;
-    }
-    setBusy(true);
-    // 发送即视为运行中：turn_start 回来之前也有一小段窗口，期间切会话同样会
-    // 让本轮中途换目录 ⇒ 守卫必须从按下发送的那一刻就生效
-    // 只有图没有文字 ⇒ 补一句自然的最小指令（协议要求 content 为非空字符串）
-    const content = text || '请看这张图。';
-    const payload = images.length ? { content, images } : { content };
-    client.request('message.chat', payload).catch((e) => {
-      setBusy(false);
-      appendMsg('error', `发送失败: ${(e && e.message) || '未知错误'}`);
-    });
+    // 忙碌中：入队到输入框上方队列面板（不硬插进对话），回合结束自动发下一条
+    if (chatBusy) { enqueueSend(text, images); return; }
+    dispatchChat(text, images);
   }
 
   // ════════════════════════════════════════════════════════════
