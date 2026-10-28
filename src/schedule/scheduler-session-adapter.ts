@@ -51,6 +51,38 @@ export function installSchedulerSessionPort(deps: {
 
   const getLoop = async (channel: string, sessionId: string) => {
     const entry = await sessionService.getOrCreateLoop(channel, sessionId);
+    // ⚠️ 2026-10-28：临时/后台 loop 的 collectHandler **没有 onEvent**（createCollectHandler 只实现了
+    // onText/onTurnStart 等），而 say 的音频是 `notify = this.outputHandler?.onEvent?.(...)` 发出的
+    // （loop.ts）⇒ SAY_VOICE 音频事件被静默丢弃 ⇒ 一次性任务 say 无声。
+    // 给它补挂 onEvent：捕获 tts.say_voice 的 audioWavBase64，用主机 SoundPlayer 播放（与 tui.ts 同法）。
+    const ch = entry.collectHandler as unknown as { onEvent?: (type: string, payload?: unknown) => void };
+    if (typeof ch.onEvent !== 'function') {
+      ch.onEvent = (type, payload) => {
+        if (type !== 'tts.say_voice') return;
+        const p = payload as { state?: string; audioWavBase64?: string } | undefined;
+        if (!p || p.state !== 'ready' || typeof p.audioWavBase64 !== 'string') return;
+        const b64 = p.audioWavBase64;
+        void (async () => {
+          try {
+            const { mkdirSync, writeFileSync } = await import('node:fs');
+            const { spawn } = await import('node:child_process');
+            const os = await import('node:os');
+            const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
+            mkdirSync(dir, { recursive: true });
+            const file = path.join(dir, `say-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
+            writeFileSync(file, Buffer.from(b64, 'base64'));
+            spawn(
+              'powershell',
+              ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+                `$p='${file}'; try { (New-Object Media.SoundPlayer $p).PlaySync() } finally { Remove-Item $p -ErrorAction SilentlyContinue }`],
+              { stdio: 'ignore', windowsHide: true },
+            ).on('error', () => { /* spawn 失败忽略 */ });
+          } catch (err) {
+            console.error('[scheduler-adapter] say host playback failed', err);
+          }
+        })();
+      };
+    }
     const loop = entry.loop as unknown as {
       notifyTaskFired?: (n: string) => Promise<void>;
       run: (i: string) => Promise<void>;
