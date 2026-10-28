@@ -20,7 +20,11 @@ interface LoopRef {
 }
 
 const openLoops = new Map<string, LoopRef>();
-const keyOf = (channel: string, sessionId: string): string => `${channel}:${sessionId}`;
+// 键**只用 sessionId**（会话 id 全局唯一：tui_/webui_/feishu_ 前缀天然区分渠道）。
+// ⚠️ 不能用 `${channel}:${sessionId}`：任务自动识别的 channel（如 add_task 得 'tui'）与
+// webui 标签注册的 channel（backend.channel 缺省 'webui'）常常不一致 ⇒ 注册表查不中 ⇒
+// reuse 又去重复建 loop ⇒ 抢 sessionDir 锁挂死（正是要修的那个坑）。
+const keyOf = (_channel: string, sessionId: string): string => sessionId;
 
 /** 登记一个开着的 UI loop（WS 连接、loop 就绪后调用） */
 export function registerOpenLoop(channel: string, sessionId: string, loop: unknown): void {
