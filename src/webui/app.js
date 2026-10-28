@@ -1300,7 +1300,7 @@
   function resolveAskUser() {
     if (!pendingAsk) return;
     const { id, questions } = pendingAsk;
-    const fields = $('#askuser-questions .ask-field');
+    const fields = $$('#askuser-questions .ask-field'); // ⚠️ 必须 $$（数组）：用 $ 只取首个元素 ⇒ fields[i] 恒 undefined ⇒ result 恒空（2026-10-28 修 ask_user 提交空答案 bug）
     const result = {};
     (questions || []).forEach((q, i) => {
       const field = fields[i];
