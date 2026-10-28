@@ -49,6 +49,11 @@ export function createAddTaskTool(
           items: { type: 'string' },
           description: '可选标签，用于分组和筛选（默认 []）。',
         },
+        sessionPolicy: {
+          type: 'string',
+          enum: ['reuse', 'new'],
+          description: '会话策略（默认 reuse）。reuse=触发时在「该任务会话」(task.sessionId) 里跑，会话被关闭也会拉起它；new=每次触发新建一次性临时会话跑完 5 分钟后销毁。',
+        },
         channel: {
           type: 'string',
           description: '任务触发的目标渠道（如 "tui"、"webui"、"feishu"）。不传则自动检测当前会话渠道。',
