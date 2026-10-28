@@ -382,7 +382,11 @@ export class HeartbeatScheduler {
 
     for (const task of dueTasks) {
       if (this.activeCount >= this.config.maxConcurrent) break;
-      this.executeTask(task);
+      // 防重复触发：慢任务（如 runOneShot 跑一整轮）执行期间 nextRunAt 还没更新，
+      // 下个心跳 tick 会把它当"仍到期"再触发。用 inFlight 标记，跑完再释放。
+      if (this.inFlight.has(task.id)) continue;
+      this.inFlight.add(task.id);
+      void this.executeTask(task).finally(() => this.inFlight.delete(task.id));
     }
   }
 
