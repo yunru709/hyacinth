@@ -9,6 +9,80 @@ import type { MessageContent } from '../types.js';
 import { extractFrames } from './ffmpeg.js';
 import { recordMediaFile } from '../media/index.js';
 
+// ── view_media 的 `capture` 抓源（2026-10-29）──────────────────────────
+// window:<标题片段> → PowerShell Win32 抓指定窗口(恢复最小化+置前台+屏幕BitBlt)；
+// camera            → 需 ffmpeg（本机未装），暂返回提示。
+async function runCapture(spec: string): Promise<string> {
+  const os = await import('node:os');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+  const tmpPng = path.join(os.tmpdir(), `hyacinth-capture-${Date.now()}.png`);
+  if (spec.startsWith('window:')) {
+    const titleLike = spec.slice('window:'.length).trim();
+    if (!titleLike) return 'Error: capture=window:<标题片段> 需要标题片段';
+    const psPath = path.join(os.tmpdir(), `hyacinth-capture-${Date.now()}.ps1`);
+    try {
+      fs.writeFileSync(psPath, CAPTURE_WINDOW_PS, 'utf-8');
+      await execFileAsync(
+        'powershell',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psPath, '-TitleLike', titleLike, '-Out', tmpPng],
+        { timeout: 20000, windowsHide: true },
+      );
+    } catch (e) {
+      try { fs.unlinkSync(psPath); } catch { /* ignore */ }
+      return `Error: 抓窗口失败(${e instanceof Error ? e.message : String(e)}): 窗口「${titleLike}」找不到或抓取异常`;
+    }
+    try { fs.unlinkSync(psPath); } catch { /* ignore */ }
+    if (!fs.existsSync(tmpPng)) return `Error: 抓窗口无输出(窗口「${titleLike}」没找到?)`;
+    return tmpPng;
+  }
+  if (spec === 'camera') {
+    return 'Error: capture=camera 需 ffmpeg（本机未安装）；可装 ffmpeg 用 dshow 抓帧，或走 webui 前端 getUserMedia';
+  }
+  return `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）`;
+}
+
+// 抓窗口 PS：EnumWindows 找标题 → 若最小化 SW_RESTORE → SW_SHOW+SetForegroundWindow → sleep400ms → 屏幕 BitBlt 按 rect → 存 PNG
+const CAPTURE_WINDOW_PS = String.raw`param([string]$TitleLike, [string]$Out)
+Add-Type -AssemblyName System.Drawing
+Add-Type @"
+using System;using System.Text;using System.Runtime.InteropServices;using System.Drawing;using System.Drawing.Imaging;
+public class Cap {
+ public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
+ [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc e, IntPtr l);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+ [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
+ [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
+ [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst,int x,int y,int w,int h,IntPtr src,int sx,int sy,int rop);
+ [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+ public static IntPtr Find(string like){
+   IntPtr found=IntPtr.Zero;
+   EnumWindows((h,l)=>{ if(IsWindowVisible(h)){ var sb=new StringBuilder(256); GetWindowText(h,sb,256); if(sb.ToString().IndexOf(like,StringComparison.OrdinalIgnoreCase)>=0){found=h;return false;} } return true; }, IntPtr.Zero);
+   return found;
+ }
+ public static bool Grab(IntPtr h, string outPath){
+   if(IsIconic(h)) ShowWindow(h, 9);
+   ShowWindow(h, 5);
+   SetForegroundWindow(h);
+   System.Threading.Thread.Sleep(400);
+   RECT r; if(!GetWindowRect(h, out r)) return false;
+   int w=r.R-r.L, ht=r.B-r.T; if(w<=0||ht<=0) return false;
+   using(var bmp=new Bitmap(w,ht)){ using(var g=Graphics.FromImage(bmp)){ IntPtr dd=g.GetHdc(); IntPtr sd=GetDC(IntPtr.Zero);
+     BitBlt(dd,0,0,w,ht,sd,r.L,r.T,0x00CC0020); ReleaseDC(IntPtr.Zero,sd); g.ReleaseHdc(dd);} bmp.Save(outPath,ImageFormat.Png);}
+   return true;
+ }
+}
+"@ -ReferencedAssemblies System.Drawing
+$h = [Cap]::Find($TitleLike)
+if($h -eq [IntPtr]::Zero){ Write-Output "NOTFOUND: $TitleLike"; exit 1 }
+if([Cap]::Grab($h,$Out)){ Write-Output "OK $Out" } else { Write-Output "GRABFAIL"; exit 1 }`;
+
 // ── MIME 映射 ───────────────────────────────────────────────────────
 
 export const IMAGE_MIME_MAP: Record<string, string> = {
