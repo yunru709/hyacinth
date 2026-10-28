@@ -306,6 +306,30 @@ export function createCompanionDomain(options: CompanionDomainOptions): DomainHa
       return { active, character, characters: availableCharacters() };
     },
 
+    // ── companion.ensureSession ────────────────────────────
+    // 方案A：仅**确保**角色会话目录存在（dir+meta.json+persona），**不切 Router / 不劫持当前会话**。
+    // webui「进陪伴」用它把会话建好，再 openSessionInTab(角色) 开独立标签
+    // （该 iframe 识别为 companion → 渲染沉浸视图）。
+    async ensureSession(params: unknown): Promise<{ character: string }> {
+      const p = params as { character?: string } | undefined;
+      let charName = p?.character || '';
+      if (!charName) charName = readLastCharacter();
+      if (!charName) {
+        const available = availableCharacters();
+        if (available.length === 1) charName = available[0];
+        else if (available.length > 1) {
+          throw new Error(`多个角色可选 (${available.join(', ')})：请在 设置→模式→陪伴角色 中选择，或指定 character`);
+        } else {
+          throw new Error('没有可用的陪伴角色。请先创建角色（companion_mode create）。');
+        }
+      }
+      const m = mgr();
+      m.setCharacter(charName);
+      m.getOrCreate();   // 建 dir + meta.json(type=companion) + persona（幂等，不切 Router）
+      writeLastCharacter(charName);
+      return { character: charName };
+    },
+
     // ── companion.activate ─────────────────────────────────
     // 对齐 companion_mode 工具（runtime-control.ts）的真实切换流程：
     //   1. 确定角色名（参数 > .last-character > 唯一可用角色）
