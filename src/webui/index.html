@@ -59,10 +59,6 @@
     <div class="tb-title" id="session-title">新会话</div>
     <!-- 并行会话：在新标签里开一条独立会话（后台也能继续跑）。
          标签条只在有 ≥2 个标签时出现，单会话用户看到的界面和以前完全一样。 -->
-    <button id="tab-new-btn-top" class="tb-icon" type="button"
-            title="新建并行会话（在新标签中打开）" aria-label="新建并行会话">
-      <i data-lucide="plus"></i>
-    </button>
 
     <div class="tb-spacer"></div>
 
@@ -76,6 +72,8 @@
       <div class="ctx-track"><div id="header-context-bar" style="width: 0%"></div></div>
       <span id="header-context-text">— / —</span>
     </div>
+    <span id="header-cache-text" style="font-size:11px;color:#9ca3af;margin-left:8px;white-space:nowrap" title="上下文缓存命中率"></span>
+    <span id="header-tokens-text" style="font-size:11px;color:#9ca3af;margin-left:8px;white-space:nowrap" title="本会话累计 token（入/出）"></span>
 
     <div id="header-online" class="online-pill" title="正在连接后端…">
       <span id="header-online-dot" style="background-color:#6b7280"></span>

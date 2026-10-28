@@ -2614,3 +2614,41 @@ html.is-embed .session-tabs,
 html.is-embed #nav-backdrop { display: none !important; }
 html.is-embed #hyacinth-main { height: 100%; }
 html.is-embed .body-area { height: 100%; }
+
+/* ── ask_user 表单（卡片式：编号选项 + 其他补充 + 提交）2026-10-28 ── */
+.askuser-box { min-width: 320px; max-width: 520px; }
+.askuser-box .ask-field { margin-bottom: 14px; }
+.askuser-box .ask-q { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--hyacinth-foreground); }
+.askuser-box .ask-opts { display: flex; flex-direction: column; gap: 6px; }
+.askuser-box .ask-opt { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--hair-strong); border-radius: 10px; cursor: pointer; transition: background .12s, border-color .12s; }
+.askuser-box .ask-opt:hover { background: var(--s2); }
+.askuser-box .ask-opt.is-sel { border-color: var(--hyacinth-primary); background: var(--tint); }
+.askuser-box .ask-idx { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; font-size: 11px; border-radius: 6px; background: var(--s2); color: var(--hyacinth-muted-foreground); }
+.askuser-box .ask-opt.is-sel .ask-idx { background: var(--hyacinth-primary); color: #fff; }
+.askuser-box .ask-opt-txt { flex: 1 1 auto; font-size: 13px; }
+.askuser-box .ask-check { width: 14px; height: 14px; flex: 0 0 auto; border-radius: 50%; border: 1.5px solid var(--hair-strong); }
+.askuser-box .ask-opt.is-sel .ask-check { border-color: var(--hyacinth-primary); background: var(--hyacinth-primary); }
+.askuser-box .ask-opt-custom { margin-top: 6px; }
+.askuser-box .ask-opt-custom input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--hair-strong); background: transparent; color: inherit; font-size: 13px; }
+
+/* ask_user 参考风格（分页头/箭头/铅笔/圆点）2026-10-28 */
+.askuser-box { min-width: 340px; max-width: 560px; }
+.askuser-box .au-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.askuser-box .au-page { font-size: 12px; color: var(--hyacinth-muted-foreground); }
+.askuser-box .au-close { border: 0; background: transparent; color: var(--hyacinth-muted-foreground); font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.askuser-box .au-close:hover { background: var(--s2); }
+.askuser-box .ask-field { margin-bottom: 14px; }
+.askuser-box .ask-q { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--hyacinth-foreground); }
+.askuser-box .ask-opts { display: flex; flex-direction: column; gap: 4px; }
+.askuser-box .ask-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; cursor: pointer; transition: background .12s; }
+.askuser-box .ask-opt:hover { background: var(--s2); }
+.askuser-box .ask-opt.is-sel { background: var(--s2); }
+.askuser-box .ask-idx { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; font-size: 11px; border-radius: 6px; background: var(--s3, var(--s2)); color: var(--hyacinth-muted-foreground); }
+.askuser-box .ask-opt.is-sel .ask-idx { background: var(--hyacinth-primary); color: #fff; }
+.askuser-box .ask-opt-txt { flex: 1 1 auto; font-size: 13px; }
+.askuser-box .au-arrow { color: var(--hyacinth-muted-foreground); font-size: 16px; opacity: 0; transition: opacity .12s; }
+.askuser-box .ask-opt:hover .au-arrow { opacity: 1; }
+.askuser-box .ask-opt.is-sel .au-arrow { opacity: 1; color: var(--hyacinth-primary); }
+.askuser-box .au-custom { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+.askuser-box .au-pencil { color: var(--hyacinth-muted-foreground); }
+.askuser-box .au-custom input { flex: 1 1 auto; border: 0; background: transparent; color: inherit; font-size: 13px; outline: none; }

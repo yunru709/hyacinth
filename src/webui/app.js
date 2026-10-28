@@ -356,8 +356,26 @@
       bar.style.width = Math.max(0, Math.min(100, (used / max) * 100)) + '%';
     }
     if (used != null && text) text.textContent = `${fmtTokens(used)} / ${fmtTokens(max)}`;
+    if (embedMode) wsPostToParent({ type: 'hyacinth:ctx', tokensUsed: used, maxContextTokens: max });
   }
 
+  // 由对话区 iframe 转发的会话上下文数据渲染（父页上下文条 / 缓存命中 / 累计 token）
+  function renderHeaderCtx(ctx) {
+    const bar = $('#header-context-bar');
+    const text = $('#header-context-text');
+    const cacheEl = $('#header-cache-text');
+    const tokEl = $('#header-tokens-text');
+    const c = ctx || {};
+    const used = c.tokensUsed != null ? c.tokensUsed : (c.contextTokensUsed != null ? c.contextTokensUsed : null);
+    const max = c.maxContextTokens || 0;
+    if (bar) bar.style.width = (used != null && max > 0) ? Math.max(0, Math.min(100, (used / max) * 100)) + '%' : '0%';
+    if (text) text.textContent = (used != null) ? `${fmtTokens(used)} / ${fmtTokens(max)}` : '— / —';
+    let rate = c.cacheHitRate != null ? c.cacheHitRate : c.cacheHitRateAvg;
+    if (rate != null) rate = rate <= 1 ? rate * 100 : rate;
+    if (cacheEl) cacheEl.textContent = (rate != null) ? `缓存 ${Math.round(rate * 10) / 10}%` : '';
+    const ti = c.totalInputTokens; const to = c.totalOutputTokens;
+    if (tokEl) tokEl.textContent = (ti != null || to != null) ? `累计 入${fmtTokens(ti || 0)} 出${fmtTokens(to || 0)}` : '';
+  }
   function updateHeader(snap) {
     if (!snap) return;
     const name = $('#header-model-name');
@@ -370,6 +388,7 @@
     if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
     if (text) text.textContent = `${fmtTokens(snap.tokensUsed)} / ${fmtTokens(snap.maxContextTokens)}`;
     if (snap.maxContextTokens) lastMaxContextTokens = snap.maxContextTokens;   // 供迭代级刷新复用 ✓
+    if (embedMode) wsPostToParent({ type: 'hyacinth:ctx', snap });
   }
 
   // ════════════════════════════════════════════════════════════
@@ -381,9 +400,19 @@
     histPending = [];
   }
 
+  // 自动跟随：只在用户已贴底(gap<80px)时才滚到底；用户上翻看历史时不打断（2026-10-28 修）
+  let _chatStick = true;
+  let _chatStickBound = false;
   function scrollChat() {
     const ml = $('#message-list');
-    if (ml) ml.scrollTop = ml.scrollHeight;
+    if (!ml) return;
+    if (!_chatStickBound) {
+      _chatStickBound = true;
+      ml.addEventListener('scroll', () => {
+        _chatStick = (ml.scrollHeight - ml.scrollTop - ml.clientHeight) < 80;
+      }, { passive: true });
+    }
+    if (_chatStick) ml.scrollTop = ml.scrollHeight;
   }
 
   function bubbleUser(text, images, timestamp) {
@@ -644,8 +673,20 @@
   // 它藏在 say 的 tool_call 里（input.content）⇒ 原先一律当折叠小条渲染，
   // 于是刷新后**回复被埋在 JSON 里** ✗ ⇒ 现在认出 say 并单独渲染 ✓
   let histPending = [];   // 延迟渲染：折不折叠取决于「后面有没有交付」✓
+  // 「无 say」会话的助手回复是以一串 text 增量事件下发 ⇒ 历史回放需把同一回合的 text
+  // 累积成一条助手气泡（否则每个增量成一段碎片、还夹着思考中…，重开就是一团乱）2026-10-28
+  let histTurnText = '';
 
   function histPush(node) { if (node) histPending.push(node); }
+
+  /** 把本回合累积的助手正文作为一条气泡渲染，并收起过程块（无 say 会话的关键修复） */
+  function flushHistTurn() {
+    if (!histTurnText.trim()) return;
+    flushHistoryProcess(true);
+    const ml = $('#message-list');
+    if (ml) { const dw = bubbleAssistant(histTurnText, { delivery: true }); if (dw) ml.appendChild(dw); }
+    histTurnText = '';
+  }
 
   /** 冲刷过程块：collapse=true（后面有交付）⇒ 收起；false ⇒ **保持展开**（不藏正文 ✓） */
   function flushHistoryProcess(collapse) {
@@ -653,7 +694,7 @@
     const ml = $('#message-list');
     if (ml) {
       const det = el('details', 'process-group');
-      det.open = !collapse;
+      det.open = false;   // 历史过程块一律收起(2026-10-28)
       det.appendChild(el('summary', '', `过程（${histPending.length}）`));
       const body = el('div', 'process-body');
       for (const n of histPending) body.appendChild(n);
@@ -676,6 +717,7 @@
     // ① say 交付 ⇒ 醒目气泡，并把之前累积的过程收起 ✓
     const sayText = historySayText(m);
     if (sayText) {
+      flushHistTurn();
       flushHistoryProcess(true);
       const dwrap = bubbleAssistant(sayText, { delivery: true, time: m.timestamp });
       ml.appendChild(dwrap);
@@ -688,15 +730,17 @@
     switch (type) {
       case 'user_input':
       case 'user':
-        flushHistoryProcess(false);
+        flushHistTurn();
+        flushHistoryProcess(true);
         ml.appendChild(bubbleUser(content, undefined, m.timestamp));
         break;
       case 'text':
       case 'assistant':
-        histPush(el('div', 'process-text', content));
+        histTurnText += content;
         break;
       case 'thinking':
-        histPush(bubbleThinking(content));
+        // 历史 thinking 多为空内容（渲染成"思考中…"占位、无信息）⇒ 跳过，避免重开满屏「思考中…」(2026-10-28)
+        if (content && String(content).trim()) histPush(bubbleThinking(content));
         break;
       case 'tool_call':
         histPush(bubbleTool(
@@ -741,7 +785,8 @@
         return;
       }
       msgs.forEach(renderHistoryMsg);
-      flushHistoryProcess(false);
+      flushHistTurn();
+      flushHistoryProcess(true);
       scrollChat();
       // 档位是会话级的：切会话 = 换一套权限状态，这里顺手对齐一次
       //（否则按钮上还写着上个会话的档位，用户会以为"设置丢了"）
@@ -878,6 +923,13 @@
         resetReconnect();
         loadHistory();
         if (!embedMode) loadSidebarRecent();  // embed 标签没有侧栏：省掉这次列表请求
+        // 冷启/重载后无标签时，自动重开上次会话 —— 免手点，也是"重启后继续"能自动触发的关键（2026-10-28）
+        if (!embedMode && tabs.length === 0) {
+          try {
+            const lastSess = localStorage.getItem('hyacinth.lastSession');
+            if (lastSess) openSessionInTab(lastSess, '');
+          } catch (e) { /* ignore */ }
+        }
         // 通知父页"这个标签已就绪、绑定的是哪条会话"（父页据此回填标题/去重）
         wsPostToParent({ type: 'hyacinth:pane-ready', sessionId: currentSessionId });
         // 模型按钮的文案要等 WS 通了才能拉（bindModelPicker 在连接前就跑过一次，
@@ -1196,22 +1248,44 @@
     const box = $('#askuser-questions');
     if (!box) return;
     box.innerHTML = '';
+    const n = payload.questions.length;
+    const head = el('div', 'au-head');
+    head.appendChild(el('span', 'au-page', n > 1 ? ('1 / ' + n) : '1 / 1'));
+    const close = el('button', 'au-close', '✕');
+    close.type = 'button';
+    close.addEventListener('click', () => { const d = $('#askuser-dialog'); if (d) d.hidden = true; pendingAsk = null; });
+    head.appendChild(close);
+    box.appendChild(head);
     (payload.questions || []).forEach((q, i) => {
       const field = el('div', 'ask-field');
-      field.appendChild(el('label', 'ask-q', `${i + 1}. ${q.question}`));
-      if (q.options && q.options.length) {
-        const sel = el('select');
-        (q.options || []).forEach((o) => {
-          const opt = el('option', '', o);
-          sel.appendChild(opt);
+      field.dataset.qi = String(i);
+      field.appendChild(el('div', 'ask-q', q.question));
+      const opts = el('div', 'ask-opts');
+      (q.options || []).forEach((o, oi) => {
+        const row = el('div', 'ask-opt');
+        row.dataset.val = o;
+        row.appendChild(el('span', 'ask-idx', String(oi + 1)));
+        row.appendChild(el('span', 'ask-opt-txt', o));
+        row.appendChild(el('span', 'au-arrow', '›'));
+        row.addEventListener('click', () => {
+          if (q.multiSelect) {
+            row.classList.toggle('is-sel');
+          } else {
+            opts.querySelectorAll('.ask-opt').forEach((x) => x.classList.remove('is-sel'));
+            row.classList.add('is-sel');
+          }
         });
-        field.appendChild(sel);
-      }
+        opts.appendChild(row);
+      });
+      if ((q.options || []).length) field.appendChild(opts);
       if (q.customInput !== false) {
+        const wrap = el('div', 'au-custom');
+        wrap.appendChild(el('span', 'au-pencil', '✎'));
         const input = el('input');
         input.type = 'text';
-        input.placeholder = q.customInput === true ? '输入…' : '自定义输入（可选）';
-        field.appendChild(input);
+        input.placeholder = '其他补充…';
+        wrap.appendChild(input);
+        field.appendChild(wrap);
       }
       box.appendChild(field);
     });
@@ -1222,14 +1296,13 @@
   function resolveAskUser() {
     if (!pendingAsk) return;
     const { id, questions } = pendingAsk;
-    const fields = $$('#askuser-questions .ask-field');
+    const fields = $('#askuser-questions .ask-field');
     const result = {};
     (questions || []).forEach((q, i) => {
       const field = fields[i];
       if (!field) return;
       const answers = [];
-      const sel = field.querySelector('select');
-      if (sel && sel.value) answers.push(sel.value);
+      field.querySelectorAll('.ask-opt.is-sel').forEach((x) => { if (x.dataset.val) answers.push(x.dataset.val); });
       const input = field.querySelector('input');
       if (input && input.value.trim()) answers.push(input.value.trim());
       if (answers.length > 0) result[q.question] = answers;
@@ -3247,6 +3320,13 @@
     });
     // 弹层内部的点击不能冒到 document 上（否则刚点开就被"点外部关闭"收掉）
     pop.addEventListener('click', (e) => e.stopPropagation());
+    // 移出整个弹层（含右侧详情卡，DOM 上是 pop 子节点 ⇒ 进详情不触发）即收起详情，
+    // 避免详情卡一直悬浮在界面上关不掉（2026-10-28 孑遗报）
+    pop.addEventListener('mouseleave', () => {
+      const d = $('#model-detail');
+      if (d) d.hidden = true;
+      $('#model-list .model-item').forEach((x) => x.classList.remove('is-hover'));
+    });
     document.addEventListener('click', () => { if (!pop.hidden) modeOpen(false); });
     // rAF 再算一次：resize 回调可能落在布局完成前一帧，读到的还是旧坐标
     //（实测在切换设备尺寸时会把弹层放到偏右 130px 的位置）
@@ -3378,7 +3458,7 @@
 
   function fmtTokens(n) {
     const v = Number(n) || 0;
-    if (v >= 1048576) return Math.round(v / 1048576) + 'M';
+    if (v >= 1000000) return (Math.round(v / 100000) / 10) + 'M';
     if (v >= 1024) return Math.round(v / 1024) + 'K';
     return String(v);
   }
@@ -3398,6 +3478,7 @@
     const cnt = $('#model-pop-count');
     if (!box) return;
     box.innerHTML = '';
+    let shown = 0;
     if (!modelPick.models.length) {
       box.appendChild(el('div', 'model-item-meta', '暂无可用模型（先到模型页配置提供商密钥）'));
       if (cnt) cnt.textContent = '';
@@ -3405,6 +3486,9 @@
     }
     for (const m of modelPick.models) {
       const active = m.provider === modelPick.provider && m.id === modelPick.model;
+      // 只显示已配置密钥的厂商的模型（当前活跃永远保留）—— 列表更干净（2026-10-28 孑遗要求）
+      if (modelPick.ready.size > 0 && !modelPick.ready.has(m.provider) && !active) continue;
+      shown++;
       // 不按"是否配了密钥"禁用列表项：listProviders 的 configured 是**启发式**
       // （没有 envKey 的在线厂商会被误判为已配置 —— 实测 commandcode 就是如此），
       // 拿它当门禁会出现"看着能点、点了报 Provider not found"或"能跑却灰着"。
@@ -3419,7 +3503,7 @@
       b.dataset.model = m.id;
       const main = el('span', 'model-item-main');
       main.appendChild(el('span', 'model-item-name', m.name));
-      const meta = [fmtTokens(m.contextWindow) + ' 上下文'];
+      const meta = [m.provider, fmtTokens(m.contextWindow) + ' 上下文'];
       if (m.reasoning) meta.push('支持思考');
       if (m.status === 'preview') meta.push('预览');
       if (maybeUnconfigured) meta.push('未配置密钥');
@@ -3432,7 +3516,8 @@
       b.addEventListener('focus', () => showModelDetail(m, b));
       box.appendChild(b);
     }
-    if (cnt) cnt.textContent = modelPick.models.length + ' 个';
+    if (shown === 0) box.appendChild(el('div', 'model-item-meta', '暂无已配置密钥的模型（先到模型页配置提供商密钥）'));
+    if (cnt) cnt.textContent = shown + ' 个';
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* 图标缺失不影响功能 */ } }
   }
 
@@ -6240,6 +6325,7 @@
     document.documentElement.setAttribute('data-code-tone', THEME_DARK.has(themeId) ? 'dark' : 'light');
   }
 
+
   function applyTheme(name) {
     // 目录未就绪 + id 不在兜底目录里 ⇒ 无法判定真假。先把属性写上去（样式照常生效），
     // 记下来等目录到齐再校；**不回落、不写 localStorage**，避免把误判结果固化。
@@ -6264,6 +6350,8 @@
     try { localStorage.setItem('hyacinth.theme', id); } catch (e) { /* 隐私模式忽略 */ }
     probeUserBg(id);
     syncThemeCards(id);
+    // 同步对话区 iframe（同源）：否则切主题后 iframe 内文档停旧主题 => 侧栏深/对话区白（2026-10-28 修）
+    try { document.querySelectorAll('iframe.chat-pane-frame').forEach(function (fr) { try { var d = fr.contentDocument; if (d && d.documentElement) d.documentElement.setAttribute('data-theme', id); } catch (_) {} }); } catch (_) {}
     notifyShellTheme();
   }
 
@@ -7804,6 +7892,7 @@
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     activeTabId = tab.id;
+    if (tab.sessionId) { try { localStorage.setItem('hyacinth.lastSession', tab.sessionId); } catch (e) { /* ignore */ } }
     tabs.forEach((t) => { if (t.pane) t.pane.hidden = t.id !== activeTabId; });
     renderTabs();           // 内部同步顶栏标题
     renderSidebarRecent();  // 侧栏高亮同步到当前可见标签
@@ -7930,6 +8019,7 @@
         return;
       }
       tab.sessionId = data.sessionId;
+      try { localStorage.setItem('hyacinth.lastSession', data.sessionId); } catch (e) { /* ignore */ }
       tab.title = tabTitleFor(data.sessionId, tab.title);
       tab.error = '';
       renderTabs();
@@ -7950,6 +8040,9 @@
       tab.running = false;
       renderTabs();
       renderSidebarRecent();
+    } else if (data.type === 'hyacinth:ctx') {
+      tab.ctx = Object.assign({}, tab.ctx || {}, data.snap || {}, (data.tokensUsed != null ? { tokensUsed: data.tokensUsed } : {}), (data.maxContextTokens != null ? { maxContextTokens: data.maxContextTokens } : {}));
+      if (tab.id === activeTabId) renderHeaderCtx(tab.ctx);
     }
   }
 
@@ -7981,8 +8074,6 @@
 
     const addBtn = $('#tab-new-btn');
     if (addBtn) addBtn.addEventListener('click', () => createFrameTab(null));
-    const addBtnTop = $('#tab-new-btn-top');
-    if (addBtnTop) addBtnTop.addEventListener('click', () => createFrameTab(null));
 
     const list = $('#session-tabs-list');
     if (list) {
