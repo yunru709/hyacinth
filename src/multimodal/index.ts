@@ -38,7 +38,17 @@ async function runCapture(spec: string): Promise<string> {
     return tmpPng;
   }
   if (spec === 'camera') {
-    return 'Error: capture=camera 需 ffmpeg（本机未安装）；可装 ffmpeg 用 dshow 抓帧，或走 webui 前端 getUserMedia';
+    // 相机：spawn 原生 WinRT 抓帧组件（Windows.Media.Capture），无需 ffmpeg。
+    const exe = path.join(os.homedir(), '.agent', 'bin', 'WgcCap.exe');
+    if (!fs.existsSync(exe)) return 'Error: 相机抓帧组件缺失（~/.agent/bin/WgcCap.exe 未构建）';
+    const camPng = path.join(os.tmpdir(), `hyacinth-cam-${Date.now()}.png`);
+    try {
+      await execFileAsync(exe, ['cam', camPng], { timeout: 15000, windowsHide: true });
+    } catch (e) {
+      return `Error: 相机抓帧失败(${e instanceof Error ? e.message : String(e)})`;
+    }
+    if (!fs.existsSync(camPng)) return 'Error: 相机抓帧无输出（摄像头被占用或权限不足?）';
+    return camPng;
   }
   return `Error: 未知 capture="${spec}"（支持 window:<标题> / camera）`;
 }
