@@ -553,7 +553,10 @@
           <input id="schedule-name" type="text" placeholder="任务名称" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground min-w-[140px]" />
           <select id="schedule-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
             <option value="daily">每天定点</option>
-            <option value="interval">每隔一段时间</option>
+            <option value="interval">固定间隔</option>
+            <option value="cron">cron 表达式</option>
+            <option value="fixed-time">单次定时</option>
+            <option value="random">随机</option>
           </select>
           <input id="schedule-value" type="text" placeholder="09:30 或 30（分钟）" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[190px]" />
           <button id="schedule-add-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
