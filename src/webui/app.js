@@ -2106,6 +2106,7 @@
     const metaBits = [];
     const modeLabel = t.mode === 'companion' ? '陪伴' : (t.mode || '');
     if (modeLabel) metaBits.push('模式 ' + modeLabel);
+    if (t.sessionPolicy) metaBits.push('策略 ' + (t.sessionPolicy === 'new' ? '一次性' : '复用'));
     if (t.sessionId) metaBits.push('会话 ' + String(t.sessionId).slice(-10));
     if (Array.isArray(t.tags) && t.tags.length) metaBits.push('标签 ' + t.tags.join('/'));
     if (t.lastRunAt) metaBits.push('上次 ' + fmtTime(t.lastRunAt));
