@@ -2437,6 +2437,17 @@
     scheduleBound = true;
     const refresh = $('#schedule-refresh-btn');
     if (refresh) refresh.onclick = () => { loadSchedule(); };
+    // 视觉/引导适配：切换调度类型时更新输入框 placeholder，提示正确填法
+    {
+      const _t = $('#schedule-type');
+      const _v = $('#schedule-value');
+      if (_t && _v) {
+        const phMap = { daily: 'HH:mm 例 09:30', interval: '间隔分钟 例 30', cron: '5 字段 例 0 9 * * *', 'fixed-time': 'HH:mm 或 ISO 例 09:30', random: '周期分钟,次数,最小间隔 例 60,5,5' };
+        const applyPh = () => { _v.placeholder = phMap[_t.value] || ''; };
+        _t.addEventListener('change', applyPh);
+        applyPh();
+      }
+    }
     const hint = (msg, ok) => {
       const h = $('#schedule-hint');
       if (!h) return;
