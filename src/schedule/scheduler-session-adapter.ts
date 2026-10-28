@@ -85,8 +85,31 @@ export function installSchedulerSessionPort(deps: {
       try {
         const h = await getLoop(channel, ephId);
         await h.runTask(taskName);
-        // 交付：把本次运行收集到的输出 append 回「任务原会话」，避免临时会话销毁后结果丢失
-        const output = h.getResponse().trim();
+        // ⚠️ getResponse() 取到的是临时会话「末轮」文本；而 say 不结束回合、agent 会继续多轮
+        // ⇒ getResponse 拿到的是困惑叙述（"没有新的任务指令…"），不是那句台词（2026-10-28 实测）。
+        // 改为从临时会话 conversation.jsonl 里提取「say 工具」的 input.content 作为交付内容。
+        let output = '';
+        try {
+          const convoPath = path.join(sessionManager.getSessionDir(ephId), 'conversation.jsonl');
+          const convo = await readFile(convoPath, 'utf-8');
+          for (const ln of convo.split('\n')) {
+            if (!ln.trim()) continue;
+            try {
+              const m = JSON.parse(ln) as { content?: unknown };
+              const arr = Array.isArray(m.content) ? m.content : [m.content];
+              for (const c of arr as Array<{ type?: string; name?: string; input?: { content?: unknown } }>) {
+                if (c && c.type === 'tool_use' && c.name === 'say' && typeof c.input?.content === 'string') {
+                  output = c.input.content.trim(); // 取最后一处 say 的台词
+                }
+              }
+            } catch {
+              /* 单行坏，跳过 */
+            }
+          }
+        } catch {
+          /* 读不到 conversation */
+        }
+        if (!output) output = h.getResponse().trim(); // 兜底：退回归档文本
         if (deliverSessionId && output) {
           try {
             await new ConversationStore().append(sessionManager.getSessionDir(deliverSessionId), {
