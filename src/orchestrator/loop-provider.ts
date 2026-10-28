@@ -458,12 +458,21 @@ export function subscribeConfig(
       if (!activeName) return;
       if (providerRouter.get(activeName)) {
         providerRouter.setDefault(activeName);
-      } else if (providerRouter.get('main')) {
-        // 启动初期 router 只以 'main' 注册了当前活跃 Provider
-        // （orchestrator-contributions：register('main', d.provider)），
-        // provider.active 的类型名尚未注册 —— 此时钉 'main' 与钉 provider.active
-        // 等价（'main' 按构造即当前活跃 Provider），否则钉住会被跳过。
-        providerRouter.setDefault('main');
+      } else {
+        // ⚠️ 治本（2026-10-29）：provider.active 未按名字注册时，**不要再盲钉 'main'**。
+        // 旧逻辑假设「启动初期 router 只注册了 'main'，且 'main' 即当前活跃 Provider」——
+        // 多 provider/通道并存后这个假设**不成立**：'main' 可能只是 providers.json 的默认厂商
+        // （本机 = deepseek/deepseek-flash），而用户配置的 provider.active 是 opencode。
+        // 盲钉 'main' ⇒ getRoutingInfo() 把"过时默认厂商"投影到模型面板/状态栏
+        // （实测：面板显示 deepseek-flash，而实际 chat 通道跑的是 opencode）。
+        // 正解：按 provider.active 现场从配置建 Provider 并注册，再钉它；建不出来才退回 'main'。
+        const created = tryCreateProviderFromConfig(deps, activeName);
+        if (created) {
+          providerRouter.register(activeName, created);
+          providerRouter.setDefault(activeName);
+        } else if (providerRouter.get('main')) {
+          providerRouter.setDefault('main');
+        }
       }
     } else if (mode === 'auto') {
       providerRouter.clearDefault();
