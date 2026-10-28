@@ -646,6 +646,33 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         return args;
     }
 
+    /// <summary>后端退出：agent 调 restart 工具时后端以 42 退出，壳需重新拉起后端</summary>
+    private void OnBackendExited(object? sender, EventArgs e)
+    {
+        if (_exiting) return;
+        int code = -1;
+        try { code = _backend?.ExitCode ?? -1; } catch { }
+        Debug.WriteLine($"[shell] backend exited code={code}");
+        if (code != 42) return;
+        try { BeginInvoke(new Action(() => { _ = RelaunchBackendAsync(); })); } catch { }
+    }
+
+    private async Task RelaunchBackendAsync()
+    {
+        try
+        {
+            Debug.WriteLine("[shell] agent restart(42) -> relaunch backend");
+            _spawnedBackend = false;
+            try { _backend?.Dispose(); } catch { }
+            _backend = null;
+            for (int i = 0; i < 40; i++) { if (!await HealthAsync()) break; await Task.Delay(250); }
+            await EnsureBackendAsync();
+            // 不重载页面：让对话区 iframe 的 WS 自动重连回原会话 ⟶ ui-protocol-session.initialize 重新触发
+            // ⟶ 续工注入自动生效。此前 Navigate(BaseUrl) 重载到根路由会丢掉会话，必须用户手点会话才继续
+            // （2026-10-28 孑遗实报）。WebView 的 WS 客户端自带退避重连（app.js reconnectTimer），后端就绪后自动连回。
+        }
+        catch (Exception ex) { Debug.WriteLine($"[shell] relaunch backend failed: {ex.Message}"); }
+    }
     private async Task<bool> EnsureBackendAsync()
     {
         if (await HealthAsync())
@@ -699,6 +726,11 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         _backend.ErrorDataReceived += (_, e) => AppendBackendLine(e.Data);
         _backend.BeginOutputReadLine();
         _backend.BeginErrorReadLine();
+        // agent 主动 restart（后端以 RESTART_EXIT_CODE=42 退出）⇒ 重新拉起后端：
+        // 新后端启动读会话快照(.restart-session)+续工标记(.restart-continuation)，恢复会话并续跑。
+        // 这就是复用 restart 工具实现"重启后继续"的壳侧那一环（2026-10-28）。
+        _backend.EnableRaisingEvents = true;
+        _backend.Exited += OnBackendExited;
         Debug.WriteLine($"[shell] 已拉起后端 pid={_backend?.Id}");
 
         var deadline = DateTime.UtcNow.AddSeconds(45);
@@ -744,12 +776,44 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         return Path.Combine(Path.GetTempPath(), "hyacinth-webview2");
     }
 
+    /// <summary>
+    /// 修复 WebView2 profile 里可能残留的「麦克风=阻止」内容设置。
+    /// 旧版本在运行期放行回调(PermissionRequested)生效前，getUserMedia 可能被 WebView2 默认拒掉、
+    /// 并把 blocked 写进 profile 的 content_settings.exceptions.media_stream_mic；这条缓存优先级
+    /// **高于**运行期放行 ⇒ 之后 getUserMedia 一直 NotAllowedError、连放行回调都不触发（2026-10-28 实测）。
+    /// 每次启动把本机 origin 的 media_stream_mic 从「阻止(2)」改成「允许(1)」。
+    /// 必须在 CoreWebView2Environment.CreateAsync 之前调用（此时 profile 未被锁、未被读进内存）。
+    /// </summary>
+    private static void SanitizeWebViewMicPermission(string userData)
+    {
+        try
+        {
+            var pref = Path.Combine(userData, "EBWebView", "Default", "Preferences");
+            if (!File.Exists(pref)) return;
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(pref)) as System.Text.Json.Nodes.JsonObject;
+            if (root?["profile"]?["content_settings"]?["exceptions"]?["media_stream_mic"] is not System.Text.Json.Nodes.JsonObject mic) return;
+            var changed = false;
+            foreach (var kv in System.Linq.Enumerable.ToList(mic))
+            {
+                var key = kv.Key;
+                if (!(key.StartsWith("http://127.0.0.1") || key.StartsWith("http://localhost") || key.StartsWith("http://[::1]"))) continue;
+                if (kv.Value is System.Text.Json.Nodes.JsonObject entry)
+                {
+                    var st = entry["setting"];
+                    if (st is not null && st.GetValue<int>() != 1) { entry["setting"] = 1; changed = true; }
+                }
+            }
+            if (changed) File.WriteAllText(pref, root.ToJsonString());
+        }
+        catch { /* profile 解析/写入失败都不该影响启动 */ }
+    }
     private async Task BootAsync()
     {
         try
         {
             var backendTask = Task.Run(() => EnsureBackendAsync()); // 后端(约1.7s)与WebView2初始化并行
             var userData = ResolveUserDataDir();
+            SanitizeWebViewMicPermission(userData);
 
             // 诊断用开关：本机 Electron 与 WebView2 同属"嵌入式 Chromium"、两者都起不来，
             // 而**系统 Chrome 正常** ⇒ 优先怀疑沙箱 / 崩溃上报器（crashpad）被安全软件拦截。
