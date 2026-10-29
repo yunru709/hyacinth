@@ -21,6 +21,7 @@
  */
 
 import { getSchedulerSessionPort } from '../schedule/session-port.js';
+import { getGlobalTriggerHub } from '../trigger/hub.js';
 import type { Tool } from '../tools/interface.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
 import type { WatchSpec } from './types.js';
