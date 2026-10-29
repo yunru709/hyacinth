@@ -95,6 +95,42 @@ export function createAddTaskTool(
       const channel = (args.channel as string | undefined) ?? getChannel?.();
       const fallback = args.fallback as string[] | undefined;
 
+      // ── 条件类（2026-10-29 自动化任务）─────────────────────────────
+      // 与时间类完全分开：不需要 scheduleType/schedule，由 WatchService 采样驱动。
+      const trigger = args.trigger as
+        | { type?: string; kind?: string; spec?: Record<string, unknown> }
+        | undefined;
+      if (trigger) {
+        if (trigger.type !== 'condition') return 'Error: trigger.type must be "condition"';
+        if (!trigger.kind) return 'Error: trigger.kind is required';
+        try {
+          const task = await scheduler.addTask(
+            name,
+            // 占位类型：条件任务的 calculateNextRun 恒为 null ⇒ 不参与心跳 tick
+            'interval',
+            { intervalMs: 60_000 } as unknown as ScheduledTask['schedule'],
+            { type: 'callback', target: name },
+            tags,
+            // ⚠️ 故意不传 channel / sessionId：
+            // 条件任务命中后只派发 tool-links（如 invoke say），不带 owner ⇒ 不唤醒会话。
+            // 若带上，就会「工具执行一次 + 再唤醒一轮对话」⇒ 同一件事做两遍。
+            undefined,
+            undefined,
+            { trigger: trigger as never },
+          );
+          return [
+            `Condition task created: ${task.name} (id: ${task.id})`,
+            `  Trigger: ${trigger.kind} ${JSON.stringify(trigger.spec ?? {})}`,
+            `  Enabled: ${task.enabled}`,
+            '',
+            '命中后事件会派发到 tool-links 清单（可配 invoke 直接执行工具）；本任务不唤醒会话。',
+            'Use list_tasks to see all tasks, remove_task to delete.',
+          ].join('\n');
+        } catch (err) {
+          return `Error creating condition task: ${(err as Error).message}`;
+        }
+      }
+
       if (!['interval', 'cron', 'daily', 'fixed-time', 'random'].includes(scheduleType)) {
         return `Error: invalid scheduleType "${scheduleType}". Must be one of: interval, cron, daily, fixed-time, random.`;
       }
