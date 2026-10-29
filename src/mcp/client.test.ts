@@ -31,7 +31,7 @@ describe('MCPClient.formatContentBlock — image 绝不内联', () => {
 
     expect(out.length).toBeLessThan(1000);                 // 不再是 78 万字符
     expect(out).not.toContain(BIG_B64.slice(0, 512));      // base64 必须消失
-    expect(out).toMatch(/\[Image saved: .+\.png \(\d/);    // 给出可用路径
+    expect(out).toMatch(/\[Image saved: .+\.png \(image\/png, [\d.]+ KB\)/);    // 给出可用路径
     expect(out).toContain('read(file_path=');
 
     // 落盘文件必须真实存在且字节数合理（≈585 KB 的 PNG 数据）
