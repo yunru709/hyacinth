@@ -66,6 +66,11 @@ export function installSchedulerSessionPort(deps: {
             : openLoop.run
               ? openLoop.run(`[Scheduled Task] "${n}" triggered.`)
               : Promise.resolve();
+        // 2026-10-29：非定时事件源（watch 等）自带提示词唤醒。
+        // 不走 notifyTaskFired，因为那条路径会套上「Your scheduled task ... has just been
+        // triggered」模板，对"监控项变化"是错的语义。
+        const runPrompt = (prompt: string) =>
+          openLoop.run ? openLoop.run(prompt) : Promise.resolve();
         return { runTask, runPrompt, getResponse: () => '' };
       }
     } catch {
