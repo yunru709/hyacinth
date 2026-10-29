@@ -465,7 +465,13 @@ export async function runToolDispatch(ctx: ToolExecContext, toolCalls: ToolCall[
     const sanitized = sanitizeToolResult(withNotes);
     const skipBuffer = call?.name === 'read' && typeof call.input.file_path === 'string' &&
       call.input.file_path.startsWith(bufferDir);
-    const content = skipBuffer ? sanitized : ctx.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
+    // 读缓冲文件本身：不能再落盘（会套娃），但也**不能无上限放行**。
+    // 事故（2026-10-29）：此处原为 `skipBuffer ? sanitized` —— 模型 read 一个 781 KB 的
+    // 缓冲文件，78 万字符原样进历史（≈20 万 tokens），缓冲省下的上下文被一次读回来全还回去。
+    // capOnly = 剥离内联媒体 + 截断到阈值 + 提示用 offset/limit 分段读。
+    const content = skipBuffer
+      ? ctx.resultBuffer.capOnly(sanitized, call?.name ?? 'read')
+      : ctx.resultBuffer.maybeBuffer(sanitized, result.tool_use_id);
     const toolResultMessage: Message = {
       role: 'user',
       content: {
