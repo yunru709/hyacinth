@@ -36,7 +36,7 @@ async function findNameRunning(name: string): Promise<boolean> {
     const { stdout } = await execFileAsync(
       'tasklist',
       ['/FI', `IMAGENAME eq ${wanted}`, '/NH', '/FO', 'CSV'],
-      { timeout: 10_000, windowsHide: true, encoding: 'latin1' } as never,
+      { timeout: 10_000, windowsHide: true },
     );
     // 无匹配时 tasklist 输出的是本地化提示文字（中文系统为「信息: 没有运行的任务…」），
     // 因此不能用"输出非空"判断，必须找进程名本身。
