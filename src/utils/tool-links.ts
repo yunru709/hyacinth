@@ -451,3 +451,73 @@ export function resolveToolLinks(
   }
   return out;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 运行时注入 + 统一派发（2026-10-29，路线 B：「按断言自动执行其他工具」）
+//
+// 为什么需要"运行时注入"而不是各调用点自己拼：
+//   事件源现在不止 `afterToolExecute:*`（工具执行后），还有 `afterWatch:*`（监控命中）等
+//   来自业务核心的事件。它们都在 `utils/` 之上，不该各自去 import 工具注册表
+//   （会破坏分层）。所以装配层在启动时注入一次 registry + invoker，各处只调
+//   `runToolLinksForEvent(event, payload)`。
+// ────────────────────────────────────────────────────────────────────────────
+
+/** 调用工具的实现签名（装配层注入；本层只认签名） */
+export type ToolInvoker = (tool: string, args: Record<string, unknown>) => Promise<string>;
+
+export interface ToolLinkRuntime {
+  /** 已注册处理器的注册表 */
+  registry: ToolLinkRegistry;
+  /** 调用工具的能力（invoke 类需要；未提供时 invoke 处理器静默跳过） */
+  invokeTool?: ToolInvoker;
+  /** 清单来源；缺省用模块级 getCurrentToolLinks() */
+  getManifest?: () => ToolLinksManifest;
+}
+
+let runtime: ToolLinkRuntime | null = null;
+
+export function setToolLinkRuntime(rt: ToolLinkRuntime | null): void {
+  runtime = rt;
+}
+
+export function getToolLinkRuntime(): ToolLinkRuntime | null {
+  return runtime;
+}
+
+/**
+ * 统一派发：某事件发生时，按清单顺序执行所有声明在该事件上的处理器。
+ *
+ * 契约与 handler.run 一致：**任何处理器失败都不影响其它处理器**，
+ * 也不向上抛错（事件源多数是后台循环，抛错会拖垮采样/调度）。
+ *
+ * @returns 各处理器产出的文本（append/enrich 类用；invoke 类返回空串）
+ */
+export async function runToolLinksForEvent(
+  event: string,
+  payload?: unknown,
+): Promise<string[]> {
+  const rt = runtime;
+  if (!rt) return []; // 未装配（如单测/极简部署）：静默跳过
+
+  const manifest = rt.getManifest?.() ?? getCurrentToolLinks();
+  const resolved = resolveToolLinks(manifest, rt.registry, event);
+  if (resolved.length === 0) return [];
+
+  const outputs: string[] = [];
+  for (const { handler, link } of resolved) {
+    try {
+      const text = await handler.run({
+        event,
+        toolName: event.split(':')[1],
+        payload,
+        link,
+        invokeTool: rt.invokeTool,
+      });
+      if (text) outputs.push(text);
+    } catch (err) {
+      // fail-safe：单个处理器失败只记录，绝不冒泡到事件源
+      console.error(`[tool-links] handler "${handler.id}" failed on "${event}":`, err);
+    }
+  }
+  return outputs;
+}
