@@ -11,6 +11,8 @@
  */
 
 import { getGlobalTriggerHub } from '../trigger/hub.js';
+// 路线 B（2026-10-29）：把监控事件派发到 tool-links 清单，实现"按断言自动执行工具"
+import { runToolLinksForEvent } from '../utils/tool-links.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
 import type { WatchEvent } from './watch-service.js';
 import { WatchService } from './watch-service.js';
