@@ -24,8 +24,9 @@ import { getSchedulerSessionPort } from '../schedule/session-port.js';
 import { getGlobalTriggerHub } from '../trigger/hub.js';
 import type { Tool } from '../tools/interface.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
+import { getWatchService, onWatchEvent } from './service-instance.js';
 import type { WatchSpec } from './types.js';
-import { WatchService, type WatchEvent, type WatchOwner } from './watch-service.js';
+import type { WatchEvent, WatchOwner, WatchService } from './watch-service.js';
 import { waitForChange } from './wait.js';
 
 /** 同步等待上限：框架侧工具超时 300s，但阻塞太久会卡住整个回合，取 90s 封顶 */
