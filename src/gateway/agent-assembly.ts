@@ -24,6 +24,7 @@ import { CompanionSessionManager } from '../memory/companion-session.js';
 import { createDefaultRegistry, createBuiltInTools, BashTool } from '../tools/index.js';
 import { deriveDangerousTools } from '../tools/side-effect.js';
 import { applyWorkspaceFence } from '../tools/path-sandbox.js';
+import { recordFileRead } from '../tools/file-tracker.js';
 import { scratchpadPath } from '../utils/scratchpad.js';
 import type { ToolExecutor } from '../tools/executor.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
