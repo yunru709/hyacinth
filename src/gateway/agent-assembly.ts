@@ -69,6 +69,7 @@ import { dispatchAutomationEvent, getAutomationRuntime, setAutomationRuntime } f
 import type { AutomationRuntimeDeps } from '../automation/service.js';
 import type { ValidationContext } from '../automation/validate.js';
 import { armProbeRules, disarmWatchIds } from '../automation/sources.js';
+import { createTimeSource } from '../automation/time-source.js';
 import { createAutomationTools } from '../automation/tools.js';
 import { createWakeSession } from '../automation/wake-adapter.js';
 import { getWatchService } from '../watch/service-instance.js';
