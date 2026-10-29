@@ -564,6 +564,13 @@ export async function runToolLinksForEvent(
 
   const outputs: string[] = [];
   for (const { handler, link } of resolved) {
+    const startedAt = Date.now();
+    // handler 无法用返回值区分「成功但无输出」与「失败」（invoke 类恒返回空串），
+    // 所以靠 report 回调上报；没上报就按成功算（append 类本来就不需要上报）。
+    let ok = true;
+    let error: string | undefined;
+    let tool: string | undefined;
+
     try {
       const text = await handler.run({
         event,
@@ -571,12 +578,30 @@ export async function runToolLinksForEvent(
         payload,
         link,
         invokeTool: rt.invokeTool,
+        report: (outcome) => {
+          ok = outcome.ok;
+          if (outcome.error) error = outcome.error;
+          if (outcome.tool) tool = outcome.tool;
+        },
       });
       if (text) outputs.push(text);
     } catch (err) {
-      // fail-safe：单个处理器失败只记录，绝不冒泡到事件源
-      console.error(`[tool-links] handler "${handler.id}" failed on "${event}":`, err);
+      // fail-safe：单个处理器失败不冒泡到事件源（事件源多是后台循环）
+      ok = false;
+      error = (err as Error).message;
     }
+
+    // 收敛点③：每一次 Sink 执行都留痕 —— 成功也记，用于统计命中频率与耗时分布。
+    recordToolLinkExecution({
+      at: startedAt,
+      event,
+      handlerId: handler.id,
+      kind: handler.kind,
+      tool,
+      ok,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
   }
   return outputs;
 }
