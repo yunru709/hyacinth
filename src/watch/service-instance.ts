@@ -42,6 +42,17 @@ export function getWatchService(): WatchService {
     // 放在单例创建处，保证"只要存在监控，就一定有消费者"。
     onWatchEvent((event) => {
       void wakeOwner(event);
+      // 路线 B（2026-10-29）：派发到 tool-links 清单，让用户声明
+      // 「这个事件上自动执行某个工具」（零 LLM）。清单未配置时为 no-op。
+      // 事件名形态 afterWatch:<kind>，清单里写 on:"afterWatch" 即可覆盖全部子事件。
+      void runToolLinksForEvent(`afterWatch:${event.kind}`, {
+        watchId: event.watchId,
+        kind: event.kind,
+        distance: event.distance,
+        note: event.note,
+        summary: event.summary,
+        owner: event.owner,
+      });
       const hub = getGlobalTriggerHub();
       if (hub) {
         void hub.fire({
