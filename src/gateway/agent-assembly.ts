@@ -551,7 +551,10 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   // 关系是数据：改这个文件即可接线/断线，不必改代码（watcher 热更见 hot-reload）。
   {
     const applied = initToolLinksFromDisk({
-      eventNames: LOOP_HOOK_NAMES,
+      // 除 loop 钩子外，还允许 afterWatch / afterScheduleTask 等外部事件源；
+      // 少这一步，清单里的 on:"afterWatch:process" 会被判 unknown event
+      // ⇒ 静默退回出厂默认（不报错、只是不生效），最难查。
+      eventNames: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
       handlerIds: buildCoreToolLinkRegistry().ids(),
     });
     if (applied.errors.length > 0) {
