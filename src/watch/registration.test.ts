@@ -27,8 +27,12 @@ describe('watch 工具注册', () => {
       expect(typeof tool.description).toBe('string');
       expect(tool.description.length).toBeGreaterThan(20);
       expect(tool.inputSchema).toBeTruthy();
-      // 注册表里的实例应当是同一个对象（不是被覆盖成别的实现）
-      expect(registry.get(tool.name)).toBe(tool);
+      // ⚠️ 不能断言对象身份：createDefaultRegistry() 通过 createWatchTools({owner})
+      // 工厂创建工具（每个会话绑自己的 owner），每次都是新实例。
+      // 这里校验的是"同名工具确实注册了且契约一致"，不是"同一个对象"。
+      const registered = registry.get(tool.name);
+      expect(registered, `tool not registered: ${tool.name}`).toBeDefined();
+      expect(registered!.description).toBe(tool.description);
     }
   });
 
