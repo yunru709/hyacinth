@@ -128,8 +128,12 @@ export function loadAutomationRules(
 }
 
 /** 写盘（缩进 2，便于人读/diff；写入不带 BOM） */
-export function saveAutomationRules(rules: AutomationRule[]): void {
-  const p = automationsPath();
+export function saveAutomationRules(
+  rules: AutomationRule[],
+  /** 测试隔离用；省略则用 ~/.agent/automations.json */
+  filePath: string = automationsPath(),
+): void {
+  const p = filePath;
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const file: AutomationFile = { version: AUTOMATIONS_VERSION, rules };
   fs.writeFileSync(p, JSON.stringify(file, null, 2) + '\n', 'utf8');
