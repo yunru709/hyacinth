@@ -41,35 +41,9 @@ function pushEvent(event: WatchEvent): void {
   if (recentEvents.length > RECENT_EVENT_LIMIT) recentEvents.shift();
 }
 
-/** 事件转成唤醒提示词。要点：说清"是什么触发了"，并明确不需要重新登记监控。 */
-export function buildWatchPrompt(event: WatchEvent): string {
-  return [
-    '[Watch Event]',
-    `监控项「${event.note ?? event.summary}」发生了变化。`,
-    `- watchId: ${event.watchId}`,
-    `- 类型: ${event.kind}`,
-    `- 变化程度: ${event.distance}`,
-    `- 时间: ${new Date(event.at).toISOString()}`,
-    '',
-    '这是你之前用 watch_start 登记的后台监控触发了。请判断是否需要行动：',
-    '需要就直接处理；不需要就说明一句。监控会在冷却期后自动继续，不要重复登记；',
-    '如果已经不需要它，用 watch_stop 停掉。',
-  ].join('\n');
-}
-
-/** 唤醒 owner 会话。失败只记录日志——监控本身不该因为唤醒失败而中断。
- *  export 出去供 condition-runner 复用（自动化任务的条件触发走同一条唤醒路径）。 */
-export async function wakeOwner(event: WatchEvent): Promise<void> {
-  const owner = event.owner;
-  if (!owner) return;
-  const port = getSchedulerSessionPort();
-  if (!port?.runPrompt) return; // 端口未接线（如测试环境）：仅记录事件
-  try {
-    await port.runPrompt(owner.channel, owner.sessionId, buildWatchPrompt(event));
-  } catch (err) {
-    console.error('[watch] wake session failed:', (err as Error).message);
-  }
-}
+// 唤醒与提示词已抽到 ./wake.ts（工具层与 ConditionTaskRunner 共用同一路径）。
+// 这里保留 re-export，避免破坏既有 import。
+export { buildWatchPrompt, wakeOwner } from './wake.js';
 
 let listenerRegistered = false;
 
