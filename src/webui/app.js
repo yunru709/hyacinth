@@ -1,6 +1,7 @@
 /* Hyacinth WebUI — SPA 单页应用
  * ----------------------------------------------------------------
- * 基于桌面 hyacinth-webui 设计稿合并生成（见 build-webui-spa.cjs）。
+ * 本文件就是前端源码本体：直接改这里，`pnpm run build` 会把 src/webui/ 复制到 dist/webui/。
+ * （历史上由外部设计稿脚本合并生成，该一次性脚本已废弃删除。）
  * 职责：
  *   1. 接入协议层（WS /ui，7 域 + schedule 域）
  *   2. hash 路由：#/chat #/model #/sessions #/settings #/companion（切换不刷新）
