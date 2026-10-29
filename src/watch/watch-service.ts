@@ -254,6 +254,12 @@ export class WatchService {
     entry.info.lastError = undefined;
 
     if (!entry.baseline) {
+      // 达成式 probe（process/port/带期望值的 http）：首帧就成立时立即触发一次。
+      // 否则基准=met，之后一直 met，距离恒为 0 ⇒ 永远不触发（与 wait 同一缺陷）。
+      if (entry.probe.isSatisfied?.(sample)) {
+        await this.fire(watchId, entry, 0);
+        return;
+      }
       entry.baseline = sample;
       return;
     }
@@ -264,28 +270,7 @@ export class WatchService {
     if (d > entry.threshold) {
       entry.streak += 1;
       if (entry.streak < entry.settleFrames) return;
-
-      entry.info.hits += 1;
-      entry.streak = 0;
-      entry.coolingUntil = now + entry.cooldownMs;
-
-      const event: WatchEvent = {
-        watchId,
-        kind: entry.spec.kind,
-        distance: d,
-        at: now,
-        note: entry.info.note,
-        summary: entry.info.summary,
-        owner: entry.owner,
-      };
-
-      try {
-        await this.opts.onEvent(event);
-      } catch {
-        /* 事件消费方的异常不影响监控本身 */
-      }
-
-      if (entry.info.once) this.stop(watchId);
+      await this.fire(watchId, entry, d);
       return;
     }
 
