@@ -39,7 +39,15 @@ function makeConfigCenter(fallback?: string[]): Any {
 function makeScheduler(): { scheduler: Any; fire: (t: Any) => Promise<void> } {
   let handler: Any;
   return {
-    scheduler: { setHandler: (fn: Any) => { handler = fn; } } as Any,
+    scheduler: {
+      setHandler: (fn: Any) => {
+        handler = fn;
+      },
+      // 2026-10-29：installSchedulerHandler 现在会把 scheduler 接到触发总线（TriggerHub），
+      // 假对象必须提供同名方法 —— 真实 HeartbeatScheduler 有 setTriggerHub。
+      // 这里只做"接受这个调用"，事件外发不在本文件的测试范围内。
+      setTriggerHub: () => {},
+    } as Any,
     fire: async (t: Any) => handler(t),
   };
 }
