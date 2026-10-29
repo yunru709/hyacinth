@@ -215,7 +215,7 @@ function createWriteFencedTool(
   approvedWriteRoots?: Iterable<string>,
 ): Tool {
   const pathParam = tool.name === 'insert' ? 'file_path' : (PATH_PARAMS[tool.name]?.[0] ?? 'file_path');
-  const fenced: Tool & { __rawTool?: Tool } = {
+  return {
     ...tool,
     async execute(args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
       const value = args[pathParam];
@@ -242,9 +242,4 @@ function createWriteFencedTool(
       return tool.execute(args, signal);
     },
   };
-  // 保留围栏包装前的裸工具引用：automation runner 是**设计时确定的机械写入**（路径在 create 规则时
-  // 已明确指定），不受会话级工作区围栏约束 ⇒ 装配层 currentInvokeTool 用 __rawTool 绕过围栏。
-  // 模型盲写拿的是 registry 里的围栏代理、不消费 __rawTool ⇒ 仍受围栏保护。
-  fenced.__rawTool = tool;
-  return fenced;
 }
