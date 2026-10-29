@@ -614,6 +614,10 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   //    （"工具 say 未注册"）⇒ count=0 且不 arm 任何 watcher。
   //    而这只打一条 warn、界面完全无感 —— 正是"配了没反应"的经典陷阱。
   const wireAutomation = () => {
+    // 进程级只装配一次（createAgentAssembly 每会话调用，不 guard 会重复注册 sink/watcher）
+    if (automationWired) return;
+    automationWired = true;
+
     // 校验需要的"外部知识"：做成**工厂**而非快照 —— 热更后（新工具注册/新 probe kind）
     // 下一次校验能立即跟上，不必重启。
     const makeCtx = (): ValidationContext => ({
