@@ -361,4 +361,66 @@ describe('waitForChange', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/failed/);
   });
+
+  it('达成式 probe 首帧即满足时立即返回，不等超时', async () => {
+    // 回归 2026-10-29 验收暴露的缺陷：explorer 一直在跑，但 wait 返回 changed=false。
+    // 原因：首帧基准=met，之后一直 met ⇒ 距离恒 0。修法 = isSatisfied 首帧短路。
+    const c = fakeClock();
+    const res = await waitForChange({
+      kind: 'process',
+      probe: {
+        async sample(): Promise<ProbeSample> {
+          return { ok: true, value: 'met' };
+        },
+        isSatisfied: (s) => s.ok && s.value === 'met',
+      },
+      timeoutMs: 5_000,
+      intervalMs: 100,
+      clock: c.now,
+      sleep: c.sleep,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.changed).toBe(true);
+    expect(res.samples).toBe(1); // 只采了一帧就返回
+    expect(res.elapsedMs).toBe(0);
+  });
+
+  it('真实 process probe：等待已运行的进程立即命中', async () => {
+    // 上一版会让这条用例超时 3 秒仍返回 false —— 用真实 probe 再钉一次
+    const c = fakeClock();
+    const probe = createDefaultProbeRegistry().create({
+      kind: 'process',
+      pid: process.pid,
+      expect: 'running',
+    });
+    const res = await waitForChange({
+      kind: 'process',
+      probe,
+      timeoutMs: 3_000,
+      intervalMs: 100,
+      clock: c.now,
+      sleep: c.sleep,
+    });
+    expect(res.changed).toBe(true);
+    expect(res.samples).toBe(1);
+  });
+
+  it('达成式 probe 未满足时仍然等（不能一律短路）', async () => {
+    const c = fakeClock();
+    const res = await waitForChange({
+      kind: 'process',
+      probe: {
+        async sample(): Promise<ProbeSample> {
+          return { ok: true, value: 'pending' };
+        },
+        isSatisfied: (s) => s.value === 'met',
+      },
+      timeoutMs: 600,
+      intervalMs: 100,
+      clock: c.now,
+      sleep: c.sleep,
+    });
+    expect(res.changed).toBe(false);
+    expect(res.samples).toBeGreaterThan(1);
+  });
 });
