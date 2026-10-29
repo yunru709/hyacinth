@@ -815,6 +815,13 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     companionSessionManager,
   });
 
+  // ⚠️ 时序锚（2026-10-30 真机实测踩坑）：
+  //    automation 装配**必须**在 registerLoopDependentTools 之后。
+  //    say / deliver 等工具依赖 loop 实例，在这一批（await import）才注册；
+  //    提前装配会让规则因「工具 say 未注册」被 validate 剔除
+  //    ⇒ count=0、不 arm 任何 watcher，且只有一条 warn —— 界面完全无感。
+  wireAutomation();
+
   // ── goal 模式审查官接线（2026-10-10）────────────────────────────────────
   // 审查官是**独立职责**的子 agent（用户裁定「独立」）：模型走 assessment 角色通道，
   // 工具 [read/glob/grep/bash]（能自行复核），每轮全新 session（用后即弃）。
