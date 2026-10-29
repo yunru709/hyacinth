@@ -372,6 +372,7 @@ export class HeartbeatScheduler {
     }
 
     await this.persistence.saveTask(task);
+    this.syncConditionTask(task); // 可能刚改过启用状态或触发方式
     return task;
   }
 
