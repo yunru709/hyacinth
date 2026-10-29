@@ -551,6 +551,11 @@
         </div>
         <div class="shrink-0 px-5 py-3 border-b border-border bg-background flex flex-wrap items-center gap-2">
           <input id="schedule-name" type="text" placeholder="任务名称" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground min-w-[140px]" />
+          <!-- 2026-10-29 自动化改造：触发方式二选一（时间 / 条件） -->
+          <select id="schedule-trigger-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+            <option value="time">⏰ 时间</option>
+            <option value="condition">👁 条件</option>
+          </select>
           <select id="schedule-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
             <option value="daily">每天定点</option>
             <option value="interval">固定间隔</option>
@@ -559,6 +564,15 @@
             <option value="random">随机</option>
           </select>
           <input id="schedule-value" type="text" placeholder="09:30 或 30（分钟）" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[190px]" />
+          <!-- 条件触发专用控件（默认隐藏，选「条件」时显示） -->
+          <select id="schedule-cond-kind" hidden class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+            <option value="file">文件变化</option>
+            <option value="http">接口状态</option>
+            <option value="process">进程</option>
+            <option value="port">端口</option>
+            <option value="ui_region">画面区域</option>
+          </select>
+          <input id="schedule-cond-spec" type="text" hidden placeholder='{"path":"C:\\a.log"} 或 {"url":"http://127.0.0.1:8080","expectStatus":200}' class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground flex-1 min-w-[260px]" />
           <button id="schedule-add-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
             <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加</span>
           </button>
