@@ -61,7 +61,10 @@
       #app-shell { height: 100vh; display: flex; flex-direction: column; }
       #hyacinth-main { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
       #chat-wrapper { height: 100%; display: flex; flex-direction: column; min-width: 0; }
-      #message-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      /* overflow-anchor:none —— 关闭浏览器滚动锚定：流式增量 / 异步 KaTeX / 图片加载让内容
+         高度反复变化时，默认的 overflow-anchor:auto 会把滚动位置"锚"住，导致"能上不能下到底、
+         一键到底才救"的偶发卡死（2026-10-29 孑遗报）。关掉后滚动完全由 scrollTop 控制。 */
+      #message-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; }
       #chat-composer { flex: 0 0 auto; }
       .message-bubble { word-break: break-word; overflow-wrap: break-word; }
       .message-code { margin: 0; overflow-x: auto; white-space: pre; }
