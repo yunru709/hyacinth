@@ -10,6 +10,7 @@ import { httpProbe } from './http.js';
 import { portProbe } from './port.js';
 import { processProbe } from './process.js';
 import { ProbeRegistry } from './registry.js';
+import { uiRegionProbe } from './ui-region.js';
 
 export { ProbeRegistry } from './registry.js';
 export { fileProbe } from './file.js';
