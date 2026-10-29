@@ -158,6 +158,13 @@ export class HeartbeatScheduler {
     this.running = true;
     this.startedAt = new Date();
 
+    // 触发总线接入（2026-10-29）：在业务核心层自行 ensure ——
+    // gateway 属 UI 适配层，不得直连 trigger（verify:layers 规则 5）。
+    // 若外部已通过 setTriggerHub 显式注入（测试/自定义场景），保留那个实例。
+    if (!this.triggerHub) {
+      this.triggerHub = ensureGlobalTriggerHub();
+    }
+
     this.tasks = await this.persistence.getAllTasks();
     this.refreshMtime();
 
