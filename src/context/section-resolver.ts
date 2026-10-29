@@ -209,13 +209,6 @@ async function resolveRuntime(
     return ctx.userInput || undefined;
   }
 
-  if (src === 'runtime:session_scratchpad') {
-    // 会话级记事本：ContextSource.getContent 不收 ctx ⇒ 这里特判，用 ctx.sessionDir 现读
-    // （与 timestamp/userInput 同套路；全局 scratchpad 仍走 sources）。
-    const { readSessionScratchpadForContext } = await import('../utils/session-scratchpad.js');
-    return readSessionScratchpadForContext(ctx.sessionDir, undefined) || undefined;
-  }
-
   if (src === 'runtime:env') {
     const envSource = ctx.sources?.get('env-info');
     if (envSource?.getContent) {

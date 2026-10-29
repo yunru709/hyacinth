@@ -28,6 +28,7 @@ import type { AgentLoop } from '../orchestrator/loop.js';
 import type { ChannelsInfo } from '../env/index.js';
 import { collectSystemInfoAsync, buildEnvironmentSection, type SystemEnvInfo } from '../env/index.js';
 import { readScratchpadForContext, ensureScratchpadFile, ensurePathLine } from '../utils/scratchpad.js';
+import { readSessionScratchpadForContext } from '../utils/session-scratchpad.js';
 // companion_memory 现按「当前 loop 的 activeRouter」判定，不再需要全局 getActiveRouter
 
 export interface ContextSourceDeps {
