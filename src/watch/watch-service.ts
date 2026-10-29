@@ -96,6 +96,7 @@ interface Entry {
   cooldownMs: number;
   coolingUntil: number;
   timer: unknown;
+  owner?: WatchOwner;
 }
 
 function summarize(spec: WatchSpec): string {
