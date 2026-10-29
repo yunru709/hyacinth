@@ -150,6 +150,8 @@ interface ExecCtx {
   scope: RunScope;
   steps: StepResult[];
   depth: number;
+  /** 单步失败策略：abort（默认，链路中途失败继续跑通常更危险）/ continue（尽力而为） */
+  onError: 'abort' | 'continue';
 }
 
 /**
