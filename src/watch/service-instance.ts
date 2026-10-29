@@ -33,6 +33,28 @@ export function onWatchEvent(listener: WatchEventListener): () => void {
 /** 取（或惰性创建）全局 WatchService */
 export function getWatchService(): WatchService {
   if (!service) {
+    // 核心监听（2026-10-29 自动化改造）：唤醒 owner + 外发触发总线。
+    // ⚠️ 必须挂在这里，不能放工具层的懒加载里 ——
+    // 自动化任务的条件触发可能**完全没经过 watch_* 工具**，那时工具层从未初始化，
+    // 懒加载的监听就不会注册 ⇒ 条件命中后没人唤醒，任务等于静默失效。
+    // 放在单例创建处，保证"只要存在监控，就一定有消费者"。
+    onWatchEvent((event) => {
+      void wakeOwner(event);
+      const hub = getGlobalTriggerHub();
+      if (hub) {
+        void hub.fire({
+          source: 'watch',
+          name: event.note ?? event.summary,
+          detail: {
+            watchId: event.watchId,
+            kind: event.kind,
+            distance: event.distance,
+            owner: event.owner,
+          },
+        });
+      }
+    });
+
     service = new WatchService({
       registry: createDefaultProbeRegistry(),
       onEvent: (event) => {
