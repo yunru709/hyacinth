@@ -24,6 +24,7 @@ import { SchedulePersistence } from './persistence.js';
 // gateway 属 UI 适配层，直连 trigger 会违反 verify:layers 规则 5（白名单只减不增）。
 import { ensureGlobalTriggerHub } from '../trigger/hub.js';
 import type { TriggerHub } from '../trigger/hub.js';
+import { getConditionTaskRunner } from './condition-port.js';
 
 const DEFAULT_CONFIG: SchedulerConfig = {
   heartbeatMs: 5000,
