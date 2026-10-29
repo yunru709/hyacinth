@@ -1,3 +1,14 @@
+/**
+ * ⚠️ 已废弃（2026-10-29 核实），**不要运行，也不要信下面写的路径**。
+ *
+ * 事实：
+ *   1. 前端源码就住在**本仓库**的 `src/webui/`（index.html / app.js / *.css 直接改）
+ *   2. 本脚本指向的 `C:/Users/74689/Desktop/hyacinth-webui` **已不存在**
+ *   3. 它**不在** package.json 的 build 流程里 —— build 只调 `copy-webui.cjs`
+ *      把 `src/webui/` 复制到 `dist/webui/`
+ *
+ * 保留文件仅为历史痕迹。留这段注释是因为它曾害人（含我）误判"前端在外部仓库"。
+ */
 // build-webui-spa — 从桌面 hyacinth-webui 设计稿提取并生成 SPA 骨架
 // 输入: C:/Users/74689/Desktop/hyacinth-webui (桌面设计稿)
 // 输出: src/webui/index.html + src/webui/theme.css + src/webui/app.css
