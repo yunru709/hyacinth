@@ -64,9 +64,11 @@ import {
 // ── 自动化链路（AutomationRule，2026-10-30）──
 // 定位：tool-links 是框架内部工具旁路（append 类），automation 是用户/模型定义的
 // 完整链路（invoke/wake/gate/safety，可多步可分支）。两者共用 TriggerHub 派发。
-import { getCurrentAutomationRules, initAutomationsFromDisk } from '../automation/store.js';
+import { getCurrentAutomationRules, initAutomationsFromDisk, saveAutomationRules } from '../automation/store.js';
 import { dispatchAutomationEvent, setAutomationRuntime } from '../automation/service.js';
-import { armProbeRules } from '../automation/sources.js';
+import type { AutomationRuntimeDeps } from '../automation/service.js';
+import { armProbeRules, disarmWatchIds } from '../automation/sources.js';
+import { createAutomationTools } from '../automation/tools.js';
 import { createWakeSession } from '../automation/wake-adapter.js';
 import { getWatchService } from '../watch/service-instance.js';
 import { getSchedulerSessionPort } from '../schedule/session-port.js';
