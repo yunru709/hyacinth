@@ -55,6 +55,27 @@ export interface SchedulerSessionPort {
    * 可选实现：未实现时调用方必须降级（不得假设其存在）。
    */
   runPrompt?(channel: string, sessionId: string, prompt: string): Promise<void>;
+
+  /**
+   * 在**一次性临时会话**里跑一段给定提示词（2026-10-30，供 automation 的
+   * `wake` + `Where.policy='new'` 使用）。
+   *
+   * 与 runOneShot 的区别：
+   *   · runOneShot 接 `taskName`，内部走 runTask —— 会套 `[Scheduled Task Triggered]` 模板
+   *   · 本方法接**任意 prompt**，语义是"开个干净会话，用这句话跑一轮"
+   *
+   * 典型用途：「日志出现异常，开个干净回合分析，别被历史结论带偏」。
+   *
+   * 可选实现：未实现时调用方必须降级或**明确报错**（不得静默假装跑过）。
+   */
+  runPromptInNewSession?(opts: {
+    channel: string;
+    prompt: string;
+    /** 结果回投到哪个会话；省略则结果留在临时会话里（随后销毁） */
+    deliverSessionId?: string;
+    /** 临时会话存活时间（毫秒），默认 5 分钟 */
+    ttlMs?: number;
+  }): Promise<void>;
 }
 
 // ── 进程级端口注册 ──────────────────────────────────────────────
