@@ -2102,6 +2102,24 @@
     return map[t] || t || '—';
   }
 
+  // 条件触发（2026-10-29 自动化改造）：把 trigger 翻成人话，例「👁 文件 C:\a.log 变化」
+  function conditionLabel(trigger) {
+    if (!trigger || trigger.type !== 'condition') return '';
+    const kindMap = { file: '文件', http: '接口', process: '进程', port: '端口', ui_region: '画面' };
+    const kind = kindMap[trigger.kind] || trigger.kind || '条件';
+    const spec = trigger.spec || {};
+    const detail = spec.path || spec.url || spec.name
+      || (spec.port ? ':' + spec.port : '')
+      || (Array.isArray(spec.region) ? '区域' : '');
+    return '👁 ' + kind + (detail ? ' ' + detail : '') + ' 变化';
+  }
+
+  /** 一行摘要：条件类显示触发条件，时间类显示调度类型 + 下次时间 */
+  function scheduleTriggerLine(t) {
+    if (t.trigger && t.trigger.type === 'condition') return conditionLabel(t.trigger);
+    return scheduleTypeLabel(t.scheduleType) + ' · 下次 ' + fmtTime(t.nextRunAt);
+  }
+
   function fmtTime(s) {
     if (!s) return '—';
     try { return new Date(s).toLocaleString(); } catch (e) { return String(s); }
@@ -2111,7 +2129,7 @@
     const row = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-3');
     const left = el('div', 'min-w-[160px] flex-1');
     left.appendChild(el('div', 'text-sm font-medium text-foreground', t.name || t.id));
-    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', scheduleTypeLabel(t.scheduleType) + ' · 下次 ' + fmtTime(t.nextRunAt)));
+    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', scheduleTriggerLine(t)));
     // 适配当前任务模型：补 模式 / 目标会话 / 标签 / 上次执行（有则显示，无则整行省略）
     const metaBits = [];
     const modeLabel = t.mode === 'companion' ? '陪伴' : (t.mode || '');
