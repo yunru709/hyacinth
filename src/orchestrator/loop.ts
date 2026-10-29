@@ -1672,11 +1672,15 @@ export class AgentLoop {
       this._runMutex = this._runMutex.then(async () => {
         // 记录本回合缓存记录起点（回合结束时据此算"本回合加权均值"）
         this.turnCacheFrom = this.cacheTurns.length;
+        // 标记进入回合：后台 say 据此判断「有没有回合会来消费队列」（见 turnActive 注释）
+        this.turnActive = true;
         try {
           await this._runInternal(userInput);
           resolve();
         } catch (err) {
           reject(err);
+        } finally {
+          this.turnActive = false;
         }
       });
     });
