@@ -355,6 +355,18 @@ export interface ToolLinkRunInput {
   toolName?: string;
   /** 调用方上下文（形状由处理器约定） */
   payload?: unknown;
+  /** 触发本次的清单项（2026-10-29）：invoke 类处理器需要读 link.invoke 才知道调什么 */
+  link?: ToolLink;
+  /**
+   * 调用另一个工具（2026-10-29，`invoke` 类专用）。
+   *
+   * 为什么用回调而不是直接 import 工具注册表：本模块在 `utils/`（底层），
+   * 反向依赖 `tools/` 会破坏分层。装配层在启动时把真实实现注入进来
+   * （见 setToolLinkRuntime），本层只认这个函数签名。
+   *
+   * 未注入时为 undefined —— 此时 invoke 类处理器必须**静默跳过**（不得抛错）。
+   */
+  invokeTool?: (tool: string, args: Record<string, unknown>) => Promise<string>;
 }
 
 export interface ToolLinkHandler {
