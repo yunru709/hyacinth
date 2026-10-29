@@ -328,6 +328,7 @@ export class HeartbeatScheduler {
         existing.enabled = true;
         existing.nextRunAt = this.calculateNextRun(existing)?.toISOString() ?? null;
         await this.persistence.saveTask(existing);
+        this.syncConditionTask(existing); // 触发方式可能被改了（时间⇄条件）
         return existing;
       }
     }
