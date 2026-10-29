@@ -55,7 +55,12 @@ import type { DependencyAnalyzer } from '../dependency/analyzer.js';
 import type { OutputHandler } from '../orchestrator/loop.js';
 import type { ConfigManager } from '../setup/config.js';
 import { createLogger } from '../logging/logger.js';
-import { initToolLinksFromDisk, setToolLinkRuntime, toolLinksPath } from '../utils/tool-links.js';
+import {
+  initToolLinksFromDisk,
+  setToolLinkRuntime,
+  TOOL_LINK_EXTRA_EVENT_SOURCES,
+  toolLinksPath,
+} from '../utils/tool-links.js';
 import { buildCoreToolLinkRegistry } from '../orchestrator/tool-link-handlers.js';
 import { LOOP_HOOK_NAMES } from '../orchestrator/loop-hooks.js';
 import type { ProviderRouter } from '../provider/router.js';
