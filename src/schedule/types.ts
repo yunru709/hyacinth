@@ -187,6 +187,12 @@ export interface ScheduledTask {
    * 为空时使用全局默认降级链（SchedulerConfig.channelFallback）。
    */
   fallback?: string[];
+  /**
+   * 触发方式（2026-10-29 自动化改造）。
+   * - 省略 ⇒ 时间类：按 scheduleType/schedule 走 HeartbeatScheduler，行为与改造前一致
+   * - type='condition' ⇒ 条件类：由 WatchService 采样驱动，命中后同样唤醒会话
+   */
+  trigger?: ScheduledTaskTrigger;
 }
 
 /** 任务执行记录 */
