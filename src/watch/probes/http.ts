@@ -20,10 +20,23 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 class HttpProbeInstance implements ProbeInstance {
   private readonly url: URL;
+  /** 是否带期望条件（决定它是"达成式"还是"内容变化式"） */
+  private readonly hasCondition: boolean;
 
   constructor(private readonly spec: HttpSpec) {
     this.url = assertHttpUrlAllowed(spec.url);
     assertHostAllowed(this.url.hostname, spec.allowPrivateHost);
+    this.hasCondition =
+      typeof spec.expectStatus === 'number' || typeof spec.expectContains === 'string';
+  }
+
+  /**
+   * 只有"达成式"（带 expectStatus / expectContains）才有"已满足"概念。
+   * 不带期望值时是纯内容变化检测，首帧不能算满足（否则会立刻误触发）。
+   */
+  isSatisfied(sample: ProbeSample): boolean {
+    if (!this.hasCondition) return false;
+    return sample.ok && sample.value === 'met';
   }
 
   async sample(signal?: AbortSignal): Promise<ProbeSample> {
