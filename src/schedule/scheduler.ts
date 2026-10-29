@@ -284,6 +284,9 @@ export class HeartbeatScheduler {
   /** 停止调度器 */
   async stop(): Promise<void> {
     this.running = false;
+    // 停调度器时一并注销所有条件任务监控：
+    // 否则调度器已停、进程还活着，watcher 仍会继续采样并唤醒会话。
+    getConditionTaskRunner()?.disarmAll();
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
