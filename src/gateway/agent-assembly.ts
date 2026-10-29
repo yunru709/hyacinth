@@ -596,7 +596,14 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   //   tool-links  = 框架内部工具旁路（append 类，需要 tool 执行上下文 payload）
   //   automation  = 用户/模型定义的完整链路（invoke/wake/gate/safety，可多步可分支）
   // 两者共用 TriggerHub 派发与统一执行记录。
-  {
+  //
+  // ⚠️ 为什么包成函数、延后到工具注册之后调用（2026-10-30 真机实测踩坑）：
+  //    `say` 等工具由 `registerLoopDependentTools`（本函数 790+ 行，内部 await import）
+  //    才注册 —— 因为它们依赖 loop 实例（say 要 loop.submitSay）。
+  //    若在本处立即装配，toolRegistry 里**还没有 say** ⇒ 规则被 validate 剔除
+  //    （"工具 say 未注册"）⇒ count=0 且不 arm 任何 watcher。
+  //    而这只打一条 warn、界面完全无感 —— 正是"配了没反应"的经典陷阱。
+  const wireAutomation = () => {
     // 校验需要的"外部知识"：做成**工厂**而非快照 —— 热更后（新工具注册/新 probe kind）
     // 下一次校验能立即跟上，不必重启。
     const makeCtx = (): ValidationContext => ({
