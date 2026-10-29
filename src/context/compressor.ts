@@ -1036,7 +1036,7 @@ export class CompressorOrchestrator {
           if (isToolResult(c) && higherLayerToolUseIds.has(c.tool_use_id)) {
             fixedContents.push({
               type: 'text',
-              text: `[ToolResult: ${c.tool_use_id}] ${c.content}`,
+              text: `[ToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(c.content)}`,
             });
           } else {
             fixedContents.push(c);
