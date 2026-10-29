@@ -434,6 +434,16 @@ export class HeartbeatScheduler {
     this.activeCount++;
     const startTime = Date.now();
 
+    // 触发总线：外发一条"任务到期执行"事件（fire-and-forget）。
+    // ⚠️ 绝不 await —— sink 里可能会去跑一整轮对话，阻塞住这里就卡死调度心跳。
+    if (this.triggerHub) {
+      void this.triggerHub.fire({
+        source: 'schedule',
+        name: task.name,
+        detail: { taskId: task.id, scheduleType: task.scheduleType, channel: task.channel },
+      });
+    }
+
     const record: TaskExecutionRecord = {
       taskId: task.id,
       taskName: task.name,
