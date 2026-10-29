@@ -164,10 +164,8 @@ export class MCPClient {
       }
       if (Array.isArray(result.content)) {
         return result.content
-          .map((block: { type: string; text?: string }) => {
-            if (block.type === 'text' && block.text) return block.text;
-            return JSON.stringify(block);
-          })
+          .map((block: unknown) => this.formatContentBlock(block))
+          .filter((s) => s.length > 0)
           .join('\n');
       }
       return JSON.stringify(result.content);
