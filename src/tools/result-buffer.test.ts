@@ -12,13 +12,19 @@ import { ToolResultBuffer, stripInlineMedia } from './result-buffer.js';
  * 压缩时再复制一份 → 上下文 1.1M > 模型 1M 窗口 → 上游只回
  * `400 "Model is unavailable"`（与模型下线共用同一句报错，极易误诊）。
  *
- * 本文件钉死两件事：
- *  1) stripInlineMedia 必须把 base64 剥离；
- *  2) 即使剥离后仍超阈值，也必须走缓冲落盘，绝不整段进历史。
+ * ⚠️ 构造测试数据时必须用**真实形态**：一整串连续的 base64（只在最末尾可能有一个
+ * `=` 或 `==` 的 padding）。若像分块 PNG 那样每百来字符插一次 `==`，正则的连续匹配
+ * 会在此处断开，测出来的"通过"是假绿 —— 这条弯路已踩过一次。
  */
 
-const B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const BIG_B64 = B64.repeat(Math.ceil(100_000 / B64.length)); // ≈100 KB
+/** 真实形态的 base64：连续无中断，仅末尾补 padding。 */
+function realBase64(len: number): string {
+  const core = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ';
+  return core.repeat(Math.ceil(len / core.length)).slice(0, len);
+}
+
+const BIG_B64 = realBase64(100_000);      // ≈100 KB
+const HUGE_B64 = realBase64(780_000);     // ≈780 KB —— 与事故中的实际体量同量级
 
 function newBuffer(overrides: { threshold?: number; enabled?: boolean } = {}) {
   const sessionDir = mkdtempSync(join(tmpdir(), 'hyacinth-rb-'));
@@ -44,6 +50,13 @@ describe('stripInlineMedia — 内联 base64 剥离', () => {
     expect(out).toContain('[inline image/png base64 omitted:');
   });
 
+  it('剥掉超长裸 base64（兜底路径，非 JSON 形态）', () => {
+    const raw = `raw blob: ${realBase64(30_000)}`;
+    const out = stripInlineMedia(raw);
+    expect(out).toContain('[base64 omitted:');
+    expect(out.length).toBeLessThan(200);
+  });
+
   it('短 base64 与非媒体长文本不受影响（零误伤）', () => {
     const shortB64 = 'abc123+/=';
     const longCode = 'const a = 1; '.repeat(50) + 'x'.repeat(5000);
@@ -60,20 +73,19 @@ describe('stripInlineMedia — 内联 base64 剥离', () => {
 describe('ToolResultBuffer.maybeBuffer — 事故防线', () => {
   it('78 万字符的截图结果：注入历史的部分必须远小于原文', () => {
     const buffer = newBuffer();
-    const raw = `[ToolResult: call_x]\n{"type":"image","data":"${BIG_B64.repeat(8)}","mimeType":"image/png"}`;
+    const raw = `[ToolResult: call_x]\n{"type":"image","data":"${HUGE_B64}","mimeType":"image/png"}`;
     expect(raw.length).toBeGreaterThan(700_000);
 
     const out = buffer.maybeBuffer(raw, 'mcp__windows-mcp__Snapshot');
 
-    expect(out.length).toBeLessThan(20_000);      // 绝不整段进历史
-    expect(out).not.toContain(BIG_B64.slice(0, 512)); // base64 必须消失
+    expect(out.length).toBeLessThan(20_000);          // 绝不整段进历史
+    expect(out).not.toContain(HUGE_B64.slice(0, 512)); // base64 必须消失
     expect(out).toContain('[Result Buffered');
   });
 
   it('含 base64 但剥离后已小于阈值的，不再落盘（避免无谓文件）', () => {
     const buffer = newBuffer({ threshold: 10_000 });
-    const raw = `small shot: ${BIG_B64.slice(0, 4200)}`;
-    // 4200 字符 base64 未达 4096? 已达 ⇒ 应被剥离，结果 < 阈值 ⇒ 不缓冲
+    const raw = `small shot: {"type":"image","data":"${realBase64(5000)}","mimeType":"image/png"}`;
     const out = buffer.maybeBuffer(raw, 'mcp__x__Screenshot');
     expect(out).toContain('[base64 omitted:');
     expect(out).not.toContain('[Result Buffered');
