@@ -158,7 +158,28 @@ export class ToolResultBuffer {
     return this.bufferDir;
   }
 
-  /** 生成 LLM 可读的指针消息，引导其使用 `read` 工具按需读取。 */
+  /**
+   * 「只截断、不落盘」版本 —— 专供**读缓冲文件自身**的结果使用。
+   *
+   * 事故背景（2026-10-29，第二处漏点）：读 buffered-results 下的文件时，调用方为避免
+   * 递归缓冲会跳过 maybeBuffer（正确的），但当时**没有任何上限**：模型 read 一个
+   * 781 KB 的缓冲文件，就得到 78 万字符（≈20 万 tokens）原样进历史。缓冲省下的上下文
+   * 被读回来一次全还回去了。
+   *
+   * 语义：不落盘（否则套娃），但仍剥离内联媒体 + 截断到阈值，并提示用 offset/limit 分段读。
+   */
+  capOnly(result: string, toolName: string): string {
+    const stripped = stripInlineMedia(this.foldRepeatedLines(result));
+    if (stripped.length <= this.threshold) return stripped;
+
+    const head = stripped.slice(0, this.threshold);
+    const omitted = stripped.length - this.threshold;
+    return (
+      `${head}\n\n[Truncated: ${omitted.toLocaleString()} more chars (~${Math.round(omitted / 4).toLocaleString()} tokens) ` +
+      `not shown — this is a buffered result (${toolName}); use read(file_path=..., offset=N, limit=M) to page through it]`
+    );
+  }
+}
   private buildPointerMessage(
     result: string,
     toolName: string,
