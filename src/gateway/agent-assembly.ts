@@ -554,6 +554,20 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     } else if (applied.existed) {
       logger.info('联动清单已生效', { path: applied.path });
     }
+
+    // ── 路线 B（2026-10-29）：注入「按断言自动执行工具」的运行时 ──
+    // 清单里声明 { handler: "core.invoke-tool", invoke: { tool, args } } 时，
+    // 事件一到就直接执行该工具（零 LLM）。不注入 ⇒ 该处理器静默跳过，
+    // append 类完全不受影响 ⇒ 对既有行为零影响。
+    // 放在装配层是因为它需要 toolRegistry 实例，而 utils/ 不能反向依赖 tools/。
+    setToolLinkRuntime({
+      registry: buildCoreToolLinkRegistry(),
+      invokeTool: async (toolName, args) => {
+        const tool = toolRegistry.get(toolName);
+        if (!tool) throw new Error(`[tool-links] invoke target not found: ${toolName}`);
+        return await tool.execute(args);
+      },
+    });
   }
 
   // ── AutoGit（S4：git 自管理策略层，evolution 层消费 GitManager 原语）──
