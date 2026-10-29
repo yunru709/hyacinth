@@ -2511,6 +2511,31 @@
       const type = (typeEl && typeEl.value) || 'daily';
       const val = (valEl && valEl.value || '').trim();
       if (!name) { hint('请先填任务名称'); return; }
+      // 2026-10-29 自动化改造：条件触发不走 schedule 对象，直接提交 trigger
+      const triggerType = ($('#schedule-trigger-type') || {}).value || 'time';
+      if (triggerType === 'condition') {
+        const kind = ($('#schedule-cond-kind') || {}).value || 'file';
+        const specEl = $('#schedule-cond-spec');
+        const specRaw = ((specEl && specEl.value) || '').trim();
+        let spec;
+        try { spec = specRaw ? JSON.parse(specRaw) : {}; }
+        catch (e) { hint('条件参数必须是合法 JSON，例 {"path":"C:\\\\a.log"}'); return; }
+        addBtn.disabled = true;
+        client.request('schedule.add', {
+          name,
+          action: { type: 'scheduled', target: name, payload: {} },
+          trigger: { type: 'condition', kind, spec },
+        })
+          .then(() => {
+            hint('已添加条件任务：' + name, true);
+            if (nameEl) nameEl.value = '';
+            if (specEl) specEl.value = '';
+            loadSchedule();
+          })
+          .catch((e) => hint('添加失败: ' + (e && e.message)))
+          .finally(() => { addBtn.disabled = false; });
+        return;
+      }
       // 按调度类型构造 schedule 对象（5 种：daily / interval / cron / fixed-time / random）
       let schedule = null;
       let label = '';
