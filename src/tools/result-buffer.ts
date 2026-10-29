@@ -198,3 +198,53 @@ export class ToolResultBuffer {
     return parts.join('\n');
   }
 }
+
+// ── 内联媒体剥离 ────────────────────────────────────────────────────
+
+/** 低于此长度的 base64 片段视为正常文本（短 hash / 短编码），不处理。 */
+const INLINE_BASE64_MIN = 4096;
+
+/** 宽松兜底阈值：极高，只有真正的二进制块才可能连续这么长。 */
+const INLINE_BASE64_HARD_MIN = 16384;
+
+/**
+ * 剥离文本中的内联媒体数据，替换为等长说明的占位符。
+ *
+ * 事故背景（2026-10-29）：MCP 截图工具把整张 PNG 的 base64 当作文本注入对话历史，
+ * 单条 78 万字符（≈20 万 tokens），上下文被顶到 1.1M > 模型 1M 窗口 ⇒ 上游返回
+ * `400 "Model is unavailable"`（一条极具误导性的通用报错，容易被误诊为"模型下线"）。
+ *
+ * 采用**精确优先 + 宽松兜底**两段式：
+ *  ① 精准匹配 JSON 内的 `"data":"<base64>"`（MCP image block 被 JSON.stringify 后的形态），
+ *     以及 `data:<mime>;base64,<...>` 的 data URI —— 零误伤；
+ *  ② 超长裸 base64 兜底（≥16 KB 连续），防止未来出现第三种形态。
+ *
+ * 设计取舍：宁可丢内容也不让 base64 进上下文 —— 这类内容模型读了也无法利用，
+ * 却会按 token 全额计费并挤掉真正的上下文。需要看图时走 read(file_path) 的那条路。
+ */
+export function stripInlineMedia(text: string): string {
+  let out = text;
+
+  // ①-a JSON 字段内的 base64（MCP image block 的典型形态）
+  out = out.replace(
+    /"data"\s*:\s*"([A-Za-z0-9+/]{4096,}={0,2})"/g,
+    (_m: string, b64: string) => `"data": "[base64 omitted: ${b64.length} chars]"`,
+  );
+
+  // ①-b data URI
+  out = out.replace(
+    /data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]{1024,})/gi,
+    (_m: string, mime: string, b64: string) =>
+      `[inline ${mime} base64 omitted: ${b64.length} chars]`,
+  );
+
+  // ② 宽松兜底：极长的裸 base64 连续串
+  if (out.length >= INLINE_BASE64_HARD_MIN) {
+    out = out.replace(
+      new RegExp(`[A-Za-z0-9+/]{${INLINE_BASE64_HARD_MIN},}={0,2}`, 'g'),
+      (m: string) => `[base64 omitted: ${m.length} chars]`,
+    );
+  }
+
+  return out;
+}
