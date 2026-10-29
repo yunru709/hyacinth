@@ -65,8 +65,9 @@ import {
 // 定位：tool-links 是框架内部工具旁路（append 类），automation 是用户/模型定义的
 // 完整链路（invoke/wake/gate/safety，可多步可分支）。两者共用 TriggerHub 派发。
 import { getCurrentAutomationRules, initAutomationsFromDisk, saveAutomationRules } from '../automation/store.js';
-import { dispatchAutomationEvent, setAutomationRuntime } from '../automation/service.js';
+import { dispatchAutomationEvent, getAutomationRuntime, setAutomationRuntime } from '../automation/service.js';
 import type { AutomationRuntimeDeps } from '../automation/service.js';
+import type { ValidationContext } from '../automation/validate.js';
 import { armProbeRules, disarmWatchIds } from '../automation/sources.js';
 import { createAutomationTools } from '../automation/tools.js';
 import { createWakeSession } from '../automation/wake-adapter.js';
