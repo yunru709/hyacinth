@@ -19,6 +19,12 @@ import type { ProbeInstance, ProbeSample, WatchKind, WatchSpec } from './types.j
 import { defaultDistance } from './types.js';
 import type { ProbeRegistry } from './probes/registry.js';
 
+/** 监控的归属会话：事件只能唤醒"登记它"的那个会话，否则多会话会互相串线 */
+export interface WatchOwner {
+  channel: string;
+  sessionId: string;
+}
+
 export interface WatchEvent {
   watchId: string;
   kind: WatchKind;
@@ -29,6 +35,8 @@ export interface WatchEvent {
   note?: string;
   /** 便于人读的 spec 摘要 */
   summary: string;
+  /** 登记该监控的会话（无归属时不唤醒，只记事件） */
+  owner?: WatchOwner;
 }
 
 export interface WatchInfo {
