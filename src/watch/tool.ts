@@ -206,7 +206,9 @@ export const watchStartTool: Tool = {
 
 export const watchStopTool: Tool = {
   name: 'watch_stop',
-  description: '停止一个后台监控。',
+  description:
+    '停止一个由 watch_start 启动的后台监控。停止后不再采样、不再产生新事件；' +
+    '已记录的历史事件仍可用 watch_list 查看。需要用 watchId（watch_start 的返回值）。',
   inputSchema: {
     type: 'object',
     properties: { watchId: { type: 'string', description: 'watch_start 返回的 id' } },
