@@ -10,9 +10,11 @@
  * 广播语义：监听者抛异常只影响自己，不影响其它监听者，更不影响采样循环。
  */
 
+import { getGlobalTriggerHub } from '../trigger/hub.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
 import type { WatchEvent } from './watch-service.js';
 import { WatchService } from './watch-service.js';
+import { wakeOwner } from './wake.js';
 
 export type WatchEventListener = (event: WatchEvent) => void;
 
