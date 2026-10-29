@@ -100,3 +100,38 @@ describe('ToolResultBuffer.maybeBuffer — 事故防线', () => {
     expect(buffer.maybeBuffer(raw, 'x')).toBe(raw);
   });
 });
+
+describe('ToolResultBuffer.capOnly — 第二处漏点（读回缓冲文件）', () => {
+  /**
+   * 事故第二步：模型 read 一个 781 KB 的 buffered-results 文件时，
+   * 调用方为防递归缓冲而跳过 maybeBuffer，但没有上限 ⇒ 78 万字符原样进历史。
+   * 缓冲省下的上下文被读回来一次全还回去。
+   */
+  it('读缓冲文件的结果必须被截断，且给出分段读提示', () => {
+    const buffer = newBuffer();
+    // 还原真实形态：read 输出带 `1→` 行号前缀
+    const raw = Array.from({ length: 3000 }, (_, i) => `${i + 1}→ Cursor Position: (1532, 1274)`).join('\n');
+    expect(raw.length).toBeGreaterThan(100_000);
+
+    const out = buffer.capOnly(raw, 'read');
+
+    expect(out.length).toBeLessThan(20_000);
+    expect(out).toContain('[Truncated:');
+    expect(out).toContain('offset=N, limit=M');
+    expect(out.startsWith('1→ Cursor Position')).toBe(true); // 头部保留，模型仍能读懂开头
+  });
+
+  it('小结果原样透传（不引入无谓噪声）', () => {
+    const buffer = newBuffer();
+    const small = '1→ hello\n2→ world';
+    expect(buffer.capOnly(small, 'read')).toBe(small);
+  });
+
+  it('读回缓冲文件时同样剥离内联 base64', () => {
+    const buffer = newBuffer({ threshold: 10_000_000 }); // 阈值拉高，确保触发的是剥离而非截断
+    const raw = `1→ screenshot\n{"type":"image","data":"${BIG_B64}","mimeType":"image/png"}`;
+    const out = buffer.capOnly(raw, 'read');
+    expect(out).not.toContain(BIG_B64.slice(0, 512));
+    expect(out).toContain('[base64 omitted:');
+  });
+});
