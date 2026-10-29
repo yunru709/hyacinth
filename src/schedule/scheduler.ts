@@ -354,6 +354,7 @@ export class HeartbeatScheduler {
     task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
     this.tasks.push(task);
     await this.persistence.saveTask(task);
+    this.syncConditionTask(task); // 条件类：登记 watcher（时间类 no-op）
     return task;
   }
 
