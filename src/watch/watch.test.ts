@@ -49,9 +49,9 @@ describe('probe security', () => {
 // ── 注册表 ──────────────────────────────────────────────────────────
 
 describe('probe registry', () => {
-  it('默认注册表包含 4 种 kind', () => {
+  it('默认注册表包含 5 种 kind', () => {
     const r = createDefaultProbeRegistry();
-    expect(r.kinds()).toEqual(['file', 'http', 'port', 'process']);
+    expect(r.kinds()).toEqual(['file', 'http', 'port', 'process', 'ui_region']);
     expect(r.describe().every((d) => d.description.length > 0)).toBe(true);
   });
 
