@@ -57,8 +57,9 @@ export function buildWatchPrompt(event: WatchEvent): string {
   ].join('\n');
 }
 
-/** 唤醒 owner 会话。失败只记录日志——监控本身不该因为唤醒失败而中断。 */
-async function wakeOwner(event: WatchEvent): Promise<void> {
+/** 唤醒 owner 会话。失败只记录日志——监控本身不该因为唤醒失败而中断。
+ *  export 出去供 condition-runner 复用（自动化任务的条件触发走同一条唤醒路径）。 */
+export async function wakeOwner(event: WatchEvent): Promise<void> {
   const owner = event.owner;
   if (!owner) return;
   const port = getSchedulerSessionPort();
