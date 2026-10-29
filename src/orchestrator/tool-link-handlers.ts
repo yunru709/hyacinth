@@ -120,6 +120,50 @@ export const evidenceLedgerHandler: ToolLinkHandler = {
 };
 
 /**
+ * `core.invoke-tool`：**按断言自动执行另一个工具**（2026-10-29，路线 B）
+ *
+ * 与上面三个 append 类 handler 的本质区别：
+ *   - 它们"产出文本、追加到结果里"（给模型加信息，路线 A）
+ *   - 这个"**直接执行动作**"，零 LLM 参与（路线 B）
+ *
+ * 声明示例（写进 ~/.agent/tool-links.json）：
+ *   {
+ *     "version": 1,
+ *     "links": [
+ *       { "on": "afterWatch:process", "handler": "core.invoke-tool",
+ *         "invoke": { "tool": "say", "args": { "content": "打完游戏了吗" } } }
+ *     ]
+ *   }
+ *
+ * ⚠️ 安全边界：**绝不进默认清单**。append 类失败最多少段提示文本，
+ *    invoke 类是真实动作（发消息、写文件、执行命令），必须由用户显式声明才生效。
+ *
+ * 契约：任何失败都返回空串并记录，不抛错（事件源多是后台循环，抛错会拖垮采样/调度）。
+ */
+export const invokeToolHandler: ToolLinkHandler = {
+  id: 'core.invoke-tool',
+  kind: 'invoke',
+  owner: 'core',
+  // 前缀形态：resolveToolLinks 会用 event.split(':')[0] 匹配，
+  // 所以写 'afterWatch' 就能覆盖 afterWatch:process / afterWatch:file 等全部子事件。
+  on: ['afterWatch', 'afterScheduleTask'],
+  run: async (linkInput) => {
+    const spec = linkInput.link?.invoke;
+    if (!spec || !spec.tool) return '';
+
+    const invoke = linkInput.invokeTool;
+    if (!invoke) return ''; // 未注入（单测/极简装配）：静默跳过，不报错
+
+    try {
+      await invoke(spec.tool, spec.args ?? {});
+    } catch (err) {
+      console.error(`[tool-links] invoke "${spec.tool}" failed on "${linkInput.event}":`, err);
+    }
+    return '';
+  },
+};
+
+/**
  * 组装核心注册表 —— **进程级一份**（这些处理器无状态）。
  * 若有**有状态**处理器：改成每装配一份，并把 utils/tool-links.ts 里 currentManifest
  * 持有者一并改成每 loop 一份（那边的 ⚠️ 有说明）。
