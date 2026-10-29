@@ -179,7 +179,8 @@ export class ToolResultBuffer {
       `not shown — this is a buffered result (${toolName}); use read(file_path=..., offset=N, limit=M) to page through it]`
     );
   }
-}
+
+  /** 生成 LLM 可读的指针消息，引导其使用 `read` 工具按需读取。 */
   private buildPointerMessage(
     result: string,
     toolName: string,
