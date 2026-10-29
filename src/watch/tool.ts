@@ -79,6 +79,21 @@ function getService(): WatchService {
         pushEvent(event);
         // 不 await：唤醒一轮可能很久，不能阻塞采样循环
         void wakeOwner(event);
+        // 同步外发到触发总线（若已接线）：让"时间触发"和"监控触发"在同一个
+        // 地方可观测/可统计。hub 未接线时为 no-op，不影响任何现有行为。
+        const hub = getGlobalTriggerHub();
+        if (hub) {
+          void hub.fire({
+            source: 'watch',
+            name: event.note ?? event.summary,
+            detail: {
+              watchId: event.watchId,
+              kind: event.kind,
+              distance: event.distance,
+              owner: event.owner,
+            },
+          });
+        }
       },
     });
   }
