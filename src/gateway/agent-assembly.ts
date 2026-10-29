@@ -731,7 +731,7 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
       }
     });
     logger.info('自动化已接入 TriggerHub', { sinks: hub.sinkCount() });
-  }
+  };
 
   // ── AutoGit（S4：git 自管理策略层，evolution 层消费 GitManager 原语）──
   // wireAutoGit 工厂内聚：new + onTurnEnd 观察者挂载（钩子体系首个装配侧观察者）
