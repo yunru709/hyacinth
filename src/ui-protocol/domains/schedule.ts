@@ -84,8 +84,12 @@ export function createScheduleDomain(options: ScheduleDomainOptions): DomainHand
     },
 
     // ── schedule.add ──────────────────────────────────────
+    // 2026-10-29 自动化改造：两种形态共用这一个方法
+    //   时间类：{ name, scheduleType, schedule, action, ... }（原样，行为不变）
+    //   条件类：{ name, action, trigger: { type:'condition', kind, spec, ... } }
     async add(params: unknown): Promise<{ ok: true }> {
-      const { name, scheduleType, schedule, action, tags, channel, fallback } = (params ?? {}) as {
+      const { name, scheduleType, schedule, action, tags, channel, fallback, trigger } = (params ??
+        {}) as {
         name?: string;
         scheduleType?: string;
         schedule?: Record<string, unknown>;
@@ -93,12 +97,45 @@ export function createScheduleDomain(options: ScheduleDomainOptions): DomainHand
         tags?: string[];
         channel?: string;
         fallback?: string[];
+        trigger?: {
+          type?: string;
+          kind?: string;
+          spec?: Record<string, unknown>;
+          intervalMs?: number;
+          cooldownMs?: number;
+          threshold?: number;
+          settleFrames?: number;
+        };
       };
-      if (!name || !scheduleType || !schedule || !action) {
-        throw new Error('schedule.add requires "name", "scheduleType", "schedule", "action"');
+      if (!name || !action) {
+        throw new Error('schedule.add requires "name" and "action"');
       }
       const scheduler = requireScheduler();
       if (!scheduler.addTask) throw new Error('addTask not supported by scheduler');
+
+      if (trigger) {
+        // 条件类：不参与心跳调度（scheduler.calculateNextRun 对它返回 null），
+        // 所以 scheduleType/schedule 只是占位，绝不会真的按时间触发。
+        if (trigger.type !== 'condition') {
+          throw new Error('schedule.add: trigger.type must be "condition"');
+        }
+        if (!trigger.kind) throw new Error('schedule.add: trigger.kind is required');
+        await scheduler.addTask(
+          name,
+          'interval',
+          { intervalMs: 60_000 },
+          action,
+          tags,
+          channel,
+          fallback,
+          { trigger: trigger as Record<string, unknown> },
+        );
+        return { ok: true };
+      }
+
+      if (!scheduleType || !schedule) {
+        throw new Error('schedule.add requires "scheduleType" and "schedule" for time-based tasks');
+      }
       await scheduler.addTask(name, scheduleType, schedule, action, tags, channel, fallback);
       return { ok: true };
     },
