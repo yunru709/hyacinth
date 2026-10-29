@@ -185,6 +185,76 @@ export class MCPClient {
     }
   }
 
+  /**
+   * 把 MCP content block 序列化成注入对话历史的文本。
+   *
+   * ⚠️ 这里是 2026-10-29 上下文爆炸事故的根因点，改动前务必读完下面注释。
+   *
+   * 事故：windows-mcp 的 Snapshot/Screenshot 返回 `[{type:'text'}, {type:'image', data:<base64>, mimeType}]`。
+   * 旧实现对非 text 块一律 `JSON.stringify(block)` ⇒ 一张 628KB 的 PNG 变成 78 万字符的纯文本
+   * （base64 约 1.3~2 字符/token ⇒ 单条约 20 万 tokens）进历史，压缩时又被 compressor 复制一份
+   * ⇒ 上下文 1.1M tokens > 模型 1M 窗口 ⇒ 上游只回 "400 Model is unavailable"（opencode 对
+   * 「请求处理不了」的粗粒度报错，与模型下线共用同一句，极易误诊）。
+   *
+   * 现行策略（三条，缺一不可）：
+   *  ① image 块：base64 **绝不内联**，落盘成临时文件后只注入路径指针，模型需要时用 read 自行查看；
+   *  ② 落盘失败：退化为「已省略」占位，宁可丢图也绝不把 base64 塞进上下文；
+   *  ③ 其他未知块：JSON 化但强制截断，杜绝任何协议扩展带来的第二起同类事故。
+   */
+  private formatContentBlock(block: unknown): string {
+    if (!block || typeof block !== 'object') return String(block ?? '');
+
+    const b = block as {
+      type?: string;
+      text?: string;
+      data?: string;
+      mimeType?: string;
+      source?: { type?: string; media_type?: string; data?: string; url?: string };
+    };
+
+    if (b.type === 'text' && typeof b.text === 'string') return b.text;
+
+    if (b.type === 'image') {
+      const data = typeof b.data === 'string' ? b.data : b.source?.data;
+      const mime = b.mimeType ?? b.source?.media_type ?? 'image/png';
+      if (!data) return `[Image: ${mime} — no data]`;
+      const bytes = Math.floor((data.length * 3) / 4);
+      const filePath = this.persistImage(data, mime);
+      return filePath
+        ? `[Image saved: ${filePath} (${mime}, ${(bytes / 1024).toFixed(1)} KB) — use read(file_path="${filePath}") to view]`
+        : `[Image omitted: ${mime}, ${(bytes / 1024).toFixed(1)} KB — could not persist, base64 dropped]`;
+    }
+
+    // 未知块类型（audio/resource/未来扩展）：JSON 化但强制截断
+    let json: string;
+    try {
+      json = JSON.stringify(block);
+    } catch {
+      json = String(block);
+    }
+    if (json.length > MAX_INLINE_BLOCK_CHARS) {
+      return `${json.slice(0, MAX_INLINE_BLOCK_CHARS)}… [block truncated, ${json.length} chars total]`;
+    }
+    return json;
+  }
+
+  /** 把图片 base64 落盘（同内容按 sha1 去重），返回绝对路径；失败返回 null。 */
+  private persistImage(base64: string, mime: string): string | null {
+    try {
+      const ext = (mime.split('/')[1] ?? 'bin').replace(/[^a-z0-9]/gi, '') || 'bin';
+      const hash = createHash('sha1').update(base64).digest('hex').slice(0, 16);
+      const dir = join(tmpdir(), 'hyacinth-mcp-images');
+      mkdirSync(dir, { recursive: true });
+      const filePath = join(dir, `${hash}.${ext}`);
+      if (!existsSync(filePath)) writeFileSync(filePath, Buffer.from(base64, 'base64'));
+      return filePath;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn('failed to persist MCP image', { error: msg });
+      return null;
+    }
+  }
+
   /** 获取 Server 名称 */
   getName(): string {
     return this.config.name;
