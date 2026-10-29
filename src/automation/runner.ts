@@ -124,6 +124,7 @@ export async function runRule(
     scope,
     steps,
     depth: 0,
+    onError,
   });
 
   const ok = failure === undefined;
@@ -132,13 +133,6 @@ export async function runRule(
     steps,
     ...(ok ? {} : { error: failure }),
   };
-
-  // 说明：onError='continue' 时不提前返回，仅记录失败继续下一个动作。
-  // 这里用闭包形式是为了让 meta 参数不污染函数签名。
-  // eslint-disable-next-line no-unreachable
-  function _unused(): void {
-    void onError;
-  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
