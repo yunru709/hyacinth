@@ -90,6 +90,38 @@ export interface TaskAction {
 }
 
 /** 定时任务定义 */
+/**
+ * 触发方式（2026-10-29 自动化改造）
+ *
+ * 设计取舍：**不新建一套存储**，而是给 ScheduledTask 加一个可选字段。
+ *   - 省略 trigger ⇒ 时间类，行为与改造前逐字节一致（老 tasks.json 直接可读，零迁移）
+ *   - type='condition' ⇒ 条件类，由 WatchService 采样驱动，命中后同样走
+ *     TriggerHub → SessionWakePort 唤醒会话
+ *
+ * 于是「定时任务」自然升级成「自动化任务」：一份存储、一个列表、一套执行记录，
+ * 只是每行多了个触发方式。
+ *
+ * spec 故意用宽松类型：schedule 层不该依赖 watch 层的具体契约
+ * （否则两个业务核心互相 import）。参数合法性由 watch 的 Probe.create 校验，
+ * 非法时在登记 watcher 的那一刻就报错，不会静默跑坏。
+ */
+export type ScheduledTaskTrigger =
+  | {
+      type: 'condition';
+      /** 采样器类型，与 watch 的 WatchKind 对应 */
+      kind: 'file' | 'http' | 'process' | 'port' | 'ui_region';
+      /** 该 kind 自己的参数（如 { path: 'C:\\a.log', watch: 'content' }） */
+      spec: Record<string, unknown>;
+      /** 采样间隔（毫秒），默认 2000 */
+      intervalMs?: number;
+      /** 命中后的冷却（毫秒），默认 30000 —— 防唤醒风暴 */
+      cooldownMs?: number;
+      /** 变化判定阈值（如 ui_region 的汉明距离） */
+      threshold?: number;
+      /** 连续 N 帧命中才算数，防单帧闪烁 */
+      settleFrames?: number;
+    };
+
 export interface ScheduledTask {
   /** 唯一标识 */
   id: string;
