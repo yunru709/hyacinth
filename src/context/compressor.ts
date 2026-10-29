@@ -1133,7 +1133,7 @@ export class CompressorOrchestrator {
         if (isToolResult(c) && !allToolUseIds.has(c.tool_use_id)) {
           fixedContents.push({
             type: 'text',
-            text: `[OrphanedToolResult: ${c.tool_use_id}] ${c.content}`,
+            text: `[OrphanedToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(c.content)}`,
           });
         } else {
           fixedContents.push(c);
