@@ -66,7 +66,7 @@ export function installSchedulerSessionPort(deps: {
             : openLoop.run
               ? openLoop.run(`[Scheduled Task] "${n}" triggered.`)
               : Promise.resolve();
-        return { runTask, getResponse: () => '' };
+        return { runTask, runPrompt, getResponse: () => '' };
       }
     } catch {
       /* 注册表查询失败 → 落回新建 */
