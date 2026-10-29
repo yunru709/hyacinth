@@ -76,8 +76,15 @@ export class ToolResultBuffer {
     // 折叠连续重复行 — 典型场景：日志中同一错误重复成百上千行
     const folded = this.foldRepeatedLines(result);
 
-    if (folded.length <= this.threshold) return folded;
-    return this.bufferToDisk(folded, toolName);
+    // 剥离内联媒体数据 — 最后一道防线。
+    // 事故（2026-10-29）：MCP 截图工具的 base64 被当文本注入历史，单条 78 万字符
+    // （≈20 万 tokens），压缩时再复制一份 ⇒ 上下文 1.1M > 1M 窗口 ⇒ 上游 400
+    // "Model is unavailable"（具误导性的通用报错）。此处在「进入历史」的唯一关口
+    // 做内容级剥离：即使上游某条路径漏了，base64 也不会落到对话里。
+    const stripped = stripInlineMedia(folded);
+
+    if (stripped.length <= this.threshold) return stripped;
+    return this.bufferToDisk(stripped, toolName);
   }
 
   // ── Internal ────────────────────────────────────────────────────
