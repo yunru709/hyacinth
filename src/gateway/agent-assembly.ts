@@ -198,6 +198,16 @@ export interface AgentComponents {
 
 // ─── Factory ─────────────────────────────────────────────────────────
 
+/**
+ * 进程级 guard：automation 只装配一次。
+ *
+ * ⚠️ `createAgentAssembly` 是**每个会话**调用一次。若不 guard：
+ *   · 每个会话都会 `hub.registerSink(...)` ⇒ 同一事件触发 N 次（N=会话数）
+ *   · 每个会话都会 arm 一遍 watcher ⇒ 监控项重复
+ * 规则表与运行时都是进程级单例，装配理应只做一次。
+ */
+let automationWired = false;
+
 export async function createAgentAssembly(
   options: CreateAgentOptions,
   supervisor?: LifecycleSupervisor,
