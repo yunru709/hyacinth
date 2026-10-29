@@ -1172,6 +1172,14 @@ export class AgentLoop {
     // say = 「说话」：只排队等落盘 + 播报，**不置回合结束标志**（2026-10-25 拆分）。
     // 说完还能继续调用别的工具接着干活 —— 这也是它与 deliver 的唯一分界线。
     this.pendingOutputs.push({ kind: 'say', content: text, voice });
+
+    // ⚠️ 后台直通（2026-10-30 真机实测的最终根因）：
+    //    没有活跃回合时，入队后**没人会来消费** —— takeSayStatus 只在回合结束时调用。
+    //    watch / automation 触发的 say 会永远躺在队列里：工具返回 ok，
+    //    却既没有声音、对话里也看不到那句话。所以这里当场消费掉。
+    if (!this.turnActive) {
+      await this.takeSayStatus();
+    }
     return { ok: true };
   }
 
