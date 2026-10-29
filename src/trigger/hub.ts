@@ -114,3 +114,15 @@ export function setGlobalTriggerHub(hub: TriggerHub | null): void {
 export function getGlobalTriggerHub(): TriggerHub | null {
   return globalHub;
 }
+
+/**
+ * 取全局总线，没有就创建（2026-10-29）。
+ *
+ * 供**业务核心层**自行接入用：HeartbeatScheduler.start() 调用它，
+ * 这样 gateway（UI 适配层）不必 import trigger ——
+ * verify:layers 规则 5「UI 不得直连业务核心」正是这么要求的。
+ */
+export function ensureGlobalTriggerHub(): TriggerHub {
+  if (!globalHub) globalHub = new TriggerHub();
+  return globalHub;
+}
