@@ -5,6 +5,11 @@
  * 是给模型用的，而模型会被内容注入了什么我们控制不了 —— 所以白名单必须
  * 在**代码里**默认拒绝内网，而不是靠提示词里写"请不要扫描内网"。
  *
+ * ⚠️ 命名注意：本文件的 `isPrivateAddress` 与 `src/kernel/security/` 里的
+ * `isPrivateHost` **不是同一个东西**（那是通用安全内核的策略函数，这里是
+ * watch probe 专用的地址判定，且放行回环）。刻意取了不同的名字，避免
+ * 有人在别处 import 错。
+ *
  * 默认策略：
  *   - localhost / 127.0.0.0/8 / ::1  → 允许（本地服务调试是刚需）
  *   - 私有网段 10/8、172.16/12、192.168/16、169.254/16、100.64/10 → 拒绝
@@ -13,14 +18,14 @@
  */
 
 /** 判断是否私有 / 链路本地 / CGNAT 地址（只看 IPv4 字面量与常见别名） */
-export function isPrivateHost(host: string): boolean {
+export function isPrivateAddress(host: string): boolean {
   const h = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
 
   if (h === 'localhost' || h === '::1' || h === '0.0.0.0') return false; // 本地放行
   if (h === 'metadata.google.internal') return true; // 云元数据端点，绝不允许探测
 
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
-  if (!m) return false; // 域名交给 DNS 解析，不在这里判（解析后再判成本太高，见下）
+  if (!m) return false; // 域名：不在这里判（DNS 解析后再判成本高，见 assertHostAllowed 注释）
 
   const [a, b] = [Number(m[1]), Number(m[2])];
   if (a === 127) return false; // 回环放行
@@ -34,12 +39,16 @@ export function isPrivateHost(host: string): boolean {
 
 /**
  * 校验目标是否允许访问。
- * @param host     主机名或 IP
- * @param allowPrivate 调用方是否显式放行内网
+ *
+ * 已知局限（明确记录，不装作没有）：这里只检查**字面量**是内网的情况。
+ * 域名先过 DNS 再判私有 IP 需要额外解析，当前不实现 —— 所以
+ * `http://evil.example.com` 解析到 127.0.0.1 的 SSRF 场景挡不住。
+ * 对"本机 agent 的调试工具"这个定位来说，这个取舍可以接受；
+ * 若要对外暴露此工具，必须先补 DNS 重绑定防护。
  */
 export function assertHostAllowed(host: string, allowPrivate: boolean | undefined): void {
   if (allowPrivate) return;
-  if (isPrivateHost(host)) {
+  if (isPrivateAddress(host)) {
     throw new Error(
       `refusing to probe private address '${host}'. ` +
         'Pass allowPrivateHost=true explicitly if this is intended (watch tool defaults to public/localhost only).',
