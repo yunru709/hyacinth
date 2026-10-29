@@ -412,6 +412,17 @@ export interface ToolLinkRunInput {
    * 未注入时为 undefined —— 此时 invoke 类处理器必须**静默跳过**（不得抛错）。
    */
   invokeTool?: (tool: string, args: Record<string, unknown>) => Promise<string>;
+  /**
+   * 上报本次执行结果（2026-10-30，收敛点③：可观测）。
+   *
+   * 为什么需要：`run()` 的契约是**返回要追加的文本**，而 invoke 类恒返回空串 ——
+   * 于是「成功执行了工具」和「什么都没做成」在返回值上**完全无法区分**。
+   * 没有这个回调，失败只能 console.error，而 console.error 没人看得见。
+   * （踩过：say 不出声，排查近一小时才发现是入队语义，不是执行失败。）
+   *
+   * 约定：**invoke 类必须调用**；append / enrich 类可不调（外层仍记录耗时与异常）。
+   */
+  report?: (outcome: { ok: boolean; error?: string; tool?: string }) => void;
 }
 
 export interface ToolLinkHandler {
