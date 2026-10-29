@@ -380,6 +380,8 @@ export class HeartbeatScheduler {
   async deleteTask(taskId: string): Promise<boolean> {
     const idx = this.tasks.findIndex(t => t.id === taskId);
     if (idx < 0) return false;
+    // 条件任务先注销 watcher 再删记录：否则会留下孤儿 watcher 继续采样并唤醒会话
+    getConditionTaskRunner()?.disarm(taskId);
     this.tasks.splice(idx, 1);
     await this.persistence.deleteTask(taskId);
     return true;
