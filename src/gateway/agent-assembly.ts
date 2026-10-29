@@ -663,6 +663,27 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
       logger.info('自动化规则已启动监控', { count: armed.armed.size });
     }
 
+    // time 类规则 → 独立时间源。
+    // 只支持 interval / daily / fixed-time（无状态、确定性）；
+    // cron / random 请继续用 scheduler 任务（random 有持久状态，不适合放这里）。
+    const timeSource = createTimeSource({
+      getRules: () => getCurrentAutomationRules(),
+      fire: (ruleId) => {
+        void dispatchAutomationEvent({
+          eventName: `afterTime:${ruleId}`,
+          source: 'time',
+          name: ruleId,
+          at: Date.now(),
+        }).catch((err: Error) => {
+          logger.warn('自动化 time 规则派发失败', { ruleId, error: err.message });
+        });
+      },
+    });
+    timeSource.start();
+    logger.info('自动化时间源已启动', {
+      timeRules: getCurrentAutomationRules().filter((r) => r.when.kind === 'time').length,
+    });
+
     // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
     const runtimeDeps: AutomationRuntimeDeps = {
       invokeTool: async (toolName, args) => {
