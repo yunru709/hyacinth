@@ -432,6 +432,7 @@ export class HeartbeatScheduler {
     task.enabled = true;
     task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
     await this.persistence.saveTask(task);
+    this.syncConditionTask(task); // 重新启用条件任务 ⇒ 重新登记 watcher
     return true;
   }
 
