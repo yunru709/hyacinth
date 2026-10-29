@@ -163,4 +163,66 @@ describe('WatchService（后台挂起）', () => {
     expect(h.service.list().length).toBe(0);
     expect(h.service.stop(info.watchId)).toBe(false); // 重复停止返回 false
   });
+
+  it('达成式 probe 首帧即满足时立即触发（不等变化）', async () => {
+    // 回归同一缺陷：后台模式下"进程早就在跑"也必须触发一次，否则永远等不到。
+    const registry = new ProbeRegistry();
+    registry.register({
+      kind: 'process',
+      description: 'always met',
+      create: () => ({
+        async sample(): Promise<ProbeSample> {
+          return { ok: true, value: 'met' };
+        },
+        isSatisfied: (s: ProbeSample) => s.ok && s.value === 'met',
+      }),
+    });
+
+    const timers = makeFakeTimers();
+    const events: WatchEvent[] = [];
+    const service = new WatchService({
+      registry,
+      onEvent: (e) => {
+        events.push(e);
+      },
+      setIntervalFn: timers.setIntervalFn,
+      clearIntervalFn: timers.clearIntervalFn,
+    });
+
+    service.start({ kind: 'process', pid: 1, expect: 'running' });
+
+    await timers.run(1); // 首帧就应触发
+    expect(events.length).toBe(1);
+    expect(events[0].distance).toBe(0);
+    expect(events[0].kind).toBe('process');
+  });
+
+  it('达成式 probe 未满足时不提前触发', async () => {
+    const registry = new ProbeRegistry();
+    registry.register({
+      kind: 'port',
+      description: 'always pending',
+      create: () => ({
+        async sample(): Promise<ProbeSample> {
+          return { ok: true, value: 'pending' };
+        },
+        isSatisfied: (s: ProbeSample) => s.value === 'met',
+      }),
+    });
+
+    const timers = makeFakeTimers();
+    const events: WatchEvent[] = [];
+    const service = new WatchService({
+      registry,
+      onEvent: (e) => {
+        events.push(e);
+      },
+      setIntervalFn: timers.setIntervalFn,
+      clearIntervalFn: timers.clearIntervalFn,
+    });
+
+    service.start({ kind: 'port', port: 1, expect: 'open' });
+    await timers.run(3);
+    expect(events.length).toBe(0);
+  });
 });
