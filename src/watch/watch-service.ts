@@ -153,6 +153,7 @@ export class WatchService {
       cooling: false,
       summary: summarize(spec),
       once: options.once ?? false,
+      owner: options.owner,
     };
 
     const entry: Entry = {
