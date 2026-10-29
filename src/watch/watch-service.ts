@@ -197,6 +197,32 @@ export class WatchService {
     for (const id of [...this.entries.keys()]) this.stop(id);
   }
 
+  /** 抛事件 + 进冷却 + once 自停。抽出来是因为「首帧即达成」和「中途变化」都要走它。 */
+  private async fire(watchId: string, entry: Entry, distance: number): Promise<void> {
+    const now = this.now();
+    entry.info.hits += 1;
+    entry.streak = 0;
+    entry.coolingUntil = now + entry.cooldownMs;
+
+    const event: WatchEvent = {
+      watchId,
+      kind: entry.spec.kind,
+      distance,
+      at: now,
+      note: entry.info.note,
+      summary: entry.info.summary,
+      owner: entry.owner,
+    };
+
+    try {
+      await this.opts.onEvent(event);
+    } catch {
+      /* 事件消费方的异常不影响监控本身 */
+    }
+
+    if (entry.info.once) this.stop(watchId);
+  }
+
   /** 单次 tick：采样 → 判变化 → 抛事件 / 重建基准。异常全部吞掉并记录，绝不让定时器崩。 */
   private async tick(watchId: string): Promise<void> {
     const entry = this.entries.get(watchId);
