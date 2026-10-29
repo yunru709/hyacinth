@@ -53,26 +53,10 @@ function getService(): WatchService {
   const svc = getWatchService();
   if (!listenerRegistered) {
     listenerRegistered = true;
-    onWatchEvent((event) => {
-      pushEvent(event);
-      // 不 await：唤醒一轮可能很久，不能阻塞采样循环
-      void wakeOwner(event);
-      // 同步外发到触发总线（若已接线）：让"时间触发"和"监控触发"在同一个
-      // 地方可观测/可统计。hub 未接线时为 no-op，不影响任何现有行为。
-      const hub = getGlobalTriggerHub();
-      if (hub) {
-        void hub.fire({
-          source: 'watch',
-          name: event.note ?? event.summary,
-          detail: {
-            watchId: event.watchId,
-            kind: event.kind,
-            distance: event.distance,
-            owner: event.owner,
-          },
-        });
-      }
-    });
+    // ⚠️ 只维护"最近事件"缓冲。唤醒与总线外发已下沉到 service-instance 的核心监听
+    // （2026-10-29）—— 那里注册才能覆盖"自动化任务、从未调用过 watch_* 工具"的场景。
+    // 此处若再注册一遍，会出现同一次命中唤醒两次会话。
+    onWatchEvent((event) => pushEvent(event));
   }
   return svc;
 }
