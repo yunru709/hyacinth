@@ -61,8 +61,12 @@ export interface LoadResult {
  *
  * @param ctx 校验所需的外部知识（probe kinds / tool names / handlers / events）
  */
-export function loadAutomationRules(ctx: ValidationContext): LoadResult {
-  const p = automationsPath();
+export function loadAutomationRules(
+  ctx: ValidationContext,
+  /** 测试隔离用；省略则用 ~/.agent/automations.json */
+  filePath: string = automationsPath(),
+): LoadResult {
+  const p = filePath;
 
   let raw: string;
   try {
