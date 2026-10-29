@@ -78,8 +78,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/** 本轮支持的 kind（顺序即文档顺序；加类见文件头"扩展指引"） */
-export const TOOL_LINK_KINDS = ['append', 'enrich'] as const;
+/** 本轮支持的 kind（顺序即文档顺序；加类见文件头"扩展指引"）
+ *
+ * 2026-10-29 新增 `invoke`：**按断言自动执行另一个工具**（路线 B）。
+ *   - append / enrich：产出文本，追加到工具结果里（路线 A 的"给模型加信息"）
+ *   - invoke：不产出文本，而是**调用另一个工具**（零 LLM 的确定性链路）
+ * 两者并存、互不冲突：同一个事件上可以既有 append 又有 invoke。
+ *
+ * invoke 的执行方式：handler 在 run() 里调用 `input.invokeTool(tool, args)`，
+ * 然后返回空串（不往结果里加东西）。这样 **ToolLinkHandler 契约与调用点完全不变**。
+ */
+export const TOOL_LINK_KINDS = ['append', 'enrich', 'invoke'] as const;
 export type ToolLinkKind = (typeof TOOL_LINK_KINDS)[number];
 
 /** 暂不支持的 kind —— 单独列出，是为了让报错信息**说得清为什么**（而不是"未知 kind"） */
