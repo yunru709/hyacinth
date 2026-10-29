@@ -19,7 +19,9 @@ import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import { CronExpression } from './cron.js';
 import { SchedulePersistence } from './persistence.js';
 // 触发总线（2026-10-29）：把"时间到了"作为一种事件源接入统一总线。
-// 只 import type —— 本模块不关心谁在消费事件，保持单向依赖。
+// 这里 import 的是**值**（ensureGlobalTriggerHub），因为接线必须发生在业务核心层：
+// gateway 属 UI 适配层，直连 trigger 会违反 verify:layers 规则 5（白名单只减不增）。
+import { ensureGlobalTriggerHub } from '../trigger/hub.js';
 import type { TriggerHub } from '../trigger/hub.js';
 
 const DEFAULT_CONFIG: SchedulerConfig = {
