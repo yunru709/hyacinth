@@ -118,6 +118,8 @@ export function createDefaultRegistry(
   registry.register(new DbQueryTool());
   registry.register(new DiskUsageTool(cwd));
   registry.register(new GenerateMediaTool(cwd));
+  // watch_wait / watch_start / watch_stop / watch_list：等待与监控（见 docs/watch.md）
+  for (const tool of watchTools) registry.register(tool);
   return registry;
 }
 
