@@ -62,6 +62,12 @@ export async function waitForChange(opts: WaitOptions): Promise<WatchResult> {
   const first = await opts.probe.sample(opts.signal);
   samples += 1;
   if (first.ok) {
+    // 达成式 probe（process/port/带期望值的 http）：条件**一开始就成立**时立即返回。
+    // 不这么做的话，首帧基准就是 met、之后一直 met、距离恒为 0 ⇒ 只能等到超时。
+    // 2026-10-29 验收实测：wait(process explorer, expect=running) 返回 changed=false。
+    if (opts.probe.isSatisfied?.(first)) {
+      return finish({ changed: true, distance: 0 });
+    }
     baseline = first;
   } else {
     failures += 1;
