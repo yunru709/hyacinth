@@ -734,8 +734,10 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
       if (prev && prev.size > 0) disarmWatchIds(asArmer(), prev.values());
       const reApplied = initAutomationsFromDisk(makeCtx());
       const reArmed = armProbeRules(getCurrentAutomationRules(), asArmer());
-      runtimeDeps.armedWatchIds = reArmed.armed;
-      setAutomationRuntime(runtimeDeps);
+      // 从**当前** runtime 取，只覆盖 armedWatchIds —— 不能用闭包捕获首次装配时的引用，
+      // 否则热更后 invokeTool 又指回第一个会话的 loop（say 再次无声）。
+      const cur = getAutomationRuntime();
+      if (cur) setAutomationRuntime({ ...cur, armedWatchIds: reArmed.armed });
       return { count: reApplied.count, errors: [...reApplied.errors, ...reArmed.errors] };
     };
 
