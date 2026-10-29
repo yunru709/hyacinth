@@ -71,6 +71,14 @@ class ProcessProbeInstance implements ProbeInstance {
     const met = this.spec.expect === 'exit' ? !alive : alive;
     return { ok: true, value: met ? 'met' : 'pending', raw: { alive } };
   }
+
+  /**
+   * 达成式语义：正在等"进程启动"而它早就在跑时，应当立刻返回，而不是
+   * 傻等超时（2026-10-29 验收暴露：explorer 一直在跑，但 wait 报 changed=false）。
+   */
+  isSatisfied(sample: ProbeSample): boolean {
+    return sample.ok && sample.value === 'met';
+  }
 }
 
 export const processProbe: Probe = {
