@@ -78,6 +78,8 @@ import { GenerateMediaTool } from './generate-media.js';
 // watch_* ：等待/监控类工具（同步等待 + 后台挂起），实现见 src/watch/
 // 这里只做注册；判定逻辑在 watch 层，tools 层不认识它内部结构。
 import { createWatchTools } from '../watch/tool.js';
+// 自动化任务：条件触发（把 scheduler 的条件任务接到 WatchService）。幂等，只装一次。
+import { installConditionTaskRunner } from '../watch/condition-runner.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
