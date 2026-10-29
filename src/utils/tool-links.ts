@@ -101,6 +101,20 @@ export interface ToolLink {
   handler: string;
   /** 缺省视为 true（清单里只写想要的行即可） */
   enabled?: boolean;
+  /**
+   * `invoke` 类专用（2026-10-29）：声明"这个事件上要执行哪个工具、带什么参数"。
+   *
+   * 这就是「根据断言自动执行其他工具」的落地形态 —— 例：
+   *   { "on": "afterWatch:process", "handler": "core.invoke-tool",
+   *     "invoke": { "tool": "say", "args": { "content": "打完游戏了吗" } } }
+   *
+   * 参数里的 `$event.*` / `$payload.*` 占位符在执行前由调用方替换（见 runToolLinks），
+   * 这样同一条声明可以用于不同的具体事件。
+   */
+  invoke?: {
+    tool: string;
+    args?: Record<string, unknown>;
+  };
 }
 
 export interface ToolLinksManifest {
