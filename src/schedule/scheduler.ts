@@ -443,6 +443,7 @@ export class HeartbeatScheduler {
     task.enabled = false;
     task.nextRunAt = null;
     await this.persistence.saveTask(task);
+    this.syncConditionTask(task); // 停用 ⇒ 内部走 disarm，停止采样
     return true;
   }
 
