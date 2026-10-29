@@ -641,7 +641,7 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     }
 
     // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
-    setAutomationRuntime({
+    const runtimeDeps: AutomationRuntimeDeps = {
       invokeTool: async (toolName, args) => {
         const tool = toolRegistry.get(toolName);
         if (!tool) throw new Error(`[automation] 工具不存在: ${toolName}`);
@@ -649,6 +649,37 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
       },
       wakeSession: createWakeSession(() => getSchedulerSessionPort()),
       armedWatchIds: armed.armed,
+    };
+    setAutomationRuntime(runtimeDeps);
+
+    // ── 工具面：让模型能设计链路（validate / create / list）──
+    // 保存后必须**重载 + 重新 arm**，否则：
+    //   ① 新规则要重启才生效（用户以为"配了没反应"）
+    //   ② 旧 watcher 残留 ⇒ 同一事件触发两次
+    // 顺序：停旧 → 写盘 → 重载 → 重 arm → 更新运行时映射
+    const asArmer = () => getWatchService() as unknown as Parameters<typeof armProbeRules>[1];
+    const reloadAndArm = (): { count: number; errors: string[] } => {
+      const prev = getAutomationRuntime()?.armedWatchIds;
+      if (prev && prev.size > 0) disarmWatchIds(asArmer(), prev.values());
+      const reApplied = initAutomationsFromDisk(makeCtx());
+      const reArmed = armProbeRules(getCurrentAutomationRules(), asArmer());
+      runtimeDeps.armedWatchIds = reArmed.armed;
+      setAutomationRuntime(runtimeDeps);
+      return { count: reApplied.count, errors: [...reApplied.errors, ...reArmed.errors] };
+    };
+
+    for (const tool of createAutomationTools({
+      getContext: () => makeCtx(),
+      getRules: () => getCurrentAutomationRules(),
+      save: (rules) => {
+        saveAutomationRules(rules);
+        return reloadAndArm();
+      },
+    })) {
+      toolRegistry.register(tool);
+    }
+    logger.info('自动化工具面已注册', {
+      tools: ['automation_validate', 'automation_create', 'automation_list'],
     });
 
     // 订阅 TriggerHub：watch / scheduler 已经在 fire，automation 在此消费。
