@@ -93,6 +93,18 @@ export interface ProbeInstance {
    * 缺省语义：value 不相等则 1。UI 区域会重写为汉明距离。
    */
   distance?(baseline: ProbeSample, current: ProbeSample): number;
+  /**
+   * 【达成式 probe 必须实现】此刻条件是否**已经成立**。
+   *
+   * 为什么需要它（2026-10-29 验收暴露的缺陷）：
+   * `distance()` 只能回答"和基准比变了没"。对 process/port/带期望值的 http 这类
+   * 「等条件成立」的 probe，若条件**一开始就成立**（进程早就在跑），首帧基准就是
+   * met，之后一直 met ⇒ 距离恒为 0 ⇒ 永远等到超时。语义完全错位。
+   *
+   * 实现约定：返回 true 表示"不必再等，条件已达成"，调用方应立即返回 changed=true。
+   * 变化式 probe（file / ui_region）不实现此方法。
+   */
+  isSatisfied?(sample: ProbeSample): boolean;
   dispose?(): void;
 }
 
