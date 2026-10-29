@@ -47,7 +47,7 @@ export function homeRelative(p: string): string {
 
 /** 记事本第一行的**声明格式**（第一行永远只放这一句；由 ensurePathLine 维护） */
 export function scratchpadPathLine(): string {
-  return '# 临时记事本（Zone 5）· ' + homeRelative(scratchpadPath());
+  return '# 跨会话记事本（所有会话共享）· ' + homeRelative(scratchpadPath());
 }
 
 /** 默认上限（字符）。可在本地配置里改：`context.scratchpadMaxChars` */
