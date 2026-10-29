@@ -124,6 +124,19 @@ export interface ToolLinksManifest {
 
 export const TOOL_LINKS_VERSION = 1;
 
+/**
+ * loop 钩子**之外**的事件源（2026-10-29）。
+ *
+ * 为什么单独声明而不是塞进 LOOP_HOOK_NAMES：
+ *   后者是 `as const satisfies ReadonlyArray<keyof LoopHooks>`，加非钩子名会破坏类型约束。
+ *   而语义校验（validateToolLinks）只要求"事件名前缀 ∈ 事件目录"，
+ *   所以由装配层把这份清单**追加**到 LOOP_HOOK_NAMES 后面即可。
+ *
+ * 没有这一步，清单里写 `on: "afterWatch:process"` 会被判 "unknown event" ⇒
+ * **静默退回出厂默认**（不报错、只是不生效）—— 这是最容易踩的坑。
+ */
+export const TOOL_LINK_EXTRA_EVENT_SOURCES = ['afterWatch', 'afterScheduleTask'] as const;
+
 /** 清单路径 —— **全局单层**（P-Config 收敛：项目级配置已取消，不做双层） */
 export function toolLinksPath(): string {
   return path.join(os.homedir(), '.agent', 'tool-links.json');
