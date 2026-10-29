@@ -177,6 +177,8 @@ export function buildCoreToolLinkRegistry(): ToolLinkRegistry {
   reg.register(diagnosticsAppendHandler);
   reg.register(referencesAppendHandler);
   reg.register(evidenceLedgerHandler);
+  // 路线 B（2026-10-29）：按清单声明直接执行工具。不进程默认清单 ⇒ 不显式配置就不生效。
+  reg.register(invokeToolHandler);
   coreRegistry = reg;
   return reg;
 }
