@@ -224,7 +224,14 @@ export function parseToolLinks(raw: unknown): { manifest: ToolLinksManifest; err
   const links: ToolLink[] = [];
   const seen = new Set<string>();
   root.links.forEach((item, i) => {
-    const l = item as { on?: unknown; handler?: unknown; kind?: unknown; enabled?: unknown };
+    const l = item as {
+      on?: unknown;
+      handler?: unknown;
+      kind?: unknown;
+      enabled?: unknown;
+      /** 2026-10-29：invoke 类规格（{ tool, args }），形状在下方兜底校验 */
+      invoke?: unknown;
+    };
     if (typeof l?.on !== 'string' || l.on.length === 0) {
       errors.push(`links[${i}]: missing "on"`);
       return;
