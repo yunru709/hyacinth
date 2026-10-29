@@ -706,7 +706,7 @@ export async function runToolInline(
     const isBufferedRead = name === 'read' && typeof (input as Record<string, unknown>).file_path === 'string' &&
       ((input as Record<string, unknown>).file_path as string).startsWith(ctx.resultBuffer.getBufferDir());
     const result = isBufferedRead
-      ? sanitizeToolResult(rawResult)
+      ? ctx.resultBuffer.capOnly(sanitizeToolResult(rawResult), name)   // 见批量路径处的事故注释
       : ctx.resultBuffer.maybeBuffer(sanitizeToolResult(rawResult), name);
     ctx.outputHandler?.onToolResult?.(result, false, id);
     // diff 通知（edit/write/multi_edit 按 filePath 写入）—— **读而不删**：
