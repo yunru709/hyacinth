@@ -309,6 +309,8 @@ export class HeartbeatScheduler {
       tags,
       channel,
       fallback,
+      // 条件类任务：带上 trigger；时间类为 undefined（与改造前一致）
+      trigger: opts?.trigger,
     };
 
     task.nextRunAt = this.calculateNextRun(task)?.toISOString() ?? null;
