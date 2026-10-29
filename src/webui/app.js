@@ -2476,6 +2476,26 @@
         applyPh();
       }
     }
+
+    // 2026-10-29 自动化改造：触发方式切换（时间 ⇄ 条件）时显示对应控件
+    {
+      const _tt = $('#schedule-trigger-type');
+      const _t = $('#schedule-type');
+      const _v = $('#schedule-value');
+      const _ck = $('#schedule-cond-kind');
+      const _cs = $('#schedule-cond-spec');
+      const applyTriggerMode = () => {
+        const isCond = !!(_tt && _tt.value === 'condition');
+        if (_t) _t.hidden = isCond;
+        if (_v) _v.hidden = isCond;
+        if (_ck) _ck.hidden = !isCond;
+        if (_cs) _cs.hidden = !isCond;
+      };
+      if (_tt) {
+        _tt.addEventListener('change', applyTriggerMode);
+        applyTriggerMode();
+      }
+    }
     const hint = (msg, ok) => {
       const h = $('#schedule-hint');
       if (!h) return;
