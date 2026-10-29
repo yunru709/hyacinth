@@ -594,18 +594,16 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   //   automation  = 用户/模型定义的完整链路（invoke/wake/gate/safety，可多步可分支）
   // 两者共用 TriggerHub 派发与统一执行记录。
   {
-    // 校验需要的"外部知识"：全部现取，避免 automation 层反向依赖各业务层
-    const knownProbeKinds = ['file', 'http', 'process', 'port', 'ui_region'];
-    const knownToolNames = toolRegistry.getToolDefinitions().map((t) => t.name);
-    const knownHandlers = buildCoreToolLinkRegistry().ids();
-    const knownEvents = [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES];
-
-    const applied = initAutomationsFromDisk({
-      knownProbeKinds,
-      knownToolNames,
-      knownHandlers,
-      knownEvents,
+    // 校验需要的"外部知识"：做成**工厂**而非快照 —— 热更后（新工具注册/新 probe kind）
+    // 下一次校验能立即跟上，不必重启。
+    const makeCtx = (): ValidationContext => ({
+      knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
+      knownToolNames: toolRegistry.getToolDefinitions().map((t) => t.name),
+      knownHandlers: buildCoreToolLinkRegistry().ids(),
+      knownEvents: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
     });
+
+    const applied = initAutomationsFromDisk(makeCtx());
     if (applied.errors.length > 0) {
       // 部分无效：非法条目已剔除，其余照常生效 —— 但必须让人看见是哪条错了
       logger.warn('自动化规则部分无效（已剔除）', {
