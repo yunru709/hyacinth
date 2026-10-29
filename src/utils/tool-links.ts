@@ -257,7 +257,15 @@ export function parseToolLinks(raw: unknown): { manifest: ToolLinksManifest; err
       return;
     }
     seen.add(key);
-    links.push({ on: l.on, handler: l.handler, ...(l.enabled === undefined ? {} : { enabled: l.enabled }) });
+    links.push({
+      on: l.on,
+      handler: l.handler,
+      ...(l.enabled === undefined ? {} : { enabled: l.enabled }),
+      // ⚠️ 2026-10-29：invoke 规格必须原样保留。
+      // 这里易漏——一旦漏掉，配置在**解析阶段就被丢弃**，运行时只看到「有这条联动但没有目标工具」，
+      // 表现为"配了却没反应"，且没有任何报错。invoke 类配置全靠这一行存活。
+      ...(l.invoke ? { invoke: l.invoke } : {}),
+    });
   });
 
   return { manifest: { version, links }, errors };
