@@ -119,7 +119,9 @@ export function createDefaultRegistry(
   registry.register(new DiskUsageTool(cwd));
   registry.register(new GenerateMediaTool(cwd));
   // watch_wait / watch_start / watch_stop / watch_list：等待与监控（见 docs/watch.md）
-  for (const tool of watchTools) registry.register(tool);
+  // owner = 当前会话：事件触发时只唤醒"登记它的那个会话"，避免多会话串线
+  const watchOwner = sessionId && channel ? { sessionId, channel } : undefined;
+  for (const tool of createWatchTools({ owner: watchOwner })) registry.register(tool);
   return registry;
 }
 
