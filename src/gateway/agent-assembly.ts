@@ -665,7 +665,7 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
         }
       } catch (err) {
         // 兜底：sink 抛错会拖垮 TriggerHub 的派发循环
-        logger.error('自动化派发异常', { event: eventName, error: (err as Error).message });
+        logger.warn('自动化派发异常', { event: eventName, error: (err as Error).message });
       }
     });
     logger.info('自动化已接入 TriggerHub', { sinks: hub.sinkCount() });
