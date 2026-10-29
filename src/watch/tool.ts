@@ -7,18 +7,27 @@
  *   watch_list   —— 列出在跑的监控 + 最近事件
  *   watch_stop   —— 停止某个监控
  *
- * 事件出口：当前实现把事件推进一个环形缓冲，由 watch_list 读取展示。
- * 真正的「唤醒会话」需要接 SessionWakePort（见 docs/watch.md 阶段 4），
- * 届时只需替换 getService() 里的 onEvent，工具签名不用变。
+ * 唤醒链路（阶段 4）：
+ *   watch 命中 → WatchEvent（带 owner=登记它的会话）
+ *              → SessionWakePort.runPrompt(channel, sessionId, 自带提示词)
+ *              → 该会话跑一轮
+ *
+ * 为什么不用 notifyTaskFired：那条路径会套上 `[Scheduled Task Triggered] ... your
+ * scheduled task "X" has just been triggered`，对「监控项变化」是错误语义，
+ * 会让我误以为在执行定时任务。这里自带提示词，端口只负责跑这一轮。
+ *
+ * 归属（owner）是必须的：watch 服务是进程级单例，多个会话可能同时挂监控，
+ * 没有 owner 就会串线（A 会话的监控把 B 会话叫醒）。
  */
 
+import { getSchedulerSessionPort } from '../schedule/session-port.js';
 import type { Tool } from '../tools/interface.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
 import type { WatchSpec } from './types.js';
-import { WatchService, type WatchEvent } from './watch-service.js';
+import { WatchService, type WatchEvent, type WatchOwner } from './watch-service.js';
 import { waitForChange } from './wait.js';
 
-/** 同步等待上限：框架侧工具超时是 300s，但阻塞太久会卡住整个回合，取 90s 封顶 */
+/** 同步等待上限：框架侧工具超时 300s，但阻塞太久会卡住整个回合，取 90s 封顶 */
 const MAX_WAIT_MS = 90_000;
 const DEFAULT_WAIT_MS = 25_000;
 const RECENT_EVENT_LIMIT = 50;
@@ -30,28 +39,49 @@ function pushEvent(event: WatchEvent): void {
   if (recentEvents.length > RECENT_EVENT_LIMIT) recentEvents.shift();
 }
 
+/** 事件转成唤醒提示词。要点：说清"是什么触发了"，并明确不需要重新登记监控。 */
+export function buildWatchPrompt(event: WatchEvent): string {
+  return [
+    '[Watch Event]',
+    `监控项「${event.note ?? event.summary}」发生了变化。`,
+    `- watchId: ${event.watchId}`,
+    `- 类型: ${event.kind}`,
+    `- 变化程度: ${event.distance}`,
+    `- 时间: ${new Date(event.at).toISOString()}`,
+    '',
+    '这是你之前用 watch_start 登记的后台监控触发了。请判断是否需要行动：',
+    '需要就直接处理；不需要就说明一句。监控会在冷却期后自动继续，不要重复登记；',
+    '如果已经不需要它，用 watch_stop 停掉。',
+  ].join('\n');
+}
+
+/** 唤醒 owner 会话。失败只记录日志——监控本身不该因为唤醒失败而中断。 */
+async function wakeOwner(event: WatchEvent): Promise<void> {
+  const owner = event.owner;
+  if (!owner) return;
+  const port = getSchedulerSessionPort();
+  if (!port?.runPrompt) return; // 端口未接线（如测试环境）：仅记录事件
+  try {
+    await port.runPrompt(owner.channel, owner.sessionId, buildWatchPrompt(event));
+  } catch (err) {
+    console.error('[watch] wake session failed:', (err as Error).message);
+  }
+}
+
 let service: WatchService | null = null;
 
 function getService(): WatchService {
   if (!service) {
     service = new WatchService({
       registry: createDefaultProbeRegistry(),
-      onEvent: (event) => pushEvent(event),
+      onEvent: (event) => {
+        pushEvent(event);
+        // 不 await：唤醒一轮可能很久，不能阻塞采样循环
+        void wakeOwner(event);
+      },
     });
   }
   return service;
-}
-
-/** 供后续接入唤醒会话时替换 */
-export function setWatchEventHandler(handler: (event: WatchEvent) => void | Promise<void>): void {
-  if (service) service.disposeAll();
-  service = new WatchService({
-    registry: createDefaultProbeRegistry(),
-    onEvent: async (event) => {
-      pushEvent(event);
-      await handler(event);
-    },
-  });
 }
 
 const SPEC_PROPS: Record<string, unknown> = {
@@ -118,7 +148,7 @@ function buildSpec(args: Record<string, unknown>): WatchSpec {
   return base as unknown as WatchSpec;
 }
 
-export const watchWaitTool: Tool = {
+const watchWaitTool: Tool = {
   name: 'watch_wait',
   description:
     '阻塞等待某个条件成立（或超时），返回是否变化。只回一个小的 JSON，不含图片，' +
@@ -168,43 +198,47 @@ export const watchWaitTool: Tool = {
   },
 };
 
-export const watchStartTool: Tool = {
-  name: 'watch_start',
-  description:
-    '启动一个后台监控，立即返回 watchId（不阻塞）。条件成立时记录事件，' +
-    '用 watch_list 查看。适合「可能要等很久」的场合。' +
-    '注意每个监控触发后会进入冷却期（默认 30 秒）再继续，避免事件风暴。',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      ...SPEC_PROPS,
-      note: { type: 'string', description: '备注，便于在 watch_list 里辨认' },
-      once: { type: 'boolean', description: '触发一次后自动停止' },
-      cooldown_s: { type: 'number', description: '命中后的冷却秒数，默认 30' },
-      ...TUNING_PROPS,
+/** 工厂：绑定 owner 后，该会话登记的监控触发时只唤醒它自己 */
+function makeWatchStartTool(owner?: WatchOwner): Tool {
+  return {
+    name: 'watch_start',
+    description:
+      '启动一个后台监控，立即返回 watchId（不阻塞）。条件成立时会唤醒你处理，' +
+      '也可用 watch_list 查看累积的事件。适合「可能要等很久」的场合。' +
+      '每个监控触发后进入冷却期（默认 30 秒）再继续，避免事件风暴。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...SPEC_PROPS,
+        note: { type: 'string', description: '备注，便于辨认这条监控' },
+        once: { type: 'boolean', description: '触发一次后自动停止' },
+        cooldown_s: { type: 'number', description: '命中后的冷却秒数，默认 30' },
+        ...TUNING_PROPS,
+      },
+      required: ['kind'],
     },
-    required: ['kind'],
-  },
-  sideEffect: 'read',
-  async execute(args: Record<string, unknown>): Promise<string> {
-    try {
-      const spec = buildSpec(args);
-      const info = getService().start(spec, {
-        note: args.note === undefined ? undefined : String(args.note),
-        once: args.once === true,
-        cooldownMs: args.cooldown_s === undefined ? undefined : Number(args.cooldown_s) * 1000,
-        intervalMs: args.interval_ms === undefined ? undefined : Number(args.interval_ms),
-        threshold: args.threshold === undefined ? undefined : Number(args.threshold),
-        settleFrames: args.settle_frames === undefined ? undefined : Number(args.settle_frames),
-      });
-      return JSON.stringify({ ok: true, watch: info });
-    } catch (err) {
-      return JSON.stringify({ ok: false, error: (err as Error).message });
-    }
-  },
-};
+    sideEffect: 'read',
+    async execute(args: Record<string, unknown>): Promise<string> {
+      try {
+        const spec = buildSpec(args);
+        const info = getService().start(spec, {
+          note: args.note === undefined ? undefined : String(args.note),
+          once: args.once === true,
+          cooldownMs: args.cooldown_s === undefined ? undefined : Number(args.cooldown_s) * 1000,
+          intervalMs: args.interval_ms === undefined ? undefined : Number(args.interval_ms),
+          threshold: args.threshold === undefined ? undefined : Number(args.threshold),
+          settleFrames: args.settle_frames === undefined ? undefined : Number(args.settle_frames),
+          owner,
+        });
+        return JSON.stringify({ ok: true, watch: info, willWakeSession: Boolean(owner) });
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message });
+      }
+    },
+  };
+}
 
-export const watchStopTool: Tool = {
+const watchStopTool: Tool = {
   name: 'watch_stop',
   description:
     '停止一个由 watch_start 启动的后台监控。停止后不再采样、不再产生新事件；' +
@@ -222,7 +256,7 @@ export const watchStopTool: Tool = {
   },
 };
 
-export const watchListTool: Tool = {
+const watchListTool: Tool = {
   name: 'watch_list',
   description: '列出所有在跑的后台监控，以及最近触发的事件（最多 50 条）。',
   inputSchema: {
@@ -242,9 +276,14 @@ export const watchListTool: Tool = {
   },
 };
 
-export const watchTools: Tool[] = [
-  watchWaitTool,
-  watchStartTool,
-  watchStopTool,
-  watchListTool,
-];
+/**
+ * 创建 watch 工具集。
+ * @param deps.owner 归属会话；给了才会在事件触发时唤醒该会话，
+ *                   不给（如单测、无会话上下文）则只记录事件。
+ */
+export function createWatchTools(deps: { owner?: WatchOwner } = {}): Tool[] {
+  return [watchWaitTool, makeWatchStartTool(deps.owner), watchStopTool, watchListTool];
+}
+
+/** 无归属版本（仅记录事件，不唤醒） */
+export const watchTools: Tool[] = createWatchTools();
