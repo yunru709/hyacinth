@@ -615,8 +615,39 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   //    （"工具 say 未注册"）⇒ count=0 且不 arm 任何 watcher。
   //    而这只打一条 warn、界面完全无感 —— 正是"配了没反应"的经典陷阱。
   const wireAutomation = () => {
-    // 进程级只装配一次（createAgentAssembly 每会话调用，不 guard 会重复注册 sink/watcher）
-    if (automationWired) return;
+    // ── 关键：invokeTool / wakeSession 必须**每次会话装配都刷新** ──
+    //
+    // ⚠️ 2026-10-30 02:40 真机实测（第二次踩这个坑）：
+    //    只用 guard 挡重复装配，会把 runtime 的 invokeTool 永久绑在**第一个**会话的
+    //    toolRegistry 上。而 `say` 的 submit 是 `loop.submitSay` —— 它只是**入队**，
+    //    等**那个 loop 的回合结束**才消费。绑错 loop 就等于 say 内容进了别的会话的队列，
+    //    永远没人消费：watcher hits 正常、规则也确实命中，但既没有声音、
+    //    当前会话的对话里也看不到那句话。
+    //    （早前能听到是因为 tool-links 每次装配都重新注入，指向最新会话。）
+    //
+    // 所以：**指向类依赖每次刷新；init / arm / 工具注册 / hub 订阅只做一次**。
+    const currentInvokeTool = async (
+      toolName: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      const tool = toolRegistry.get(toolName);
+      if (!tool) throw new Error(`[automation] 工具不存在: ${toolName}`);
+      return await tool.execute(args);
+    };
+    const currentWakeSession = createWakeSession(() => getSchedulerSessionPort());
+
+    if (automationWired) {
+      // 后续会话：只把指向刷到当前会话（sink / watcher / 工具都已经在首次注册过）
+      const cur = getAutomationRuntime();
+      if (cur) {
+        setAutomationRuntime({
+          ...cur,
+          invokeTool: currentInvokeTool,
+          wakeSession: currentWakeSession,
+        });
+      }
+      return;
+    }
     automationWired = true;
 
     // 校验需要的"外部知识"：做成**工厂**而非快照 —— 热更后（新工具注册/新 probe kind）
