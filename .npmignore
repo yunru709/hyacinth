@@ -60,3 +60,15 @@ vt-*.txt
 # Test-only setup helpers (vitest bootstrap, compiled into dist) - not for the published package
 dist/test-setup.js
 dist/test-setup.d.ts
+
+# 本地调试残留 / 本地数据 / dev 配置 —— 绝不进包（2026-10-29 发布前补：
+# gitignore 里有但 npmignore 没同步，实测 `npm pack` 会把 .tmp-* 和 .commandcode/ 带上）
+.tmp*
+tmp/
+.commandcode/
+arch-report/
+/outputs/
+*.log
+*.wav
+.github/
+.gitattributes
