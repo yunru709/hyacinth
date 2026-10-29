@@ -143,6 +143,15 @@ export function createTimeSource(deps: TimeSourceDeps): TimeSource {
     start() {
       if (running) return;
       running = true;
+      // 立即登记一次 nextRun（不等第一个 tick）。
+      //
+      // 为什么：`interval` 的语义是「从 start 那一刻起一个间隔」。若等到第一个 tick
+      // 才登记，基准就变成了"首个 tick 的时刻"（可能已过去几秒）⇒ 行为不确定，
+      // 且 fixed-time 规则可能在首个 tick 前就已过期而永远不触发。
+      const t0 = now();
+      for (const rule of deps.getRules()) {
+        if (rule.enabled && rule.when.kind === 'time') ensureSchedule(rule, t0);
+      }
       timer = setInterval(() => void tick(), tickMs);
       // 不阻止进程退出（自动化不该拖住关闭）
       timer.unref?.();
