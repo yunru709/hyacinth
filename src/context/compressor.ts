@@ -79,6 +79,46 @@ function truncateText(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 3) + '...';
 }
 
+/** 压缩降级（tool_result → 文本）时单个结果的最大保留长度（字符）。 */
+const MAX_DEGRADED_TOOL_RESULT_CHARS = 8000;
+
+/**
+ * 压缩降级路径的内容裁剪。
+ *
+ * 事故背景（2026-10-29）：孤立 tool_result 被降级成普通文本时**原样保留** content，
+ * 一条 78 万字符的 MCP 截图 base64 因此进入对话历史；每压缩一轮就再复制一份，
+ * 上下文被顶到 1.1M tokens > 模型 1M 窗口 ⇒ 上游只回
+ * `400 "Model is unavailable"`（opencode 对「请求处理不了」的粗粒度报错，
+ * 与模型下线共用同一句，极易误诊为"模型不可用/欠费"）。
+ *
+ * 为何必须在这里单独兜：这是**唯一不经 ToolResultBuffer 的注入路径**
+ * （result-buffer 只在工具执行后调用，压缩产物不经过它）。
+ *
+ * 两步：先剥离内联 base64（模型读了也用不上，却按 token 全额计费），再按字符数截断。
+ */
+function truncateDegradedToolResult(content: string): string {
+  let text = content;
+
+  if (text.length > 1024) {
+    text = text.replace(
+      /"data"\s*:\s*"([A-Za-z0-9+/]{4096,}={0,2})"/g,
+      (_m: string, b64: string) => `"data": "[base64 omitted: ${b64.length} chars]"`,
+    );
+    text = text.replace(
+      /data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]{1024,})/gi,
+      (_m: string, mime: string, b64: string) =>
+        `[inline ${mime} base64 omitted: ${b64.length} chars]`,
+    );
+  }
+
+  if (text.length > MAX_DEGRADED_TOOL_RESULT_CHARS) {
+    const omitted = text.length - MAX_DEGRADED_TOOL_RESULT_CHARS;
+    text = `${text.slice(0, MAX_DEGRADED_TOOL_RESULT_CHARS)}… [truncated ${omitted} chars]`;
+  }
+
+  return text;
+}
+
 /**
  * 从消息列表中提取涉及的文件路径。
  * 匹配模式：file_path、file、绝对路径（/ 或 \ 分隔）、.ts/.js/.py 等扩展名。
