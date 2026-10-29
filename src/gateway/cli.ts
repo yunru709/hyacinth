@@ -1789,23 +1789,23 @@ async function createProvider(providerType?: ProviderType, modelName?: string): 
  * 获取指定 Provider 的 API Key
  */
 function getApiKeyForProvider(type: ProviderType): string {
-  if (type === 'local') return 'local';
-
-  // gemini 特殊处理：支持 GEMINI_API_KEY 或 GOOGLE_API_KEY
-  if (type === 'gemini') {
-    const key = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-    if (!key) throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required.');
-    return key;
+  // 全部由 factory-registry 元数据驱动，无厂商特例（原 gemini/local 硬编码已删，2026-10-29）：
+  //   · local/ollama/llamacpp → factory.local=true ⇒ 无 key，返回哨兵 'local'
+  //   · env 别名（如 gemini 的 GEMINI_API_KEY / GOOGLE_API_KEY）→ factory.envKeys: string[]
+  //   · 缺省回退 API_KEY_MAP 的单值
+  const factory = getProviderFactory(type);
+  if (factory?.local) return 'local';
+  const envKeys = factory?.envKeys?.length
+    ? factory.envKeys
+    : API_KEY_MAP[type]
+      ? [API_KEY_MAP[type]]
+      : [];
+  if (envKeys.length === 0) throw new Error(`Unknown provider type: ${type as string}`);
+  for (const envKey of envKeys) {
+    const key = process.env[envKey];
+    if (key) return key;
   }
-
-  const envVarName = API_KEY_MAP[type];
-  if (!envVarName) {
-    throw new Error(`Unknown provider type: ${type as string}`);
-  }
-
-  const key = process.env[envVarName];
-  if (!key) throw new Error(`${envVarName} is required.`);
-  return key;
+  throw new Error(`${envKeys.join(' or ')} is required.`);
 }
 
 /**
