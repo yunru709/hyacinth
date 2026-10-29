@@ -633,19 +633,21 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     ): Promise<string> => {
       const tool = toolRegistry.get(toolName);
       if (!tool) throw new Error(`[automation] 工具不存在: ${toolName}`);
-      // ── 自动化写入必须绕过 write 的 read-before-write 门控 ──
-      // 自动化规则是**设计时确定的机械写入**（模型/用户在 create 时已明确 file_path + content），
-      // 不是运行时盲写 ⇒ 不该受"模型编辑前必须读过该文件"的门控约束。
-      // 不绕过的后果（2026-10-30 真机实测）：目标文件已存在且 file-tracker 认为"未读/被外部改过"
-      // 时，WriteTool 会**返回错误字符串而非抛异常**（见 src/tools/write.ts:56-81），runner 的
-      // invoke catch 不到 ⇒ 误判 ok:true ⇒ 继续执行后续动作 ⇒ 文件静默没更新，但链路"看起来成功"。
-      // recordFileRead 让门控认为"刚完整读过"，从而放行。edit 类暂未纳入（锚定模式本身有自校验，
-      // 行模式同理需此处理，若日后自动化用到 edit 再补）。
+      // ── 自动化必须绕过「工作区围栏 + read-before-write 门控」两层拦截 ──
+      // 1) 工作区围栏：registry 里的写类工具被 applyWorkspaceFence 包成围栏代理（目标在
+      //    workspaceRoot 外 ⇒ 返回错误字符串而非抛异常）。自动化是**设计时确定的机械写入**
+      //    （路径在 create 规则时已明确），不受会话级围栏约束 ⇒ 取 __rawTool（围栏包装前的裸
+      //    工具）。2026-10-30 实测根因即此：写 ~/.agent/work/... 被围栏拦，runner 静默误判成功。
+      // 2) read-before-write 门控：裸 WriteTool 内部仍有（见 src/tools/write.ts:56-81），文件已
+      //    存在且 file-tracker 认为"未读/被外部改过"时返回错误字符串而不抛异常 ⇒ runner 同样
+      //    误判成功。recordFileRead 让门控认为"刚完整读过"，从而放行。edit 类暂未纳入。
+      const rawTool = (tool as unknown as { __rawTool?: typeof tool }).__rawTool;
+      const effective = rawTool ?? tool;
       if (toolName === 'write') {
         const fp = (args.file_path ?? args.path) as unknown;
         if (typeof fp === 'string' && fp) recordFileRead(fp);
       }
-      return await tool.execute(args);
+      return await effective.execute(args);
     };
     const currentWakeSession = createWakeSession(() => getSchedulerSessionPort());
 
