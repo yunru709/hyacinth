@@ -145,6 +145,16 @@ export function installSchedulerSessionPort(deps: {
       };
     },
 
+    /**
+     * 非定时事件源（watch 等）用**自带提示词**唤醒一轮。
+     * 不走 notifyTaskFired：那条路径会套上「scheduled task ... has just been triggered」，
+     * 对"监控项发生变化"是错的语义。
+     */
+    async runPrompt(channel: string, sessionId: string, prompt: string) {
+      const h = await getLoop(channel, sessionId);
+      await h.runPrompt(prompt);
+    },
+
     async createEphemeralSession(channel) {
       const sessionId = await createEphemeral(channel);
       return { sessionId };
