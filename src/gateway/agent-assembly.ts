@@ -620,6 +620,18 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
       path: applied.path,
     });
 
+    // probe 类规则 → 启动 watcher，并建立 ruleId→watchId 映射。
+    // runtime 靠这个映射做**精确匹配**：同一 kind 下可能有多条监控
+    // （监控 A 日志、监控 B 日志都是 file），只按 kind 匹配会让 A 的命中触发 B 的规则。
+    const armed = armProbeRules(getCurrentAutomationRules(), getWatchService());
+    if (armed.errors.length > 0) {
+      // 单条 arm 失败不阻断其它规则，但必须可见
+      logger.warn('自动化规则 arm 部分失败', { errors: armed.errors, armed: armed.armed.size });
+    }
+    if (armed.armed.size > 0) {
+      logger.info('自动化规则已启动监控', { count: armed.armed.size });
+    }
+
     // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
     setAutomationRuntime({
       invokeTool: async (toolName, args) => {
@@ -628,6 +640,7 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
         return await tool.execute(args);
       },
       wakeSession: createWakeSession(() => getSchedulerSessionPort()),
+      armedWatchIds: armed.armed,
     });
 
     // 订阅 TriggerHub：watch / scheduler 已经在 fire，automation 在此消费。
