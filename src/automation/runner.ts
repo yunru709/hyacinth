@@ -159,18 +159,25 @@ interface ExecCtx {
  * @returns 首个错误信息（无错返回 undefined）
  */
 async function runActions(actions: Action[], exec: ExecCtx): Promise<string | undefined> {
+  let firstError: string | undefined;
+
   for (const action of actions) {
     const step = await runOne(action, exec);
     exec.steps.push(step);
     exec.ctx.record?.(step);
 
     if (!step.ok) {
-      // 默认 abort：链路中途失败继续跑通常更危险。
-      // （'continue' 语义留给批处理类链路，通过 RunOptions 控制。）
-      return step.error ?? `${step.sink} 执行失败`;
+      const msg = step.error ?? `${step.sink} 执行失败`;
+      if (exec.onError === 'continue') {
+        // 尽力而为：记下首个错误，继续执行后续动作（用于批处理类链路）
+        if (firstError === undefined) firstError = msg;
+        continue;
+      }
+      // 默认 abort：链路中途失败继续跑通常更危险（尤其是物理执行链）
+      return msg;
     }
   }
-  return undefined;
+  return firstError;
 }
 
 async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
