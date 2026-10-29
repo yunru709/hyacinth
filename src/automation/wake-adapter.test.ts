@@ -76,7 +76,8 @@ describe('createWakeSession：new', () => {
 
 describe('createWakeSession：渠道优先级与端口', () => {
   it('target.channel > fallback[0] > 默认 webui', async () => {
-    const runPrompt = vi.fn(async () => {});
+    // 显式声明参数类型：否则 mock.calls 的元素是空元组，c[0] 取不到
+    const runPrompt = vi.fn(async (_channel: string, _sessionId: string, _prompt: string) => {});
     const fn = createWakeSession(() => ({ runPrompt }));
     const base: Where = { policy: 'reuse', target: { sessionId: 's1' } };
 
