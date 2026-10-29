@@ -287,6 +287,8 @@ export class HeartbeatScheduler {
         existing.tags = tags;
         existing.channel = channel ?? existing.channel;
         existing.fallback = fallback ?? existing.fallback;
+        // 触发方式随同名更新一起覆盖：显式传 undefined 表示"改回时间类"
+        existing.trigger = opts?.trigger;
         existing.enabled = true;
         existing.nextRunAt = this.calculateNextRun(existing)?.toISOString() ?? null;
         await this.persistence.saveTask(existing);
