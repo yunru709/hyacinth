@@ -716,16 +716,12 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     });
 
     // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
-    const runtimeDeps: AutomationRuntimeDeps = {
-      invokeTool: async (toolName, args) => {
-        const tool = toolRegistry.get(toolName);
-        if (!tool) throw new Error(`[automation] 工具不存在: ${toolName}`);
-        return await tool.execute(args);
-      },
-      wakeSession: createWakeSession(() => getSchedulerSessionPort()),
+    // 用上方已按会话刷新的引用（与本函数开头的后续会话分支保持一致）
+    setAutomationRuntime({
+      invokeTool: currentInvokeTool,
+      wakeSession: currentWakeSession,
       armedWatchIds: armed.armed,
-    };
-    setAutomationRuntime(runtimeDeps);
+    });
 
     // ── 工具面：让模型能设计链路（validate / create / list）──
     // 保存后必须**重载 + 重新 arm**，否则：
