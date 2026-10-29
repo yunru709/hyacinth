@@ -162,6 +162,7 @@ export class WatchService {
       cooldownMs: Math.max(0, options.cooldownMs ?? this.opts.defaultCooldownMs ?? DEFAULT_COOLDOWN_MS),
       coolingUntil: 0,
       timer: null,
+      owner: options.owner,
     };
 
     entry.timer = this.setIntervalFn(() => {
