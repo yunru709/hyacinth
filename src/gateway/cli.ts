@@ -13,6 +13,7 @@ import type { ProviderType, ProviderConfig } from '../types.js';
 import type { Provider } from '../provider/interface.js';
 import { ProviderManager } from '../provider/manager.js';
 import { getProviderConfigLoader } from '../provider/config.js';
+import { getProviderFactory } from '../provider/factory-registry.js';
 import { toProjectKey } from '../utils/misc.js';
 import { LocalProvider } from '../provider/local.js';
 import { ConversationStore } from '../memory/conversation.js';
