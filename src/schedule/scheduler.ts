@@ -259,6 +259,14 @@ export class HeartbeatScheduler {
       return nextMs > MISSED_CATCH_UP_GAP_MS;
     });
 
+    // 条件任务重建（2026-10-29 自动化改造）。
+    // 为什么必须在这里做：条件任务的 watcher 活在 WatchService 内存里（watchId 重启即失），
+    // 不做重建的话「重启后条件任务全部静默失效」—— 这正是自动化任务最容易踩的坑。
+    // 时间类任务不受影响（syncConditionTask 对它们一律 no-op）。
+    for (const t of this.tasks) {
+      if (t.trigger?.type === 'condition') this.syncConditionTask(t);
+    }
+
     // 启动心跳循环
     this.timer = setInterval(() => this.tick(), this.config.heartbeatMs);
     // 立即执行一次 tick
