@@ -195,19 +195,10 @@ export interface SchedulerHandlerDeps {
 export function installSchedulerHandler(deps: SchedulerHandlerDeps): void {
   const { heartbeatScheduler, loop, channelLoops, resolveChannelLoop, configCenter } = deps;
 
-  // ── 触发总线（2026-10-29）───────────────────────────────────────
-  // 把"定时任务到期"接入统一事件总线；watch 侧也会 fire 到同一个全局实例，
-  // 于是"时间触发"和"监控触发"有了统一的观测面（历史 + 统计 + sink）。
-  //
-  // 当前 sink 只做观测（debug 日志）。后续若要"多源统一唤醒"等消费者，
-  // 在这里 registerSink 即可，事件源一行都不用改。
-  // 未接线时 scheduler 的 fire 是 no-op ⇒ 对既有行为零影响。
-  const triggerHub = new TriggerHub();
-  triggerHub.registerSink((event) => {
-    logger.debug(`[trigger] ${event.source}: ${event.name}`);
-  });
-  setGlobalTriggerHub(triggerHub);
-  heartbeatScheduler.setTriggerHub(triggerHub);
+  // 触发总线接线已移出本文件（2026-10-29）：
+  // gateway 属 UI 适配层，不得直连业务核心 trigger（verify:layers 规则 5 会红，
+  // 且该白名单只减不增）。改由 HeartbeatScheduler.start() 自己在业务核心层接入，
+  // 详见 scheduler.ts 的 setTriggerHub / start 注释。
 
   heartbeatScheduler.setHandler(async (task) => {
     logger.info(`Scheduled task fired: ${task.name}`, { id: task.id, type: task.action.type, channel: task.channel });
