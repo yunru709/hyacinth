@@ -50,6 +50,13 @@ class PortProbeInstance implements ProbeInstance {
     const met = this.spec.expect === 'closed' ? !open : open;
     return { ok: true, value: met ? 'met' : 'pending', raw: { open } };
   }
+
+  /**
+   * 达成式语义：等"端口打开"而它本来就在听时，应立刻返回（2026-10-29 验收暴露的缺陷）。
+   */
+  isSatisfied(sample: ProbeSample): boolean {
+    return sample.ok && sample.value === 'met';
+  }
 }
 
 export const portProbe: Probe = {
