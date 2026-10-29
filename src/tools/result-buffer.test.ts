@@ -82,7 +82,8 @@ describe('ToolResultBuffer.maybeBuffer — 事故防线', () => {
     expect(out).not.toContain(HUGE_B64.slice(0, 512)); // base64 必须消失
     // 剥离后已远小于阈值 ⇒ 不再落盘（少一个无谓文件），但必须带省略标注
     expect(out).toContain('[base64 omitted:');
-    expect(out).toContain('Cursor Position'.length ? '' : ''); // 占位：确保结构未被破坏
+    // 非媒体文本必须原样保留
+    expect(out).toContain('"mimeType":"image/png"');
   });
 
   it('含 base64 但剥离后已小于阈值的，不再落盘（避免无谓文件）', () => {
