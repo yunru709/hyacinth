@@ -10,7 +10,11 @@ import type { MCPConfig } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 import type { Logger } from '../logging/logger.js';
 
-function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {  let timer: ReturnType<typeof setTimeout>;
+/** 未知 MCP content 块 JSON 化后的最大内联长度（字符）。超过即截断 —— 与图片落盘同为防上下文爆炸。 */
+const MAX_INLINE_BLOCK_CHARS = 4000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => {
