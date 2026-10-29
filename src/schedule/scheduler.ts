@@ -13,6 +13,7 @@ import type {
   TaskExecutionRecord,
   SchedulerConfig,
   SchedulerStatus,
+  ScheduledTaskTrigger,
 } from './types.js';
 import type { ScheduleConfig as SystemScheduleConfig } from '../setup/config.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
