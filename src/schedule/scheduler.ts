@@ -518,6 +518,11 @@ export class HeartbeatScheduler {
 
   /** 计算下次执行时间 */
   private calculateNextRun(task: ScheduledTask): Date | null {
+    // 条件类任务（trigger.type==='condition'）没有"下次执行时间"：
+    // 它由 WatchService 采样驱动，不参与心跳 tick。
+    // 返回 null ⇒ nextRunAt 为 null ⇒ tick 的筛选条件 `!t.nextRunAt` 直接跳过它，
+    // 天然隔离，不必在 tick 里再加分支。
+    if (task.trigger?.type === 'condition') return null;
     const now = new Date();
     // 如果之前执行过，从 lastRunAt 之后算；否则从当前时间算
     const from = task.lastRunAt ? new Date(task.lastRunAt) : now;
