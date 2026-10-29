@@ -43,16 +43,16 @@ export function readSessionScratchpadForContext(
   const body = raw.trim();
   const capped =
     Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : SCRATCHPAD_DEFAULT_MAX_CHARS;
+  // 文件不存在/为空：给带路径的最小标题（模型据此知道往哪写），不重复加标题。
+  if (!body) {
+    return `# 会话记事本（本会话）· ${homeRelative(file)}\n(空 —— 可用 edit 写本会话待办/临时事项；跨会话耐久的放全局 scratchpad)`;
+  }
   const shown =
     body.length > capped
       ? body.slice(0, capped) + `\n\n[已截断：全文 ${body.length} 字符，上限 ${capped}]`
       : body;
-  return [
-    '# 会话记事本（本会话专属 · 随会话删除销毁）',
-    `(系统提供；文件：${homeRelative(file)}；用 edit 写入；不进消息历史，只在 Zone 5 live 区)`,
-    '',
-    shown || '（空 —— 可用 edit 写本会话的待办 / 临时事项；跨会话耐久的放全局 scratchpad）',
-  ].join('\n');
+  // 直接返回文件正文（首行已是标题 + `>` 说明），不重复加标题。
+  return shown;
 }
 
 /** 会话记事本首次使用的种子（幂等；不存在才建） */
