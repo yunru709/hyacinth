@@ -43,6 +43,18 @@ export interface SchedulerSessionPort {
    * 建临时会话(标记 ephemeral) → 跑任务 → 把输出 append 回 deliverSessionId 会话 → 5min 后销毁临时会话。
    */
   runOneShot(opts: { channel: string; taskName: string; deliverSessionId?: string }): Promise<void>;
+
+  /**
+   * 用**调用方给定的提示词**唤醒该会话跑一轮（2026-10-29 新增，供 watch 等非定时事件源使用）。
+   *
+   * 为什么不复用 notifyTaskFired：那条路径会把任务名塞进
+   * `[Scheduled Task Triggered] Your scheduled task "..." has just been triggered`
+   * 模板里 —— 对「监控项变化」这类事件是错的语义，会把 agent 误导成"我在执行定时任务"。
+   * 这里让事件源自带提示词，端口只负责"把这一轮跑起来"。
+   *
+   * 可选实现：未实现时调用方必须降级（不得假设其存在）。
+   */
+  runPrompt?(channel: string, sessionId: string, prompt: string): Promise<void>;
 }
 
 // ── 进程级端口注册 ──────────────────────────────────────────────
