@@ -57,7 +57,7 @@ export const DEFAULT_PIPELINE_SLOTS: SlotSpec[] = [
  * 注意：这里只校准数据，不削弱校验 —— 随后 `assemble()` 仍会 fail-fast 比对
  * 「出厂 requires ⊆ 模块实际声明」，拼错键名照样抓得住（C-09 那条回归用例就是锁这个）。
  */
-function resolveSlotContract(slots: SlotSpec[]): SlotSpec[] {
+export function resolveSlotContract(slots: SlotSpec[]): SlotSpec[] {
   const defaults = new Map(DEFAULT_PIPELINE_SLOTS.map((s) => [s.id, s]));
   return slots.map((slot) => {
     const def = defaults.get(slot.id);
