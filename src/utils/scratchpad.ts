@@ -78,8 +78,8 @@ export function readScratchpadForContext(
 
   // 头一行自报位置与性质：模型据此知道"这是给我的便签"，也知道被截时该怎么办
   return [
-    '# scratchpad',
-    `(系统提供 · 临时记事本；文件：${homeRelative(file)}；不进消息历史，只出现在本轮的 Zone 5 live 区)`,
+    '# 跨会话记事本（所有会话共享）',
+    `(系统提供 · 跨会话共享；文件：${homeRelative(file)}；不进消息历史，只在 Zone 5 live 区；环境事实/工程纪律放这里)`,
     '',
     shown,
   ].join('\n');

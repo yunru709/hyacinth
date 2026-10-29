@@ -146,7 +146,8 @@ export const DEFAULT_CONTEXT_MANIFEST: ContextManifest = {
         { name: 'timestamp',          source: 'runtime:timestamp',          priority: 7, type: 'runtime', description: '当前时间戳' },
           // 时间戳：**排在记事本之后**（2026-09-21 用户裁定修订，取代此前「紧跟时间戳之后」）——
           // 判据 = **稳定的在前、易变的在后**：记事本很少改，时间戳每轮都可能变 ✓
-        { name: 'scratchpad',         source: 'runtime:scratchpad',         priority: 6, type: 'runtime', description: '临时记事本（Zone 5；agent 用 edit 直接维护）' },
+        { name: 'scratchpad',         source: 'runtime:scratchpad',         priority: 6, type: 'runtime', description: '跨会话记事本（全局；环境事实/工程纪律）' },
+        { name: 'session_scratchpad', source: 'runtime:session_scratchpad', priority: 6.5, type: 'runtime', description: '会话记事本（本会话；待办/临时，随会话删除销毁）' },
         // user_input 顺延到 8：它是这一轮真正的用户输入，必须仍在最后 ✓
         { name: 'user_input',         source: 'runtime:userInput',          priority: 8, type: 'runtime', description: '用户当前输入（每轮变化）' },
       ],

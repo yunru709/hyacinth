@@ -296,7 +296,8 @@ export async function createAgentAssembly(
   const securityWorkspaceRoot = (config as { security?: { workspaceRoot?: string } }).security?.workspaceRoot ?? cwd;
   // 额外可写根：agent 自维护区（与 memory.md 同目录的 persona 目录；Zone 5 临时记事本也在此）
   // —— 目录由 scratchpadPath() 推导（不写死字符串 ✓），且只放行这一个目录 ✓
-  const extraWritableRoots = [path.dirname(scratchpadPath())];
+  // 会话级记事本在 <sessionDir>/scratchpad.md ⇒ 把 sessionDir 也放行（否则 edit 写不进会话记事本）
+const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
   // ── 权限统一（2026-10-13）：越界写入 = 「可确认」而非「不可能」──
   // 同一个 Set 交给两边：围栏读（决定放行）、loop 权限层写（用户点 yes/always 后记录）。
   // 缺了任何一边 ⇒ 要么越界永远写不进去，要么确认后仍被拒（静默不一致）。
