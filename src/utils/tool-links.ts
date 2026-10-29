@@ -78,6 +78,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// 收敛点③（2026-10-30）：每次 Sink 执行都留痕。见该模块文件头的事故记录。
+import { recordToolLinkExecution } from './tool-link-executions.js';
+
 /** 本轮支持的 kind（顺序即文档顺序；加类见文件头"扩展指引"）
  *
  * 2026-10-29 新增 `invoke`：**按断言自动执行另一个工具**（路线 B）。
