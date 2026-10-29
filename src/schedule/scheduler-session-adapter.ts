@@ -115,8 +115,10 @@ export function installSchedulerSessionPort(deps: {
     };
     const runTask = (n: string) =>
       loop.notifyTaskFired ? loop.notifyTaskFired(n) : loop.run(`[Scheduled Task] "${n}" triggered.`);
+    // 同 openLoop 分支：非定时事件源（watch）用自带提示词唤醒
+    const runPrompt = (prompt: string) => loop.run(prompt);
     const getResponse = () => (entry.collectHandler as unknown as { getResponse?: () => string })?.getResponse?.() ?? '';
-    return { runTask, getResponse };
+    return { runTask, runPrompt, getResponse };
   };
 
   const port: SchedulerSessionPort = {
