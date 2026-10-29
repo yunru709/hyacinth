@@ -64,7 +64,27 @@ export function createAddTaskTool(
           description: '目标渠道离线时的渠道回退链。如 ["webui", "tui"] 先试 webui，再试 tui。省略时使用全局默认（config.schedule.channelFallback，默认 ["feishu"]）。',
         },
       },
-      required: ['name', 'scheduleType', 'schedule'],
+        trigger: {
+          type: 'object',
+          description:
+            '条件触发（2026-10-29 自动化改造）：给了它就**不需要** scheduleType/schedule。\n' +
+            '形如 { "type": "condition", "kind": "process", "spec": { "name": "Weixin", "expect": "exit" } }。\n' +
+            'kind 可选 file/http/process/port/ui_region；spec 是该 kind 自己的参数。\n' +
+            '命中后事件派发到 tool-links 清单（可配 invoke 直接执行工具），本任务自身不唤醒会话。',
+          properties: {
+            type: { type: 'string', enum: ['condition'] },
+            kind: { type: 'string', enum: ['file', 'http', 'process', 'port', 'ui_region'] },
+            spec: { type: 'object' },
+            intervalMs: { type: 'number', description: '采样间隔（毫秒），默认 2000' },
+            cooldownMs: { type: 'number', description: '命中后冷却（毫秒），默认 30000' },
+            threshold: { type: 'number' },
+            settleFrames: { type: 'number' },
+          },
+          required: ['type', 'kind', 'spec'],
+        },
+      },
+      // 条件类只需要 name；时间类才需要 scheduleType + schedule（execute 里分别校验）
+      required: ['name'],
     },
     async execute(args: Record<string, unknown>): Promise<string> {
       const name = args.name as string;
