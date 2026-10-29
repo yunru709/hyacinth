@@ -216,6 +216,62 @@ export function installSchedulerSessionPort(deps: {
         setTimeout(() => void destroySession(channel, sid), 5 * 60_000);
       }
     },
+
+    /**
+     * 一次性临时会话 + **任意提示词**（2026-10-30，供 automation 的 `Where.policy='new'`）
+     *
+     * 与 runOneShot 的唯一区别：用 `runPrompt(prompt)` 而不是 `runTask(taskName)`。
+     * 后者会套 `[Scheduled Task Triggered]` 模板 —— 对"自动化链路触发"是错误语义。
+     *
+     * 输出提取策略与 runOneShot 保持一致（优先取最后一次 say 的 content，
+     * 退回归档文本）：say 不结束回合，末轮文本往往是"没有新指令"这类困惑叙述。
+     * ⚠️ 这段提取逻辑与 runOneShot 重复，将来抽成内部工具函数。
+     */
+    async runPromptInNewSession({ channel, prompt, deliverSessionId, ttlMs }) {
+      const ephId = await createEphemeral(channel);
+      const ttl = typeof ttlMs === 'number' && ttlMs > 0 ? ttlMs : 5 * 60_000;
+      try {
+        const h = await getLoop(channel, ephId);
+        await h.runPrompt(prompt);
+
+        let output = '';
+        try {
+          const convoPath = path.join(sessionManager.getSessionDir(ephId), 'conversation.jsonl');
+          const convo = await readFile(convoPath, 'utf-8');
+          for (const ln of convo.split('\n')) {
+            if (!ln.trim()) continue;
+            try {
+              const m = JSON.parse(ln) as { content?: unknown };
+              const arr = Array.isArray(m.content) ? m.content : [m.content];
+              for (const c of arr as Array<{ type?: string; name?: string; input?: { content?: unknown } }>) {
+                if (c && c.type === 'tool_use' && c.name === 'say' && typeof c.input?.content === 'string') {
+                  output = c.input.content.trim();
+                }
+              }
+            } catch {
+              /* 单行坏，跳过 */
+            }
+          }
+        } catch {
+          /* 读不到 conversation */
+        }
+        if (!output) output = h.getResponse().trim();
+
+        if (deliverSessionId && output) {
+          try {
+            await new ConversationStore().append(sessionManager.getSessionDir(deliverSessionId), {
+              role: 'assistant',
+              content: [{ type: 'text', text: `[自动化]\n${output}` }],
+            } as never);
+          } catch {
+            /* 交付失败不阻断销毁 */
+          }
+        }
+      } finally {
+        const sid = ephId;
+        setTimeout(() => void destroySession(channel, sid), ttl);
+      }
+    },
   };
 
   setSchedulerSessionPort(port);
