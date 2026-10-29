@@ -623,7 +623,15 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     // probe 类规则 → 启动 watcher，并建立 ruleId→watchId 映射。
     // runtime 靠这个映射做**精确匹配**：同一 kind 下可能有多条监控
     // （监控 A 日志、监控 B 日志都是 file），只按 kind 匹配会让 A 的命中触发 B 的规则。
-    const armed = armProbeRules(getCurrentAutomationRules(), getWatchService());
+    //
+    // as unknown as：WatchArmer 是跨层的"最小接口"（参数故意比 WatchSpec 宽），
+    // 与真实 WatchService.start 的逆变检查不兼容。spec 的实际形状由
+    // WatchService 内部的 probe registry 校验 —— 传错了会在 start 时抛错，
+    // 由 armProbeRules 捕获并记入 errors，不会静默跑坏。
+    const armed = armProbeRules(
+      getCurrentAutomationRules(),
+      getWatchService() as unknown as Parameters<typeof armProbeRules>[1],
+    );
     if (armed.errors.length > 0) {
       // 单条 arm 失败不阻断其它规则，但必须可见
       logger.warn('自动化规则 arm 部分失败', { errors: armed.errors, armed: armed.armed.size });
