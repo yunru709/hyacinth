@@ -122,6 +122,18 @@ export function registerContextSources(deps: ContextSourceDeps): void {
     getContent: () => readScratchpadForContext(),
   });
 
+  // ── 会话级记事本（本会话专属；随会话删除销毁）──────────────────────
+  // 与全局 scratchpad 并列，同样走 registerSource + runtime:xxx 通用回退（**零特判**）。
+  // ★ 会话目录**每轮现取** loop.currentSessionDir（loop 跨会话存活，装配期捕获会陈旧，
+  //   与 channel_context / ContextSourceDeps 注释同法）。
+  contextComposer.registerSource({
+    name: 'session_scratchpad',
+    strategy: 'always_inline',
+    cacheability: 'live',
+    description: '会话记事本（本会话；待办/临时，随会话删除销毁）',
+    getContent: () => readSessionScratchpadForContext(loop.currentSessionDir),
+  });
+
   // ── 陪伴模式 Memory ──────────────────────────────────────────────────
   // 从角色目录动态读取（~/.agent/companion/<name>/memory.md），
   // 不同角色各自独立的记忆文件。
