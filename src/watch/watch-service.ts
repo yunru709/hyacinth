@@ -287,12 +287,28 @@ export class WatchService {
       return;
     }
 
+    const baseline = entry.baseline;
     const distanceOf = entry.probe.distance ?? defaultDistance;
-    const d = distanceOf(entry.baseline, sample);
+    const d = distanceOf(baseline, sample);
 
     if (d > entry.threshold) {
       entry.streak += 1;
       if (entry.streak < entry.settleFrames) return;
+
+      // ⚠️ 达成式 probe 只报「**新达成**」（pending → met），反向不算命中。
+      //
+      // `distance` 只表示"变了"，**不区分方向**；而 process probe 的 value 只有
+      // 'met' / 'pending' 两种。不在这里拦方向，就会出现
+      // 「微信启动也说一句、关闭也说一句」
+      //（2026-10-30 用户实测指出：声音是在**启动**时听到的，而不是关闭时）。
+      //
+      // 只有带 isSatisfied 的达成式 probe（process / port / 带期望值的 http）需要方向判定；
+      // 纯变化型（file / ui_region）没有 isSatisfied，行为完全不变。
+      if (entry.probe.isSatisfied) {
+        if (!entry.probe.isSatisfied(sample)) return; // 现在未达成 ⇒ 不是命中
+        if (entry.probe.isSatisfied(baseline)) return; // 之前已达成 ⇒ 不是"新"达成
+      }
+
       await this.fire(watchId, entry, d);
       return;
     }
