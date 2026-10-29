@@ -75,6 +75,9 @@ import { ArchiveTool } from './archive.js';
 import { DbQueryTool } from './db-query.js';
 import { DiskUsageTool } from './disk-usage.js';
 import { GenerateMediaTool } from './generate-media.js';
+// watch_* ：等待/监控类工具（同步等待 + 后台挂起），实现见 src/watch/
+// 这里只做注册；判定逻辑在 watch 层，tools 层不认识它内部结构。
+import { watchTools } from '../watch/tool.js';
 import type { SandboxConfig } from './bash.js';
 import type { GitManager } from '../evolution/git-manager.js';
 
