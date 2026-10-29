@@ -82,7 +82,9 @@ describe('createTimeSource', () => {
     const fired: string[] = [];
     const src = createTimeSource({
       getRules: () => [rule('r1', { intervalMs: 100 }, false)],
-      fire: (id) => fired.push(id),
+      fire: (id) => {
+        fired.push(id);
+      },
       tickMs: 10,
       now: () => now,
     });
@@ -99,7 +101,9 @@ describe('createTimeSource', () => {
     const fired: string[] = [];
     const src = createTimeSource({
       getRules: () => [rule('r1', { runAt: new Date(at).toISOString() })],
-      fire: (id) => fired.push(id),
+      fire: (id) => {
+        fired.push(id);
+      },
       tickMs: 10,
       now: () => now,
     });
