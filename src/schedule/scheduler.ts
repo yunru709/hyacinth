@@ -75,6 +75,21 @@ export class HeartbeatScheduler {
   }
 
   /**
+   * 接入触发总线（2026-10-29）。
+   *
+   * 这是纯增量的接线点：任务到期时额外往总线发一条事件，
+   * **不改动任何既有的调度/执行逻辑**。未接入（null）时 fire 为 no-op，
+   * 行为与改造前逐字节一致 —— 现有 scheduler.test.ts 全绿即是证明。
+   *
+   * 为什么不把调度循环整个搬进总线：HeartbeatScheduler 承担了持久化、
+   * 补执行、并发上限、超时等职责，整体迁移风险远大于收益。
+   * 这里只做"事件外发"，让 watch 等其它源能与定时任务共用同一个观测/分发通道。
+   */
+  setTriggerHub(hub: TriggerHub | null): void {
+    this.triggerHub = hub;
+  }
+
+  /**
    * 获取调度器状态
    *
    * ⚠️ C-18（2026-10-22 修复）：这里曾返回 `recentExecutions: []`（字面空数组）。
