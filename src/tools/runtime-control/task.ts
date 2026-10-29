@@ -63,7 +63,6 @@ export function createAddTaskTool(
           items: { type: 'string' },
           description: '目标渠道离线时的渠道回退链。如 ["webui", "tui"] 先试 webui，再试 tui。省略时使用全局默认（config.schedule.channelFallback，默认 ["feishu"]）。',
         },
-      },
         trigger: {
           type: 'object',
           description:
