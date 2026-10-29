@@ -264,6 +264,23 @@ export function parseToolLinks(raw: unknown): { manifest: ToolLinksManifest; err
       return;
     }
     seen.add(key);
+    // invoke 规格形状校验（2026-10-29）：必须有非空 tool 字符串，args 可选且须为对象。
+    // 不能直接透传 unknown —— 非法规格放过去，运行时才发现就太晚了。
+    let invokeSpec: NonNullable<ToolLink['invoke']> | undefined;
+    if (l.invoke !== undefined) {
+      const inv = l.invoke as { tool?: unknown; args?: unknown };
+      if (typeof inv?.tool !== 'string' || inv.tool.length === 0) {
+        errors.push(`links[${i}]: "invoke" requires a non-empty "tool" string`);
+        return;
+      }
+      invokeSpec = {
+        tool: inv.tool,
+        ...(inv.args && typeof inv.args === 'object'
+          ? { args: inv.args as Record<string, unknown> }
+          : {}),
+      };
+    }
+
     links.push({
       on: l.on,
       handler: l.handler,
@@ -271,7 +288,7 @@ export function parseToolLinks(raw: unknown): { manifest: ToolLinksManifest; err
       // ⚠️ 2026-10-29：invoke 规格必须原样保留。
       // 这里易漏——一旦漏掉，配置在**解析阶段就被丢弃**，运行时只看到「有这条联动但没有目标工具」，
       // 表现为"配了却没反应"，且没有任何报错。invoke 类配置全靠这一行存活。
-      ...(l.invoke ? { invoke: l.invoke } : {}),
+      ...(invokeSpec ? { invoke: invokeSpec } : {}),
     });
   });
 
