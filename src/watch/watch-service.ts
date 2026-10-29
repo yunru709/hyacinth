@@ -238,10 +238,27 @@ export class WatchService {
     if (entry.coolingUntil > now) return; // 冷却中：不采样、不抛事件
 
     if (entry.coolingUntil !== 0 && entry.coolingUntil <= now) {
-      // 冷却结束：重建基准，避免"一解除就立刻再次命中"
+      // 冷却结束：**只重建基准，不判定、不触发**。
+      //
+      // ⚠️ 2026-10-30 真机实测 bug：这里原来是 `entry.baseline = null`，
+      //    下一帧立刻走 `!baseline → isSatisfied(sample) → fire(w, entry, 0)` 的
+      //    首帧短路。于是「达成式条件只要持续成立」（如微信一直不在）就每过一个
+      //    冷却周期重报一次 —— 实测 hits 涨到 11、distance 全为 0，
+      //    同一条 say 被反复播报十几次，用户明确反馈"一直在反复说话"。
+      //
+      // 正确语义：冷却结束后把**当前状态**作为新基准。
+      //   状态没变 ⇒ distance 恒为 0 ⇒ 不会再触发；
+      //   状态若已回到未达成（如微信重新启动）⇒ 基准更新，下次再达成时可正常触发。
       entry.coolingUntil = 0;
-      entry.baseline = null;
       entry.streak = 0;
+      try {
+        const s = await entry.probe.sample();
+        entry.info.samples += 1;
+        entry.baseline = s.ok ? s : null;
+      } catch {
+        entry.baseline = null;
+      }
+      return; // 本帧只重建基线，不参与判定
     }
 
     let sample: ProbeSample;
