@@ -71,35 +71,36 @@ export async function wakeOwner(event: WatchEvent): Promise<void> {
   }
 }
 
-let service: WatchService | null = null;
+let listenerRegistered = false;
 
 function getService(): WatchService {
-  if (!service) {
-    service = new WatchService({
-      registry: createDefaultProbeRegistry(),
-      onEvent: (event) => {
-        pushEvent(event);
-        // 不 await：唤醒一轮可能很久，不能阻塞采样循环
-        void wakeOwner(event);
-        // 同步外发到触发总线（若已接线）：让"时间触发"和"监控触发"在同一个
-        // 地方可观测/可统计。hub 未接线时为 no-op，不影响任何现有行为。
-        const hub = getGlobalTriggerHub();
-        if (hub) {
-          void hub.fire({
-            source: 'watch',
-            name: event.note ?? event.summary,
-            detail: {
-              watchId: event.watchId,
-              kind: event.kind,
-              distance: event.distance,
-              owner: event.owner,
-            },
-          });
-        }
-      },
+  // 用进程级单例：自动化任务（ConditionTaskRunner）与手动 watch_* 共享同一批监控，
+  // 否则 watchId 会在两套实例间重复、watch_list 只能看到一半。
+  const svc = getWatchService();
+  if (!listenerRegistered) {
+    listenerRegistered = true;
+    onWatchEvent((event) => {
+      pushEvent(event);
+      // 不 await：唤醒一轮可能很久，不能阻塞采样循环
+      void wakeOwner(event);
+      // 同步外发到触发总线（若已接线）：让"时间触发"和"监控触发"在同一个
+      // 地方可观测/可统计。hub 未接线时为 no-op，不影响任何现有行为。
+      const hub = getGlobalTriggerHub();
+      if (hub) {
+        void hub.fire({
+          source: 'watch',
+          name: event.note ?? event.summary,
+          detail: {
+            watchId: event.watchId,
+            kind: event.kind,
+            distance: event.distance,
+            owner: event.owner,
+          },
+        });
+      }
     });
   }
-  return service;
+  return svc;
 }
 
 const SPEC_PROPS: Record<string, unknown> = {
