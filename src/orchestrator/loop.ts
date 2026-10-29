@@ -337,6 +337,20 @@ export class AgentLoop {
   private interrupted = false;
   /** 串行化锁：确保 run() 不会并发执行 */
   private _runMutex: Promise<void> = Promise.resolve();
+
+  /**
+   * 是否处于「回合执行中」。
+   *
+   * 用途：`say` 的落盘 + 屏显 + 播报原本只在**回合结束**时由 takeSayStatus() 统一消费
+   * （延后是为了避免历史尾部停在 user(tool_result)，见该方法注释）。
+   *
+   * 但**后台事件**（watch 命中 / automation 链路）调用 say 时并没有回合在跑 ——
+   * 入队后永远没人消费：既没有声音、对话里也看不到那句话，
+   * 而工具还返回 ok。这正是 2026-10-30 真机反复"听不到"的根因。
+   *
+   * 所以 submitSay 检查它：false ⇒ 当场消费（直通播报）；true ⇒ 照旧入队。
+   */
+  private turnActive = false;
   private recentToolNames: string[] = [];
   private currentSummary: string | undefined;
   private orchestrator: LLMOrchestrator;
