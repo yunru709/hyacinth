@@ -64,6 +64,8 @@ export interface StartOptions {
   /** 触发一次后自动停止 */
   once?: boolean;
   cooldownMs?: number;
+  /** 归属会话：事件触发时用于唤醒对应会话 */
+  owner?: WatchOwner;
 }
 
 export interface WatchServiceOptions {
