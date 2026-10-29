@@ -94,6 +94,33 @@ export class HeartbeatScheduler {
   }
 
   /**
+   * 条件任务同步（2026-10-29 自动化改造）。
+   *
+   * 时间类任务一律 no-op —— 这是保证"改造对既有定时任务零影响"的关键：
+   * 只有 trigger.type==='condition' 才会走到端口上。
+   *
+   * 端口未注册（极简部署/单测环境）时整体跳过：条件任务仍会被持久化，
+   * 只是不会真的去采样。这样 scheduler 的独立性得以保留。
+   */
+  private syncConditionTask(task: ScheduledTask): void {
+    const runner = getConditionTaskRunner();
+    if (!runner) return;
+
+    if (task.enabled && task.trigger?.type === 'condition') {
+      runner.arm({
+        id: task.id,
+        name: task.name,
+        trigger: task.trigger,
+        channel: task.channel,
+        sessionId: task.sessionId,
+        enabled: task.enabled,
+      });
+    } else {
+      runner.disarm(task.id);
+    }
+  }
+
+  /**
    * 获取调度器状态
    *
    * ⚠️ C-18（2026-10-22 修复）：这里曾返回 `recentExecutions: []`（字面空数组）。
