@@ -586,6 +586,91 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     });
   }
 
+  // ── 自动化链路（AutomationRule，2026-10-30）──
+  // 与上面的 tool-links 分工：
+  //   tool-links  = 框架内部工具旁路（append 类，需要 tool 执行上下文 payload）
+  //   automation  = 用户/模型定义的完整链路（invoke/wake/gate/safety，可多步可分支）
+  // 两者共用 TriggerHub 派发与统一执行记录。
+  {
+    // 校验需要的"外部知识"：全部现取，避免 automation 层反向依赖各业务层
+    const knownProbeKinds = ['file', 'http', 'process', 'port', 'ui_region'];
+    const knownToolNames = toolRegistry.getToolDefinitions().map((t) => t.name);
+    const knownHandlers = buildCoreToolLinkRegistry().ids();
+    const knownEvents = [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES];
+
+    const applied = initAutomationsFromDisk({
+      knownProbeKinds,
+      knownToolNames,
+      knownHandlers,
+      knownEvents,
+    });
+    if (applied.errors.length > 0) {
+      // 部分无效：非法条目已剔除，其余照常生效 —— 但必须让人看见是哪条错了
+      logger.warn('自动化规则部分无效（已剔除）', {
+        errors: applied.errors,
+        path: applied.path,
+        effective: applied.count,
+      });
+    }
+    logger.info('自动化规则已加载', {
+      count: applied.count,
+      existed: applied.existed,
+      path: applied.path,
+    });
+
+    // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
+    setAutomationRuntime({
+      invokeTool: async (toolName, args) => {
+        const tool = toolRegistry.get(toolName);
+        if (!tool) throw new Error(`[automation] 工具不存在: ${toolName}`);
+        return await tool.execute(args);
+      },
+      wakeSession: createWakeSession(() => getSchedulerSessionPort()),
+    });
+
+    // 订阅 TriggerHub：watch / scheduler 已经在 fire，automation 在此消费。
+    // 事件转换放在装配层做 —— 让 automation 层不认识 trigger 的类型。
+    const hub = ensureGlobalTriggerHub();
+    hub.registerSink(async (e) => {
+      const detail = (e.detail ?? {}) as Record<string, unknown>;
+      const kind = typeof detail.kind === 'string' ? detail.kind : '';
+      const watchId = typeof detail.watchId === 'string' ? detail.watchId : '';
+      // watch 事件带 watchId，才能让 probe 类规则精确匹配自己 arm 的监控项；
+      // 其他源退化为 `<source>:<name>`。
+      const eventName =
+        e.source === 'watch' && kind
+          ? `afterWatch:${kind}${watchId ? `#${watchId}` : ''}`
+          : `${e.source}:${e.name}`;
+
+      try {
+        const outcomes = await dispatchAutomationEvent({
+          eventName,
+          source: e.source,
+          name: e.name,
+          at: e.at,
+          payload: detail,
+        });
+        const failed = outcomes.filter((o) => !o.result.ok);
+        if (failed.length > 0) {
+          // 失败必须可见（曾经"配了没反应也没提示"排查了一整晚）
+          logger.warn('自动化规则执行失败', {
+            failed: failed.map((f) => ({ rule: f.ruleName, id: f.ruleId, error: f.result.error })),
+          });
+        }
+        if (outcomes.length > 0) {
+          logger.info('自动化规则已执行', {
+            event: eventName,
+            ran: outcomes.map((o) => ({ rule: o.ruleName, ok: o.result.ok, steps: o.result.steps.length })),
+          });
+        }
+      } catch (err) {
+        // 兜底：sink 抛错会拖垮 TriggerHub 的派发循环
+        logger.error('自动化派发异常', { event: eventName, error: (err as Error).message });
+      }
+    });
+    logger.info('自动化已接入 TriggerHub', { sinks: hub.sinkCount() });
+  }
+
   // ── AutoGit（S4：git 自管理策略层，evolution 层消费 GitManager 原语）──
   // wireAutoGit 工厂内聚：new + onTurnEnd 观察者挂载（钩子体系首个装配侧观察者）
   // + 启动处置（autoGit.startupAction 收编遗留脏工作区）。避免装配层直接 new。
