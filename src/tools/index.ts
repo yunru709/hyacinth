@@ -124,6 +124,8 @@ export function createDefaultRegistry(
   // owner = 当前会话：事件触发时只唤醒"登记它的那个会话"，避免多会话串线
   const watchOwner = sessionId && channel ? { sessionId, channel } : undefined;
   for (const tool of createWatchTools({ owner: watchOwner })) registry.register(tool);
+  // 自动化任务：把 scheduler 的条件任务接到 WatchService（幂等，多会话重复调用也只装一次）
+  installConditionTaskRunner();
   return registry;
 }
 
