@@ -148,16 +148,29 @@ export const invokeToolHandler: ToolLinkHandler = {
   // 所以写 'afterWatch' 就能覆盖 afterWatch:process / afterWatch:file 等全部子事件。
   on: ['afterWatch', 'afterScheduleTask'],
   run: async (linkInput) => {
+    // 收敛点③（2026-10-30）：所有分支都要 report，否则「没跑」和「跑成功」无法区分。
     const spec = linkInput.link?.invoke;
-    if (!spec || !spec.tool) return '';
+    if (!spec || !spec.tool) {
+      linkInput.report?.({ ok: false, error: 'invoke 规格缺失：清单项没有 invoke.tool' });
+      return '';
+    }
 
     const invoke = linkInput.invokeTool;
-    if (!invoke) return ''; // 未注入（单测/极简装配）：静默跳过，不报错
+    if (!invoke) {
+      // 未注入 = runtime 没装配好。这是配置/装配错误，必须可见（以前是静默跳过）。
+      linkInput.report?.({
+        ok: false,
+        tool: spec.tool,
+        error: 'invokeTool 未注入：tool-links runtime 未装配（检查 agent-assembly 的 setToolLinkRuntime）',
+      });
+      return '';
+    }
 
     try {
       await invoke(spec.tool, spec.args ?? {});
+      linkInput.report?.({ ok: true, tool: spec.tool });
     } catch (err) {
-      console.error(`[tool-links] invoke "${spec.tool}" failed on "${linkInput.event}":`, err);
+      linkInput.report?.({ ok: false, tool: spec.tool, error: (err as Error).message });
     }
     return '';
   },
