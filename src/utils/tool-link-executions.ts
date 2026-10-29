@@ -57,8 +57,16 @@ function failureLogPath(): string {
   return path.join(os.homedir(), '.agent', 'logs', 'tool-links-failures.jsonl');
 }
 
+/** 是否把失败写进文件。测试里关掉，免得把伪造的失败混进真实日志。 */
+let fileLoggingEnabled = true;
+
+export function setToolLinkFailureLogging(enabled: boolean): void {
+  fileLoggingEnabled = enabled;
+}
+
 /** 失败落文件：尽力而为，任何异常都不冒泡（记录日志本身绝不能干扰业务） */
 function appendFailureToFile(e: ToolLinkExecution): void {
+  if (!fileLoggingEnabled) return;
   try {
     const p = failureLogPath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
