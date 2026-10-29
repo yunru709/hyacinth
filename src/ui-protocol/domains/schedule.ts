@@ -39,6 +39,8 @@ export interface SchedulerLike {
     tags?: string[],
     channel?: string,
     fallback?: string[],
+    /** 2026-10-29 自动化改造：trigger 存在时为条件类任务（由 WatchService 驱动） */
+    opts?: { reuseByName?: boolean; trigger?: Record<string, unknown> },
   ): Promise<unknown>;
   deleteTask?(taskId: string): Promise<boolean>;
   enableTask?(taskId: string): Promise<boolean>;
