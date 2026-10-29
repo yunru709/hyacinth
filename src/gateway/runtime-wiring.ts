@@ -26,6 +26,8 @@ import type { SkillRegistry } from '../skills/registry.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { ToolBundleRegistry } from '../tools/bundle-registry.js';
 import type { MCPSystem } from '../mcp/system.js';
+// 触发总线（2026-10-29）：定时任务 / 监控等事件源的统一入口
+import { TriggerHub, setGlobalTriggerHub } from '../trigger/hub.js';
 import type { HeartbeatScheduler } from '../schedule/scheduler.js';
 import type { Provider } from '../provider/interface.js';
 import type { ProviderRouter } from '../provider/router.js';
