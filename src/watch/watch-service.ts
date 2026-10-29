@@ -54,6 +54,11 @@ export interface WatchInfo {
   cooling: boolean;
   summary: string;
   once: boolean;
+  /**
+   * 归属会话（2026-10-29）：undefined 表示"只记事件、不唤醒"。
+   * 暴露出来是为了 ① 诊断时能看出监控属于哪个会话；② 测试能验证归属正确。
+   */
+  owner?: WatchOwner;
 }
 
 export interface StartOptions {
