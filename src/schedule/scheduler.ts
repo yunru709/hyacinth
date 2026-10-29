@@ -272,7 +272,7 @@ export class HeartbeatScheduler {
     tags: string[] = [],
     channel?: string,
     fallback?: string[],
-    opts?: { reuseByName?: boolean },
+    opts?: { reuseByName?: boolean; trigger?: ScheduledTaskTrigger },
   ): Promise<ScheduledTask> {
     // 【2026-10-28 修（孑遗反馈"add_task 同名复用旧 id"）】
     // 默认仍按 name **upsert**（有意的契约，见 schedule.test.ts「同名 addTask 更新而非新增」）；
