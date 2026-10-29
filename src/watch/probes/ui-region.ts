@@ -77,7 +77,11 @@ export const uiRegionProbe: Probe = {
     if (spec.kind !== 'ui_region') throw new Error('uiRegionProbe received mismatched spec');
     const region = spec.region;
     if (region) {
-      if (region.length !== 4) throw new Error('ui_region: region must be [left, top, right, bottom]');
+      if (region.length !== 4) {
+        throw new Error(
+          `ui_region: region must have exactly 4 numbers [left, top, right, bottom], got ${region.length}`,
+        );
+      }
       const [l, t, r, b] = region;
       if (r <= l || b <= t) throw new Error('ui_region: region must satisfy right > left and bottom > top');
     }
