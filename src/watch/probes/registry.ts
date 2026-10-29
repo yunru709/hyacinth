@@ -1,44 +1,49 @@
 /**
  * Probe 注册表（2026-10-29）
  *
- * 为什么要有它：Watch 的 `kind` 会持续增加（UI 区域、文件、HTTP、进程、端口、
- * 将来还有剪贴板、窗口标题、DOM 选择器…）。如果写成 if/switch，
- * 这个文件三个月就会变成两千行上帝对象。
- *
- * 约定：**加一种类型 = 加一个文件 + 在 index.ts 里 register 一行**，
- * 不改任何既有代码路径。
+ * 为什么要有这一层：`watch` 是个"万能监控"工具，如果所有 kind 都写在一个
+ * switch 里，三个月后必然是两千行的上帝对象。这里强制一个 kind 一个文件、
+ * 实现 `Probe` 接口、在注册表登记，加新类型=加文件+一行注册。
  */
 
-import type { Probe, WatchKind } from '../types.js';
+import type { Probe, ProbeInstance, WatchKind, WatchSpec } from '../types.js';
 
-const registry = new Map<WatchKind, Probe>();
+export class ProbeRegistry {
+  private probes = new Map<WatchKind, Probe>();
 
-/** 注册一个 Probe；同 kind 重复注册直接抛错（避免静默覆盖导致排查困难） */
-export function registerProbe(probe: Probe): void {
-  if (registry.has(probe.kind)) {
-    throw new Error(`Probe already registered for kind "${probe.kind}"`);
+  register(probe: Probe): void {
+    this.probes.set(probe.kind, probe);
   }
-  registry.set(probe.kind, probe);
-}
 
-export function getProbe(kind: WatchKind): Probe {
-  const p = registry.get(kind);
-  if (!p) {
-    const known = [...registry.keys()].join(', ') || '(none)';
-    throw new Error(`Unknown watch kind "${kind}"; available: ${known}`);
+  get(kind: WatchKind): Probe | undefined {
+    return this.probes.get(kind);
   }
-  return p;
-}
 
-export function hasProbe(kind: string): kind is WatchKind {
-  return registry.has(kind as WatchKind);
-}
+  has(kind: WatchKind): boolean {
+    return this.probes.has(kind);
+  }
 
-export function listProbes(): Probe[] {
-  return [...registry.values()];
-}
+  /** 已注册的 kind 列表（进工具描述） */
+  kinds(): WatchKind[] {
+    return [...this.probes.keys()].sort();
+  }
 
-/** 仅供测试：清空注册表（生产代码不要调用） */
-export function __resetProbeRegistry(): void {
-  registry.clear();
+  /** kind → 一行说明（进工具描述） */
+  describe(): Array<{ kind: WatchKind; description: string }> {
+    return this.kinds().map((k) => ({ kind: k, description: this.probes.get(k)!.description }));
+  }
+
+  /**
+   * 按 spec 产出实例。未注册的 kind 抛错（而不是静默返回 undefined），
+   * 因为调用方是工具层，需要把错误原样告诉模型。
+   */
+  create(spec: WatchSpec): ProbeInstance {
+    const probe = this.probes.get(spec.kind);
+    if (!probe) {
+      throw new Error(
+        `unknown watch kind '${spec.kind}'; registered: ${this.kinds().join(', ') || '(none)'}`,
+      );
+    }
+    return probe.create(spec);
+  }
 }
