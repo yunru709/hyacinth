@@ -250,6 +250,7 @@ export class WatchService {
         at: now,
         note: entry.info.note,
         summary: entry.info.summary,
+        owner: entry.owner,
       };
 
       try {
