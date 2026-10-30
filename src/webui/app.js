@@ -288,7 +288,8 @@
     if (view === 'settings' && connected && shouldLoadModel()) loadModel();
     if (view === 'sessions' && connected) loadSessions();
     if (view === 'settings' && connected) loadSettings();
-    if (view === 'schedule' && connected) loadSchedule();   // 定时任务视图 ✓
+    if (view === 'schedule' && connected) loadSchedule();   // 自动化编排视图（automation 域）
+    if (view === 'tasks' && connected) loadTasks();         // 定时任务视图（schedule 域：add_task 建的任务）
     if (view === 'plugins' && connected) loadPlugins();     // 插件视图（内核挂载 + 目录插件管理）
     if (view === 'skills' && connected) loadSkills();       // 技能视图（列表 / 详情 / 启停）
     if (view === 'settings' && connected) loadToolsAndMCP();

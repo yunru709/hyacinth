@@ -633,6 +633,20 @@
         <div id="automation-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
       </div>
       </section>
+      <section data-view="tasks" class="view-section h-full" hidden>
+      <div class="h-full flex flex-col" data-dom-id="tasks-panel">
+        <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 class="text-lg font-semibold text-foreground">定时任务</h1>
+            <p id="tasks-status" class="text-xs text-muted-foreground mt-0.5">来自 add_task 的调度任务（走 HeartbeatScheduler，有 cron / 持久化 / 补执行）</p>
+          </div>
+          <button id="tasks-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span>
+          </button>
+        </div>
+        <div id="tasks-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
+      </div>
+      </section>
       <section data-view="plugins" class="view-section h-full" hidden>
       <div class="h-full flex flex-col" data-dom-id="plugins-panel">
         <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
