@@ -2446,36 +2446,26 @@
   /** 绑定工具条（只绑一次 ✓；由 loadSchedule 触发 ⇒ 视图 markup 必已在 ✓） */
   function bindScheduleOnce() {
     if (scheduleBound) return;
-    const addBtn = $('#schedule-add-btn');
+    const addBtn = $('#automation-add-btn');
     if (!addBtn) return;
     scheduleBound = true;
-    const refresh = $('#schedule-refresh-btn');
+    const refresh = $('#automation-refresh-btn');
     if (refresh) refresh.onclick = () => { loadSchedule(); };
-    // 视觉/引导适配：切换调度类型时更新输入框 placeholder，提示正确填法
+    // 触发类型切换（状态条件 ⇄ 定时）显隐对应控件
     {
-      const _t = $('#schedule-type');
-      const _v = $('#schedule-value');
-      if (_t && _v) {
-        const phMap = { daily: 'HH:mm 例 09:30', interval: '间隔分钟 例 30', cron: '5 字段 例 0 9 * * *', 'fixed-time': 'HH:mm 或 ISO 例 09:30', random: '周期分钟,次数,最小间隔 例 60,5,5' };
-        const applyPh = () => { _v.placeholder = phMap[_t.value] || ''; };
-        _t.addEventListener('change', applyPh);
-        applyPh();
-      }
-    }
-
-    // 2026-10-29 自动化改造：触发方式切换（时间 ⇄ 条件）时显示对应控件
-    {
-      const _tt = $('#schedule-trigger-type');
-      const _t = $('#schedule-type');
-      const _v = $('#schedule-value');
-      const _ck = $('#schedule-cond-kind');
-      const _cs = $('#schedule-cond-spec');
+      const _tt = $('#automation-trigger-type');
+      const _pk = $('#automation-probe-kind');
+      const _ps = $('#automation-probe-spec');
+      const _pi = $('#automation-probe-interval');
+      const _st = $('#automation-schedule-type');
+      const _sv = $('#automation-schedule-value');
       const applyTriggerMode = () => {
-        const isCond = !!(_tt && _tt.value === 'condition');
-        if (_t) _t.hidden = isCond;
-        if (_v) _v.hidden = isCond;
-        if (_ck) _ck.hidden = !isCond;
-        if (_cs) _cs.hidden = !isCond;
+        const isTime = !!(_tt && _tt.value === 'time');
+        if (_pk) _pk.hidden = isTime;
+        if (_ps) _ps.hidden = isTime;
+        if (_pi) _pi.hidden = isTime;
+        if (_st) _st.hidden = !isTime;
+        if (_sv) _sv.hidden = !isTime;
       };
       if (_tt) {
         _tt.addEventListener('change', applyTriggerMode);
@@ -2483,90 +2473,66 @@
       }
     }
     const hint = (msg, ok) => {
-      const h = $('#schedule-hint');
+      const h = $('#automation-hint');
       if (!h) return;
       h.textContent = msg || '';
       h.style.color = ok ? 'var(--state-success)' : 'var(--state-error)';
     };
     addBtn.onclick = () => {
       if (!connected) { hint('尚未连接后端'); return; }
-      const nameEl = $('#schedule-name');
-      const typeEl = $('#schedule-type');
-      const valEl = $('#schedule-value');
-      const name = (nameEl && nameEl.value || '').trim();
-      const type = (typeEl && typeEl.value) || 'daily';
-      const val = (valEl && valEl.value || '').trim();
-      if (!name) { hint('请先填任务名称'); return; }
-      // 2026-10-29 自动化改造：条件触发不走 schedule 对象，直接提交 trigger
-      const triggerType = ($('#schedule-trigger-type') || {}).value || 'time';
-      if (triggerType === 'condition') {
-        const kind = ($('#schedule-cond-kind') || {}).value || 'file';
-        const specEl = $('#schedule-cond-spec');
-        const specRaw = ((specEl && specEl.value) || '').trim();
-        let spec;
-        try { spec = specRaw ? JSON.parse(specRaw) : {}; }
-        catch (e) { hint('条件参数必须是合法 JSON，例 {"path":"C:\\\\a.log"}'); return; }
-        addBtn.disabled = true;
-        client.request('schedule.add', {
-          name,
-          action: { type: 'scheduled', target: name, payload: {} },
-          trigger: { type: 'condition', kind, spec },
-        })
-          .then(() => {
-            hint('已添加条件任务：' + name, true);
-            if (nameEl) nameEl.value = '';
-            if (specEl) specEl.value = '';
-            loadSchedule();
-          })
-          .catch((e) => hint('添加失败: ' + (e && e.message)))
-          .finally(() => { addBtn.disabled = false; });
-        return;
-      }
-      // 按调度类型构造 schedule 对象（5 种：daily / interval / cron / fixed-time / random）
-      let schedule = null;
-      let label = '';
-      if (type === 'daily') {
-        if (!/^\d{1,2}:\d{2}$/.test(val)) { hint('时间格式应为 HH:mm，例如 09:30'); return; }
-        schedule = { time: val }; label = '每天 ' + val;
-      } else if (type === 'interval') {
-        const mins = Number(val);
-        if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例如 30'); return; }
-        schedule = { intervalMs: Math.round(mins * 60000) }; label = '每 ' + mins + ' 分钟';
-      } else if (type === 'cron') {
-        if (val.split(/\s+/).filter(Boolean).length !== 5) { hint('cron 需 5 字段，例：0 9 * * *'); return; }
-        schedule = { expression: val }; label = 'cron ' + val;
-      } else if (type === 'fixed-time') {
-        let iso;
-        if (/^\d{1,2}:\d{2}$/.test(val)) {
-          const [h, m] = val.split(':').map(Number);
-          const d = new Date(); d.setHours(h, m, 0, 0);
-          if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
-          iso = d.toISOString();
+      const name = (($('#automation-name') || {}).value || '').trim();
+      const tool = (($('#automation-tool') || {}).value || '').trim();
+      const argsRaw = (($('#automation-args') || {}).value || '').trim();
+      const triggerType = ($('#automation-trigger-type') || {}).value || 'probe';
+      const enable = !!($('#automation-enable') || {}).checked;
+      if (!name) { hint('请先填规则名称'); return; }
+      if (!tool) { hint('请填要调用的工具名（如 bash / say / write）'); return; }
+      let args;
+      try { args = argsRaw ? JSON.parse(argsRaw) : {}; }
+      catch (e) { hint('工具参数必须是合法 JSON，例 {"command":"..."}'); return; }
+
+      // 构造 when（触发）
+      let when;
+      if (triggerType === 'time') {
+        const st = ($('#automation-schedule-type') || {}).value || 'interval';
+        const sv = (($('#automation-schedule-value') || {}).value || '').trim();
+        if (!sv) { hint('请填时间参数（如 30 或 09:30）'); return; }
+        if (st === 'interval') {
+          const mins = Number(sv);
+          if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例 30'); return; }
+          when = { kind: 'time', schedule: { intervalMs: Math.round(mins * 60000) } };
+        } else if (st === 'daily') {
+          if (!/^\d{1,2}:\d{2}$/.test(sv)) { hint('时间格式应为 HH:mm，例 09:30'); return; }
+          when = { kind: 'time', schedule: { time: sv } };
+        } else if (st === 'cron') {
+          if (sv.split(/\s+/).filter(Boolean).length !== 5) { hint('cron 需 5 字段，例 0 9 * * *'); return; }
+          when = { kind: 'time', schedule: { expression: sv } };
         } else {
-          const d = new Date(val);
-          if (isNaN(d.getTime())) { hint('单次定时请填 HH:mm 或 ISO 时间，例 09:30 / 2026-10-29T09:00'); return; }
-          iso = d.toISOString();
+          when = { kind: 'time', schedule: { runAt: sv } };
         }
-        schedule = { runAt: iso }; label = '单次 ' + new Date(iso).toLocaleString();
-      } else if (type === 'random') {
-        const p = val.split(',').map((x) => Number(x.trim()));
-        const periodMin = p[0];
-        if (!Number.isFinite(periodMin) || periodMin <= 0) { hint('随机请填「周期分钟[,次数,最小间隔分钟]」，例 60,5,5'); return; }
-        const count = (Number.isFinite(p[1]) && p[1] > 0) ? Math.floor(p[1]) : 1;
-        const minIntMin = (Number.isFinite(p[2]) && p[2] > 0) ? p[2] : 5;
-        schedule = { periodMs: Math.round(periodMin * 60000), count, minIntervalMs: Math.round(minIntMin * 60000) };
-        label = '每 ' + periodMin + ' 分钟随机 ' + count + ' 次';
       } else {
-        hint('未知调度类型'); return;
+        const pk = ($('#automation-probe-kind') || {}).value || 'process';
+        const psRaw = (($('#automation-probe-spec') || {}).value || '').trim();
+        let spec;
+        try { spec = psRaw ? JSON.parse(psRaw) : {}; }
+        catch (e) { hint('条件参数必须是合法 JSON，例 {"name":"steam","expect":"exit"}'); return; }
+        const ivRaw = (($('#automation-probe-interval') || {}).value || '').trim();
+        when = { kind: 'probe', probe: { kind: pk, spec } };
+        if (ivRaw) { const iv = Number(ivRaw); if (Number.isFinite(iv) && iv > 0) when.probe.intervalMs = iv; }
       }
+
+      // 一条 invoke 动作（工具名 + 参数）；后续可扩展为多动作链
+      const id = 'ui-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const rule = { id, name, enabled: false, when, do: [{ sink: 'invoke', tool, args }] };
       addBtn.disabled = true;
-      client.request('schedule.add', {
-        name,
-        scheduleType: type,
-        schedule,
-        action: { type: 'scheduled', target: name, payload: {} },
-      })
-        .then(() => { hint('已添加：' + name + '（' + label + '）', true); if (nameEl) nameEl.value = ''; if (valEl) valEl.value = ''; loadSchedule(); })
+      client.request('automation.create', { rule, enable })
+        .then((res) => {
+          if (res && res.ok === false) { hint('添加失败：' + (res.errors || []).join('；')); return; }
+          hint('已添加规则：' + name, true);
+          const nEl = $('#automation-name'); if (nEl) nEl.value = '';
+          const aEl = $('#automation-args'); if (aEl) aEl.value = '';
+          loadSchedule();
+        })
         .catch((e) => hint('添加失败: ' + (e && e.message)))
         .finally(() => { addBtn.disabled = false; });
     };
