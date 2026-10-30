@@ -77,6 +77,7 @@ function declaredToolNames(): Map<string, string> {
     path.join(ROOT, 'src', 'skills'),    // use_skill（实测漏检 → 守则①误报）
     path.join(ROOT, 'src', 'rollback'),  // rollback / rollback_status（同上）
     path.join(ROOT, 'src', 'watch'),     // watch_*（2026-10-30 归 utility，补齐此前漏检的盲区）
+    path.join(ROOT, 'src', 'automation'), // automation_*（归 automation 包，补齐此前漏检的盲区）
   ];
   // 单文件入口：整个 src/channels 不能扫（那里有大量**渠道名** name: 'feishu' 等，会变假阳性），
   // 但 send_channel_message 这个工具正好声明在 dispatcher.ts 里。
