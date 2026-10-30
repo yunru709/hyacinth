@@ -25,7 +25,7 @@ import {
 import { armProbeRules, disarmWatchIds } from '../../automation/sources.js';
 import { getAutomationRuntime, setAutomationRuntime } from '../../automation/service.js';
 import { getWatchService } from '../../watch/service-instance.js';
-import { buildCoreToolLinkRegistry } from '../../orchestrator/tool-link-handlers.js';
+import { DEFAULT_PROBE_KINDS } from '../../watch/probes/index.js';
 import { LOOP_HOOK_NAMES } from '../../orchestrator/loop-hooks.js';
 import { TOOL_LINK_EXTRA_EVENT_SOURCES } from '../../utils/tool-links.js';
 
@@ -38,9 +38,8 @@ export function createAutomationDomain(options: AutomationDomainOptions): Domain
   const { getToolNames } = options;
 
   const makeCtx = (): ValidationContext => ({
-    knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
+    knownProbeKinds: DEFAULT_PROBE_KINDS,
     knownToolNames: getToolNames(),
-    knownHandlers: buildCoreToolLinkRegistry().ids(),
     knownEvents: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
   });
 

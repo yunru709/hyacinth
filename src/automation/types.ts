@@ -14,7 +14,7 @@
  * 看起来像一件事，实际是九种组合。这里把它们拆开：
  *
  *   When  —— 什么时候触发（时间 / 状态 / 事件）         ← 决定"何时"
- *   What  —— 做什么（invoke / wake / append / gate）     ← 决定"做什么"
+ *   What  —— 做什么（invoke / wake / gate / loop）       ← 决定"做什么"
  *   Where —— 唤醒模型时落在哪个会话（只在 wake 里出现）  ← 决定"在哪想"
  *
  * 这样：任何 When 都能配任何 What；Where 只有"要动脑子"的那类 Action 才需要。
@@ -123,7 +123,14 @@ export interface InvokeAction {
   args?: Record<string, unknown>;
 }
 
-/** 往工具结果里追加信息（对应现有 append / enrich 类处理器） */
+/**
+ * 往工具结果里追加信息（对应现有 append / enrich 类处理器）。
+ *
+ * ⚠️ **已停用（2026-10-31 T3）**：append handler 的入参依赖工具执行上下文
+ * （payload.input / toolName / link），automation 事件不带 ⇒ 恒返回 ''（结构性无输出）。
+ * validate 现在直接拒绝此 sink；类型保留仅为兼容磁盘旧规则的**拒绝路径**与 runner 的
+ * 显式失败兜底（appendText 未注入 ⇒ ok:false，不再静默）。append 联动请走 tool-links。
+ */
 export interface AppendAction {
   sink: 'append';
   /** 处理器 id，如 `core.diagnostics-append` */
@@ -176,7 +183,7 @@ export interface SafetyAction {
  *   until  每轮后断言：成立→退出
  * 三者可组合，任一满足即退出；maxIterations 是兜底硬上限（默认 1000，上限 10000）。
  *
- * 循环体可递归含 invoke/append/wake/gate/loop（深度上限 5，与 gate 共用）。
+ * 循环体可递归含 invoke/wake/gate/loop（深度上限 5，与 gate 共用）。
  * 每轮共享 scope：$result.* 指向该轮最后一步输出，可被 while/until 断言。
  */
 export interface LoopAction {

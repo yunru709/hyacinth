@@ -65,7 +65,8 @@ import {
 // 定位：tool-links 是框架内部工具旁路（append 类），automation 是用户/模型定义的
 // 完整链路（invoke/wake/gate/safety，可多步可分支）。两者共用 TriggerHub 派发。
 import { getCurrentAutomationRules, initAutomationsFromDisk, saveAutomationRules } from '../automation/store.js';
-import { dispatchAutomationEvent, getAutomationRuntime, setAutomationRuntime } from '../automation/service.js';
+import { dispatchAutomationEvent, getAutomationRuntime, setAutomationRuntime, warnFailedOutcomes } from '../automation/service.js';
+import { bridgeLoopHooks } from './automation-loop-bridge.js';
 import type { AutomationRuntimeDeps } from '../automation/service.js';
 import type { ValidationContext } from '../automation/validate.js';
 import { armProbeRules, disarmWatchIds } from '../automation/sources.js';
@@ -73,6 +74,7 @@ import { createTimeSource } from '../automation/time-source.js';
 import { createAutomationTools } from '../automation/tools.js';
 import { createWakeSession } from '../automation/wake-adapter.js';
 import { getWatchService } from '../watch/service-instance.js';
+import { DEFAULT_PROBE_KINDS } from '../watch/probes/index.js';
 import { getSchedulerSessionPort } from '../schedule/session-port.js';
 import { ensureGlobalTriggerHub } from '../trigger/hub.js';
 import { buildCoreToolLinkRegistry } from '../orchestrator/tool-link-handlers.js';
@@ -642,19 +644,13 @@ export async function createAgentAssembly(
       return await tool.execute(args);
     };
     const currentWakeSession = createWakeSession(() => getSchedulerSessionPort());
-
-    // append 动作的实现（2026-10-31 接通：此前 appendText 从未注入 ⇒ append sink 恒失败并中断后续动作）。
-    // 语义：按 handler id 找 core tool-links 处理器执行，把触发事件的 payload 作为其输入。
-    // 仅在「监听工具事件」（如 afterToolExecute:write）时 payload 才带工具入参；其他事件下
-    // handler 自己 fail-safe（多数返回空串），不会误伤。
-    const currentAppendText = async (
-      handlerId: string,
-      event: { payload?: unknown },
-    ): Promise<string> => {
-      const handler = buildCoreToolLinkRegistry().get(handlerId);
-      if (!handler) throw new Error(`[automation] append handler 不存在: ${handlerId}`);
-      return await handler.run({ payload: event.payload } as never);
-    };
+    // ── T3（2026-10-31 复核）：**回退** currentAppendText 注入 ──
+    // 2026-10-31 早先"接通"的 appendText 实为无效接线：四个 core append handler 的入参
+    // 依赖工具执行上下文（payload.input / toolName / link），automation 事件不带 ⇒
+    // 恒返回 ''（复核报告 §三逐 handler 证据）。静默空转比显式失败更危险 ——
+    // 现已回退注入：append sink 不再有运行时实现，若磁盘旧规则仍含 append 动作，
+    // runner 会显式记 "appendText 未注入" 失败（不再无声）；新规则由 validate 直接拒绝。
+    // append 类联动请走 tool-links 清单（那条路有完整工具上下文）。
 
     // ── automation 工具的构造与注册：**每个会话的 toolRegistry 都要注册** ──
     // 背景（2026-10-30 真机实测踩坑，装配竞态）：
@@ -664,9 +660,8 @@ export async function createAgentAssembly(
     //   看不到」——表现为工具时有时无（Unknown tool）。修复：把「工具注册」从「一次性 init」
     //   里解耦，每次会话装配都重注册到**当前** registry（overwriteGuard 对同源 core 放行，幂等）。
     const makeCtx = (): ValidationContext => ({
-      knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
+      knownProbeKinds: DEFAULT_PROBE_KINDS,
       knownToolNames: toolRegistry.getToolDefinitions().map((t) => t.name),
-      knownHandlers: buildCoreToolLinkRegistry().ids(),
       knownEvents: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
     });
     const asArmer = () => getWatchService() as unknown as Parameters<typeof armProbeRules>[1];
@@ -750,14 +745,21 @@ export async function createAgentAssembly(
     const timeSource = createTimeSource({
       getRules: () => getCurrentAutomationRules(),
       fire: (ruleId) => {
+        // T6（2026-10-31 复核）：fire 处必须消费 outcomes —— 此前只 .catch 派发异常，
+        // 规则级失败（工具报错、abort）被静默丢弃。失败日志走 warnFailedOutcomes，
+        // 与下方 hub sink 同一实现 ⇒ 必然同格式。
         void dispatchAutomationEvent({
           eventName: `afterTime:${ruleId}`,
           source: 'time',
           name: ruleId,
           at: Date.now(),
-        }).catch((err: Error) => {
-          logger.warn('自动化 time 规则派发失败', { ruleId, error: err.message });
-        });
+        })
+          .then((outcomes) => {
+            warnFailedOutcomes(logger.warn.bind(logger), outcomes);
+          })
+          .catch((err: Error) => {
+            logger.warn('自动化 time 规则派发失败', { ruleId, error: err.message });
+          });
       },
     });
     timeSource.start();
@@ -767,10 +769,10 @@ export async function createAgentAssembly(
 
     // 注入运行时：invoke（调工具）+ wake（唤醒会话，Where 决定落在哪个会话）
     // 用上方已按会话刷新的引用（与本函数开头的后续会话分支保持一致）
+    // appendText 有意不注入（T3 回退，见上方 currentAppendText 处注释）。
     setAutomationRuntime({
       invokeTool: currentInvokeTool,
       wakeSession: currentWakeSession,
-      appendText: currentAppendText,
       armedWatchIds: armed.armed,
     });
 
@@ -812,13 +814,9 @@ export async function createAgentAssembly(
           at: e.at,
           payload: detail,
         });
-        const failed = outcomes.filter((o) => !o.result.ok);
-        if (failed.length > 0) {
-          // 失败必须可见（曾经"配了没反应也没提示"排查了一整晚）
-          logger.warn('自动化规则执行失败', {
-            failed: failed.map((f) => ({ rule: f.ruleName, id: f.ruleId, error: f.result.error })),
-          });
-        }
+        // 失败必须可见（曾经"配了没反应也没提示"排查了一整晚）。
+        // T6：格式收敛到 warnFailedOutcomes 单一实现（time fire 同用），不再内联。
+        warnFailedOutcomes(logger.warn.bind(logger), outcomes);
         if (outcomes.length > 0) {
           logger.info('自动化规则已执行', {
             event: eventName,
@@ -921,6 +919,20 @@ export async function createAgentAssembly(
   //    提前装配会让规则因「工具 say 未注册」被 validate 剔除
   //    ⇒ count=0、不 arm 任何 watcher，且只有一条 warn —— 界面完全无感。
   wireAutomation();
+
+  // ── T2（2026-10-31 复核 §四）：loop 钩子 → TriggerHub 事件桥 ──
+  // hub sink（wireAutomation 内注册）早已把 source==='loop' 的事件名映射为钩子名本身，
+  // 但一直缺 fire 侧 ⇒ event 类规则（onTurnEnd / afterToolExecute:write …）写得出来、
+  // 校验过得去、永远不触发。此处补上：白名单钩子 → hub.fire({source:'loop'})。
+  // 每次会话装配都接**当前** loop（实例每会话新建，旧实例的订阅随实例废弃，
+  // 与本文件其他 loop 作用域接线同法，无需保存 disposer）。
+  bridgeLoopHooks({
+    hooks: loop.loopHooks,
+    getSessionId: () => path.basename(loop.currentSessionDir), // 活取值：会话切换后不陈旧
+    fire: (e) => {
+      void ensureGlobalTriggerHub().fire({ source: 'loop', name: e.name, detail: e.detail });
+    },
+  });
 
   // ── goal 模式审查官接线（2026-10-10）────────────────────────────────────
   // 审查官是**独立职责**的子 agent（用户裁定「独立」）：模型走 assessment 角色通道，

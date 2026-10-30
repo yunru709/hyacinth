@@ -10,11 +10,10 @@
 
 import { HookBus } from '../kernel/hook-bus.js';
 import type { Message, ToolCall } from '../types.js';
-import type { ToolExecSummary } from './turn-state.js';
 
 /** 主循环 10 个钩子点及其 payload */
 export interface LoopHooks extends Record<string, unknown> {
-  /** 回合开始（currentTurn 自增之后） */
+  /** 回合开始（currentTurn 自增之后）。turn = currentTurn（实例级全局迭代号） */
   onTurnStart: { turn: number };
   /** 上下文组装之前：旁路 preTurn、技能/MCP/记忆注入归位、工具列表过滤 */
   beforeContextAssemble: {
@@ -33,16 +32,26 @@ export interface LoopHooks extends Record<string, unknown> {
   onStreamEvent: { turn: number; event: unknown };
   /** 工具执行之前：权限链、storm 抑制、turnRecorder 预录 */
   beforeToolExecute: { turn: number; calls: ToolCall[] };
-  /** 工具执行之后：依赖影响面、resultBuffer、diff 通道 */
-  afterToolExecute: { turn: number; results: ToolExecSummary[] };
-  /** 迭代结束前（stop 判定已出）：bypass postTurn 迭代中审查 */
-  beforeIterationEnd: { turn: number; stop: boolean; stopReason?: string };
-  /** 迭代结束：异步子 Agent 注入、stats、loopGuard */
-  onIterationEnd: { turn: number; stop: boolean; stopReason?: string };
-  /** 回合结束：最终 postTurn、簇消费、图片回收 */
-  onTurnEnd: { turn: number; tokensUsed: number; stopReason?: string };
-  /** 回合异常（管道/LLM 抛错时兜底通知） */
-  onTurnError: { turn: number; error: Error };
+  /**
+   * 工具执行之后：依赖影响面、resultBuffer、diff 通道。
+   * results 实际形状是 ToolExecOutcome（loop-tools.ts，{id,name,ok}，id = provider tool_use
+   * id，全局唯一）；此处用结构化内联类型而非 import —— loop-tools 反向 import 本模块
+   * （LoopHookBus），正向引类型会成环。id 是自动化桥（T2）按 result 扇出去重的键。
+   */
+  afterToolExecute: { turn: number; results: Array<{ id?: string; name: string; ok: boolean }> };
+  /**
+   * 迭代结束前（stop 判定已出）：bypass postTurn 迭代中审查。
+   * `iteration` = loop 实例级**全局**迭代号（this.currentTurn，永不重置）——
+   * `turn`（turnCount）每个用户回合都从 1 重来，跨回合必然碰撞；事件去重
+   * （automation 桥的 eventId，T2）需要永不重复的标识（2026-10-31 复核方案①）。
+   */
+  beforeIterationEnd: { turn: number; stop: boolean; stopReason?: string; iteration: number };
+  /** 迭代结束：异步子 Agent 注入、stats、loopGuard。iteration 语义同上 */
+  onIterationEnd: { turn: number; stop: boolean; stopReason?: string; iteration: number };
+  /** 回合结束：最终 postTurn、簇消费、图片回收。iteration = 本回合最后一轮的全局迭代号 */
+  onTurnEnd: { turn: number; tokensUsed: number; stopReason?: string; iteration: number };
+  /** 回合异常（管道/LLM 抛错时兜底通知）。iteration 语义同上 */
+  onTurnError: { turn: number; error: Error; iteration: number };
 }
 
 // ── [圈三锚点 · 事件目录] ──────────────────────────────────────────────

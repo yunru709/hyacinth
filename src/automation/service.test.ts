@@ -19,8 +19,8 @@ vi.mock('./store.js', async (importOriginal) => {
   return { ...actual, saveAutomationRules: vi.fn() };
 });
 
-import { dispatchAutomationEvent, dispatchWatchEvent, setAutomationRuntime } from './service.js';
-import type { AutomationEvent } from './runtime.js';
+import { dispatchAutomationEvent, dispatchWatchEvent, setAutomationRuntime, warnFailedOutcomes } from './service.js';
+import type { AutomationEvent, RuleRunOutcome } from './runtime.js';
 import { saveAutomationRules, setCurrentAutomationRules, getCurrentAutomationRules } from './store.js';
 import type { AutomationRule } from './types.js';
 
@@ -129,5 +129,39 @@ describe('dispatchAutomationEvent：maxRuns 生命周期', () => {
     setCurrentAutomationRules([rule({ maxRuns: 5, runCount: 0 })]);
     await dispatchAutomationEvent(ev());
     expect(getCurrentAutomationRules()[0].runCount ?? 0).toBe(0); // 失败不累加
+  });
+});
+
+describe('warnFailedOutcomes：T6 失败日志（time fire 此前静默丢弃规则级失败）', () => {
+  const outcome = (ok: boolean, error?: string): RuleRunOutcome => ({
+    ruleId: 'r1',
+    ruleName: '测试规则',
+    result: ok ? { ok: true, steps: [] } : { ok: false, steps: [], error },
+  });
+
+  it('有失败 → 以 hub sink 同款格式 warn（message + failed[{rule,id,error}]）', () => {
+    const warns: Array<{ msg: string; fields: Record<string, unknown> }> = [];
+    warnFailedOutcomes((msg, fields) => warns.push({ msg, fields: fields ?? {} }), [
+      outcome(true),
+      outcome(false, 'Error: 工具炸了'),
+    ]);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].msg).toBe('自动化规则执行失败');
+    expect(warns[0].fields.failed).toEqual([
+      { rule: '测试规则', id: 'r1', error: 'Error: 工具炸了' },
+    ]);
+  });
+
+  it('全部成功 → 不 warn（time 源高频触发，成功不该刷屏）', () => {
+    const warn = vi.fn();
+    warnFailedOutcomes(warn, [outcome(true), outcome(true)]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('空 outcomes / 日志函数抛错 → 均不抛（日志失败不拖垮事件源）', () => {
+    expect(() => warnFailedOutcomes(vi.fn(), [])).not.toThrow();
+    expect(() =>
+      warnFailedOutcomes(() => { throw new Error('log pipe broken'); }, [outcome(false, 'x')]),
+    ).not.toThrow();
   });
 });

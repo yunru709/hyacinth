@@ -53,10 +53,11 @@ describe('② 载荷形状（类型级；字段增删即编译失败）', () => 
     const onStreamEvent: LoopHooks['onStreamEvent'] = { turn: 1, event: null };
     const beforeToolExecute: LoopHooks['beforeToolExecute'] = { turn: 1, calls: [] };
     const afterToolExecute: LoopHooks['afterToolExecute'] = { turn: 1, results: [] };
-    const beforeIterationEnd: LoopHooks['beforeIterationEnd'] = { turn: 1, stop: false };
-    const onIterationEnd: LoopHooks['onIterationEnd'] = { turn: 1, stop: true, stopReason: 'end_turn' };
-    const onTurnEnd: LoopHooks['onTurnEnd'] = { turn: 1, tokensUsed: 10, stopReason: 'end_turn' };
-    const onTurnError: LoopHooks['onTurnError'] = { turn: 1, error: new Error('x') };
+    // iteration = loop 实例级全局迭代号（T2 事件去重键；turn 每用户回合重置 ⇒ 跨回合碰撞）
+    const beforeIterationEnd: LoopHooks['beforeIterationEnd'] = { turn: 1, stop: false, iteration: 7 };
+    const onIterationEnd: LoopHooks['onIterationEnd'] = { turn: 1, stop: true, stopReason: 'end_turn', iteration: 7 };
+    const onTurnEnd: LoopHooks['onTurnEnd'] = { turn: 1, tokensUsed: 10, stopReason: 'end_turn', iteration: 7 };
+    const onTurnError: LoopHooks['onTurnError'] = { turn: 1, error: new Error('x'), iteration: 7 };
 
     // 逐项 touch（避免 unused；同时确保上面 10 个构造确实被执行）
     for (const p of [

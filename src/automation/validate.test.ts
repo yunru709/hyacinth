@@ -13,7 +13,6 @@ import { validateRule } from './validate.js';
 const ctx: ValidationContext = {
   knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
   knownToolNames: ['say', 'write', 'bash', 'http_request'],
-  knownHandlers: ['core.diagnostics-append', 'core.invoke-tool'],
   knownEvents: ['afterToolExecute', 'onTurnEnd', 'afterWatch', 'afterScheduleTask'],
 };
 
@@ -107,9 +106,15 @@ describe('validateRule：必须拒绝的情况', () => {
     expect(r.errors[0]).toContain('未注册');
   });
 
-  it('未知 handler', () => {
-    const r = validateRule(baseRule({ do: [{ sink: 'append', handler: 'nope' }] }), ctx);
-    expect(r.errors[0]).toContain('未注册');
+  it('append sink 一律拒绝（T3：结构性无输出，即使 handler 名真实存在）', () => {
+    // 2026-10-31 复核收窄：四个 append handler 对 automation 可达事件恒返回 ''
+    // （payload.input / toolName / link 结构性缺失），放行只会得到"跑但永远没效果"的链路。
+    const r = validateRule(
+      baseRule({ do: [{ sink: 'append', handler: 'core.diagnostics-append' }] }),
+      ctx,
+    );
+    expect(r.errors[0]).toContain('append sink 在自动化链路中不生效');
+    expect(r.rule).toBeUndefined();
   });
 
   it('未知事件名', () => {
@@ -181,7 +186,6 @@ describe('validateRule：cron 试解析（2026-10-31 补 发现7 残留）', () 
   const cronCtx = {
     knownProbeKinds: ['file'],
     knownToolNames: ['noop'],
-    knownHandlers: [],
     knownEvents: ['onTurnEnd'],
   } as never;
 

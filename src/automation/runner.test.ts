@@ -313,8 +313,16 @@ describe('runRule：loop 退出原因（R1 回归，2026-10-31）', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('times=10 + until 第 1 轮即满足 → ok:true（合法提前退出，不得误判为截断）', async () => {
-    const c = ctx({ invokeTool: vi.fn(async () => 'ok') });
+  it('times=10 + until 第 1 轮即满足 → ok:true，且 loop 之后的动作继续执行', async () => {
+    // 「后续动作继续执行」必须显式断言：原 bug 的实际伤害是误判截断 → abort 跳过后续动作，
+    // 只断言 ok:true 钉不住这个伤害（2026-10-31 复核改进）。
+    const executed: string[] = [];
+    const c = ctx({
+      invokeTool: vi.fn(async (tool) => {
+        executed.push(tool);
+        return 'ok';
+      }),
+    });
     const res = await runRule(
       rule({
         do: [
@@ -322,15 +330,65 @@ describe('runRule：loop 退出原因（R1 回归，2026-10-31）', () => {
             sink: 'loop',
             times: 10,
             until: { path: 'result', op: '!=', value: 'IMPOSSIBLE__' },
-            do: [{ sink: 'invoke', tool: 'x' }],
+            do: [{ sink: 'invoke', tool: 'loopBody' }],
           },
+          { sink: 'invoke', tool: 'afterLoop' },
         ],
       }),
       event,
       c,
     );
     expect(res.ok).toBe(true);
-    expect(JSON.stringify(res.steps)).toContain('iterations=1');
+    // 强断言：直接取 loop step 的 output（JSON.stringify 全量搜索任何 step 含该子串都过）
+    expect(res.steps.find((s) => s.sink === 'loop')?.output).toBe('iterations=1');
+    expect(executed).toEqual(['loopBody', 'afterLoop']);
+  });
+
+  it('times=10 + while 第 2 轮不满足 → ok:true，后续动作继续执行（while 退出路径）', async () => {
+    // while 与 until 走的是不同的 break 行（runner.ts 判定顺序：times → until → while），
+    // 必须单独钉住：第 2 轮 while 条件不成立 ⇒ 提前退出且不算截断。
+    const executed: string[] = [];
+    let bodyRuns = 0;
+    const c = ctx({
+      invokeTool: async (tool) => {
+        executed.push(tool);
+        if (tool !== 'loopBody') return 'ok';
+        bodyRuns++;
+        // 第 2 轮返回哨兵值 ⇒ while（result != STOP__）在本轮结束后不成立
+        return bodyRuns === 2 ? 'STOP__' : 'ok';
+      },
+    });
+    const res = await runRule(
+      rule({
+        do: [
+          {
+            sink: 'loop',
+            times: 10,
+            while: { path: 'result', op: '!=', value: 'STOP__' },
+            do: [{ sink: 'invoke', tool: 'loopBody' }],
+          },
+          { sink: 'invoke', tool: 'afterLoop' },
+        ],
+      }),
+      event,
+      c,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.steps.find((s) => s.sink === 'loop')?.output).toBe('iterations=2');
+    expect(executed).toEqual(['loopBody', 'loopBody', 'afterLoop']);
+  });
+
+  it('times=1000 = cap → ok:true（>= 边界；exitedByCap 标记次序被破坏时此测试报警）', async () => {
+    // 次序敏感：exitedByCap 只能在三个 break 判断**之后**标记。若重构把它移到 break 之前
+    // （或收紧截断判定），times=cap 会被误判为截断失败 —— 此用例就是护栏。
+    const c = ctx({ invokeTool: vi.fn(async () => 'ok') });
+    const res = await runRule(
+      rule({ do: [{ sink: 'loop', times: 1000, do: [{ sink: 'invoke', tool: 'x' }] }] }),
+      event,
+      c,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.steps.find((s) => s.sink === 'loop')?.output).toBe('iterations=1000');
   });
 
   it('times=5000 超过 cap=1000 且无条件退出 → ok:false，error 含「上限」', async () => {
@@ -341,6 +399,6 @@ describe('runRule：loop 退出原因（R1 回归，2026-10-31）', () => {
       c,
     );
     expect(res.ok).toBe(false);
-    expect(JSON.stringify(res.steps)).toContain('上限');
+    expect(res.steps.find((s) => s.sink === 'loop')?.error).toContain('上限');
   });
 });

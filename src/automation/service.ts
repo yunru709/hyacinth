@@ -78,6 +78,32 @@ export async function dispatchAutomationEvent(
 }
 
 /**
+ * 统一规则失败日志（T6，2026-10-31 复核）。
+ *
+ * 各事件源（hub sink / time fire）消费 dispatchAutomationEvent 返回的 outcomes 时共用：
+ * 「哪条规则、为什么失败」必须可见 —— 曾经 time 源只 .catch 派发异常，
+ * 规则级失败（工具报错、abort 等）被静默丢弃，正是"配了没反应"的又一变体。
+ *
+ * 日志格式与 hub sink 原有格式一致（单一实现 ⇒ 两个源必然同格式）。
+ * 不抛错：日志失败不能反过来拖垮事件源。
+ */
+export function warnFailedOutcomes(
+  warn: (message: string, context?: Record<string, unknown>) => void,
+  outcomes: readonly RuleRunOutcome[],
+): void {
+  if (!outcomes || outcomes.length === 0) return;
+  const failed = outcomes.filter((o) => !o.result.ok);
+  if (failed.length === 0) return;
+  try {
+    warn('自动化规则执行失败', {
+      failed: failed.map((f) => ({ rule: f.ruleName, id: f.ruleId, error: f.result.error })),
+    });
+  } catch {
+    // 日志管道坏了不该拖垮派发循环
+  }
+}
+
+/**
  * maxRuns：成功执行后累加 runCount；达到上限自动停用（enabled=false）并落盘。
  *
  * ⚠️ 停用只改内存 + 写盘；probe watcher 不会立即 disarm（要等下次 reloadAndArm），

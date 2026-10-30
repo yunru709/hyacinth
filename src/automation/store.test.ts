@@ -24,7 +24,6 @@ import type { AutomationRule } from './types.js';
 const ctx: ValidationContext = {
   knownProbeKinds: ['file', 'process'],
   knownToolNames: ['say', 'write'],
-  knownHandlers: ['core.invoke-tool'],
   knownEvents: ['afterWatch', 'afterToolExecute'],
 };
 

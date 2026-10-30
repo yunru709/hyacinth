@@ -21,10 +21,10 @@ describe('loop-hooks 声明表', () => {
     await bus.emit('onStreamEvent', { turn: 1, event: {} });
     await bus.emit('beforeToolExecute', { turn: 1, calls: [] });
     await bus.emit('afterToolExecute', { turn: 1, results: [] });
-    await bus.emit('beforeIterationEnd', { turn: 1, stop: false });
-    await bus.emit('onIterationEnd', { turn: 1, stop: false });
-    await bus.emit('onTurnEnd', { turn: 1, tokensUsed: 0 });
-    await bus.emit('onTurnError', { turn: 1, error: new Error('x') });
+    await bus.emit('beforeIterationEnd', { turn: 1, stop: false, iteration: 1 });
+    await bus.emit('onIterationEnd', { turn: 1, stop: false, iteration: 1 });
+    await bus.emit('onTurnEnd', { turn: 1, tokensUsed: 0, iteration: 1 });
+    await bus.emit('onTurnError', { turn: 1, error: new Error('x'), iteration: 1 });
 
     expect(fired).toEqual([...LOOP_HOOK_NAMES]);
   });

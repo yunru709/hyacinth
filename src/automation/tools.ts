@@ -55,8 +55,8 @@ export function createAutomationTools(deps: AutomationToolDeps): Tool[] {
     name: 'automation_validate',
     description:
       '校验一条自动化链路规则（纯静态检查，不保存、不执行）。\n' +
-      '会检查：结构是否完整、probe 类型是否存在、工具/处理器是否已注册、\n' +
-      'wake 的 reuse 是否指定了会话、gate 嵌套是否过深等。\n' +
+      '会检查：结构是否完整、probe 类型是否存在、工具是否已注册、事件名是否在目录里、\n' +
+      'wake 的 reuse 是否指定了会话、gate/loop 嵌套是否过深等。\n' +
       '**建议先用它验证，再用 automation_create 保存。**',
     inputSchema: {
       type: 'object',
@@ -65,7 +65,9 @@ export function createAutomationTools(deps: AutomationToolDeps): Tool[] {
           type: 'object',
           description:
             '规则对象。形如 { id, name, enabled, when: {kind:"probe",probe:{kind,spec}}, do:[...] }。\n' +
-            'when.kind 可选 time/probe/event；do 里的 sink 可选 invoke/append/wake/gate/safety。',
+            'when.kind 可选 time/probe/event；do 里的 sink 可选 invoke/wake/gate/safety/loop。\n' +
+            '**append 不可用**：append 处理器依赖工具执行上下文，automation 事件不带，恒返回空串\n' +
+            '（写文件等用 invoke；append 类联动请用 tool-links 清单）。',
         },
       },
       required: ['rule'],

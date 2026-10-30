@@ -29,9 +29,10 @@ export interface ValidationContext {
   knownProbeKinds: readonly string[];
   /** 已知的工具名（toolRegistry 的 ids） */
   knownToolNames: readonly string[];
-  /** 已知的 tool-links handler id */
-  knownHandlers: readonly string[];
-  /** 已知的事件名（loop 钩子 + 扩展事件源） */
+  /**
+   * 已知的事件名（loop 钩子 + 扩展事件源）。
+   * （2026-10-31 T3：knownHandlers 已随 append sink 拒绝一并移除 —— 它只为 append 校验存在。）
+   */
   knownEvents: readonly string[];
 }
 
@@ -351,15 +352,21 @@ function validateAction(
   }
 
   if (sink === 'append') {
-    if (!isNonEmptyStr(raw.handler)) {
-      errors.push(`${where}.append: 缺少 "handler"`);
-      return undefined;
-    }
-    if (!(ctx.knownHandlers as readonly string[]).includes(raw.handler)) {
-      errors.push(`${where}.append: handler "${raw.handler}" 未注册`);
-      return undefined;
-    }
-    return { sink: 'append', handler: raw.handler };
+    // ── T3（2026-10-31 复核收窄）：append sink 在自动化链路中**结构性无输出**，直接拒绝 ──
+    // 证据（复核报告 §三，逐 handler 核对）：四个 append 类 handler 的入参全部依赖
+    // 工具执行上下文 —— core.diagnostics-append 要 payload.input、core.references-append /
+    // core.evidence-ledger-append 还要 toolName + capability/effects、core.invoke-tool 要
+    // link（经 resolveToolLinks 匹配）。而 automation 事件 payload 只有触发源自带字段
+    // （watch {kind,watchId} / schedule {taskId,…} / loop {turn,…}），不含这些 ⇒ 四个
+    // handler 对可达事件恒返回 ''。即使未来某事件带上 input，后三个仍被 toolName / link 卡死。
+    // 与其放行一条"跑但永远没效果"的链路（正是"配了没反应"陷阱的变体），不如在配置期拒绝。
+    // tool-links 清单（tool-links.json）里的 append 联动不受影响 —— 那条路有完整上下文。
+    errors.push(
+      `${where}.append: append sink 在自动化链路中不生效（append 处理器依赖工具执行上下文，` +
+        `automation 事件不带 ⇒ 恒返回空串）。请改用 invoke（如 write/edit 工具）或 wake；` +
+        `append 联动请继续用 tool-links 清单`,
+    );
+    return undefined;
   }
 
   if (sink === 'wake') {

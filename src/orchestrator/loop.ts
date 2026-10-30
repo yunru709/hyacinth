@@ -1979,15 +1979,19 @@ export class AgentLoop {
         lastResult = result;
 
         // ── 钩子：迭代结束（在门链之后，插件看到的是最终判停） ──
+        // iteration = this.currentTurn（实例级全局迭代号，永不重置）。turn=turnCount 每个用户
+        // 回合从 1 重来，跨回合碰撞；automation 桥（T2）的事件去重键需要唯一标识。
         await this.loopHooks.emit('beforeIterationEnd', {
           turn: turnCount,
           stop: result.stop,
           stopReason: result.stopReason,
+          iteration: this.currentTurn,
         });
         await this.loopHooks.emit('onIterationEnd', {
           turn: turnCount,
           stop: result.stop,
           stopReason: result.stopReason,
+          iteration: this.currentTurn,
         });
 
         // ── 迭代级上下文占用推送（UI 即时刷新进度条，无需等整轮结束） ──
@@ -2104,6 +2108,7 @@ export class AgentLoop {
         turn: turnCount,
         tokensUsed: this.lastContextTokens,
         stopReason: lastResult.stopReason,
+        iteration: this.currentTurn, // T2：全局迭代号（见 beforeIterationEnd 处注释）
       });
       if (this.activeRouter.onPostTurn) {
         await this.activeRouter.onPostTurn(this, this.pendingTaskName, toolWasCalled);
@@ -2244,6 +2249,7 @@ export class AgentLoop {
       await this.loopHooks.emit('onTurnError', {
         turn: turnCount,
         error: error instanceof Error ? error : new Error(message),
+        iteration: this.currentTurn, // T2：全局迭代号（见 beforeIterationEnd 处注释）
       }).catch(() => {});
       this.outputHandler?.onStatus?.(
         `Agent error: ${message}`,
