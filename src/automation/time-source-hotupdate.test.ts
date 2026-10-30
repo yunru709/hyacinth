@@ -28,14 +28,18 @@ describe('time-source 热更（2026-10-31 回归）', () => {
     });
     ts.start();
 
-    clock += 1500; // 第一次到点
+    clock += 1500; // 越过首次 runAt → 第一次触发
     await new Promise((r) => setTimeout(r, 60));
     expect(fired).toEqual(['t']);
 
-    // 热更：改成新的未来时刻（同 id，schedule 内容变了 ⇒ 签名变 ⇒ 必须重算）
+    // 热更：改成新的未来时刻（同 id，schedule 内容变 ⇒ 签名变 ⇒ 必须重算）
     clock += 60000;
-    rules[0].when = { kind: 'time', schedule: { runAt: new Date(clock + 1000).toISOString() } };
-    clock += 1500;
+    rules[0].when = { kind: 'time', schedule: { runAt: new Date(clock + 5000).toISOString() } };
+    // 先让 tick 在「未到点」时重算并缓存 at（from=clock < runAt）
+    await new Promise((r) => setTimeout(r, 40));
+    expect(fired).toEqual(['t']); // 尚未到点
+
+    clock += 6000; // 越过新 runAt → 第二次触发
     await new Promise((r) => setTimeout(r, 60));
     expect(fired).toEqual(['t', 't']);
 
