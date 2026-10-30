@@ -224,6 +224,24 @@ const BUILTIN_SCHEDULE: ToolBundle = {
 };
 
 /**
+ * 自动化链路 —— 按需激活（2026-10-30）。此前 automation_* 4 个工具游离在
+ * 所有 bundle 之外（只有全量模式可见），补上专属包。
+ *
+ * 与 schedule 的分工（不是重复）：
+ *   schedule  = 模型/用户"一句话定时提醒"——走 HeartbeatScheduler，自带 cron / 持久化 /
+ *               补执行 / 并发·超时 / 执行记录；工具 add_task 等，简洁。
+ *   automation = "触发(定时/状态/事件) → 多步动作链"——零模型按图执行，
+ *               支持 invoke 跑工具 / wake 唤醒会话 / gate 分支 / loop 循环 / maxRuns。
+ * 一个面向"简单定时"，一个面向"复杂编排"。
+ */
+const BUILTIN_AUTOMATION: ToolBundle = {
+  name: 'automation',
+  description: '自动化链路 — 触发(定时/状态/事件) → 多步动作链（零模型执行，按需激活）',
+  builtin: true,
+  tools: ['automation_validate', 'automation_create', 'automation_list', 'automation_remove'],
+};
+
+/**
  * 媒体生成 —— 按需激活（2026-10-08 从 common 拆出）。
  *
  * 注意区分：**看见**（view_image / view_media）留在 common —— 感知用户给的
@@ -241,7 +259,7 @@ const BUILTIN_BUNDLES: ToolBundle[] = [
   BUILTIN_ALL, BUILTIN_COMMON, BUILTIN_CODING,
   BUILTIN_AGENT, BUILTIN_ADMIN, BUILTIN_SESSION, BUILTIN_WORKFLOW, BUILTIN_UTILITY,
   BUILTIN_COMPANION, BUILTIN_OFFICE, BUILTIN_DATABASE, BUILTIN_KNOWLEDGE,
-  BUILTIN_SCHEDULE, BUILTIN_MEDIA,
+  BUILTIN_SCHEDULE, BUILTIN_AUTOMATION, BUILTIN_MEDIA,
 ];
 
 /** 内置包名称集合（供测试与 UI 判定） */
@@ -261,7 +279,7 @@ const DEFAULT_CONFIG: ToolBundlesConfig = {
     session: BUILTIN_SESSION, workflow: BUILTIN_WORKFLOW, utility: BUILTIN_UTILITY,
     companion: BUILTIN_COMPANION,
     office: BUILTIN_OFFICE, database: BUILTIN_DATABASE, knowledge: BUILTIN_KNOWLEDGE,
-    schedule: BUILTIN_SCHEDULE, media: BUILTIN_MEDIA,
+    schedule: BUILTIN_SCHEDULE, automation: BUILTIN_AUTOMATION, media: BUILTIN_MEDIA,
   },
 };
 
