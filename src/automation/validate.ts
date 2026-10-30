@@ -21,6 +21,7 @@
  */
 
 import type { Action, Assertion, AutomationRule, WhenSpec, Where } from './types.js';
+import { CronExpression } from '../utils/cron.js';
 
 /** 校验所需的"外部知识"（由调用方注入） */
 export interface ValidationContext {
