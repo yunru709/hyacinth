@@ -53,19 +53,20 @@ export function getWatchService(): WatchService {
         summary: event.summary,
         owner: event.owner,
       });
-      const hub = getGlobalTriggerHub();
-      if (hub) {
-        void hub.fire({
-          source: 'watch',
-          name: event.note ?? event.summary,
-          detail: {
-            watchId: event.watchId,
-            kind: event.kind,
-            distance: event.distance,
-            owner: event.owner,
-          },
-        });
-      }
+      // ensure 而非 get：hub 尚未创建时立即建一个 —— 否则 probe 事件会因 hub=null
+      // 被静默丢弃（2026-10-30 实测：restart 后时序缝隙下 ui_region 规则永不触发的
+      // 根因之一；time 规则走 timeSource 直连 dispatch 不经 hub，所以不受影响）。
+      const hub = ensureGlobalTriggerHub();
+      void hub.fire({
+        source: 'watch',
+        name: event.note ?? event.summary,
+        detail: {
+          watchId: event.watchId,
+          kind: event.kind,
+          distance: event.distance,
+          owner: event.owner,
+        },
+      });
     });
 
     service = new WatchService({
