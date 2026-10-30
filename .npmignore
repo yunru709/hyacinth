@@ -35,8 +35,11 @@ tsconfig.tsbuildinfo
 # Per-user config (auto-generated)
 .agent/
 
-# Build scripts (not needed at runtime) — 仅根目录，放行 training/scripts/（随包发布，供微调使用）
+# Build scripts (not needed at runtime) — 仅根目录
 /scripts/
+
+# 微调/训练资产（本地模型相关，不入包；模型在运行期按需下载或配置路径，见 README「本地模型」）
+/training/
 
 # .NET 桌面壳：C# 源码 + 开发期入口（npm 包是 node 侧，桌壳从源码仓库构建）
 desktop/
