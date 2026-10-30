@@ -836,6 +836,22 @@ export class UiProtocolSession {
         getLoop: () => this.loop as unknown as LoopLike,
       }));
 
+      // ── 自动化域（automation.*）：WebUI 读写 AutomationRule（触发 + 动作链）──
+      // 与 schedule 域并存：schedule 是「定时/条件 → 唤醒模型」，automation 是
+      // 「触发 → 动作链(invoke 工具/参数、gate、wake)」，后者才能表达"零模型跑工具"。
+      // 动态 import：避免顶部 import 链（本方法已 async，见上方 registerOpenLoop）。
+      {
+        const { createAutomationDomain } = await import('../../ui-protocol/domains/automation.js');
+        this.server.registerDomain('automation', createAutomationDomain({
+          // 工具名列表用于 validate 的 ValidationContext（knownToolNames）。
+          // 惰性取：UI 请求时 loop 已初始化，registry 就绪。
+          getToolNames: () =>
+            (this.backend.getToolRegistry?.()?.getToolDefinitions?.() ?? []).map(
+              (t: { name: string }) => t.name,
+            ),
+        }));
+      }
+
       // model 域重绑到 loop 运行时 registry：协议写（model.*Channel / switch）
       // 直接作用于当前路由（原 rebindRuntimeRegistry 职责内聚到 initialize，
       // 调用方不再需要持有 agent 组件引用）
