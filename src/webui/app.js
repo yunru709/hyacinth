@@ -2091,90 +2091,81 @@
     return true;
   }
 
-  // ── 定时任务视图（schedule 域；2026-09-20 接入 ✓）────────────────────
-  // 此前 schedule **整域闲置** ✗ ⇒ 定时任务在平板上"看不到、管不了" ✗（终端里却能配 ✓）。
-  // 六个方法全接：list / addDaily / add / toggle / remove / runtime ✓
+  // ── 自动化编排视图（automation 域；2026-10-30 重做）────────────────────
+  // 从「定时任务」升级为「自动化链路」：触发(When) × 动作链(do: invoke 工具/参数、gate、wake)。
+  // 核心价值是 invoke 零模型跑工具，schedule 域表达不了，故走独立的 automation 域。
   let scheduleBound = false;
   /** 删除采用"两段点击"确认 —— 刻意不用 window.confirm ✗（无头探针遇原生对话框会卡 ✓） */
   let schedulePendingDelete = null;
 
-  function scheduleTypeLabel(t) {
-    const map = { daily: '每天定点', interval: '固定间隔', cron: 'cron', 'fixed-time': '单次定时', random: '随机' };
-    return map[t] || t || '—';
+  // 触发摘要：把 when 翻成人话
+  function whenLabel(w) {
+    if (!w) return '—';
+    if (w.kind === 'time') {
+      const s = w.schedule || {};
+      if (s.intervalMs) return '⏰ 每 ' + Math.round(Number(s.intervalMs) / 60000) + ' 分钟';
+      if (s.time) return '⏰ 每天 ' + s.time;
+      if (s.expression) return '⏰ cron ' + s.expression;
+      return '⏰ ' + JSON.stringify(s);
+    }
+    if (w.kind === 'probe') {
+      const kindMap = { file: '文件', http: '接口', process: '进程', port: '端口', ui_region: '画面' };
+      const k = kindMap[w.probe && w.probe.kind] || (w.probe && w.probe.kind) || '条件';
+      const sp = (w.probe && w.probe.spec) || {};
+      const detail = sp.path || sp.url || sp.name || (sp.port ? ':' + sp.port : '') || '';
+      return '👁 ' + k + (detail ? ' ' + detail : '') + (sp.expect ? ' →' + sp.expect : '');
+    }
+    if (w.kind === 'event') return '⚡ ' + w.event;
+    return w.kind || '—';
   }
 
-  // 条件触发（2026-10-29 自动化改造）：把 trigger 翻成人话，例「👁 文件 C:\a.log 变化」
-  function conditionLabel(trigger) {
-    if (!trigger || trigger.type !== 'condition') return '';
-    const kindMap = { file: '文件', http: '接口', process: '进程', port: '端口', ui_region: '画面' };
-    const kind = kindMap[trigger.kind] || trigger.kind || '条件';
-    const spec = trigger.spec || {};
-    const detail = spec.path || spec.url || spec.name
-      || (spec.port ? ':' + spec.port : '')
-      || (Array.isArray(spec.region) ? '区域' : '');
-    return '👁 ' + kind + (detail ? ' ' + detail : '') + ' 变化';
+  // 动作链摘要：invoke/wake/gate/append 逐个翻成人话
+  function doLabel(doList) {
+    if (!Array.isArray(doList) || !doList.length) return '—';
+    return doList.map((a) => {
+      if (a.sink === 'invoke') return 'invoke ' + (a.tool || '?');
+      if (a.sink === 'wake') return 'wake.' + ((a.where && a.where.policy) || '?');
+      if (a.sink === 'gate') return 'gate 分支';
+      return a.sink || '?';
+    }).join(' → ');
   }
 
-  /** 一行摘要：条件类显示触发条件，时间类显示调度类型 + 下次时间 */
-  function scheduleTriggerLine(t) {
-    if (t.trigger && t.trigger.type === 'condition') return conditionLabel(t.trigger);
-    return scheduleTypeLabel(t.scheduleType) + ' · 下次 ' + fmtTime(t.nextRunAt);
-  }
-
-  function fmtTime(s) {
-    if (!s) return '—';
-    try { return new Date(s).toLocaleString(); } catch (e) { return String(s); }
-  }
-
-  function scheduleRow(t) {
+  function automationRow(r) {
     const row = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-3');
     const left = el('div', 'min-w-[160px] flex-1');
-    left.appendChild(el('div', 'text-sm font-medium text-foreground', t.name || t.id));
-    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', scheduleTriggerLine(t)));
-    // 适配当前任务模型：补 模式 / 目标会话 / 标签 / 上次执行（有则显示，无则整行省略）
-    const metaBits = [];
-    const modeLabel = t.mode === 'companion' ? '陪伴' : (t.mode || '');
-    if (modeLabel) metaBits.push('模式 ' + modeLabel);
-    if (t.sessionPolicy) metaBits.push('策略 ' + (t.sessionPolicy === 'new' ? '一次性' : '复用'));
-    if (t.sessionId) metaBits.push('会话 ' + String(t.sessionId).slice(-10));
-    if (Array.isArray(t.tags) && t.tags.length) metaBits.push('标签 ' + t.tags.join('/'));
-    if (t.lastRunAt) metaBits.push('上次 ' + fmtTime(t.lastRunAt));
-    if (metaBits.length) left.appendChild(el('div', 'text-[11px] text-muted-foreground mt-0.5', metaBits.join(' · ')));
+    left.appendChild(el('div', 'text-sm font-medium text-foreground', r.name || r.id));
+    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', whenLabel(r.when)));
+    left.appendChild(el('div', 'text-[11px] text-muted-foreground mt-0.5', '动作链：' + doLabel(r.do)));
     row.appendChild(left);
-    const stat = el('div', 'text-xs text-muted-foreground');
-    stat.textContent = '跑了 ' + (t.runCount || 0) + ' 次' + ((t.errorCount || 0) ? ' · 出错 ' + t.errorCount + ' 次' : '') + (t.channel ? ' · 渠道 ' + t.channel : '');
-    row.appendChild(stat);
-
-    // 启用开关 ⇒ schedule.toggle ✓
+    // 启用开关 ⇒ automation.toggle
     const sw = document.createElement('input');
     sw.type = 'checkbox';
-    sw.checked = !!t.enabled;
+    sw.checked = !!r.enabled;
     sw.className = 'w-3.5 h-3.5 accent-[var(--hyacinth-primary)] shrink-0 cursor-pointer';
-    sw.title = t.enabled ? '已启用（点击停用）' : '已停用（点击启用）';
+    sw.title = r.enabled ? '已启用（点击停用）' : '已停用（点击启用）';
     sw.onchange = () => {
       if (!connected) { sw.checked = !sw.checked; return; }
       sw.disabled = true;
-      client.request('schedule.toggle', { id: t.id, enabled: sw.checked })
-        .then(() => { appendMsg('system', '任务「' + t.name + '」已' + (sw.checked ? '启用' : '停用')); loadSchedule(); })
+      client.request('automation.toggle', { id: r.id, enabled: sw.checked })
+        .then(() => { appendMsg('system', '规则「' + (r.name || r.id) + '」已' + (sw.checked ? '启用' : '停用')); loadSchedule(); })
         .catch((e) => { sw.checked = !sw.checked; sw.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message)); });
     };
     row.appendChild(sw);
-
     // 删除（两段确认 ✓）
     const del = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors', '删除');
     del.style.color = 'var(--state-error)';
     del.onclick = () => {
       if (!connected) return;
-      if (schedulePendingDelete !== t.id) {
-        schedulePendingDelete = t.id;
+      if (schedulePendingDelete !== r.id) {
+        schedulePendingDelete = r.id;
         del.textContent = '再点一次确认';
-        setTimeout(() => { if (schedulePendingDelete === t.id) { schedulePendingDelete = null; del.textContent = '删除'; } }, 4000);
+        setTimeout(() => { if (schedulePendingDelete === r.id) { schedulePendingDelete = null; del.textContent = '删除'; } }, 4000);
         return;
       }
       schedulePendingDelete = null;
       del.disabled = true;
-      client.request('schedule.remove', { id: t.id })
-        .then((res) => { appendMsg('system', (res && res.ok) ? '任务「' + t.name + '」已删除' : '删除未生效'); loadSchedule(); })
+      client.request('automation.remove', { id: r.id })
+        .then((res) => { appendMsg('system', (res && res.ok) ? '规则「' + (r.name || r.id) + '」已删除' : '删除未生效'); loadSchedule(); })
         .catch((e) => { del.disabled = false; appendMsg('error', '删除失败: ' + (e && e.message)); });
     };
     row.appendChild(del);
@@ -2182,34 +2173,28 @@
   }
 
   async function loadSchedule() {
-    const listEl = $('#schedule-list');
+    const listEl = $('#automation-list');
     if (!listEl) return;
     bindScheduleOnce();
     let data = null;
-    try { data = await client.request('schedule.list'); } catch (e) { data = null; }
+    try { data = await client.request('automation.list'); } catch (e) { data = null; }
     if (!data) {
       listEl.innerHTML = '';
-      listEl.appendChild(el('div', 'text-sm text-state-error', '取不到定时任务（后端可能未就绪）'));
+      listEl.appendChild(el('div', 'text-sm text-state-error', '取不到自动化规则（后端可能未就绪）'));
       return;
     }
-    const tasks = data.tasks || [];
-    const st = data.status || null;
-    let pending = null;
-    try { const rt = await client.request('schedule.runtime'); pending = rt && rt.pendingTaskName; } catch (e) { /* ignore */ }
-    const statusEl = $('#schedule-status');
+    const rules = data.rules || [];
+    const statusEl = $('#automation-status');
     if (statusEl) {
-      const bits = [];
-      if (st) bits.push((st.running ? '调度器运行中' : '调度器已停止') + ' · 启用 ' + (st.enabledTaskCount || 0) + '/' + (st.taskCount || 0));
-      bits.push('共 ' + tasks.length + ' 个任务');
-      if (pending) bits.push('正在执行：' + pending);
-      statusEl.textContent = bits.join(' · ');
+      const enabled = rules.filter((r) => r.enabled).length;
+      statusEl.textContent = '触发 → 动作链，零模型按图执行 · 已启用 ' + enabled + '/' + rules.length + ' 条规则';
     }
     listEl.innerHTML = '';
-    if (!tasks.length) {
-      listEl.appendChild(el('div', 'text-sm text-muted-foreground', '还没有定时任务。上面填个名称和时间，点「添加」即可。'));
+    if (!rules.length) {
+      listEl.appendChild(el('div', 'text-sm text-muted-foreground', '还没有自动化规则。上面填规则名 + 触发条件 + 要调用的工具，点「添加规则」。'));
       return;
     }
-    tasks.forEach((t) => listEl.appendChild(scheduleRow(t)));
+    rules.forEach((r) => listEl.appendChild(automationRow(r)));
   }
 
   // ── 插件视图（plugin 契约域：内核挂载 list + 目录插件管理面）────────
