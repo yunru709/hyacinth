@@ -91,6 +91,21 @@ export async function dispatchAutomationEvent(
 
   try {
     const outcomes = await runMatchingRules(rules, event, d, d.armedWatchIds);
+    // 临时诊断（2026-10-30，查完删）：记录 runRule 结果 ok/error，定位 invoke 失败原因
+    try {
+      const os2 = await import('node:os');
+      const p2 = await import('node:path');
+      const f2 = await import('node:fs');
+      const line = outcomes
+        .map((o) => `rule=${o.ruleId} ok=${o.result.ok} err=${(o.result as { error?: string }).error ?? ''}`)
+        .join(' || ');
+      f2.appendFileSync(
+        p2.join(os2.homedir(), '.agent', 'work', 'dispatch-outcome.log'),
+        `${new Date().toISOString()} ${event.eventName} => ${line || '(no outcomes)'}\n`,
+      );
+    } catch {
+      /* 诊断失败不影响主流程 */
+    }
     applyMaxRuns(outcomes);
     return outcomes;
   } catch (err) {
