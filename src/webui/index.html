@@ -539,46 +539,53 @@
       </div>
     </section>
       <section data-view="schedule" class="view-section h-full" hidden>
-      <div class="h-full flex flex-col" data-dom-id="schedule-panel">
+      <div class="h-full flex flex-col" data-dom-id="automation-panel">
         <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h1 class="text-lg font-semibold text-foreground">自动化</h1>
-            <p id="schedule-status" class="text-xs text-muted-foreground mt-0.5">加载中…</p>
+            <h1 class="text-lg font-semibold text-foreground">自动化编排</h1>
+            <p id="automation-status" class="text-xs text-muted-foreground mt-0.5">触发 → 动作链，零模型按图执行（invoke 工具 / 跑脚本，不惊动模型）</p>
           </div>
-          <button id="schedule-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
+          <button id="automation-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span>
           </button>
         </div>
-        <div class="shrink-0 px-5 py-3 border-b border-border bg-background flex flex-wrap items-center gap-2">
-          <input id="schedule-name" type="text" placeholder="任务名称" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground min-w-[140px]" />
-          <!-- 2026-10-29 自动化改造：触发方式二选一（时间 / 条件） -->
-          <select id="schedule-trigger-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
-            <option value="time">⏰ 时间</option>
-            <option value="condition">👁 条件</option>
-          </select>
-          <select id="schedule-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
-            <option value="daily">每天定点</option>
-            <option value="interval">固定间隔</option>
-            <option value="cron">cron 表达式</option>
-            <option value="fixed-time">单次定时</option>
-            <option value="random">随机</option>
-          </select>
-          <input id="schedule-value" type="text" placeholder="09:30 或 30（分钟）" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[190px]" />
-          <!-- 条件触发专用控件（默认隐藏，选「条件」时显示） -->
-          <select id="schedule-cond-kind" hidden class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
-            <option value="file">文件变化</option>
-            <option value="http">接口状态</option>
-            <option value="process">进程</option>
-            <option value="port">端口</option>
-            <option value="ui_region">画面区域</option>
-          </select>
-          <input id="schedule-cond-spec" type="text" hidden placeholder='{"path":"C:\\a.log"} 或 {"url":"http://127.0.0.1:8080","expectStatus":200}' class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground flex-1 min-w-[260px]" />
-          <button id="schedule-add-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加</span>
-          </button>
-          <span id="schedule-hint" class="text-xs text-muted-foreground"></span>
+        <div class="shrink-0 px-5 py-3 border-b border-border bg-background flex flex-col gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs text-muted-foreground w-8">触发</span>
+            <input id="automation-name" type="text" placeholder="规则名称" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground min-w-[130px]" />
+            <select id="automation-trigger-type" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+              <option value="probe">👁 状态条件</option>
+              <option value="time">⏰ 定时</option>
+            </select>
+            <select id="automation-probe-kind" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+              <option value="process">进程</option>
+              <option value="file">文件</option>
+              <option value="http">接口</option>
+              <option value="port">端口</option>
+              <option value="ui_region">画面</option>
+            </select>
+            <input id="automation-probe-spec" type="text" placeholder='{"name":"steam","expect":"exit"}' class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground flex-1 min-w-[220px]" />
+            <input id="automation-probe-interval" type="number" placeholder="间隔ms(3000)" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[120px]" />
+            <select id="automation-schedule-type" hidden class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground">
+              <option value="interval">固定间隔</option>
+              <option value="daily">每天定点</option>
+              <option value="cron">cron</option>
+              <option value="fixed-time">单次</option>
+            </select>
+            <input id="automation-schedule-value" type="text" hidden placeholder="30(分钟) / 09:30" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[150px]" />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs text-muted-foreground w-8">动作</span>
+            <input id="automation-tool" type="text" placeholder="工具名 例 bash / say / write / http_request" class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground w-[200px]" />
+            <input id="automation-args" type="text" placeholder='工具参数 JSON 例 {"command":"..."} 或 {"content":"微信已关"}' class="h-9 px-3 rounded-md bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground flex-1 min-w-[260px]" />
+            <label class="inline-flex items-center gap-1.5 text-xs text-foreground"><input type="checkbox" id="automation-enable" checked class="accent-[var(--hyacinth-primary)]">立即启用</label>
+            <button id="automation-add-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加规则</span>
+            </button>
+            <span id="automation-hint" class="text-xs text-muted-foreground"></span>
+          </div>
         </div>
-        <div id="schedule-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
+        <div id="automation-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
       </div>
       </section>
       <section data-view="plugins" class="view-section h-full" hidden>
