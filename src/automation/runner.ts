@@ -245,6 +245,31 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
     }
   }
 
+  // ── loop：动作链内部循环（do-while：至少 1 轮，每轮后判定终止）─
+  if (action.sink === 'loop') {
+    if (exec.depth + 1 > 5) {
+      return { ...base(), ok: false, error: 'loop 嵌套超过 5 层' };
+    }
+    const cap = Math.min(Math.max(1, Math.floor(action.maxIterations ?? 1000)), 10000);
+    const loopBody = action.do;
+    let iterations = 0;
+    let loopErr: string | undefined;
+    for (let i = 0; i < cap; i++) {
+      const err = await runActions(loopBody, { ...exec, depth: exec.depth + 1 });
+      iterations++;
+      if (err) {
+        loopErr = err;
+        if (exec.onError !== 'continue') break; // abort：立即停
+      }
+      // 每轮后判定终止（次数优先，再判条件；任一满足即退）
+      if (action.times !== undefined && iterations >= action.times) break;
+      if (action.until && evalAssertion(action.until, exec.scope)) break;
+      if (action.while && !evalAssertion(action.while, exec.scope)) break;
+    }
+    if (loopErr) return { ...base(), ok: false, error: loopErr };
+    return { ...base(), ok: true, output: `iterations=${iterations}` };
+  }
+
   // ── gate：执行后断言 → 分支 ─────────────────────────────
   const asserted = evalAssertion(action.assert, exec.scope);
   const branch = asserted ? action.onPass : action.onFail;

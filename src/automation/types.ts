@@ -164,7 +164,36 @@ export interface SafetyAction {
   action: 'hold' | 'stop' | 'goto-safe';
 }
 
-export type Action = InvokeAction | AppendAction | WakeAction | GateAction | SafetyAction;
+/**
+ * 循环动作（动作链内部循环）：
+ *   入口(前面的动作) → 每轮按序执行 do → 每轮后判定终止 → 退出(后续动作)。
+ *
+ * 语义 = **do-while**：至少执行一轮再判定终止（"经过一段循环后再退出"）。
+ *
+ * 终止条件（validate 强制至少给一个，否则等同死循环直接拒绝）：
+ *   times  固定轮数（跑满即退）
+ *   while  每轮后断言：成立→继续下一轮，不成立→退出
+ *   until  每轮后断言：成立→退出
+ * 三者可组合，任一满足即退出；maxIterations 是兜底硬上限（默认 1000，上限 10000）。
+ *
+ * 循环体可递归含 invoke/append/wake/gate/loop（深度上限 5，与 gate 共用）。
+ * 每轮共享 scope：$result.* 指向该轮最后一步输出，可被 while/until 断言。
+ */
+export interface LoopAction {
+  sink: 'loop';
+  /** 循环体（每轮按序执行；至少一个动作） */
+  do: Action[];
+  /** 固定轮数 */
+  times?: number;
+  /** 每轮后断言：成立→继续下一轮，不成立→退出 */
+  while?: Assertion;
+  /** 每轮后断言：成立→退出 */
+  until?: Assertion;
+  /** 安全兜底上限（默认 1000，最大 10000）—— 条件永真时靠它停 */
+  maxIterations?: number;
+}
+
+export type Action = InvokeAction | AppendAction | WakeAction | GateAction | SafetyAction | LoopAction;
 
 /** 断言：对"上一步结果"或"事件载荷"做简单比较 */
 export interface Assertion {

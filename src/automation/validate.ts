@@ -205,8 +205,62 @@ function validateAction(
     return undefined;
   }
   const sink = raw.sink;
+
+  // loop 先于 SINK_KINDS 校验处理（其校验逻辑独立、需递归 do + 断言）
+  if (sink === 'loop') {
+    if (depth >= MAX_GATE_DEPTH) {
+      errors.push(`${where}.loop: 嵌套层级超过 ${MAX_GATE_DEPTH}，可能是滥造`);
+      return undefined;
+    }
+    const body = validateActionList(raw.do, ctx, errors, `${where}.loop.do`, depth + 1);
+    if (!body || body.length === 0) {
+      errors.push(`${where}.loop: "do" 必须是非空数组（至少一个动作）`);
+      return undefined;
+    }
+    const hasTimes = raw.times !== undefined;
+    const hasWhile = raw.while !== undefined;
+    const hasUntil = raw.until !== undefined;
+    if (!hasTimes && !hasWhile && !hasUntil) {
+      errors.push(`${where}.loop: 至少需要 times / while / until 之一（否则无终止条件=死循环）`);
+      return undefined;
+    }
+    let times: number | undefined;
+    if (hasTimes) {
+      if (typeof raw.times !== 'number' || !Number.isInteger(raw.times) || raw.times < 1) {
+        errors.push(`${where}.loop.times: 必须是 >=1 的整数`);
+        return undefined;
+      }
+      times = raw.times;
+    }
+    const whileA = hasWhile ? validateAssertion(raw.while, errors, `${where}.loop.while`) : undefined;
+    if (hasWhile && !whileA) return undefined;
+    const untilA = hasUntil ? validateAssertion(raw.until, errors, `${where}.loop.until`) : undefined;
+    if (hasUntil && !untilA) return undefined;
+    let maxIterations: number | undefined;
+    if (raw.maxIterations !== undefined) {
+      if (
+        typeof raw.maxIterations !== 'number' ||
+        !Number.isInteger(raw.maxIterations) ||
+        raw.maxIterations < 1 ||
+        raw.maxIterations > 10000
+      ) {
+        errors.push(`${where}.loop.maxIterations: 必须是 1..10000 的整数`);
+        return undefined;
+      }
+      maxIterations = raw.maxIterations;
+    }
+    return {
+      sink: 'loop',
+      do: body,
+      ...(times !== undefined ? { times } : {}),
+      ...(whileA ? { while: whileA } : {}),
+      ...(untilA ? { until: untilA } : {}),
+      ...(maxIterations !== undefined ? { maxIterations } : {}),
+    };
+  }
+
   if (typeof sink !== 'string' || !(SINK_KINDS as readonly string[]).includes(sink)) {
-    errors.push(`${where}: 未知的 sink "${String(sink)}"（可选: ${SINK_KINDS.join(', ')}）`);
+    errors.push(`${where}: 未知的 sink "${String(sink)}"（可选: ${SINK_KINDS.join(', ')} / loop）`);
     return undefined;
   }
 
