@@ -2499,86 +2499,226 @@
     scheduleBound = true;
     const refresh = $('#automation-refresh-btn');
     if (refresh) refresh.onclick = () => { loadSchedule(); };
-    // 触发类型切换（状态条件 ⇄ 定时）显隐对应控件
-    {
-      const _tt = $('#automation-trigger-type');
-      const _pk = $('#automation-probe-kind');
-      const _ps = $('#automation-probe-spec');
-      const _pi = $('#automation-probe-interval');
-      const _st = $('#automation-schedule-type');
-      const _sv = $('#automation-schedule-value');
-      const applyTriggerMode = () => {
-        const isTime = !!(_tt && _tt.value === 'time');
-        if (_pk) _pk.hidden = isTime;
-        if (_ps) _ps.hidden = isTime;
-        if (_pi) _pi.hidden = isTime;
-        if (_st) _st.hidden = !isTime;
-        if (_sv) _sv.hidden = !isTime;
-      };
-      if (_tt) {
-        _tt.addEventListener('change', applyTriggerMode);
-        applyTriggerMode();
-      }
-    }
+
     const hint = (msg, ok) => {
       const h = $('#automation-hint');
       if (!h) return;
       h.textContent = msg || '';
       h.style.color = ok ? 'var(--state-success)' : 'var(--state-error)';
     };
+
+    // ── 触发类型切换（probe / time / event）──
+    const tt = $('#automation-trigger-type');
+    const whenProbe = $('#automation-when-probe');
+    const whenTime = $('#automation-when-time');
+    const whenEvent = $('#automation-when-event');
+    const applyTrigger = () => {
+      const v = tt ? tt.value : 'probe';
+      if (whenProbe) whenProbe.hidden = v !== 'probe';
+      if (whenTime) whenTime.hidden = v !== 'time';
+      if (whenEvent) whenEvent.hidden = v !== 'event';
+    };
+    if (tt) { tt.addEventListener('change', applyTrigger); applyTrigger(); }
+
+    // ── probe kind 切换 → 结构化字段（替代手写 JSON spec）──
+    const pk = $('#automation-probe-kind');
+    const pf = $('#automation-probe-fields');
+    const mkInput = (id, ph, flex) => {
+      const i = document.createElement('input');
+      i.type = (id === 'pf-port' || id === 'pf-expectStatus') ? 'number' : 'text';
+      i.id = id;
+      i.placeholder = ph;
+      i.className = 'h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground ' + (flex ? 'flex-1 min-w-[180px]' : 'w-[130px]');
+      return i;
+    };
+    const mkSelect = (id, opts) => {
+      const s = document.createElement('select');
+      s.id = id;
+      s.className = 'h-8 px-2 rounded-md bg-background border border-border text-sm text-foreground';
+      for (const o of opts) { const op = document.createElement('option'); op.value = o; op.textContent = o; s.appendChild(op); }
+      return s;
+    };
+    const renderProbeFields = () => {
+      if (!pf || !pk) return;
+      pf.innerHTML = '';
+      const kind = pk.value;
+      if (kind === 'process') {
+        pf.appendChild(mkInput('pf-name', '进程名 例 steam', true));
+        pf.appendChild(mkSelect('pf-expect', ['running', 'exit']));
+      } else if (kind === 'file') {
+        pf.appendChild(mkInput('pf-path', '文件路径', true));
+        pf.appendChild(mkSelect('pf-watch', ['content', 'mtime']));
+      } else if (kind === 'http') {
+        pf.appendChild(mkInput('pf-url', 'URL', true));
+        pf.appendChild(mkSelect('pf-method', ['GET', 'HEAD', 'POST']));
+        pf.appendChild(mkInput('pf-expectStatus', '期望状态码 例 200'));
+      } else if (kind === 'port') {
+        pf.appendChild(mkInput('pf-port', '端口', false));
+        pf.appendChild(mkSelect('pf-expect', ['open', 'closed']));
+      } else if (kind === 'ui_region') {
+        pf.appendChild(mkInput('pf-region', '区域 left,top,right,bottom（空=全屏）', true));
+      }
+    };
+    if (pk) { pk.addEventListener('change', renderProbeFields); renderProbeFields(); }
+
+    // ── 动作链：多动作，可增删 ──
+    const actionsEl = $('#automation-actions');
+    const addActionRow = () => {
+      if (!actionsEl) return;
+      const row = document.createElement('div');
+      row.className = 'flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 automation-action-row';
+
+      const sinkSel = document.createElement('select');
+      sinkSel.className = 'automation-act-sink h-8 px-2 rounded-md bg-card border border-border text-sm text-foreground shrink-0';
+      [['invoke', '⚙ 跑工具'], ['wake', '💬 唤醒会话']].forEach((o) => {
+        const op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; sinkSel.appendChild(op);
+      });
+
+      const invWrap = document.createElement('div');
+      invWrap.className = 'automation-act-invoke flex flex-wrap items-center gap-2 flex-1';
+      const toolI = document.createElement('input');
+      toolI.className = 'automation-act-tool h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground w-[150px]';
+      toolI.placeholder = '工具名 例 bash/say/write';
+      const argsI = document.createElement('input');
+      argsI.className = 'automation-act-args h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground flex-1 min-w-[180px]';
+      argsI.placeholder = '参数 JSON 例 {"command":"..."} / {"content":"..."}';
+      invWrap.appendChild(toolI); invWrap.appendChild(argsI);
+
+      const wakeWrap = document.createElement('div');
+      wakeWrap.className = 'automation-act-wake flex flex-wrap items-center gap-2 flex-1';
+      wakeWrap.hidden = true;
+      const polSel = document.createElement('select');
+      polSel.className = 'automation-act-policy h-8 px-2 rounded-md bg-card border border-border text-sm text-foreground';
+      [['reuse', '复用会话(带历史)'], ['new', '新临时会话(干净)']].forEach((o) => {
+        const op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; polSel.appendChild(op);
+      });
+      const sessI = document.createElement('input');
+      sessI.className = 'automation-act-session h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground w-[160px]';
+      sessI.placeholder = '目标会话id(可空=当前)';
+      const promptI = document.createElement('input');
+      promptI.className = 'automation-act-prompt h-8 px-2 rounded-md bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground flex-1 min-w-[160px]';
+      promptI.placeholder = '给模型的话 例 微信关了，提醒我一下';
+      wakeWrap.appendChild(polSel); wakeWrap.appendChild(sessI); wakeWrap.appendChild(promptI);
+
+      const del = document.createElement('button');
+      del.className = 'text-[11px] px-2 py-1 rounded-md border border-border bg-card text-foreground hover:bg-muted shrink-0';
+      del.textContent = '×';
+      del.style.color = 'var(--state-error)';
+      del.onclick = () => { row.remove(); };
+
+      sinkSel.onchange = () => {
+        const isInvoke = sinkSel.value === 'invoke';
+        invWrap.hidden = !isInvoke;
+        wakeWrap.hidden = isInvoke;
+      };
+
+      row.appendChild(sinkSel);
+      row.appendChild(invWrap);
+      row.appendChild(wakeWrap);
+      row.appendChild(del);
+      actionsEl.appendChild(row);
+    };
+    const addActionBtn = $('#automation-add-action');
+    if (addActionBtn) addActionBtn.onclick = addActionRow;
+    addActionRow();
+
+    // ── 完整 JSON 模式切换 ──
+    const jsonToggle = $('#automation-json-toggle');
+    const jsonArea = $('#automation-json');
+    if (jsonToggle && jsonArea) jsonToggle.onclick = () => { jsonArea.hidden = !jsonArea.hidden; };
+
+    // ── 收集 probe spec（结构化 → spec 对象）──
+    const collectSpec = (kind) => {
+      const val = (id) => { const e = $('#' + id); return e ? String(e.value || '').trim() : ''; };
+      if (kind === 'process') { const s = {}; if (val('pf-name')) s.name = val('pf-name'); s.expect = val('pf-expect') || 'exit'; return s; }
+      if (kind === 'file') { const s = {}; if (val('pf-path')) s.path = val('pf-path'); if (val('pf-watch')) s.watch = val('pf-watch'); return s; }
+      if (kind === 'http') { const s = {}; if (val('pf-url')) s.url = val('pf-url'); if (val('pf-method')) s.method = val('pf-method'); if (val('pf-expectStatus')) s.expectStatus = Number(val('pf-expectStatus')); return s; }
+      if (kind === 'port') { const s = {}; if (val('pf-port')) s.port = Number(val('pf-port')); s.expect = val('pf-expect') || 'open'; return s; }
+      if (kind === 'ui_region') { const s = {}; if (val('pf-region')) s.region = val('pf-region').split(',').map((x) => Number(x.trim())); return s; }
+      return {};
+    };
+
+    // ── 收集动作链 ──
+    const collectActions = () => {
+      const rows = actionsEl ? Array.from(actionsEl.querySelectorAll('.automation-action-row')) : [];
+      const out = [];
+      for (const row of rows) {
+        const sink = (row.querySelector('.automation-act-sink') || {}).value || 'invoke';
+        if (sink === 'invoke') {
+          const tool = ((row.querySelector('.automation-act-tool') || {}).value || '').trim();
+          const argsRaw = ((row.querySelector('.automation-act-args') || {}).value || '').trim();
+          if (!tool) throw new Error('有个动作没填工具名');
+          let args = {};
+          if (argsRaw) { try { args = JSON.parse(argsRaw); } catch { throw new Error('动作参数必须是合法 JSON：' + argsRaw); } }
+          out.push({ sink: 'invoke', tool, args });
+        } else {
+          const policy = ((row.querySelector('.automation-act-policy') || {}).value || 'reuse');
+          const sess = ((row.querySelector('.automation-act-session') || {}).value || '').trim();
+          const prompt = ((row.querySelector('.automation-act-prompt') || {}).value || '').trim();
+          const where = { policy };
+          if (sess) where.target = { sessionId: sess };
+          const act = { sink: 'wake', where };
+          if (prompt) act.prompt = prompt;
+          out.push(act);
+        }
+      }
+      return out;
+    };
+
     addBtn.onclick = () => {
       if (!connected) { hint('尚未连接后端'); return; }
       const name = (($('#automation-name') || {}).value || '').trim();
-      const tool = (($('#automation-tool') || {}).value || '').trim();
-      const argsRaw = (($('#automation-args') || {}).value || '').trim();
-      const triggerType = ($('#automation-trigger-type') || {}).value || 'probe';
       const enable = !!($('#automation-enable') || {}).checked;
       if (!name) { hint('请先填规则名称'); return; }
-      if (!tool) { hint('请填要调用的工具名（如 bash / say / write）'); return; }
-      let args;
-      try { args = argsRaw ? JSON.parse(argsRaw) : {}; }
-      catch (e) { hint('工具参数必须是合法 JSON，例 {"command":"..."}'); return; }
 
-      // 构造 when（触发）
-      let when;
-      if (triggerType === 'time') {
-        const st = ($('#automation-schedule-type') || {}).value || 'interval';
-        const sv = (($('#automation-schedule-value') || {}).value || '').trim();
-        if (!sv) { hint('请填时间参数（如 30 或 09:30）'); return; }
-        if (st === 'interval') {
-          const mins = Number(sv);
-          if (!Number.isFinite(mins) || mins <= 0) { hint('间隔请填分钟数，例 30'); return; }
-          when = { kind: 'time', schedule: { intervalMs: Math.round(mins * 60000) } };
-        } else if (st === 'daily') {
-          if (!/^\d{1,2}:\d{2}$/.test(sv)) { hint('时间格式应为 HH:mm，例 09:30'); return; }
-          when = { kind: 'time', schedule: { time: sv } };
-        } else if (st === 'cron') {
-          if (sv.split(/\s+/).filter(Boolean).length !== 5) { hint('cron 需 5 字段，例 0 9 * * *'); return; }
-          when = { kind: 'time', schedule: { expression: sv } };
-        } else {
-          when = { kind: 'time', schedule: { runAt: sv } };
-        }
+      let rule;
+      if (jsonArea && !jsonArea.hidden && (jsonArea.value || '').trim()) {
+        // 完整 JSON 模式：直接用它（覆盖表单）
+        try { rule = JSON.parse(jsonArea.value); }
+        catch (e) { hint('完整 JSON 不合法：' + e.message); return; }
+        if (!rule.id) rule.id = 'ui-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        if (rule.name === undefined) rule.name = name;
+        if (rule.enabled === undefined) rule.enabled = false;
       } else {
-        const pk = ($('#automation-probe-kind') || {}).value || 'process';
-        const psRaw = (($('#automation-probe-spec') || {}).value || '').trim();
-        let spec;
-        try { spec = psRaw ? JSON.parse(psRaw) : {}; }
-        catch (e) { hint('条件参数必须是合法 JSON，例 {"name":"steam","expect":"exit"}'); return; }
-        const ivRaw = (($('#automation-probe-interval') || {}).value || '').trim();
-        when = { kind: 'probe', probe: { kind: pk, spec } };
-        if (ivRaw) { const iv = Number(ivRaw); if (Number.isFinite(iv) && iv > 0) when.probe.intervalMs = iv; }
+        const triggerType = ($('#automation-trigger-type') || {}).value || 'probe';
+        let when;
+        try {
+          if (triggerType === 'time') {
+            const st = ($('#automation-schedule-type') || {}).value || 'interval';
+            const sv = (($('#automation-schedule-value') || {}).value || '').trim();
+            if (!sv) throw new Error('请填时间参数（间隔分钟 / HH:mm / cron / ISO）');
+            if (st === 'interval') { const mins = Number(sv); if (!Number.isFinite(mins) || mins <= 0) throw new Error('间隔请填分钟数，例 30'); when = { kind: 'time', schedule: { intervalMs: Math.round(mins * 60000) } }; }
+            else if (st === 'daily') { if (!/^\d{1,2}:\d{2}$/.test(sv)) throw new Error('每天定点格式 HH:mm，例 09:30'); when = { kind: 'time', schedule: { time: sv } }; }
+            else if (st === 'cron') { if (sv.split(/\s+/).filter(Boolean).length !== 5) throw new Error('cron 需 5 字段，例 0 9 * * *'); when = { kind: 'time', schedule: { expression: sv } }; }
+            else { when = { kind: 'time', schedule: { runAt: sv } }; }
+          } else if (triggerType === 'event') {
+            const ev = (($('#automation-event') || {}).value || '').trim();
+            if (!ev) throw new Error('请填事件名');
+            when = { kind: 'event', event: ev };
+          } else {
+            const pkVal = ($('#automation-probe-kind') || {}).value || 'process';
+            const spec = collectSpec(pkVal);
+            when = { kind: 'probe', probe: { kind: pkVal, spec } };
+            const ivRaw = (($('#automation-probe-interval') || {}).value || '').trim();
+            if (ivRaw) { const iv = Number(ivRaw); if (Number.isFinite(iv) && iv > 0) when.probe.intervalMs = iv; }
+          }
+        } catch (e) { hint(e.message); return; }
+        let actions;
+        try { actions = collectActions(); } catch (e) { hint(e.message); return; }
+        if (!actions.length) { hint('至少加一个动作'); return; }
+        const id = 'ui-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        rule = { id, name, enabled: false, when, do: actions };
+        const mrRaw = (($('#automation-maxruns') || {}).value || '').trim();
+        if (mrRaw) { const mr = Number(mrRaw); if (Number.isFinite(mr) && mr >= 1) rule.maxRuns = Math.floor(mr); }
       }
 
-      // 一条 invoke 动作（工具名 + 参数）；后续可扩展为多动作链
-      const id = 'ui-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const rule = { id, name, enabled: false, when, do: [{ sink: 'invoke', tool, args }] };
       addBtn.disabled = true;
       client.request('automation.create', { rule, enable })
         .then((res) => {
           if (res && res.ok === false) { hint('添加失败：' + (res.errors || []).join('；')); return; }
           hint('已添加规则：' + name, true);
           const nEl = $('#automation-name'); if (nEl) nEl.value = '';
-          const aEl = $('#automation-args'); if (aEl) aEl.value = '';
+          if (jsonArea) jsonArea.value = '';
           loadSchedule();
         })
         .catch((e) => hint('添加失败: ' + (e && e.message)))
