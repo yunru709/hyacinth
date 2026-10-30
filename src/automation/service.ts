@@ -67,11 +67,45 @@ export async function dispatchAutomationEvent(
   if (rules.length === 0) return [];
 
   try {
-    return await runMatchingRules(rules, event, d, d.armedWatchIds);
+    const outcomes = await runMatchingRules(rules, event, d, d.armedWatchIds);
+    applyMaxRuns(outcomes);
+    return outcomes;
   } catch (err) {
     // runMatchingRules 内部已逐条隔离，走到这里说明是框架级错误
     console.error('[automation] 派发失败:', (err as Error).message);
     return [];
+  }
+}
+
+/**
+ * maxRuns：成功执行后累加 runCount；达到上限自动停用（enabled=false）并落盘。
+ *
+ * ⚠️ 停用只改内存 + 写盘；probe watcher 不会立即 disarm（要等下次 reloadAndArm），
+ *    但 ruleMatches 会过滤 enabled=false ⇒ 停用规则不再执行；time 规则由 timeSource
+ *    检查 enabled 自动跳过。故无需在这里动 watcher，落盘即可持久化。
+ */
+function applyMaxRuns(outcomes: RuleRunOutcome[]): void {
+  if (!outcomes || outcomes.length === 0) return;
+  const rules = getCurrentAutomationRules();
+  let dirty = false;
+  for (const o of outcomes) {
+    if (!o.result.ok) continue; // 只计成功轮次
+    const r = rules.find((x) => x.id === o.ruleId);
+    if (!r || r.maxRuns === undefined) continue;
+    const next = (r.runCount ?? 0) + 1;
+    r.runCount = next;
+    if (next >= r.maxRuns) {
+      r.enabled = false;
+      console.error(`[automation] 规则 "${r.name}"(${r.id}) 已达 maxRuns=${r.maxRuns}，自动停用`);
+    }
+    dirty = true;
+  }
+  if (dirty) {
+    try {
+      saveAutomationRules(rules);
+    } catch (err) {
+      console.error('[automation] 更新 runCount 落盘失败:', (err as Error).message);
+    }
   }
 }
 
