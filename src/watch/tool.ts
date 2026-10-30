@@ -89,6 +89,11 @@ const SPEC_PROPS: Record<string, unknown> = {
     items: { type: 'number' },
     description: 'ui_region: [left, top, right, bottom]',
   },
+  windowTitle: {
+    type: 'string',
+    description:
+      'ui_region: 按窗口标题抓图（Windows Graphics Capture，比 region 稳，不受遮挡/DPI/位置影响）。给了它就忽略 region',
+  },
   allowPrivateHost: {
     type: 'boolean',
     description: '是否允许探测内网地址（默认 false，仅放行本机与公网）',

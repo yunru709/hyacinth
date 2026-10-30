@@ -24,6 +24,13 @@ export interface UiRegionSpec {
   kind: 'ui_region';
   /** 省略 = 全屏。强烈建议限定，否则光标闪烁即误报 */
   region?: Region;
+  /**
+   * 按窗口标题抓图（Windows Graphics Capture）。给了它就忽略 region：
+   * 抓的是**窗口自身 surface**，即使窗口被别的窗口遮挡、不是焦点、
+   * 或 DPI 缩放/位置变动，都能抓到该窗口的真实画面（CopyFromScreen 做不到）。
+   * 依赖 ~/.agent/bin/WgcCap.exe。窗口最小化时可能抓不到（退化为采样失败）。
+   */
+  windowTitle?: string;
   /** dHash 汉明距离阈值（0..64），默认 6 */
   threshold?: number;
 }
