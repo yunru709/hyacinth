@@ -169,3 +169,30 @@ describe('validateRule：必须拒绝的情况', () => {
     expect(r.errors[0]).toContain('未知的 sink');
   });
 });
+
+describe('validateRule：cron 试解析（2026-10-31 补 发现7 残留）', () => {
+  const cronRule = (expr: string) => ({
+    id: 'c-cron',
+    name: 'cron',
+    enabled: false,
+    when: { kind: 'time', schedule: { expression: expr } },
+    do: [{ sink: 'invoke', tool: 'noop' }],
+  });
+  const cronCtx = {
+    knownProbeKinds: ['file'],
+    knownToolNames: ['noop'],
+    knownHandlers: [],
+    knownEvents: ['onTurnEnd'],
+  } as never;
+
+  it('"99 99 * * *"（字段数够但越界）→ 拒绝', () => {
+    const r = validateRule(cronRule('99 99 * * *'), cronCtx);
+    expect(r.rule).toBeUndefined();
+    expect(r.errors.join()).toContain('cron');
+  });
+
+  it('"0 */2 * * *" → 通过', () => {
+    const r = validateRule(cronRule('0 */2 * * *'), cronCtx);
+    expect(r.rule).toBeDefined();
+  });
+});

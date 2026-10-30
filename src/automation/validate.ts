@@ -192,8 +192,18 @@ function validateWhen(raw: unknown, ctx: ValidationContext, errors: string[]): W
     }
     if (typeof s.expression !== 'undefined') {
       any = true;
-      if (typeof s.expression !== 'string' || s.expression.trim().split(/\s+/).length !== 5) {
+      if (typeof s.expression !== 'string') {
+        errors.push('"when.schedule.expression" 必须是字符串');
+      } else if (s.expression.trim().split(/\s+/).length !== 5) {
         errors.push('"when.schedule.expression" 必须是 5 字段 cron（分 时 日 月 周）');
+      } else {
+        // 试解析：复用 utils/cron 作唯一解析真源（否则"字段数够但越界"如 "99 99 * * *"
+        // 会通过校验、运行时 CronExpression 抛错被 computeNextRun 吞成 null ⇒ 静默永不触发）。
+        try {
+          new CronExpression(s.expression);
+        } catch (err) {
+          errors.push(`"when.schedule.expression" 非法 cron：${(err as Error).message}`);
+        }
       }
     }
     if (!any) {
