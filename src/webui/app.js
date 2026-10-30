@@ -4323,6 +4323,8 @@
   }
 
   async function sttFinishRecording() {
+    // 录音已结束：立即释放麦克风轨道（tracks）并清引用，避免设备被 WebView2 持续持有（2026-10-31）
+    try { sttState.stream?.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
     const blob = new Blob(sttState.chunks, { type: sttState.chunks[0]?.type || 'audio/webm' });
     sttState.chunks = [];
     if (sttState.timer) { clearInterval(sttState.timer); sttState.timer = null; }
