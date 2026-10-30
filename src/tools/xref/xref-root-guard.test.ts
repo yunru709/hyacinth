@@ -2,7 +2,7 @@
  * xref-root-guard.test.ts — 「不许把用户主目录当项目根索引」的回归点（2026-09-19）
  *
  * 事故：插件把裸 cwd 当项目根（`init(services.cwd)`），而 agent 可能从主目录启动。
- * 实测产出 **1.18GB** 索引（`xref-C-Users-74689.sqlite`，把 AppData / 浏览器缓存全扫了）。
+ * 实测产出 **1.18GB** 索引（`xref-C-Users-&lt;user&gt;.sqlite`，把 AppData / 浏览器缓存全扫了）。
  *
  * 关键：`assertIndexableRoot()` 在 `Database()` **之前**抛错 —— 因此**连库文件都不会创建**，
  * 所以本文件可以放心拿**真实主目录**做断言（不需要也不要劫持 homedir 来测这一条）。

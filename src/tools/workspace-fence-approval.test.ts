@@ -168,7 +168,7 @@ describe('审计回归 2026-10-13（围栏判据）', () => {
   it('【B2】批准根必须以 workspaceRoot 为基准（用 cwd 会记到别处，导致"批准了却写不出去"）', () => {
     // 判据一侧：classifyWriteTarget 内部是 path.resolve(workspaceRoot, filePath)。
     // 记录一侧（loop-tools 的 4 处）修复前用 path.resolve(filePath) ⇒ 基准是 process.cwd()。
-    // 本机 cwd = C:\Users\74689，workspaceRoot = ...\hyacinth ⇒ 两者算出的根**不是同一个地方**，
+    // 本机 cwd = C:\Users\<user>，workspaceRoot = ...\hyacinth ⇒ 两者算出的根**不是同一个地方**，
     // 围栏据此永远匹配不上 ⇒ 用户按了 yes/always/aor 仍被拦。
     const rel = path.join('sub', 'a.txt');
     const byRoot = path.dirname(path.resolve(root, rel));   // ✅ 与判据同源（修好后 loop-tools 用的写法）
