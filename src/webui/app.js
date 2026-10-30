@@ -2217,6 +2217,13 @@
     flow.appendChild(chainArrow());
     flow.appendChild(chainNode('end', { icon: '🏁', primary: '完成', detail: '' }));
     card.appendChild(flow);
+    // maxRuns 进度：达到上限后规则会自动停用，这里把「已跑 / 上限」显出来
+    if (typeof r.maxRuns === 'number' && r.maxRuns > 0) {
+      const runN = typeof r.runCount === 'number' ? r.runCount : 0;
+      const done = runN >= r.maxRuns;
+      const line = el('div', 'text-[11px] ' + (done ? 'text-state-error' : 'text-muted-foreground'), '已触发 ' + runN + ' / ' + r.maxRuns + ' 次' + (done ? '（已达上限，已停用）' : '后自动停用'));
+      card.appendChild(line);
+    }
     return card;
   }
 
