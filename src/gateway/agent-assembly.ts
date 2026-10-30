@@ -777,10 +777,18 @@ export async function createAgentAssembly(
       const watchId = typeof detail.watchId === 'string' ? detail.watchId : '';
       // watch 事件带 watchId，才能让 probe 类规则精确匹配自己 arm 的监控项；
       // 其他源退化为 `<source>:<name>`。
+      // 事件名映射 —— 让「validate 的 knownEvents、hub 拼名、ruleMatches 前缀匹配」三者对齐。
+      // 2026-10-31 修复（审查发现 2）：原来非 watch 源一律拼 `<source>:<name>`，于是 scheduler
+      // 事件成了 `schedule:xxx`：既不在 knownEvents（被 validate 拒）、也匹配不上文档承诺的
+      // `afterScheduleTask`（成了死名）。这里按源映射成「事件目录里真实存在的名字」。
       const eventName =
         e.source === 'watch' && kind
           ? `afterWatch:${kind}${watchId ? `#${watchId}` : ''}`
-          : `${e.source}:${e.name}`;
+          : e.source === 'schedule'
+            ? `afterScheduleTask:${e.name}`
+            : e.source === 'loop'
+              ? `${e.name}` // loop 钩子名本身即事件名（onTurnEnd 等）
+              : `${e.source}:${e.name}`;
 
       try {
         const outcomes = await dispatchAutomationEvent({

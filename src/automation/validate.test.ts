@@ -119,7 +119,8 @@ describe('validateRule：必须拒绝的情况', () => {
 
   it('wake + reuse 但没有 target（无法确定续哪个会话）', () => {
     const r = validateRule(baseRule({ do: [{ sink: 'wake', where: { policy: 'reuse' } }] }), ctx);
-    expect(r.errors[0]).toContain('必须提供 target.sessionId 或 target.channel');
+    // 2026-10-31 收紧：reuse 必须给 sessionId（channel-only 会被 wake-adapter 拒/抛），文案随之更新
+    expect(r.errors[0]).toContain('必须提供 target.sessionId');
   });
 
   it('gate 没给任何分支', () => {
