@@ -4209,17 +4209,22 @@
 
   /** 解码录音 blob → 16kHz 单声道 Float32（AudioContext 指定采样率即完成重采样） */
   async function sttDecodeTo16k(blob) {
-    sttState.sharedCtx ??= new AudioContext({ sampleRate: 16000 });
-    const buf = await blob.arrayBuffer();
-    const audio = await sttState.sharedCtx.decodeAudioData(buf);
-    // 多声道混到单声道
-    const ch = audio.numberOfChannels;
-    const out = new Float32Array(audio.length);
-    for (let c = 0; c < ch; c++) {
-      const data = audio.getChannelData(c);
-      for (let i = 0; i < data.length; i++) out[i] += data[i] / ch;
+    // 按需创建、用完即关：常驻 AudioContext 会让进程持续持有音频设备（2026-10-31 排查麦克风占用）
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    try {
+      const buf = await blob.arrayBuffer();
+      const audio = await ctx.decodeAudioData(buf);
+      // 多声道混到单声道
+      const ch = audio.numberOfChannels;
+      const out = new Float32Array(audio.length);
+      for (let c = 0; c < ch; c++) {
+        const data = audio.getChannelData(c);
+        for (let i = 0; i < data.length; i++) out[i] += data[i] / ch;
+      }
+      return { samples: out, sampleRate: audio.sampleRate };
+    } finally {
+      try { await ctx.close(); } catch (e) { /* ignore */ }
     }
-    return { samples: out, sampleRate: audio.sampleRate };
   }
 
   /** Float32 → 16bit PCM WAV（服务端 stt/wav.ts 只认这个） */
