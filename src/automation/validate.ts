@@ -454,9 +454,12 @@ function validateWhere(raw: unknown, errors: string[], where: string): Where | u
     };
   }
 
-  // reuse 必须知道"续哪个会话"，否则语义无从落地
-  if (policy === 'reuse' && (!target || (!target.sessionId && !target.channel))) {
-    errors.push(`${where}: policy="reuse" 时必须提供 target.sessionId 或 target.channel`);
+  // reuse 必须知道"续哪个会话"，否则语义无从落地。
+  // 2026-10-31 审查修复：原实现允许只给 channel（channel-only），但 wake-adapter 的 reuse
+  // 分支无条件要求 sessionId 并抛错 ⇒ channel-only 规则能通过校验+落盘，却每次执行必炸。
+  // 收紧为必须 sessionId（与 wake-adapter.ts 的运行时要求一致）。
+  if (policy === 'reuse' && (!target || !target.sessionId)) {
+    errors.push(`${where}: policy="reuse" 时必须提供 target.sessionId（仅给 channel 无法确定续哪个会话）`);
     return undefined;
   }
 
