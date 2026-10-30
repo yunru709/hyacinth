@@ -175,5 +175,37 @@ export function createAutomationTools(deps: AutomationToolDeps): Tool[] {
     },
   };
 
-  return [validateTool, createTool, listTool];
+  const removeTool: Tool = {
+    name: 'automation_remove',
+    description: '删除一条自动化规则（按 id）。保存后立即重新加载 + 重新 arm 其余规则。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '要删除的规则 id（用 automation_list 查看）' },
+      },
+      required: ['id'],
+    },
+    sideEffect: 'write',
+    async execute(args: Record<string, unknown>): Promise<string> {
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) return '❌ 缺少 "id"（用 automation_list 查看规则 id）';
+      const existing = deps.getRules();
+      const removed = existing.find((r) => r.id === id);
+      if (!removed) {
+        return `❌ 没有 id="${id}" 的规则（用 automation_list 查看现有 id）`;
+      }
+      const next = existing.filter((r) => r.id !== id);
+      const saved = deps.save(next);
+      const lines = [
+        `✅ 已删除规则: ${removed.name} (${id})`,
+        `  剩余规则: ${saved.count}`,
+      ];
+      if (saved.errors.length > 0) {
+        lines.push(`  ⚠️ 重新加载时发现 ${saved.errors.length} 处问题:\n${formatErrors(saved.errors)}`);
+      }
+      return lines.join('\n');
+    },
+  };
+
+  return [validateTool, createTool, listTool, removeTool];
 }
