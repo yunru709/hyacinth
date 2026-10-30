@@ -57,6 +57,14 @@ class PortProbeInstance implements ProbeInstance {
   isSatisfied(sample: ProbeSample): boolean {
     return sample.ok && sample.value === 'met';
   }
+
+  /**
+   * expect='closed'：端口"本来就关"是**当前状态**，不是"关闭"这个**事件**。
+   * watch 首帧不该触发它，否则规则 arm 时（含 UI reload 重新 arm）会误报。
+   */
+  get fireOnFirstSatisfied(): boolean {
+    return this.spec.expect !== 'closed';
+  }
 }
 
 export const portProbe: Probe = {

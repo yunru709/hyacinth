@@ -79,6 +79,14 @@ class ProcessProbeInstance implements ProbeInstance {
   isSatisfied(sample: ProbeSample): boolean {
     return sample.ok && sample.value === 'met';
   }
+
+  /**
+   * expect='exit'：进程"本来就不在"是**当前状态**，不是"退出"这个**事件**。
+   * watch 首帧不该触发它，否则规则 arm 时（含 UI reload 重新 arm）会误报（2026-10-30 实测）。
+   */
+  get fireOnFirstSatisfied(): boolean {
+    return this.spec.expect !== 'exit';
+  }
 }
 
 export const processProbe: Probe = {

@@ -105,6 +105,19 @@ export interface ProbeInstance {
    * 变化式 probe（file / ui_region）不实现此方法。
    */
   isSatisfied?(sample: ProbeSample): boolean;
+  /**
+   * 首帧即满足时，watch（持续监测）是否应立即触发一次。默认 true。
+   *
+   * ⚠️ process expect=exit / port expect=closed 必须为 false：
+   *   "进程本来就不在 / 端口本来就关"是**当前状态**，不是"退出/关闭"这个**事件**。
+   *   首帧就 fire 会导致：规则 arm 时（进程恰好没运行）误报一次；UI 改规则触发
+   *   reload→重新 arm 时又首帧误报（2026-10-30 用户实测：Steam 从未启动却报两声，
+   *   起点正是"在自动化页面关闭这两个功能"即 reload 重新 arm）。
+   *   running/open 保持 true（"它已经在跑/已经在听"是正面事实，立即通知合理）。
+   *
+   * 注意：此字段只影响 watch 持续监测；wait 同步等待另有首帧短路逻辑，不受影响。
+   */
+  fireOnFirstSatisfied?: boolean;
   dispose?(): void;
 }
 

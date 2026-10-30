@@ -279,7 +279,9 @@ export class WatchService {
     if (!entry.baseline) {
       // 达成式 probe（process/port/带期望值的 http）：首帧就成立时立即触发一次。
       // 否则基准=met，之后一直 met，距离恒为 0 ⇒ 永远不触发（与 wait 同一缺陷）。
-      if (entry.probe.isSatisfied?.(sample)) {
+      // 例外：fireOnFirstSatisfied=false 的（process exit / port closed）——"本来就不在/没开"
+      // 是当前状态不是"退出/关闭"事件，首帧只建基准、不 fire（防 arm 误报，见 types 注释）。
+      if (entry.probe.isSatisfied?.(sample) && entry.probe.fireOnFirstSatisfied !== false) {
         await this.fire(watchId, entry, 0);
         return;
       }
