@@ -61,6 +61,29 @@ export async function dispatchAutomationEvent(
   event: AutomationEvent,
 ): Promise<RuleRunOutcome[]> {
   const d = deps;
+
+  // ── 临时诊断（2026-10-30，定位 probe 事件为何不执行；查完删除）──
+  try {
+    const os = await import('node:os');
+    const pathMod = await import('node:path');
+    const fsMod = await import('node:fs');
+    const armed = d?.armedWatchIds;
+    const armedStr = armed ? `${armed.size}[${[...armed.keys()].join('|')}]` : 'NULL';
+    const rs = getCurrentAutomationRules();
+    let matchedStr = 'no-deps';
+    if (d) {
+      const { matchRules } = await import('./runtime.js');
+      const m = matchRules(rs, event, d.armedWatchIds);
+      matchedStr = `${m.length}[${m.map((x) => x.id).join('|')}]`;
+    }
+    fsMod.appendFileSync(
+      pathMod.join(os.homedir(), '.agent', 'work', 'dispatch-diag.log'),
+      `${new Date().toISOString()} ev=${event.eventName} deps=${d ? 'Y' : 'NULL'} armed=${armedStr} rules=${rs.length} matched=${matchedStr}\n`,
+    );
+  } catch {
+    /* 诊断失败不影响主流程 */
+  }
+
   if (!d) return [];
 
   const rules = getCurrentAutomationRules();
