@@ -74,6 +74,12 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连�
 
 ## 安装
 
+### 前置要求
+
+- **Node.js ≥ 22.5**（`node:sqlite` 为内置模块，低于此版本启动即报错）
+- **pnpm**（本仓库唯一受支持的包管理器）
+- **Windows 从源码构建**还需：**VS Build Tools**（“使用 C++ 的桌面开发”工作负载）+ **Python 3** —— `tree-sitter-*`、`sherpa-onnx-node`、`sharp` 安装时走 node-gyp 编译，缺工具链 `pnpm install` 会失败。
+
 ### npm（全局）
 
 ```bash
