@@ -2246,6 +2246,87 @@
     rules.forEach((r) => listEl.appendChild(automationRow(r)));
   }
 
+  // ── 定时任务视图（schedule 域；add_task 建的任务，走 HeartbeatScheduler）──
+  // 与「自动化」页的分工：这里是 scheduler 的任务（有 cron/持久化/补执行/执行记录），
+  // 「自动化」页是 automation 的链路（零模型/分支/循环）。两者后端不同、互不影响。
+  const TASK_TYPE_LABEL = { interval: '间隔', cron: 'cron', daily: '每天', 'fixed-time': '单次', random: '随机' };
+  function taskRow(t) {
+    const card = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-col gap-2');
+    const head = el('div', 'flex items-center gap-3');
+    head.appendChild(el('div', 'text-sm font-medium text-foreground flex-1 min-w-0 truncate', t.name || t.id));
+    head.appendChild(el('span', 'text-[11px] px-2 py-0.5 rounded-full border border-border ' + (t.enabled ? 'text-state-success' : 'text-muted-foreground'), t.enabled ? '已启用' : '已停用'));
+    const sw = document.createElement('input');
+    sw.type = 'checkbox';
+    sw.checked = !!t.enabled;
+    sw.className = 'w-3.5 h-3.5 accent-[var(--hyacinth-primary)] shrink-0 cursor-pointer';
+    sw.title = t.enabled ? '已启用（点击停用）' : '已停用（点击启用）';
+    sw.onchange = () => {
+      if (!connected) { sw.checked = !sw.checked; return; }
+      sw.disabled = true;
+      client.request('schedule.toggle', { id: t.id, enabled: sw.checked })
+        .then(() => loadTasks())
+        .catch((e) => { sw.checked = !sw.checked; sw.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message || e)); });
+    };
+    head.appendChild(sw);
+    const del = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors shrink-0', '删除');
+    del.style.color = 'var(--state-error)';
+    let pendingDel = null;
+    del.onclick = () => {
+      if (!connected) return;
+      if (pendingDel !== t.id) {
+        pendingDel = t.id;
+        del.textContent = '再点一次确认';
+        setTimeout(() => { if (pendingDel === t.id) { pendingDel = null; del.textContent = '删除'; } }, 4000);
+        return;
+      }
+      pendingDel = null;
+      del.disabled = true;
+      client.request('schedule.remove', { id: t.id })
+        .then((res) => { appendMsg('system', (res && res.ok) ? '任务「' + (t.name || t.id) + '」已删除' : '删除未生效'); loadTasks(); })
+        .catch((e) => { del.disabled = false; appendMsg('error', '删除失败: ' + (e && e.message || e)); });
+    };
+    head.appendChild(del);
+    card.appendChild(head);
+    const meta = el('div', 'flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground');
+    meta.appendChild(el('span', '', '⏱ ' + (TASK_TYPE_LABEL[t.scheduleType] || t.scheduleType || '?')));
+    if (t.nextRunAt) { try { meta.appendChild(el('span', '', '下次 ' + new Date(t.nextRunAt).toLocaleString())); } catch (e) { /* ignore */ } }
+    if (typeof t.runCount === 'number') meta.appendChild(el('span', '', '已跑 ' + t.runCount + ' 次'));
+    if (t.errorCount) meta.appendChild(el('span', 'text-state-error', '出错 ' + t.errorCount + ' 次'));
+    card.appendChild(meta);
+    return card;
+  }
+  async function loadTasks() {
+    const listEl = $('#tasks-list');
+    if (!listEl) return;
+    bindTasksOnce();
+    let data = null;
+    try { data = await client.request('schedule.list'); } catch (e) { data = null; }
+    if (!data) {
+      listEl.innerHTML = '';
+      listEl.appendChild(el('div', 'text-sm text-state-error', '取不到定时任务（后端可能未就绪）'));
+      return;
+    }
+    const tasks = data.tasks || [];
+    const statusEl = $('#tasks-status');
+    if (statusEl) {
+      const enabled = tasks.filter((t) => t.enabled).length;
+      statusEl.textContent = 'add_task 建的调度任务，走 HeartbeatScheduler（cron / 持久化 / 补执行） · 已启用 ' + enabled + '/' + tasks.length;
+    }
+    listEl.innerHTML = '';
+    if (!tasks.length) {
+      listEl.appendChild(el('div', 'text-sm text-muted-foreground', '还没有定时任务。让 agent 用 add_task 建，或走 TUI /schedule。'));
+      return;
+    }
+    tasks.forEach((t) => listEl.appendChild(taskRow(t)));
+  }
+  let tasksBound = false;
+  function bindTasksOnce() {
+    if (tasksBound) return;
+    tasksBound = true;
+    const refresh = $('#tasks-refresh-btn');
+    if (refresh) refresh.onclick = () => { loadTasks(); };
+  }
+
   // ── 插件视图（plugin 契约域：内核挂载 list + 目录插件管理面）────────
   // 目录插件可启停/重载（PluginManager 管理面经契约层暴露）；内核插件
   // （permission-chain/bypass/world-engine 等安全与能力基座）只读展示。
