@@ -373,9 +373,17 @@ function validateAssertion(raw: unknown, errors: string[], where: string): Asser
     errors.push(`${where}: "assert.path" 缺失`);
     return undefined;
   }
-  // 只允许两个命名空间，避免模型写出任意取值表达式
-  if (!raw.path.startsWith('result.') && !raw.path.startsWith('event.')) {
-    errors.push(`${where}: "assert.path" 必须以 "result." 或 "event." 开头`);
+  // 只允许两个命名空间，但允许**整体**（'result'/'event'）或**子字段**（'result.xxx'/'event.xxx'）。
+  // 为什么允许整体：invoke 的工具结果都是**字符串**（如 "42"），没有子字段可用；若只允许 'result.'
+  // 前缀，gate 就永远断言不了 invoke 的结果（`result > 阈值` 写不出来）——而"执行后断言上一步结果"
+  // 正是 gate 的核心用途。runner 的 pickPath 对 'result' 直接取 scope.result，故整体断言可正常工作。
+  if (
+    raw.path !== 'result' &&
+    raw.path !== 'event' &&
+    !raw.path.startsWith('result.') &&
+    !raw.path.startsWith('event.')
+  ) {
+    errors.push(`${where}: "assert.path" 必须是 "result"/"event" 或以 "result."/"event." 开头`);
     return undefined;
   }
   if (typeof raw.op !== 'string' || !(ASSERT_OPS as readonly string[]).includes(raw.op)) {
