@@ -9,10 +9,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { dhashFromGray } from './region-sampler-ps.js';
-import { hammingDistanceHex, setDefaultRegionSampler, uiRegionProbe } from './ui-region.js';
+import {
+  hammingDistanceHex,
+  setDefaultRegionSampler,
+  setDefaultWindowSampler,
+  uiRegionProbe,
+} from './ui-region.js';
 
 afterEach(() => {
   setDefaultRegionSampler(null);
+  setDefaultWindowSampler(null);
 });
 
 describe('hammingDistanceHex', () => {
