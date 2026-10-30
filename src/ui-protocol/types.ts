@@ -284,6 +284,7 @@ export const UI_METHOD = {
   COMPANION_DEACTIVATE: 'companion.deactivate',
   COMPANION_VOICES: 'companion.voices',
   COMPANION_VOICE_BIND: 'companion.voiceBind',
+  COMPANION_ENSURE_SESSION: 'companion.ensureSession',
   COMPANION_VOICE_REGISTER: 'companion.voiceRegister',
   COMPANION_VOICE_DELETE: 'companion.voiceDelete',
   COMPANION_VOICE_LIST: 'companion.voiceList',
