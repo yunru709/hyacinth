@@ -267,3 +267,37 @@ describe('runRule：wake', () => {
     expect(res.error).toBe('会话拉不起来');
   });
 });
+
+describe('runRule：resolveDeep 模板解析边界（2026-10-30 回归）', () => {
+  it('以 $ 开头但不是 $event/$result 的字符串原样保留（命令不能被当模板吃掉）', async () => {
+    let got: Record<string, unknown> = {};
+    const c = ctx({ invokeTool: async (_t, a) => { got = a; return 'ok'; } });
+    const cmd = "$f='x'; echo $f";
+    await runRule(rule({ do: [{ sink: 'invoke', tool: 'bash', args: { command: cmd } }] }), event, c);
+    expect(got.command).toBe(cmd); // 原样，未被 pickPath 吃成 undefined
+  });
+
+  it('同一 args 内 $event.* 仍被正常解析（对照：证明不是整体跳过解析）', async () => {
+    let got: Record<string, unknown> = {};
+    const c = ctx({ invokeTool: async (_t, a) => { got = a; return 'ok'; } });
+    await runRule(
+      rule({ do: [{ sink: 'invoke', tool: 'x', args: { plain: '$f=1', fromEvent: '$event.name' } }] }),
+      event,
+      c,
+    );
+    expect(got.plain).toBe('$f=1');        // 非模板 → 原样
+    expect(got.fromEvent).toBe('微信监控'); // 模板 → 取 event.name
+  });
+
+  it('嵌套对象/数组里的非模板 $ 字符串也保持原样', async () => {
+    let got: Record<string, unknown> = {};
+    const c = ctx({ invokeTool: async (_t, a) => { got = a; return 'ok'; } });
+    await runRule(
+      rule({ do: [{ sink: 'invoke', tool: 'x', args: { list: ['$a', '$event.name'], obj: { k: '$b' } } }] }),
+      event,
+      c,
+    );
+    expect(got.list).toEqual(['$a', '微信监控']);
+    expect(got.obj).toEqual({ k: '$b' });
+  });
+});
