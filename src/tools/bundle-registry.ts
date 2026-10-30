@@ -162,13 +162,16 @@ const BUILTIN_WORKFLOW: ToolBundle = {
   ],
 };
 
-/** 通用工具（2026-10-10 从 common 移出）—— 文件 / 网络 / 渠道杂项 */
+/** 通用工具（2026-10-10 从 common 移出）—— 文件 / 网络 / 渠道 / 后台监控杂项 */
 const BUILTIN_UTILITY: ToolBundle = {
   name: 'utility',
-  description: '通用工具 — 文件比较 / JSON 编辑 / HTTP / 压缩 / 磁盘 / 渠道外发（按需激活）',
+  description: '通用工具 — 文件比较 / JSON 编辑 / HTTP / 压缩 / 磁盘 / 后台监控 / 渠道外发（按需激活）',
   builtin: true,
   tools: [
     'diff_files', 'json_edit', 'http_request', 'archive', 'disk_usage',
+    // 后台监控 4 个（watch_*）—— 定义在 src/watch/tool.ts，此前游离在所有包外，
+    // 只有全量模式可见。归入 utility（通用监控/等待）。2026-10-30 整理。
+    'watch_start', 'watch_wait', 'watch_stop', 'watch_list',
     'send_channel_message',
   ],
 };
