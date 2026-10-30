@@ -754,33 +754,9 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     });
 
     // ── 工具面：让模型能设计链路（validate / create / list）──
-    // 保存后必须**重载 + 重新 arm**，否则：
-    //   ① 新规则要重启才生效（用户以为"配了没反应"）
-    //   ② 旧 watcher 残留 ⇒ 同一事件触发两次
-    // 顺序：停旧 → 写盘 → 重载 → 重 arm → 更新运行时映射
-    const asArmer = () => getWatchService() as unknown as Parameters<typeof armProbeRules>[1];
-    const reloadAndArm = (): { count: number; errors: string[] } => {
-      const prev = getAutomationRuntime()?.armedWatchIds;
-      if (prev && prev.size > 0) disarmWatchIds(asArmer(), prev.values());
-      const reApplied = initAutomationsFromDisk(makeCtx());
-      const reArmed = armProbeRules(getCurrentAutomationRules(), asArmer());
-      // 从**当前** runtime 取，只覆盖 armedWatchIds —— 不能用闭包捕获首次装配时的引用，
-      // 否则热更后 invokeTool 又指回第一个会话的 loop（say 再次无声）。
-      const cur = getAutomationRuntime();
-      if (cur) setAutomationRuntime({ ...cur, armedWatchIds: reArmed.armed });
-      return { count: reApplied.count, errors: [...reApplied.errors, ...reArmed.errors] };
-    };
-
-    for (const tool of createAutomationTools({
-      getContext: () => makeCtx(),
-      getRules: () => getCurrentAutomationRules(),
-      save: (rules) => {
-        saveAutomationRules(rules);
-        return reloadAndArm();
-      },
-    })) {
-      toolRegistry.register(tool);
-    }
+    // 保存后必须**重载 + 重新 arm**（见上方 registerAutomationTools → reloadAndArm）。
+    // registerAutomationTools 每次会话装配都会调用（首装配与后续会话都调），修复工具注册竞态。
+    registerAutomationTools();
     logger.info('自动化工具面已注册', {
       tools: ['automation_validate', 'automation_create', 'automation_list'],
     });
