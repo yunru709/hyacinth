@@ -15,19 +15,19 @@
  * 与完整的执行记录），语义是"任务"；AutomationRule 是"链路定义"，纯配置。
  * 硬塞进去会让"改配置"和"改统计"互相冲掉，且 diff 不可读。
  *
- * 所以这里**只支持确定性的三种**调度（interval / daily / fixed-time），
- * 覆盖绝大多数需求，且无状态（nextRunAt 在内存里，重启重算）。
+ * 支持 interval / daily / fixed-time / **cron** 四种确定性调度。
+ *   · cron 复用 utils/cron 的 CronExpression（纯工具，不是 schedule 业务核心）——
+ *     字段名 `expression`，与 UI（app.js 建规则）和 scheduler 的 CronConfig 保持一致。
+ *     2026-10-30 修复：此前 UI 能建 cron 规则但本模块不认 expression ⇒ 永不触发。
+ *   · random 仍不支持（有状态：periodStartAt/pendingSlots 需持久化跨重启续用），
+ *     需要 random 时继续用 scheduler 任务表达。
  *
- * cron 与 random 暂不支持：
- *   · random 是**有状态**的（periodStartAt / pendingSlots 要持久化跨重启续用）
- *   · cron 需要解析器
- * 需要这两者时，仍可用现有的 scheduler 任务表达 —— 能力等价，只是入口不同。
- *
- * ⚠️ 这是一个**临时的第三条路径**。架构终态是"所有触发源统一为 Source"，
- *    届时本模块会退化成 TimeSource 的一个实现，被 Hub 统一调度。
+ * ⚠️ 架构终态是"所有触发源统一为 Source"，届时本模块退化成 TimeSource 的一个实现，
+ *    被 Hub 统一调度。（time-source 与 scheduler 的分工见 agent-assembly wireAutomation。）
  */
 
 import type { AutomationRule } from './types.js';
+import { CronExpression } from '../utils/cron.js';
 
 /** time 类规则里我们支持的调度配置子集 */
 interface IntervalCfg {
@@ -38,6 +38,9 @@ interface DailyCfg {
 }
 interface FixedTimeCfg {
   runAt: string; // ISO 8601
+}
+interface CronCfg {
+  expression: string; // 5-field cron
 }
 
 export interface TimeSourceDeps {
@@ -86,6 +89,16 @@ export function computeNextRun(
     const t = Date.parse(schedule.runAt);
     if (Number.isNaN(t)) return null;
     return t > from ? t : null;
+  }
+
+  // cron：5-field 标准表达式（字段 expression，与 scheduler CronConfig / UI 一致）
+  if (typeof schedule.expression === 'string' && schedule.expression.trim()) {
+    try {
+      const next = new CronExpression(schedule.expression).next(new Date(from));
+      return next ? next.getTime() : null;
+    } catch {
+      return null; // 非法表达式不触发（创建时应由校验拦下）
+    }
   }
 
   return null;
