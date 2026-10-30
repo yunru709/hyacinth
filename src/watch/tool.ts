@@ -123,6 +123,7 @@ function buildSpec(args: Record<string, unknown>): WatchSpec {
     'host',
     'port',
     'region',
+    'windowTitle',
     'allowPrivateHost',
   ]) {
     if (args[key] !== undefined) base[key] = args[key];

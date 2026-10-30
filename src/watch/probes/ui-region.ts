@@ -21,11 +21,23 @@ import type { Probe, ProbeInstance, ProbeSample, Region, UiRegionSpec } from '..
 /** 给定区域返回指纹（16 位十六进制）。region 为空表示整屏。 */
 export type RegionSampler = (region?: Region) => Promise<string>;
 
-let injectedSampler: RegionSampler | null = null;
+/**
+ * 给定窗口标题返回指纹（16 位十六进制）。
+ * 与 RegionSampler 同语义的 dHash，可直接算汉明距离。
+ */
+export type WindowSampler = (windowTitle: string) => Promise<string>;
 
-/** 注入采样器（上层接入 MCP / native 实现时用） */
+let injectedSampler: RegionSampler | null = null;
+let injectedWindowSampler: WindowSampler | null = null;
+
+/** 注入区域采样器（上层接入 MCP / native 实现时用） */
 export function setDefaultRegionSampler(sampler: RegionSampler | null): void {
   injectedSampler = sampler;
+}
+
+/** 注入窗口采样器（按窗口标题抓，不受遮挡/DPI/位置影响） */
+export function setDefaultWindowSampler(sampler: WindowSampler | null): void {
+  injectedWindowSampler = sampler;
 }
 
 async function resolveSampler(): Promise<RegionSampler> {
@@ -33,6 +45,13 @@ async function resolveSampler(): Promise<RegionSampler> {
   // 惰性加载兜底实现：只有真的用到 ui_region 时才把它拉进来
   const mod = await import('./region-sampler-ps.js');
   return mod.sampleRegionViaPowerShell;
+}
+
+async function resolveWindowSampler(): Promise<WindowSampler> {
+  if (injectedWindowSampler) return injectedWindowSampler;
+  // 惰性加载 WGC 实现：只有真按窗口监测时才把它（含 sharp）拉进来
+  const mod = await import('./region-sampler-wgc.js');
+  return mod.sampleWindowViaWgc;
 }
 
 /** 两个 64 位十六进制指纹的汉明距离（0..64） */
