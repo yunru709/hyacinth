@@ -248,6 +248,8 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | | `companion/` `world-engine/` `skills/` `mcp/` | 陪伴语音台词库；世界引擎；技能系统；MCP 桥接（stdio + SSE） |
 | | `local-model/` `generation/` `media/` `multimodal/` | 本地模型托管与下载；生成供应商层（图 / 视频 / 音频）；媒体库；图片管线 |
 | | `machine/` `schedule/` `dependency/` | Flow 状态机；定时调度；依赖分析 |
+| | `automation/` `watch/` `trigger/` | 自动化链路（time/probe/event 触发 → invoke/wake/gate/loop 动作，零 LLM 可执行）；状态监控（文件/HTTP/进程/端口/画面）；TriggerHub 事件总线 |
+| | `stt/` `tts/` | 语音识别（sherpa-onnx SenseVoice，可选）；语音合成（breeze / CosyVoice3，可选） |
 | **交互界面** | `channels/` | ChannelManager + TUI / HTTP 内置渠道 + feishu / clawbot 插件渠道 + 跨渠道分发 |
 | | `ui/` `ui-protocol/` `webui/` | TUI 组件；UI 契约层：统一 RPC + 事件（23 域）；WebUI 静态前端 |
 | **基础设施** | `hot-reload/` `lifecycle/` `runtime/` `logging/` `utils/` `shims/` | 15 Watcher 家族；受管进程状态；运行时配置中心；日志器；通用工具；类型兜底 |
