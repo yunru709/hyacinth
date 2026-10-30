@@ -301,3 +301,46 @@ describe('runRule：resolveDeep 模板解析边界（2026-10-30 回归）', () =
     expect(got.obj).toEqual({ k: '$b' });
   });
 });
+
+describe('runRule：loop 退出原因（R1 回归，2026-10-31）', () => {
+  it('times 跑满（< cap）→ ok:true', async () => {
+    const c = ctx({ invokeTool: vi.fn(async () => 'ok') });
+    const res = await runRule(
+      rule({ do: [{ sink: 'loop', times: 2, do: [{ sink: 'invoke', tool: 'x' }] }] }),
+      event,
+      c,
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it('times=10 + until 第 1 轮即满足 → ok:true（合法提前退出，不得误判为截断）', async () => {
+    const c = ctx({ invokeTool: vi.fn(async () => 'ok') });
+    const res = await runRule(
+      rule({
+        do: [
+          {
+            sink: 'loop',
+            times: 10,
+            until: { path: 'result', op: '!=', value: 'IMPOSSIBLE__' },
+            do: [{ sink: 'invoke', tool: 'x' }],
+          },
+        ],
+      }),
+      event,
+      c,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.steps[0].output).toContain('iterations=1');
+  });
+
+  it('times=5000 超过 cap=1000 且无条件退出 → ok:false，error 含「上限」', async () => {
+    const c = ctx({ invokeTool: vi.fn(async () => 'ok') });
+    const res = await runRule(
+      rule({ do: [{ sink: 'loop', times: 5000, do: [{ sink: 'invoke', tool: 'x' }] }] }),
+      event,
+      c,
+    );
+    expect(res.ok).toBe(false);
+    expect(res.steps[0].error).toContain('上限');
+  });
+});

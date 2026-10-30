@@ -254,6 +254,7 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
     const loopBody = action.do;
     let iterations = 0;
     let loopErr: string | undefined;
+    let exitedByCap = false; // 仅「跑满 cap 自然结束」为 true；times/until/while 主动退出为 false
     for (let i = 0; i < cap; i++) {
       const err = await runActions(loopBody, { ...exec, depth: exec.depth + 1 });
       iterations++;
@@ -265,11 +266,14 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
       if (action.times !== undefined && iterations >= action.times) break;
       if (action.until && evalAssertion(action.until, exec.scope)) break;
       if (action.while && !evalAssertion(action.while, exec.scope)) break;
+      // 走到这里说明本轮结束后无任何退出条件命中；若已是最后一轮 ⇒ cap 耗尽
+      if (i === cap - 1) exitedByCap = true;
     }
     if (loopErr) return { ...base(), ok: false, error: loopErr };
-    // 因 maxIterations 兜底而提前结束（times 未跑满）⇒ 诚实报失败，不静默当成功。
-    // 2026-10-31 审查发现：旧实现 times=5000 跑满 cap=1000 轮后仍 ok:true，且被 applyMaxRuns 计为成功。
-    if (action.times !== undefined && iterations < action.times) {
+    // 2026-10-31 修（R1 回归）：只有「因 cap 耗尽自然结束」且 times 明确 > cap（本该跑更多轮）
+    // 才判截断失败。times/until/while 的合法提前退出必须 ok:true —— types.ts 明确允许三者
+    // 「任一满足即退」。旧判定 `iterations < times` 会把 until 提前退出误判成失败并 abort 跳过后续动作。
+    if (exitedByCap && action.times !== undefined && action.times > cap) {
       return {
         ...base(),
         ok: false,
