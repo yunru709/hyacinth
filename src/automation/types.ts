@@ -224,8 +224,16 @@ export interface AutomationRule {
   enabled: boolean;
 
   when: WhenSpec;
-  /** 动作链：按数组顺序执行；gate 内部可嵌套 */
+  /** 动作链：按数组顺序执行；gate/loop 内部可嵌套 */
   do: Action[];
+
+  /**
+   * 最多执行次数：成功执行达到该次数后**自动停用**（enabled=false 并落盘）。
+   * 不填 = 不限次（默认）。执行计数见 runCount。
+   */
+  maxRuns?: number;
+  /** 已执行次数（引擎维护、随规则持久化；停用后保留历史值便于审计） */
+  runCount?: number;
 
   meta?: {
     description?: string;

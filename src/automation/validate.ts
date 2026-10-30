@@ -109,6 +109,25 @@ export function validateRule(raw: unknown, ctx: ValidationContext): ValidationRe
     }
   }
 
+  // ── maxRuns / runCount（可选，执行次数限制）──────────────
+  let maxRuns: number | undefined;
+  if (raw.maxRuns !== undefined) {
+    if (typeof raw.maxRuns !== 'number' || !Number.isInteger(raw.maxRuns) || raw.maxRuns < 1) {
+      errors.push('"maxRuns" 必须是 >=1 的整数');
+    } else {
+      maxRuns = raw.maxRuns;
+    }
+  }
+  // runCount 由引擎维护；重新加载（initAutomationsFromDisk）时必须保留，否则重启后计数丢失
+  let runCount: number | undefined;
+  if (raw.runCount !== undefined) {
+    if (typeof raw.runCount !== 'number' || !Number.isInteger(raw.runCount) || raw.runCount < 0) {
+      errors.push('"runCount" 必须是 >=0 的整数');
+    } else {
+      runCount = raw.runCount;
+    }
+  }
+
   if (errors.length > 0 || !when || actions.length === 0) {
     return { errors };
   }
@@ -120,6 +139,8 @@ export function validateRule(raw: unknown, ctx: ValidationContext): ValidationRe
     when,
     do: actions,
     ...(meta ? { meta } : {}),
+    ...(maxRuns !== undefined ? { maxRuns } : {}),
+    ...(runCount !== undefined ? { runCount } : {}),
   };
   return { rule, errors: [] };
 }

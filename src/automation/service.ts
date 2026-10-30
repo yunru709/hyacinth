@@ -29,7 +29,7 @@
 import type { RunnerContext } from './runner.js';
 import type { AutomationEvent, RuleRunOutcome } from './runtime.js';
 import { runMatchingRules } from './runtime.js';
-import { getCurrentAutomationRules } from './store.js';
+import { getCurrentAutomationRules, saveAutomationRules } from './store.js';
 
 /** 装配所需依赖 */
 export interface AutomationRuntimeDeps extends RunnerContext {
