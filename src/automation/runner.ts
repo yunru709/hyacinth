@@ -292,18 +292,35 @@ function pickPath(scope: RunScope, path: string): unknown {
   return cur;
 }
 
+/**
+ * 数值断言用的宽松取数：工具结果常是「带格式字符串」（如 bash 成功返回 "42\n[Exit code: 0, 15ms]"），
+ * 直接 Number() 得 NaN 会让 `result > 阈值` 永远 false（实测 T4a 因此误走 onFail）。
+ * 这里先 Number()，失败再从字符串提取第一个数字（"42\n[Exit code: 0, 15ms]" → 42）。
+ * 仅用于 <,<=,>,>= 数值断言；==/!= 仍走严格相等，不受影响。
+ */
+function toNumberLike(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const direct = Number(v);
+    if (!Number.isNaN(direct)) return direct;
+    const m = v.match(/-?\d+(?:\.\d+)?/);
+    if (m) return Number(m[0]);
+  }
+  return NaN;
+}
+
 function evalAssertion(a: Assertion, scope: RunScope): boolean {
   const actual = pickPath(scope, a.path);
   const expected = a.value;
   switch (a.op) {
     case '<':
-      return Number(actual) < Number(expected);
+      return toNumberLike(actual) < toNumberLike(expected);
     case '<=':
-      return Number(actual) <= Number(expected);
+      return toNumberLike(actual) <= toNumberLike(expected);
     case '>':
-      return Number(actual) > Number(expected);
+      return toNumberLike(actual) > toNumberLike(expected);
     case '>=':
-      return Number(actual) >= Number(expected);
+      return toNumberLike(actual) >= toNumberLike(expected);
     case '==':
       return actual === expected;
     case '!=':
