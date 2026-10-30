@@ -137,7 +137,7 @@ describe('validateRule：必须拒绝的情况', () => {
       }),
       ctx,
     );
-    expect(r.errors[0]).toContain('result." 或 "event.');
+    expect(r.errors[0]).toContain('"result"/"event"');
   });
 
   it('非法 safety action', () => {
