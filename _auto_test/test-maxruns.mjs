@@ -9,6 +9,9 @@ const backup = autoPath + '.testbak';
 const had = fs.existsSync(autoPath);
 if (had) fs.copyFileSync(autoPath, backup);
 
+// 值快照：dispatch 后立即拷字段，避免对象引用被后续 dispatch 改动
+const snap = () => { const r = getCurrentAutomationRules()[0]; return { runCount: r.runCount, enabled: r.enabled }; };
+
 let pass = true;
 try {
   setCurrentAutomationRules([{
@@ -21,10 +24,8 @@ try {
   setAutomationRuntime({ invokeTool: async () => { calls++; return 'ok'; }, wakeSession: async () => {}, armedWatchIds: new Map() });
 
   const ev = { eventName: 'x', source: 'test', name: 'x', at: Date.now() };
-  const o1 = await dispatchAutomationEvent(ev);
-  const s1 = getCurrentAutomationRules()[0];
-  const o2 = await dispatchAutomationEvent(ev);
-  const s2 = getCurrentAutomationRules()[0];
+  const o1 = await dispatchAutomationEvent(ev); const s1 = snap();
+  const o2 = await dispatchAutomationEvent(ev); const s2 = snap();
   const o3 = await dispatchAutomationEvent(ev);
 
   console.log(`dispatch1: outcomes=${o1.length} runCount=${s1.runCount} enabled=${s1.enabled} (expect 1/1/true)`);
@@ -35,7 +36,6 @@ try {
       && o2.length === 1 && s2.runCount === 2 && s2.enabled === false
       && o3.length === 0 && calls === 2;
 
-  // 磁盘持久化：runCount=2, enabled=false 应已落盘
   const disk = JSON.parse(fs.readFileSync(autoPath, 'utf8'));
   const d = disk.rules.find((r) => r.id === 't-maxruns');
   console.log(`disk runCount=${d && d.runCount} enabled=${d && d.enabled} (expect 2/false)`);
