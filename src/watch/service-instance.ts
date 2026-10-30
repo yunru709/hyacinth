@@ -10,7 +10,7 @@
  * 广播语义：监听者抛异常只影响自己，不影响其它监听者，更不影响采样循环。
  */
 
-import { getGlobalTriggerHub } from '../trigger/hub.js';
+import { ensureGlobalTriggerHub } from '../trigger/hub.js';
 // 路线 B（2026-10-29）：把监控事件派发到 tool-links 清单，实现"按断言自动执行工具"
 import { runToolLinksForEvent } from '../utils/tool-links.js';
 import { createDefaultProbeRegistry } from './probes/index.js';
