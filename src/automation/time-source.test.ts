@@ -45,8 +45,14 @@ describe('computeNextRun', () => {
     expect(computeNextRun({ runAt: '2020-01-01T00:00:00Z' }, T)).toBeNull();
   });
 
+  it('cron 支持（expression 字段，与 UI/scheduler 一致）', () => {
+    const next = computeNextRun({ expression: '0 3 * * *' }, T);
+    expect(next).not.toBeNull();
+    expect(next as number).toBeGreaterThan(T);
+  });
+
   it('不支持的配置 → null', () => {
-    expect(computeNextRun({ cron: '0 3 * * *' }, T)).toBeNull();
+    expect(computeNextRun({ foo: 'bar' }, T)).toBeNull();
     expect(computeNextRun({}, T)).toBeNull();
   });
 });
