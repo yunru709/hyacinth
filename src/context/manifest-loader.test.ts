@@ -124,9 +124,10 @@ describe('查询接口', () => {
   it('getSections 按 priority 排序返回；zone 不存在 → 空数组', () => {
     const loader = new ManifestLoader(tmpCwd());
     const sections = loader.getSections('zone5');
-    // 2026-09-19：Zone 5 增了第 8 条 —— 临时记事本（scratchpad, priority 7，
-    // 紧跟 timestamp(6) 之后；user_input 顺延到 8）。**期望随设计前进，显式改并写明原因** ✓
-    expect(sections.map((s) => s.priority)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // 2026-09-19：Zone 5 增第 8 条 —— 临时记事本（scratchpad, priority 7）。
+    // 2026-10-30：再增会话级记事本 session_scratchpad（priority 6.5，紧随 timestamp(6)；
+    // user_input 顺延到 7、末条到 8）。**期望随设计前进，显式改并写明原因** ✓
+    expect(sections.map((s) => s.priority)).toEqual([1, 2, 3, 4, 5, 6, 6.5, 7, 8]);
     expect(loader.getSections('nope')).toEqual([]);
   });
 

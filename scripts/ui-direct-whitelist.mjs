@@ -30,7 +30,9 @@ export const UI_DIRECT_ALLOWED = new Map([
   ['channels/builtin/http-webhook.ts', new Set(['context', 'gateway', 'local-model', 'prompts', 'runtime', 'setup'])],
   // stt/tts：进程级单例引擎服务（模型/识别器只初始化一次），与 companion 音色库同一注入模式
   ['channels/builtin/ui-protocol-session.ts', new Set(['companion', 'generation', 'hot-reload', 'stt', 'tts'])],
-  ['gateway/agent-assembly.ts', new Set(['agents', 'dependency', 'evolution', 'memory', 'orchestrator', 'provider', 'skills', 'supervisor', 'tools'])],
+  // 装配根（组合根）：automation/watch/schedule/trigger 是 2026-10-29~30 自动化改造引入的
+  // 业务核心，由本文件装配注入。属语义分类 1「装配/接线类，永不迁移」——本表是其豁免凭证。
+  ['gateway/agent-assembly.ts', new Set(['agents', 'automation', 'dependency', 'evolution', 'memory', 'orchestrator', 'provider', 'schedule', 'skills', 'supervisor', 'tools', 'trigger', 'watch'])],
   ['gateway/arch-assembly.ts', new Set(['context', 'supervisor'])],
   ['gateway/base-contributions.ts', new Set(['evolution', 'machine', 'rollback'])],
   ['gateway/boot.ts', new Set(['memory', 'provider', 'setup'])],

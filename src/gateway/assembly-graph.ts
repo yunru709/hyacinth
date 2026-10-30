@@ -99,7 +99,7 @@ export const ASSEMBLY_GRAPH: AssemblyEntry[] = [
   { id: 'backgroundRegistry', kind: 'instance', anchor: 'new BackgroundProcessRegistry', needs: '-', provides: '异步进程工具', phase: 'P-B', note: '' },
   { id: 'stores', kind: 'phase', anchor: 'new ConversationStore', needs: 'maxMessages/cwd', provides: 'conversation/event/stats/summary/memory', phase: 'P-B', note: '5 个存储实例' },
   { id: 'skillRegistry', kind: 'instance', anchor: 'new SkillRegistry()', needs: '-', provides: 'skills 注册面', phase: 'P-B', note: '' },
-  { id: 'heartbeatScheduler', kind: 'instance', anchor: 'new HeartbeatScheduler', needs: 'configCenter(schedule)', provides: '定时任务', phase: 'P-B', note: 'start 并行；handler 在 P-E 才 set' },
+  { id: 'heartbeatScheduler', kind: 'instance', anchor: 'acquireSharedScheduler', needs: 'configCenter(schedule)', provides: '定时任务', phase: 'P-B', note: '进程级共享单例（schedule/shared.ts，防 N 会话 N 倍触发）；start 并行；handler 在 P-E 才 set' },
   { id: 'mcpSystem', kind: 'instance', anchor: 'new MCPSystem', needs: 'cwd', provides: 'MCP server 生命周期/工具', phase: 'P-B', note: 'start 并行（慢）' },
   { id: 'pluginManager', kind: 'instance', anchor: 'new PluginManager', needs: 'toolRegistry, skillRegistry, contextComposer, mcpSystem', provides: '目录插件生命周期', phase: 'P-B', note: '' },
 
