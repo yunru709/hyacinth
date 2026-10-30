@@ -68,6 +68,7 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连�
 - **自修复**：文本循环检测（滑动窗口 Jaccard）、工具风暴抑制、会话垃圾清理。
 - **热重载**：15 个 Watcher（配置 / 插件 / 工具 / 技能 / MCP / 名单 / 记忆清单等），改文件即生效。
 - **定时调度**：`interval` / `cron` / `daily` / `fixed-time` / `random` 五种，支持跨渠道主动推送。
+- **自动化链路**：一条规则 = 触发（`time` / `probe` / `event`）+ 动作链（`invoke` / `wake` / `gate` / `loop`）——机械步骤零 LLM 执行，需要智能才 `wake` 唤醒会话；`probe` 支持文件 / HTTP / 进程 / 端口 / 画面监控。
 - **记忆**：会话存储族 + 跨会话项目记忆 + 5-Zone 分层上下文 + 四阶段压缩。
 
 ***
