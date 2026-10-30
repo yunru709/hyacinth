@@ -2,14 +2,14 @@
 
 > npm **v1.0.0** · MIT · TypeScript · Node.js **≥ 22.5**（ESM） · **109** 内置工具 · **19** Provider 类型 · [npm 包](https://www.npmjs.com/package/hyacinth-ai) · [GitHub 仓库](https://github.com/yunru709/hyacinth)
 
-**Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在 TUI / 飞书 / 微信 / WebUI 等渠道之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
+**Hyacinth（风信子）** 是一个跑在本地终端里的多 Provider AI Agent：读写文件、执行命令、搜索与交叉引用分析代码、调用 API、运行本地模型，并能在 TUI / 飞书 / 微信 / WebUI / 桌面端之间主动联系你。它记得你的项目，从内核到插件全链路可替换。
 
 ```
 用户输入 → 输入归一化 → 旁路注入 → 5-Zone 上下文组装 → LLM 调用 → 工具执行 → 回合收尾
              ↑________________________ 每一轮走完六个阶段 ________________________↓
 ```
 
-***
+---
 
 ## 目录
 
@@ -24,25 +24,25 @@
 - [参与贡献](#参与贡献)
 - [许可证](#许可证)
 
-***
+---
 
 ## 简介
 
 Hyacinth 是一个**可编程、可扩展的智能体框架**。它把 Agent 的每个环节——工具、上下文、Provider、渠道、记忆、规划、插件——都抽象成可替换的模块，通过**注册表装配**而非硬编码连接。三条贯穿全项目的设计主线：
 
 - **内核零业务**：`kernel/` 只提供管道 / 钩子总线 / 插件宿主 + 安全内核，业务能力全部以插件、贡献批、内核槽位的形式挂载。
-- **注册而非硬编码**：所有可替换点集中在 `supervisor/extension-registry.ts`，装配顺序由 `gateway/assembly-graph.ts` 声明并用 Kahn 拓扑排序执行；分层约束（内核零业务依赖、装配层禁止直接 new 业务类）由 `scripts/verify-layers.mjs` 机器校验。
+- **注册而非硬编码**：所有可替换点集中在 `supervisor/extension-registry.ts`，装配顺序由 `gateway/assembly-graph.ts` 声明并用 Kahn 拓扑排序执行；分层约束（内核零业务依赖、装配层禁止直接 `new` 业务类）由 `scripts/verify-layers.mjs` 机器校验。
 - **旁路 Agent 元认知层**：独立的意图识别 / 纠偏 / 记忆维护进程，异常隔离、工具白名单极窄，与主循环解耦。
 - **渠道即能力**：消息可在任意已连接渠道间借道分发（`send_channel_message`），不创建会话、不写入记录。
 
-***
+---
 
 ## 特性
 
 ### 工具系统（109 个内置工具，另可动态接入 MCP / 插件工具）
 
 - **基础文件 / 命令**：`read` / `write` / `edit` / `multi_edit` / `insert` / `bash` / `glob` / `grep` / `probe` / `diff_files` / `json_edit` / `archive` / `disk_usage` / `system_info` 等。
-- **代码智能**：`xref_build` / `xref_query` / `xref_graph` / `xref_list`（基于 tree-sitter 的跨文件交叉引用索引，支持 10 种查询：引用 / 定义 / 调用 / 依赖 / 影响面 / 数据流），`verify_change`（类型检查 + 定向测试一条龙），`plan_execute`（结构化预测断言的批量执行）。
+- **代码智能**：`xref_build` / `xref_query` / `xref_graph` / `xref_list`（基于 tree-sitter 的跨文件交叉引用索引，支持引用 / 定义 / 调用 / 依赖 / 影响面 / 数据流等查询），`verify_change`（类型检查 + 定向测试一条龙），`plan_execute`（结构化预测断言的批量执行）。
 - **子 Agent 编排**：`delegate_to_agent` / `spawn_sub_agent` / `create_sub_agent` / `destroy_sub_agent`，支持委托、并行（克隆多实例）、异步（后台句柄）三种协作模式。
 - **运行时控制**：`switch_provider` / `new_session` / `session_fork` / `create_bundle` / `add_task` / `rollback` / `flow_start` / `enter_goal` / `ask_user` / `interrupt` / `say` 等一整套自管理工具。
 - **可扩展**：MCP（`mcp__{server}__{tool}` 动态注册）、Python 桥接（`docx_read` / `xlsx_read`）、目录插件与 `world_*` 动态注册。
@@ -59,7 +59,20 @@ Hyacinth 是一个**可编程、可扩展的智能体框架**。它把 Agent 的
 
 ### 多渠道
 
-TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连接）与**微信 ClawBot**（http-polling）两个插件渠道——统一经 `ui-protocol`（UI 契约层，23 个业务域）连接。
+TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连接）与**微信 ClawBot**（http-polling）两个插件渠道，另有独立**桌面壳**（Windows）。统一经 `ui-protocol`（UI 契约层）连接，消息可跨渠道借道分发。
+
+### 自动化链路
+
+一条规则 = **触发** + **动作链**，运行时无需 LLM 即可按图执行，只有真正需要智能的步骤才唤醒模型。
+
+- **触发**：`time`（interval / daily / fixed-time / cron 定时）、`probe`（文件变化 / HTTP 状态 / 进程存活 / 端口开关 / 屏幕区域画面变化）、`event`（watch 事件、定时任务到期、主循环钩子）。
+- **动作**：`invoke`（零 LLM 直接调工具）、`wake`（唤醒会话跑一轮模型，reuse 续原会话 / new 干净临时会话）、`gate`（断言分支）、`loop`（迭代重试）。
+- 规则默认 `enabled:false`，需显式启用；支持 `maxRuns` 限次自动停用、失败可见日志。
+
+### 语音（可选）
+
+- **语音识别（STT）**：本地 sherpa-onnx SenseVoice，模型按需下载。
+- **语音合成（TTS）**：breeze / CosyVoice3，在线音色与本地推理两种后端。
 
 ### 可观测与自管理
 
@@ -68,18 +81,17 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连�
 - **自修复**：文本循环检测（滑动窗口 Jaccard）、工具风暴抑制、会话垃圾清理。
 - **热重载**：15 个 Watcher（配置 / 插件 / 工具 / 技能 / MCP / 名单 / 记忆清单等），改文件即生效。
 - **定时调度**：`interval` / `cron` / `daily` / `fixed-time` / `random` 五种，支持跨渠道主动推送。
-- **自动化链路**：一条规则 = 触发（`time` / `probe` / `event`）+ 动作链（`invoke` / `wake` / `gate` / `loop`）——机械步骤零 LLM 执行，需要智能才 `wake` 唤醒会话；`probe` 支持文件 / HTTP / 进程 / 端口 / 画面监控。
 - **记忆**：会话存储族 + 跨会话项目记忆 + 5-Zone 分层上下文 + 四阶段压缩。
 
-***
+---
 
 ## 安装
 
 ### 前置要求
 
 - **Node.js ≥ 22.5**（`node:sqlite` 为内置模块，低于此版本启动即报错）
-- **pnpm**（本仓库唯一受支持的包管理器）
-- **Windows 从源码构建**还需：**VS Build Tools**（“使用 C++ 的桌面开发”工作负载）+ **Python 3** —— `tree-sitter-*`、`sherpa-onnx-node`、`sharp` 安装时走 node-gyp 编译，缺工具链 `pnpm install` 会失败。
+- **pnpm**（推荐用 pnpm 安装依赖）
+- **Windows 从源码构建**还需：**VS Build Tools**（"使用 C++ 的桌面开发"工作负载）+ **Python 3** —— 部分原生依赖安装时走 node-gyp 编译。
 
 ### npm（全局）
 
@@ -87,11 +99,9 @@ TUI / CLI / HTTP API（Fastify）/ WebUI，以及**飞书**（WebSocket 长连�
 npm install -g hyacinth-ai
 ```
 
-要求 **Node.js ≥ 22.5**（知识库 / xref / db_query 依赖内置 `node:sqlite`）。
-
 ### 从源码构建
 
-> 本仓库**必须用 pnpm**：`npm install` 会执行 `tree-sitter-cli` 的构建脚本并失败。
+> 本仓库**建议用 pnpm**：`npm install` 会触发 `tree-sitter-cli` 的构建脚本并失败。
 
 ```bash
 git clone https://github.com/yunru709/hyacinth
@@ -100,7 +110,7 @@ pnpm install
 pnpm build
 ```
 
-***
+---
 
 ## 快速开始
 
@@ -108,6 +118,7 @@ pnpm build
 hyacinth setup     # 交互式配置向导（含 persona 初始化）
 hyacinth doctor    # 系统诊断（--fix 自动修复）
 hyacinth tui       # 全屏 TUI
+hyacinth webui     # 浏览器 WebUI（等价 serve --webui）
 hyacinth "帮我看看这个项目是做什么的"
 ```
 
@@ -126,16 +137,18 @@ DEEPSEEK_API_KEY=sk-...
 ### 本地模型（可选）
 
 ```bash
-pnpm run setup:llamacpp   # 一键编译 llama.cpp
+pnpm run setup:llamacpp   # 一键编译 / 拉取 llama.cpp
 hyacinth -p local --start-model --model "qwen2.5-coder:7b"
 hyacinth -p local         # 连接已运行的本地服务
 ```
+
+模型在运行期按需下载或配置（可用环境变量 `HYACINTH_MODELS_DIR` / 配置 `models.modelsDir` 指向已有目录）。
 
 ### 终端要求（Windows）
 
 TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microsoft/terminal)（Win11 自带）。旧控制台（cmd/conhost）下 emoji 和框线可能乱码，可用 `pnpm start:win` 缓解。macOS / Linux 各终端开箱即用。
 
-***
+---
 
 ## 使用
 
@@ -163,13 +176,13 @@ TUI 依赖 Unicode 渲染，推荐 [Windows Terminal](https://github.com/microso
 
 ### 配置体系
 
-- **全局 `~/.agent/`** — `config.json`（主配置）、`.env`（密钥）、`providers.json`（厂商）、`model-channels.json`（模型通道）、`tool-bundles.json`（工具包）、`agents.json`（子 Agent）、`mcp.json`、`plugins.config.json`、`extension-registry.json`（扩展名单）、`context-manifest.json`（上下文分层清单）、`models.json`（本地模型目录），以及 `modes/`、`prompts/`、`skills/`、`tools/`、`plugins/`、`sessions/`、`media/`、`knowledge/` 等。
+- **全局 `~/.agent/`** — `config.json`（主配置）、`.env`（密钥）、`providers.json`（厂商）、`model-channels.json`（模型通道）、`tool-bundles.json`（工具包）、`agents.json`（子 Agent）、`mcp.json`、`plugins.config.json`、`extension-registry.json`（扩展名单）、`context-manifest.json`（上下文分层清单）、`models.json`（本地模型目录），以及 `modes/`、`prompts/`、`skills/`、`tools/`、`sessions/`、`media/`、`knowledge/` 等。
 - **项目 `<cwd>/.agent/`** — 仅**数据面**走项目级：`modes/`（同名覆盖全局）、`specs/`（Flow 规格）、`backups/`。**配置本身不设项目级**——`ConfigManager` 只读 `~/.agent/config.json`。
 - **项目根 `commands.json`** — 斜杠命令，模型可经 write/edit 修改并热重载。
 
 配置一律走**运行时配置中心**（`update_config` / `reset_config`），手改 `config.json` 会被内存快照覆盖。
 
-***
+---
 
 ## 架构
 
@@ -184,7 +197,7 @@ src/index.ts
             │    ├─ boot()                  # 配置加载 + 会话恢复三分支
             │    ├─ 贡献批依序装配            # base → infra → channel → context-chain → orchestrator → core
             │    │                           # → 插件管理 → arch 替换(provider/router/agent) → service/slot
-            │    │                           # 替换 → 插件 → loop 依赖工具 → runtime → source 替换（最晚）
+            │    │                           # → 替换 → 插件 → loop 依赖工具 → runtime → source 替换（最晚）
             │    └─ new AgentLoop(...)       # provider:main 替换必须在 Loop 构造前完成
             └─ Guardian 守护（默认启用）      # 退出码 42=重启 43=更新 44=插件热更新兜底
 ```
@@ -215,21 +228,27 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | **2 Manifest** | （默认关闭） | 供需要独立缓存断点的 Provider |
 | **3 History** | project_context（`.agent.md` / `AGENTS.md`）/ history_summary / history | 对话历史 |
 | **4 Context** | kb_context（知识库检索结果） | 可关闭省 token |
-| **5 Live** | flow / channel_context / timestamp / user_input / orchestrator_hint | 每轮变化 |
+| **5 Live** | flow / channel_context / 会话工具 / 旁路注入 / 记事本 / timestamp / user_input | 每轮变化 |
+
+### 触发与自动化
+
+- **TriggerHub** 是一条进程内事件总线：watch（状态监控）与 schedule（定时任务）是它的生产者，automation 规则订阅并派发到自己的动作链。
+- **watch** 是"万能监控"工具：`file` / `http` / `process` / `port` / `ui_region` 各一个探针实现，注册进 `ProbeRegistry`，加新类型=加文件+一行注册。`ui_region` 支持按窗口标题抓画面（Windows Graphics Capture），不受遮挡影响。
+- **automation** 只认窄接口端口（WatchArmer / WakePort / ConditionTaskRunner），由装配层注入，因此不认识 watch / schedule 的具体实现。
 
 ### 监督与替换：架构注册表
 
-`supervisor/extension-registry.ts` 维护 **47 个可替换点**（`REPLACEABLE_POINTS`）：6 个内核 pipeline 槽位、22 个 service、`provider:main`、2 个 router、10 个 context source，以及 `adapter:*` / `channel:*` / `tool:*` / `skill:*` / `agent:*` / `plugin:*` 六个动态族。
+`supervisor/extension-registry.ts` 维护全部可替换点（`REPLACEABLE_POINTS`）：内核 pipeline 槽位、service、`provider:main`、router、context source，以及 `adapter:*` / `channel:*` / `tool:*` / `skill:*` / `agent:*` / `plugin:*` 等动态族。
 
 裁决链：**用户配置 > 插件 priority > 插件 ID > 内置基线**。替换在 `gateway/arch-assembly.ts` 应用（动态 import + 形状校验 + 记录生效/失败），名单文件 `~/.agent/extension-registry.json` 支持 serve 运行中热生效。
 
 > 完整的逐文件拆解见 [docs/architecture.md](docs/architecture.md)。
 
-***
+---
 
 ## 项目结构
 
-`src/` 下 **44 个模块目录**按域分组：
+`src/` 下 **49 个模块目录**按域分组：
 
 | 域 | 模块 | 职责 |
 | --- | --- | --- |
@@ -237,22 +256,24 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 | | `supervisor/` | 架构监督：assembly-registry 出厂图、extension-registry 名单裁决、guardian 守护、重启协议、优雅关闭 |
 | | `kernel/` | 内核三件套（pipeline / hook-bus / plugin-host）+ `security/` 安全内核 |
 | | `update/` `diagnostics/` `setup/` `env/` | 自更新；doctor 诊断 + 自动修复；首启向导（含 persona 初始化）；环境采集 |
-| **内核执行链** | `orchestrator/` | AgentLoop 主循环 + 6 阶段 stages/ + TurnState + planner + plan-store |
+| **内核执行链** | `orchestrator/` | AgentLoop 主循环 + 6 阶段 stages/ + TurnState + planner + plan-store + 旁路 Agent 基座 |
 | | `provider/` | 19 种 Provider 适配、路由、弹性链、模型目录 |
 | | `context/` | 5-Zone、manifest、composer、compressor、router、cache-strategy、tokenizer |
 | | `tools/` | 内置工具 + 运行时控制工具族 + 注册表 / 执行器 / 沙箱 / 结果缓冲 + `xref/` `plan-execute/` `python-bridge/` |
 | | `registry/` `parser/` `prompts/` | GenericRegistry 基座 + Tool/Skill/Agent 三注册表；流式事件输出路由；提示词模板库 |
+| **触发与自动化** | `automation/` | 自动化链路（规则校验 / 时间源 / 执行器 / 端口） |
+| | `watch/` | 状态监控（5 种探针 + 采样服务 + 冷却 / 首帧语义） |
+| | `trigger/` | TriggerHub 进程内事件总线 |
+| | `schedule/` `machine/` `dependency/` | 定时调度；Flow 状态机；依赖分析 |
 | **记忆与进化** | `memory/` `knowledge/` `evolution/` | 会话存储族 + 跨会话记忆 + 摘要；知识库（FTS5 + 结构化库 + watcher）；GitManager + AutoGit + bundle/tag 备份 |
 | | `rollback/` `repair/` | 逐回合回滚账本；死循环检测 / 风暴抑制 / 垃圾清理 |
 | **能力域（插件化）** | `plugins/` `plugin-sdk/` | 插件运行时（loader / manager / adapter + 内核插件）；插件契约面（自包含零内部 import） |
 | | `bypass/` `agents/` | 旁路 Agent 基座（BypassManager + ContextOrchestrator）；子 Agent 定义 / 注册 / delegate |
 | | `companion/` `world-engine/` `skills/` `mcp/` | 陪伴语音台词库；世界引擎；技能系统；MCP 桥接（stdio + SSE） |
 | | `local-model/` `generation/` `media/` `multimodal/` | 本地模型托管与下载；生成供应商层（图 / 视频 / 音频）；媒体库；图片管线 |
-| | `machine/` `schedule/` `dependency/` | Flow 状态机；定时调度；依赖分析 |
-| | `automation/` `watch/` `trigger/` | 自动化链路（time/probe/event 触发 → invoke/wake/gate/loop 动作，零 LLM 可执行）；状态监控（文件/HTTP/进程/端口/画面）；TriggerHub 事件总线 |
 | | `stt/` `tts/` | 语音识别（sherpa-onnx SenseVoice，可选）；语音合成（breeze / CosyVoice3，可选） |
 | **交互界面** | `channels/` | ChannelManager + TUI / HTTP 内置渠道 + feishu / clawbot 插件渠道 + 跨渠道分发 |
-| | `ui/` `ui-protocol/` `webui/` | TUI 组件；UI 契约层：统一 RPC + 事件（23 域）；WebUI 静态前端 |
+| | `ui/` `ui-protocol/` `webui/` | TUI 组件；UI 契约层：统一 RPC + 事件；WebUI 静态前端 |
 | **基础设施** | `hot-reload/` `lifecycle/` `runtime/` `logging/` `utils/` `shims/` | 15 Watcher 家族；受管进程状态；运行时配置中心；日志器；通用工具；类型兜底 |
 
 ### 关键数量（读一次源码即知，勿记快照）
@@ -262,7 +283,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 - 模块目录 **49**，可替换点 **48**，热重载 Watcher **15**
 - 测试文件 **285**（`vitest run` 输出为准）
 
-***
+---
 
 ## 文档
 
@@ -277,15 +298,13 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 
 ## 参与贡献
 
-> 本仓库**必须用 pnpm**（`packageManager: pnpm@10.25.0`）——`npm install` 会触发 `tree-sitter-cli` 的构建脚本并失败。
-
 ```bash
 git clone https://github.com/yunru709/hyacinth
 cd hyacinth
 pnpm install
-pnpm build          # tsc + clean-stale + copy-prompts + copy-webui + clean-tests + clean-maps + copy-grammars
+pnpm build          # tsc + 复制 prompts / webui / grammars + 清理
 pnpm dev            # tsc --watch 模式
-pnpm test           # vitest（231 个测试套件）
+pnpm test           # vitest
 pnpm smoke          # 真实装配链冒烟（stub provider）
 pnpm verify:layers  # 分层约束机器校验
 ```
