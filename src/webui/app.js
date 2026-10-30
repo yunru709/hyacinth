@@ -2131,6 +2131,16 @@
     if (a.sink === 'gate') return { icon: '⑂', primary: 'gate', detail: '条件分支' };
     if (a.sink === 'append') return { icon: '📝', primary: 'append', detail: a.to || '' };
     if (a.sink === 'safety') return { icon: '🛡', primary: 'safety', detail: '' };
+    if (a.sink === 'loop') {
+      // 循环节点：主名显示终止条件，detail 显示循环体动作摘要（→ 让"内部循环"可读）
+      const body = Array.isArray(a.do) ? a.do : [];
+      const term = a.times !== undefined ? '×' + a.times
+        : a.until ? 'until'
+        : a.while ? 'while'
+        : '循环';
+      const inner = body.map((b) => b.sink === 'invoke' ? (b.tool || 'invoke') : (b.sink || '?')).join(', ');
+      return { icon: '🔁', primary: 'loop ' + term, detail: body.length + '步: ' + inner };
+    }
     return { icon: '•', primary: a.sink || '?', detail: '' };
   }
 
