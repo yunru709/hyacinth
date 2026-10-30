@@ -4293,11 +4293,19 @@
         appendMsg('error', '语音输入不可用：' + why);
         return;
       }
-      sttState.chunks = [];
-      sttState.recorder = new MediaRecorder(sttState.stream);
-      sttState.recorder.ondataavailable = (e) => { if (e.data.size) sttState.chunks.push(e.data); };
-      sttState.recorder.onstop = () => { void sttFinishRecording(); };
-      sttState.recorder.start();
+      try {
+        sttState.chunks = [];
+        sttState.recorder = new MediaRecorder(sttState.stream);
+        sttState.recorder.ondataavailable = (e) => { if (e.data.size) sttState.chunks.push(e.data); };
+        sttState.recorder.onstop = () => { void sttFinishRecording(); };
+        sttState.recorder.start();
+      } catch (err) {
+        // MediaRecorder 构造/启动失败：必须释放已取得的麦克风流，否则设备持续占用（2026-10-31）
+        sttCleanup();
+        sttBtnSet('idle');
+        appendMsg('error', '录音启动失败：' + ((err && err.message) || err));
+        return;
+      }
       sttState.startedAt = Date.now();
       sttBtnSet('recording');
       sttState.timer = setInterval(() => {
