@@ -223,6 +223,12 @@ export const UI_METHOD = {
   SCHEDULE_REMOVE: 'schedule.remove',
   SCHEDULE_TOGGLE: 'schedule.toggle',
   SCHEDULE_RUNTIME: 'schedule.runtime',
+  // automation（自动化链路：触发 + 动作链）
+  AUTOMATION_LIST: 'automation.list',
+  AUTOMATION_VALIDATE: 'automation.validate',
+  AUTOMATION_CREATE: 'automation.create',
+  AUTOMATION_REMOVE: 'automation.remove',
+  AUTOMATION_TOGGLE: 'automation.toggle',
   // kb
   KB_GET: 'kb.get',
   KB_SET_ENABLED: 'kb.setEnabled',
