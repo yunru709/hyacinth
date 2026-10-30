@@ -267,6 +267,15 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
       if (action.while && !evalAssertion(action.while, exec.scope)) break;
     }
     if (loopErr) return { ...base(), ok: false, error: loopErr };
+    // 因 maxIterations 兜底而提前结束（times 未跑满）⇒ 诚实报失败，不静默当成功。
+    // 2026-10-31 审查发现：旧实现 times=5000 跑满 cap=1000 轮后仍 ok:true，且被 applyMaxRuns 计为成功。
+    if (action.times !== undefined && iterations < action.times) {
+      return {
+        ...base(),
+        ok: false,
+        error: `loop 达上限 ${cap} 轮未跑满 times=${action.times}（调大 maxIterations）`,
+      };
+    }
     return { ...base(), ok: true, output: `iterations=${iterations}` };
   }
 

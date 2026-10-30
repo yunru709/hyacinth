@@ -1,47 +1,32 @@
 /**
- * AutomationRule 的时间源（2026-10-30）
+ * AutomationRule 的时间源（2026-10-30，2026-10-31 修热更缓存失效）
  *
- * ────────────────────────────────────────────────────────────────────────────
- * 补上 when.kind === 'time' 的执行能力
- * ────────────────────────────────────────────────────────────────────────────
  * 前置两步已完成：probe 类靠 watcher、event 类靠 TriggerHub 被动接收。
  * time 类需要**主动计时** —— 本模块就是一个轻量 tick：
- *   每 intervalMs 扫一遍所有 time 规则，到点的就派发 `afterTime:<ruleId>` 事件。
+ *   每 tickMs 扫一遍所有 time 规则，到点的就派发 `afterTime:<ruleId>` 事件。
  *
  * ────────────────────────────────────────────────────────────────────────────
- * 为什么不复用 Scheduler
+ * 为什么用「schedule 内容签名」缓存，而不是单纯的 ruleId → nextRun
  * ────────────────────────────────────────────────────────────────────────────
- * Scheduler 的存储是 tasks.json（带 runCount/nextRunAt/periodStartAt 等运行时状态
- * 与完整的执行记录），语义是"任务"；AutomationRule 是"链路定义"，纯配置。
- * 硬塞进去会让"改配置"和"改统计"互相冲掉，且 diff 不可读。
+ * 2026-10-31 缺陷（审查确认）：旧实现 `nextRun: Map<ruleId, number|null>` 见 id 已存在
+ * 就返回旧值。于是：
+ *   · fixed-time 规则**触发过一次后** nextRun 被写成 null（已过），此后即使改 runAt
+ *     也因 has(id) 命中旧值 ⇒ **永不触发，只能重启进程**解封；
+ *   · daily/interval 改配置后仍按旧配置算一次，之后才自愈。
+ * 修法：缓存里同时存 schedule 的**内容签名**，配置变了（sig 变）就重算，
+ * 无需外部显式 invalidate —— 热更两路（都只重挂 probe watcher、不碰时间源）也能自动生效。
  *
- * 支持 interval / daily / fixed-time / **cron** 四种确定性调度。
- *   · cron 复用 utils/cron 的 CronExpression（纯工具，不是 schedule 业务核心）——
- *     字段名 `expression`，与 UI（app.js 建规则）和 scheduler 的 CronConfig 保持一致。
- *     2026-10-30 修复：此前 UI 能建 cron 规则但本模块不认 expression ⇒ 永不触发。
- *   · random 仍不支持（有状态：periodStartAt/pendingSlots 需持久化跨重启续用），
- *     需要 random 时继续用 scheduler 任务表达。
- *
- * ⚠️ 架构终态是"所有触发源统一为 Source"，届时本模块退化成 TimeSource 的一个实现，
- *    被 Hub 统一调度。（time-source 与 scheduler 的分工见 agent-assembly wireAutomation。）
+ * 支持 interval / daily / fixed-time / cron；random 仍不支持（有状态，用 scheduler 任务）。
  */
 
 import type { AutomationRule } from './types.js';
 import { CronExpression } from '../utils/cron.js';
 
 /** time 类规则里我们支持的调度配置子集 */
-interface IntervalCfg {
-  intervalMs: number;
-}
-interface DailyCfg {
-  time: string; // "HH:mm"
-}
-interface FixedTimeCfg {
-  runAt: string; // ISO 8601
-}
-interface CronCfg {
-  expression: string; // 5-field cron
-}
+interface IntervalCfg { intervalMs: number }
+interface DailyCfg { time: string } // "HH:mm"
+interface FixedTimeCfg { runAt: string } // ISO 8601
+interface CronCfg { expression: string } // 5-field cron
 
 export interface TimeSourceDeps {
   /** 现取当前规则（热更后自动跟上） */
@@ -108,18 +93,39 @@ export function createTimeSource(deps: TimeSourceDeps): TimeSource {
   const tickMs = deps.tickMs ?? 5000;
   const now = deps.now ?? Date.now;
 
-  /** ruleId → 下次触发时刻（内存态；重启后按当前时间重算） */
-  const nextRun = new Map<string, number | null>();
+  /** ruleId → { at: 下次触发时刻; sig: 该时刻对应的 schedule 内容签名 } */
+  const nextRun = new Map<string, { at: number | null; sig: string }>();
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
-  /** 初始化某规则的下次触发时刻（仅在首次见到该规则时算） */
+  function sigOf(schedule: Record<string, unknown>): string {
+    try {
+      return JSON.stringify(schedule);
+    } catch {
+      return String(schedule);
+    }
+  }
+
+  /** 按规则当前配置计算 { at, sig } */
+  function computeFor(rule: AutomationRule, from: number): { at: number | null; sig: string } {
+    if (rule.when.kind !== 'time') return { at: null, sig: '' };
+    const schedule = rule.when.schedule;
+    return { at: computeNextRun(schedule, from), sig: sigOf(schedule) };
+  }
+
+  /**
+   * 取该规则的下次触发时刻。
+   * · 首次见到 ⇒ 计算并缓存；
+   * · 缓存存在且 **schedule 内容签名未变** ⇒ 沿用（不重算，避免每次 tick 抖动）；
+   * · 签名变了（热更改了配置）⇒ **重算并覆盖**（这是本次修复的核心）。
+   */
   function ensureSchedule(rule: AutomationRule, from: number): number | null {
-    if (nextRun.has(rule.id)) return nextRun.get(rule.id) ?? null;
-    const n =
-      rule.when.kind === 'time' ? computeNextRun(rule.when.schedule, from) : null;
-    nextRun.set(rule.id, n);
-    return n;
+    const cur = nextRun.get(rule.id);
+    const curSig = rule.when.kind === 'time' ? sigOf(rule.when.schedule) : '';
+    if (cur && cur.sig === curSig) return cur.at;
+    const next = computeFor(rule, from);
+    nextRun.set(rule.id, next);
+    return next.at;
   }
 
   async function tick(): Promise<void> {
@@ -134,7 +140,7 @@ export function createTimeSource(deps: TimeSourceDeps): TimeSource {
     for (const rule of rules) {
       if (!rule.enabled || rule.when.kind !== 'time') continue;
 
-      let due = ensureSchedule(rule, t);
+      const due = ensureSchedule(rule, t);
       if (due === null) continue;
       if (due > t) continue;
 
@@ -147,8 +153,7 @@ export function createTimeSource(deps: TimeSourceDeps): TimeSource {
       }
 
       // 重算下一次：fixed-time 只触发一次（computeNextRun 返回 null）
-      due = computeNextRun(rule.when.schedule, t);
-      nextRun.set(rule.id, due);
+      nextRun.set(rule.id, computeFor(rule, t));
     }
   }
 
@@ -178,7 +183,7 @@ export function createTimeSource(deps: TimeSourceDeps): TimeSource {
       nextRun.clear();
     },
     snapshot() {
-      return [...nextRun.entries()].map(([ruleId, nextRunAt]) => ({ ruleId, nextRunAt }));
+      return [...nextRun.entries()].map(([ruleId, v]) => ({ ruleId, nextRunAt: v.at }));
     },
   };
 }

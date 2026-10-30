@@ -161,11 +161,45 @@ function validateWhen(raw: unknown, ctx: ValidationContext, errors: string[]): W
   }
 
   if (kind === 'time') {
-    if (!isObj(raw.schedule)) {
+    const s = raw.schedule;
+    if (!isObj(s)) {
       errors.push('"when.schedule" 必须是对象（时间类配置）');
       return undefined;
     }
-    return { kind: 'time', schedule: raw.schedule };
+    // ── 内容校验（2026-10-31 审查修复）──
+    // 原来只查"是对象"，坏配置要么静默死掉、要么在错误时刻触发：
+    // 例 "25:70" 曾过 /^\d{1,2}:\d{2}$/ ⇒ setHours(25,70) 被 JS Date 静默归一化到后天凌晨。
+    // 这里对存在的字段逐项校验；至少要有一种可识别的调度配置。
+    let any = false;
+    if (typeof s.intervalMs !== 'undefined') {
+      any = true;
+      if (typeof s.intervalMs !== 'number' || !(s.intervalMs > 0)) {
+        errors.push('"when.schedule.intervalMs" 必须是正数');
+      }
+    }
+    if (typeof s.time !== 'undefined') {
+      any = true;
+      if (typeof s.time !== 'string' || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(s.time)) {
+        errors.push('"when.schedule.time" 必须是 HH:mm（00:00–23:59）');
+      }
+    }
+    if (typeof s.runAt !== 'undefined') {
+      any = true;
+      if (typeof s.runAt !== 'string' || Number.isNaN(Date.parse(s.runAt))) {
+        errors.push('"when.schedule.runAt" 必须是合法 ISO 时间');
+      }
+    }
+    if (typeof s.expression !== 'undefined') {
+      any = true;
+      if (typeof s.expression !== 'string' || s.expression.trim().split(/\s+/).length !== 5) {
+        errors.push('"when.schedule.expression" 必须是 5 字段 cron（分 时 日 月 周）');
+      }
+    }
+    if (!any) {
+      errors.push('"when.schedule" 需含 intervalMs / time / runAt / expression 之一');
+    }
+    if (errors.length > 0) return undefined;
+    return { kind: 'time', schedule: s };
   }
 
   if (kind === 'probe') {

@@ -32,3 +32,11 @@ export function createDefaultProbeRegistry(): ProbeRegistry {
   registry.register(uiRegionProbe);
   return registry;
 }
+
+/**
+ * 默认 probe kind 列表（单一真源，供校验层派生）。
+ *
+ * 2026-10-31：此前 `knownProbeKinds` 在 agent-assembly 与 ui-protocol/domains/automation.ts
+ * 各硬编码一份，加第 6 种 probe 时两处会静默拒绝模型建的规则。改为统一从这里派生。
+ */
+export const DEFAULT_PROBE_KINDS: readonly string[] = createDefaultProbeRegistry().kinds();
