@@ -770,6 +770,7 @@ export async function createAgentAssembly(
     setAutomationRuntime({
       invokeTool: currentInvokeTool,
       wakeSession: currentWakeSession,
+      appendText: currentAppendText,
       armedWatchIds: armed.armed,
     });
 
