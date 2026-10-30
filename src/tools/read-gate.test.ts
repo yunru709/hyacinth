@@ -93,21 +93,20 @@ describe('write 门控：拒绝即给料', () => {
 });
 
 describe('edit 门控：交出锚点上下文', () => {
-  it('未读 + old_string 唯一命中 → 给出命中行与上下文，下一轮成功', async () => {
+  it('未读 + old_string 唯一命中 → 命中即自证，直接放行（2026-10-28 有意放宽）', async () => {
+    // 2026-10-28 孑遗反馈「edit 门禁回合成本高」⇒ 字符串模式且 old_string 在当前内容里确实
+    // 命中时跳过门控（edit.ts L116-125）：锚定替换 + content 是本轮刚读的新鲜内容，命中即证明
+    // 「你看到的就是你要改的」。安全底线仍在：未命中/行模式（无锚点）仍走门控（见下方用例）。
     const body = ['aaa', 'target-line', 'ccc', 'ddd'].join('\n') + '\n';
     const p = tmpFile('e1.txt', body);
     const tool = new EditTool();
 
     const first = await tool.execute({ file_path: p, old_string: 'target-line', new_string: 'TARGET' });
-    expect(first).toContain('not read yet');
-    expect(first).toContain('occurs at line 2');
-    expect(first).toContain('CONTEXT');
-    expect(first).toContain('target-line');                  // 上下文已交出
-    expect(fs.readFileSync(p, 'utf8')).toContain('target-line'); // 未改动
-
-    const second = await tool.execute({ file_path: p, old_string: 'target-line', new_string: 'TARGET' });
-    expect(second).not.toContain('not read yet');
-    expect(fs.readFileSync(p, 'utf8')).toContain('TARGET');
+    expect(first).not.toContain('not read yet');              // 命中即放行
+    const lines = fs.readFileSync(p, 'utf8').split('\n');
+    expect(lines[1]).toBe('TARGET');                          // 只改匹配行
+    expect(lines[0]).toBe('aaa');                             // 其余行原封不动
+    expect(lines[3]).toBe('ddd');
   });
 
   it('未读 + old_string **未命中** → 明确指出"你的假设是错的"（比报错有用）', async () => {
@@ -118,11 +117,14 @@ describe('edit 门控：交出锚点上下文', () => {
     expect(r).toContain('real-content');                     // 顺手给出真实开头
   });
 
-  it('未读 + old_string 多处命中 → 提示不唯一并给出行号列表', async () => {
+  it('未读 + old_string 多处命中 → 拒绝且一字不改（不唯一 = 不动手）', async () => {
+    // 命中即跳过门控后，多处命中交给 executeStringReplace 的「Multiple matches」保护：
+    // 抛错且文件一字不动 —— 2026-10-28 放宽并未削弱这条安全底线。
     const p = tmpFile('e3.txt', 'dup\ndup\ndup\n');
-    const r = await new EditTool().execute({ file_path: p, old_string: 'dup', new_string: 'z' });
-    expect(r).toContain('NOT unique');
-    expect(r).toContain('1, 2, 3');
+    await expect(
+      new EditTool().execute({ file_path: p, old_string: 'dup', new_string: 'z' }),
+    ).rejects.toThrow(/Multiple matches/);
+    expect(fs.readFileSync(p, 'utf8')).toBe('dup\ndup\ndup\n'); // 未改动
   });
 
   it('⚠️ 行模式（无锚点）与 write 同等严格：只给片段后仍必须被拒', async () => {
