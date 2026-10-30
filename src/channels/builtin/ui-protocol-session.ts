@@ -846,7 +846,7 @@ export class UiProtocolSession {
           // 工具名列表用于 validate 的 ValidationContext（knownToolNames）。
           // 惰性取：UI 请求时 loop 已初始化，registry 就绪。
           getToolNames: () =>
-            (this.backend.getToolRegistry?.()?.getToolDefinitions?.() ?? []).map(
+            (this.backend.getToolRegistry?.()?.getAll?.() ?? []).map(
               (t: { name: string }) => t.name,
             ),
         }));
