@@ -61,29 +61,6 @@ export async function dispatchAutomationEvent(
   event: AutomationEvent,
 ): Promise<RuleRunOutcome[]> {
   const d = deps;
-
-  // ── 临时诊断（2026-10-30，定位 probe 事件为何不执行；查完删除）──
-  try {
-    const os = await import('node:os');
-    const pathMod = await import('node:path');
-    const fsMod = await import('node:fs');
-    const armed = d?.armedWatchIds;
-    const armedStr = armed ? `${armed.size}[${[...armed.keys()].join('|')}]` : 'NULL';
-    const rs = getCurrentAutomationRules();
-    let matchedStr = 'no-deps';
-    if (d) {
-      const { matchRules } = await import('./runtime.js');
-      const m = matchRules(rs, event, d.armedWatchIds);
-      matchedStr = `${m.length}[${m.map((x) => x.id).join('|')}]`;
-    }
-    fsMod.appendFileSync(
-      pathMod.join(os.homedir(), '.agent', 'work', 'dispatch-diag.log'),
-      `${new Date().toISOString()} ev=${event.eventName} deps=${d ? 'Y' : 'NULL'} armed=${armedStr} rules=${rs.length} matched=${matchedStr}\n`,
-    );
-  } catch {
-    /* 诊断失败不影响主流程 */
-  }
-
   if (!d) return [];
 
   const rules = getCurrentAutomationRules();
@@ -91,21 +68,6 @@ export async function dispatchAutomationEvent(
 
   try {
     const outcomes = await runMatchingRules(rules, event, d, d.armedWatchIds);
-    // 临时诊断（2026-10-30，查完删）：记录 runRule 结果 ok/error，定位 invoke 失败原因
-    try {
-      const os2 = await import('node:os');
-      const p2 = await import('node:path');
-      const f2 = await import('node:fs');
-      const line = outcomes
-        .map((o) => `rule=${o.ruleId} ok=${o.result.ok} err=${(o.result as { error?: string }).error ?? ''}`)
-        .join(' || ');
-      f2.appendFileSync(
-        p2.join(os2.homedir(), '.agent', 'work', 'dispatch-outcome.log'),
-        `${new Date().toISOString()} ${event.eventName} => ${line || '(no outcomes)'}\n`,
-      );
-    } catch {
-      /* 诊断失败不影响主流程 */
-    }
     applyMaxRuns(outcomes);
     return outcomes;
   } catch (err) {
