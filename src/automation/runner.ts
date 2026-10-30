@@ -299,7 +299,11 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
  */
 function resolveDeep(value: unknown, scope: RunScope): unknown {
   if (typeof value === 'string') {
-    if (!value.startsWith('$')) return value;
+    // 仅解析 $event.* / $result.* 模板引用；**其余以 $ 开头的字符串原样返回**。
+    // 2026-10-30 实测根因：invoke 的 bash 命令以 PowerShell 变量开头（如 `$f='...'; ...`）
+    // 时，旧的 `if (!value.startsWith('$')) return value` 会把整串当模板路径去 pickPath，
+    // 解析成 undefined ⇒ bash 报「缺少 command 参数」，导致所有这类规则静默不执行。
+    if (!/^\$(event|result)(\.|$)/.test(value)) return value;
     return pickPath(scope, value.slice(1));
   }
   if (Array.isArray(value)) return value.map((v) => resolveDeep(v, scope));
