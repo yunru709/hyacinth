@@ -118,7 +118,7 @@ export function sizeWarnings(dbBytes: number, cacheBytes: number): string[] {
  * 项目根合法性校验（2026-09-19，事故驱动）。
  *
  * 事故：插件把**裸 cwd** 当项目根（`xref-plugin.ts` 的 `init(services.cwd)`），而 agent
- * 可能从用户主目录启动。实测后果 —— `root=C:\Users\74689` → `projectKey=C-Users-74689`
+ * 可能从用户主目录启动。实测后果 —— `root=C:\Users\<user>` → `projectKey=C-Users-<user>`
  * → 产出 **1.18GB** 的索引（把 AppData、浏览器缓存全解析了一遍），且无人察觉，
  * 直到一次空间盘点才发现。
  *

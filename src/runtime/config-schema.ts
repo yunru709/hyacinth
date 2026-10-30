@@ -219,7 +219,7 @@ export interface FullConfig {
   models: {
     /**
      * 模型存储根目录（STT/TTS 等下载模型共用）。空 = ~/.agent/models。
-     * 换盘场景：设为如 D:\hyacinth-models；环境变量 HYACINTH_MODELS_DIR 优先于此。
+     * 换盘场景：设为如 C:\hyacinth-models；环境变量 HYACINTH_MODELS_DIR 优先于此。
      * 只影响之后的下载与查找，已下载文件不自动迁移。
      */
     root: string;

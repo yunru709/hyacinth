@@ -42,7 +42,7 @@ export function deriveMarkers(configs: MCPConfig[]): string[] {
     for (const token of tokens) {
       const t = token.trim();
       if (!t || t.startsWith('-')) continue;
-      // 路径取basename（F:\Python3.13\python.exe → python.exe）
+      // 路径取basename（C:\Python313\python.exe → python.exe）
       const base = t.split(/[\\/]/).pop() ?? t;
       const word = base.toLowerCase();
       if (generic.has(word) || generic.has(word.replace(/\.(exe|cmd|bat)$/i, ''))) continue;

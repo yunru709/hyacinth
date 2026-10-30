@@ -223,7 +223,7 @@ export interface XrefCacheReport {
     /**
      * 可疑根 = root_dir 落在禁区（主目录本身 / 主目录的祖先）。
      * 与"孤儿"不同：目录**存在**，但把它当项目根会把无关目录整片扫进来 ——
-     * 这正是 2026-09-19 那起 1.18GB 事故的特征（root = C:\Users\74689）。
+     * 这正是 2026-09-19 那起 1.18GB 事故的特征（root = C:\Users\<user>）。
      */
     suspect_root: boolean;
   }[];

@@ -4895,12 +4895,12 @@
       '  </div>' +
       '  <div class="settings-row"><div class="settings-label">CLI 路径</div>' +
       '    <div style="display:flex;gap:8px;flex:0 0 340px">' +
-      '      <input id="tts-breeze-clipath" class="settings-input" data-dom-id="tts-breeze-clipath" placeholder="F:\\TTSEngines\\audio-cpp\\audiocpp_cli.exe" style="flex:1 1 auto;min-width:0" />' +
+      '      <input id="tts-breeze-clipath" class="settings-input" data-dom-id="tts-breeze-clipath" placeholder="C:\\TTSEngines\\audio-cpp\\audiocpp_cli.exe" style="flex:1 1 auto;min-width:0" />' +
       '      <span id="tts-breeze-cli-flag" data-dom-id="tts-breeze-cli-flag" class="settings-desc" style="flex:0 0 auto">—</span>' +
       '    </div></div>' +
       '  <div class="settings-row"><div class="settings-label">GGUF 模型路径</div>' +
       '    <div style="display:flex;gap:8px;flex:0 0 340px">' +
-      '      <input id="tts-breeze-modelpath" class="settings-input" data-dom-id="tts-breeze-modelpath" placeholder="F:\\TTSEngines\\dl\\breeze-tts-2-q8_0.gguf" style="flex:1 1 auto;min-width:0" />' +
+      '      <input id="tts-breeze-modelpath" class="settings-input" data-dom-id="tts-breeze-modelpath" placeholder="C:\\TTSEngines\\dl\\breeze-tts-2-q8_0.gguf" style="flex:1 1 auto;min-width:0" />' +
       '      <span id="tts-breeze-model-flag" data-dom-id="tts-breeze-model-flag" class="settings-desc" style="flex:0 0 auto">—</span>' +
       '    </div></div>' +
       '  <div class="settings-row"><div class="settings-label">后端 / 设备 / 端口</div>' +

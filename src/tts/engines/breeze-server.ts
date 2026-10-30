@@ -114,7 +114,7 @@ async function healthy(port: number): Promise<boolean> {
 
 function resolveExePath(o: BreezeServerOptions): string {
   if (o.exePath) return o.exePath;
-  // server 与 cli 同目录（实测 F:\TTSEngines\audio-cpp 下三个 exe 并排）
+  // server 与 cli 同目录（实测 <TTS安装目录>\audio-cpp 下三个 exe 并排）
   if (o.cliPath) return path.join(path.dirname(o.cliPath), 'audiocpp_server.exe');
   return path.join(path.dirname(o.modelPath), 'audiocpp_server.exe');
 }

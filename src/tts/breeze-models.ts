@@ -29,7 +29,7 @@
  *   执行器写过一版又撤了，原因是**两个真冲突尚未解决**，硬接上去会害人：
  *    1. **路径语义对立**：本模块的 `ggufReady()` / `runtimeReady()` 只认
  *       `BREEZE_DIR()`（`<models.root>/tts/breeze-tts-2/`），而运行时实际用的是配置里的
- *       `voice.tts.breeze.cliPath` / `modelPath`（用户机器上指向 `F:\TTSEngines\...`）。
+ *       `voice.tts.breeze.cliPath` / `modelPath`（用户机器上指向 `<TTS安装目录>\...`）。
  *       两者可以完全不同 ⇒ 在「已装好但在别的盘」的机器上，执行器会判定「全缺」
  *       并重新下 5GB。必须先统一「受管安装位」与「实际运行位」的语义，
  *       或者让执行器尊重已配置的 cliPath/modelPath，才谈得上接 UI。

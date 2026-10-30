@@ -29,7 +29,7 @@
 
   用法：
     powershell -ExecutionPolicy Bypass -File scripts/desktop-package.ps1
-    powershell -ExecutionPolicy Bypass -File scripts/desktop-package.ps1 -OutDir F:\Hyacinth
+    powershell -ExecutionPolicy Bypass -File scripts/desktop-package.ps1 -OutDir C:\Hyacinth
     powershell -ExecutionPolicy Bypass -File scripts/desktop-package.ps1 -SkipDeps   # 只更新壳 + dist
 #>
 param(
@@ -52,7 +52,7 @@ if (-not (Test-Path (Join-Path $repo 'dist\index.js'))) {
 if (-not (Test-Path $proj)) { throw "找不到桌面壳工程: $proj" }
 
 $nodeExe = $null
-foreach ($c in @("$env:ProgramFiles\nodejs\node.exe", 'F:\Node\node.exe')) {
+foreach ($c in @("$env:ProgramFiles\nodejs\node.exe")) {
   if (Test-Path $c) { $nodeExe = $c; break }
 }
 if (-not $nodeExe) {

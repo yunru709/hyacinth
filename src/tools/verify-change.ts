@@ -18,7 +18,7 @@ import type { Tool } from './interface.js';
  *     从根上消灭参数注入（Windows 上 npx.cmd/tsc.cmd 那套绕不过 shell，故直接调 js 入口）。
  *   - 传入的路径参数走**危险元字符黑名单**（不是白名单 —— 白名单会误杀 `C:\...` 绝对路径）。
  *   - **项目根绝不能盲用 `process.cwd()`**：agent 的 cwd 常常是"包含多个项目的工作区目录"
- *     （实测就是 `C:\Users\74689\Desktop`），而项目在 `Desktop\Agent\hyacinth`。盲用会导致
+ *     （实测就是 `C:\Users\<user>\Desktop`），而项目在 `Desktop\Agent\hyacinth`。盲用会导致
  *     相对 paths 解析到不存在的位置、tsc 在 0.1 秒内就失败、关联测试全判 NO TARGETS ——
  *     即**"看起来跑了，其实什么都没验"**（首次 live 实跑即撞上）。现按
  *     `paths 向上找标记 → cwd 是否项目 → git toplevel` 的顺序推断，都不成立就明确报错，**不猜**。
@@ -91,7 +91,7 @@ export class VerifyChangeTool implements Tool {
 
     // ── 0. 定项目根 ──
     // **绝不能盲用 process.cwd()**：agent 的 cwd 往往是"包含多个项目的工作区目录"
-    // （本会话就是 C:\Users\74689\Desktop），而项目在 Desktop\Agent\hyacinth。
+    // （本会话就是 C:\Users\<user>\Desktop），而项目在 Desktop\Agent\hyacinth。
     // 盲用会导致：相对 paths 解析到不存在的位置、tsc 在 0.1s 内就失败、
     // 关联测试全判为 NO TARGETS —— 即"看起来跑了，其实什么都没验"。
     const resolved = await resolveRoot(explicitRoot, pathsArg, timeoutMs);
