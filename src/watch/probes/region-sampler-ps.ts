@@ -41,9 +41,7 @@ if ($r) {
   $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
   $x = $vs.X; $y = $vs.Y; $w = $vs.Width; $h = $vs.Height
 }
-// ⚠️ 坑：本脚本是 TS 模板字符串，PowerShell 的「美元+花括号」插值会被 JS 抢先解析
-// （曾导致 "ReferenceError: w is not defined"，且只在模块加载时暴露）。
-// 因此脚本里禁止出现该形式，需要拼接时用 'a' + $var。
+# 坑：本脚本是 TS 模板字符串，PS 的「$+花括号」插值会被 JS 抢先解析（曾致 ReferenceError），故脚本内禁止该形式，拼接用 'a' + $var。
 if ($w -le 0 -or $h -le 0) { throw ('invalid capture size ' + $w + 'x' + $h) }
 $bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)
