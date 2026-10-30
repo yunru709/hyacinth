@@ -636,8 +636,46 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
     };
     const currentWakeSession = createWakeSession(() => getSchedulerSessionPort());
 
+    // ── automation 工具的构造与注册：**每个会话的 toolRegistry 都要注册** ──
+    // 背景（2026-10-30 真机实测踩坑，装配竞态）：
+    //   toolRegistry 是**每会话新建**的（createBuiltInTools），但 automationWired 是
+    //   **进程级全局**。旧实现只在首次装配注册 automation_* 工具，后续会话直接 return
+    //   ⇒ 只有首个装配的会话看得到 create/list/validate，其余会话「watcher 已 arm 但工具
+    //   看不到」——表现为工具时有时无（Unknown tool）。修复：把「工具注册」从「一次性 init」
+    //   里解耦，每次会话装配都重注册到**当前** registry（overwriteGuard 对同源 core 放行，幂等）。
+    const makeCtx = (): ValidationContext => ({
+      knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
+      knownToolNames: toolRegistry.getToolDefinitions().map((t) => t.name),
+      knownHandlers: buildCoreToolLinkRegistry().ids(),
+      knownEvents: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
+    });
+    const asArmer = () => getWatchService() as unknown as Parameters<typeof armProbeRules>[1];
+    const reloadAndArm = (): { count: number; errors: string[] } => {
+      const prev = getAutomationRuntime()?.armedWatchIds;
+      if (prev && prev.size > 0) disarmWatchIds(asArmer(), prev.values());
+      const reApplied = initAutomationsFromDisk(makeCtx());
+      const reArmed = armProbeRules(getCurrentAutomationRules(), asArmer());
+      // 从**当前** runtime 取，只覆盖 armedWatchIds —— 不能用闭包捕获首次装配时的引用，
+      // 否则热更后 invokeTool 又指回第一个会话的 loop（say 再次无声）。
+      const cur = getAutomationRuntime();
+      if (cur) setAutomationRuntime({ ...cur, armedWatchIds: reArmed.armed });
+      return { count: reApplied.count, errors: [...reApplied.errors, ...reArmed.errors] };
+    };
+    const registerAutomationTools = (): void => {
+      for (const tool of createAutomationTools({
+        getContext: () => makeCtx(),
+        getRules: () => getCurrentAutomationRules(),
+        save: (rules) => {
+          saveAutomationRules(rules);
+          return reloadAndArm();
+        },
+      })) {
+        toolRegistry.register(tool);
+      }
+    };
+
     if (automationWired) {
-      // 后续会话：只把指向刷到当前会话（sink / watcher / 工具都已经在首次注册过）
+      // 后续会话：刷新 runtime 指向，并**把工具注册到当前会话的 registry**（关键修复）
       const cur = getAutomationRuntime();
       if (cur) {
         setAutomationRuntime({
@@ -646,18 +684,10 @@ const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
           wakeSession: currentWakeSession,
         });
       }
+      registerAutomationTools();
       return;
     }
     automationWired = true;
-
-    // 校验需要的"外部知识"：做成**工厂**而非快照 —— 热更后（新工具注册/新 probe kind）
-    // 下一次校验能立即跟上，不必重启。
-    const makeCtx = (): ValidationContext => ({
-      knownProbeKinds: ['file', 'http', 'process', 'port', 'ui_region'],
-      knownToolNames: toolRegistry.getToolDefinitions().map((t) => t.name),
-      knownHandlers: buildCoreToolLinkRegistry().ids(),
-      knownEvents: [...LOOP_HOOK_NAMES, ...TOOL_LINK_EXTRA_EVENT_SOURCES],
-    });
 
     const applied = initAutomationsFromDisk(makeCtx());
     if (applied.errors.length > 0) {
