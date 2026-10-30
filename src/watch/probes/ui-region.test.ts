@@ -102,3 +102,61 @@ describe('ui_region probe', () => {
     expect(() => uiRegionProbe.create({ kind: 'ui_region', threshold: 99 })).toThrow(/0\.\.64/);
   });
 });
+
+describe('ui_region probe — windowTitle（WGC 窗口采样）', () => {
+  it('windowTitle 给了就走窗口采样器，且忽略 region', async () => {
+    let seenTitle: string | undefined;
+    setDefaultWindowSampler(async (title) => {
+      seenTitle = title;
+      return 'abcdef0123456789';
+    });
+    setDefaultRegionSampler(async () => {
+      throw new Error('region sampler should NOT be called when windowTitle set');
+    });
+
+    const probe = uiRegionProbe.create({
+      kind: 'ui_region',
+      windowTitle: 'My Window',
+      region: [0, 0, 10, 10],
+    });
+    const sample = await probe.sample();
+    expect(sample.ok).toBe(true);
+    expect(sample.value).toBe('abcdef0123456789');
+    expect(seenTitle).toBe('My Window');
+  });
+
+  it('没有 windowTitle 时仍走区域采样器', async () => {
+    let regionCalled = false;
+    setDefaultRegionSampler(async () => {
+      regionCalled = true;
+      return '0000000000000000';
+    });
+    setDefaultWindowSampler(async () => {
+      throw new Error('window sampler should NOT be called without windowTitle');
+    });
+    const probe = uiRegionProbe.create({ kind: 'ui_region', region: [0, 0, 100, 100] });
+    const sample = await probe.sample();
+    expect(sample.ok).toBe(true);
+    expect(regionCalled).toBe(true);
+  });
+
+  it('窗口采样器抛错 → ok=false，不抛给调用方', async () => {
+    setDefaultWindowSampler(async () => {
+      throw new Error('wgc exploded');
+    });
+    const probe = uiRegionProbe.create({ kind: 'ui_region', windowTitle: 'Whatever' });
+    const sample = await probe.sample();
+    expect(sample.ok).toBe(false);
+    expect(sample.error).toMatch(/wgc exploded/);
+  });
+
+  it('windowTitle 变化时 distance 按汉明距离', async () => {
+    let value = '0000000000000000';
+    setDefaultWindowSampler(async () => value);
+    const probe = uiRegionProbe.create({ kind: 'ui_region', windowTitle: 'W' });
+    const first = await probe.sample();
+    value = '00000000000000ff';
+    const second = await probe.sample();
+    expect(probe.distance!(first, second)).toBe(8);
+  });
+});
