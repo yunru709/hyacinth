@@ -132,6 +132,8 @@ export const UI_DOMAIN = {
   COMPANION: 'companion',
   /** 调度任务（对应 TUI /schedule）：list / add / addDaily / remove / toggle / runtime */
   SCHEDULE: 'schedule',
+  /** 自动化链路（时间/条件/事件 → 动作链）：list / validate / create / remove / toggle */
+  AUTOMATION: 'automation',
   /** 文件预览（WebUI「预览」栏数据面）：meta / list / read / browse / setRoot / rawUrl */
   PREVIEW: 'preview',
   /** 语音转文字（本地 SenseVoice）：状态/模型下载/转写（16kHz WAV base64） */

@@ -67,15 +67,14 @@ describe('scratchpad（Zone 5 临时记事本）', () => {
     expect(readScratchpadForContext()).toBe('');
   });
 
-  it('② 有内容 ⇒ 自带位置说明，且**不含固定的绝对路径**（用户要求）', () => {
+  it('② 有内容 ⇒ 原样注入正文，且**不含固定的绝对路径**（用户要求）', () => {
     reset();
     fs.writeFileSync(scratchpadPath(), '- 待办：验证 Zone 5 位置\n', 'utf-8');
     const text = readScratchpadForContext();
-    expect(text).toContain('# scratchpad');
     expect(text).toContain('待办：验证 Zone 5 位置');
-    // 位置用运行期推导的 ~/… 形式
-    expect(text).toContain(homeRelative(scratchpadPath()));
-    // ★ 用户要求：不要固定的绝对路径 —— 这条守卫就是它
+    // 2026-10-30 契约变更：readScratchpadForContext 直接返回文件正文、不二次加标题
+    // （标题由 seed 首行自带，见 scratchpad.ts L79-82 与用例④）。此处只守用户要求：
+    // 注入文本里不得出现写死的绝对路径。
     expect(text, '注入文本里出现了写死的绝对路径').not.toContain(path.resolve(scratchpadPath()));
   });
 
