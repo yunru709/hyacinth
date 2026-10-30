@@ -72,3 +72,12 @@ arch-report/
 *.wav
 .github/
 .gitattributes
+
+# 2026-10-31 发布卫生：开发期目录，绝不进包（实测 npm pack 会把它们带上：tools-dev 135 / shots 36 / _auto_test 8 / plugins 5 / model-repo 3 个文件）
+# 前导 `/` 锚定根级，避免误伤 dist/plugins 等编译产物
+/tools-dev/
+/shots/
+/_auto_test/
+/plugins/
+/model-repo/
+/.tmp-icon/

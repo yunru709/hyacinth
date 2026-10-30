@@ -24,7 +24,11 @@
     "gen:webui-css": "node scripts/gen-webui-css.cjs",
     "gen:highlight": "node scripts/gen-highlight.cjs",
     "gen:icons": "node scripts/gen-icons.cjs",
-    "gen:desktop-icon": "node scripts/gen-desktop-icon.cjs"
+    "gen:desktop-icon": "node scripts/gen-desktop-icon.cjs",
+    "prepublishOnly": "pnpm build && pnpm test && pnpm verify:layers"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   },
   "keywords": [
     "ai",
