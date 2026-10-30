@@ -75,6 +75,12 @@ class UiRegionProbeInstance implements ProbeInstance {
   async sample(signal?: AbortSignal): Promise<ProbeSample> {
     if (signal?.aborted) return { ok: false, value: '', error: 'aborted' };
     try {
+      // windowTitle 优先：走 WGC 抓窗口（不受遮挡/DPI/位置影响）
+      if (this.spec.windowTitle !== undefined && this.spec.windowTitle !== '') {
+        const windowSampler = await resolveWindowSampler();
+        const value = await windowSampler(this.spec.windowTitle);
+        return { ok: true, value };
+      }
       const sampler = await resolveSampler();
       const value = await sampler(this.spec.region);
       return { ok: true, value };
