@@ -193,6 +193,12 @@ async function runOne(action: Action, exec: ExecCtx): Promise<StepResult> {
       const args = resolveDeep(action.args ?? {}, exec.scope) as Record<string, unknown>;
       const output = await exec.ctx.invokeTool(action.tool, args);
       exec.scope.result = output; // 供后续 $result.* 引用
+      // ⚠️ 工具可能「不抛异常但返回错误字符串」（workspace fence 拦写工作区外、write 的 read-gate
+      //   拒绝、参数缺失等）。不识别就会当 ok:true 静默吞掉（T6 实测踩坑：围栏拦了但 runner 判成功）。
+      //   约定：工具错误串以 "Error:"（英文）或 "错误："（中文）开头；正常成功输出不这样开头。
+      if (typeof output === 'string' && /^(Error:|错误：)/.test(output)) {
+        return { ...base(), target: action.tool, ok: false, error: output, output };
+      }
       return { ...base(), target: action.tool, ok: true, output };
     } catch (err) {
       return { ...base(), target: action.tool, ok: false, error: (err as Error).message };
