@@ -2104,7 +2104,10 @@
     if (w.kind === 'time') {
       const s = w.schedule || {};
       let d = '';
-      if (s.intervalMs) d = '每 ' + Math.round(Number(s.intervalMs) / 60000) + ' 分钟';
+      if (s.intervalMs) {
+        const ms = Number(s.intervalMs);
+        d = ms < 60000 ? '每 ' + Math.round(ms / 1000) + ' 秒' : '每 ' + Math.round(ms / 60000) + ' 分钟';
+      }
       else if (s.time) d = '每天 ' + s.time;
       else if (s.expression) d = 'cron ' + s.expression;
       else if (s.runAt) d = '单次 ' + String(s.runAt);
