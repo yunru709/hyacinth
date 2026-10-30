@@ -326,7 +326,14 @@ export async function createAgentAssembly(
   // 额外可写根：agent 自维护区（与 memory.md 同目录的 persona 目录；Zone 5 临时记事本也在此）
   // —— 目录由 scratchpadPath() 推导（不写死字符串 ✓），且只放行这一个目录 ✓
   // 会话级记事本在 <sessionDir>/scratchpad.md ⇒ 把 sessionDir 也放行（否则 edit 写不进会话记事本）
-const extraWritableRoots = [path.dirname(scratchpadPath()), sessionDir];
+  // agent 工作区 ~/.agent/work 也放行（2026-10-30）：automation 的 invoke 写类动作常在此跑临时脚本/落产物；
+  //   它是 agent 自己的目录（freecad/scripts/测试产物都在此），非用户敏感区。写真正的外部路径仍被围栏拦，
+  //   且 runner 现在会识别围栏返回的错误串、明确报 ok:false（不再静默假成功，见 automation/runner.ts）。
+  const extraWritableRoots = [
+    path.dirname(scratchpadPath()),
+    sessionDir,
+    path.join(os.homedir(), '.agent', 'work'),
+  ];
   // ── 权限统一（2026-10-13）：越界写入 = 「可确认」而非「不可能」──
   // 同一个 Set 交给两边：围栏读（决定放行）、loop 权限层写（用户点 yes/always 后记录）。
   // 缺了任何一边 ⇒ 要么越界永远写不进去，要么确认后仍被拒（静默不一致）。
