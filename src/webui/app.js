@@ -219,9 +219,9 @@
   // ════════════════════════════════════════════════════════════
   // SPA hash 路由
   // ════════════════════════════════════════════════════════════
-  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'tasks', 'plugins', 'skills', 'companion'];
+  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'plugins', 'skills', 'companion'];
   // data-view → data-nav-item 映射（导航里 model 对应 models）
-  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', tasks: 'tasks', plugins: 'plugins', skills: 'skills' };
+  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins', skills: 'skills' };
 
   function currentView() {
     // embed 本页 = 并行会话标签的一格：只承担一条会话，忽略 hash（父页 hash 不该泄漏进来）
