@@ -2584,15 +2584,13 @@
     // 子标签切换：自动化规则 / 定时任务（定时任务=自动化的一种形式，同页呈现）
     const tabRules = $('#auto-tab-rules');
     const tabTasks = $('#auto-tab-tasks');
-    const rulesForm = $('#auto-rules-form');
+    const rulesView = $('#auto-rules-view');
     const tasksView = $('#auto-tasks-view');
-    const autoList = $('#automation-list');
     const activeTabCls = ['bg-background', 'text-foreground', 'border', 'border-b-0', 'border-border'];
     const inactiveTabCls = ['text-muted-foreground'];
     const switchAutoTab = (which) => {
       const isTasks = which === 'tasks';
-      if (rulesForm) rulesForm.hidden = isTasks;
-      if (autoList) autoList.hidden = isTasks;
+      if (rulesView) rulesView.hidden = isTasks;
       if (tasksView) tasksView.hidden = !isTasks;
       for (const b of [tabRules, tabTasks]) {
         if (!b) continue;
