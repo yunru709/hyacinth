@@ -643,6 +643,19 @@ export async function createAgentAssembly(
     };
     const currentWakeSession = createWakeSession(() => getSchedulerSessionPort());
 
+    // append 动作的实现（2026-10-31 接通：此前 appendText 从未注入 ⇒ append sink 恒失败并中断后续动作）。
+    // 语义：按 handler id 找 core tool-links 处理器执行，把触发事件的 payload 作为其输入。
+    // 仅在「监听工具事件」（如 afterToolExecute:write）时 payload 才带工具入参；其他事件下
+    // handler 自己 fail-safe（多数返回空串），不会误伤。
+    const currentAppendText = async (
+      handlerId: string,
+      event: { payload?: unknown },
+    ): Promise<string> => {
+      const handler = buildCoreToolLinkRegistry().get(handlerId);
+      if (!handler) throw new Error(`[automation] append handler 不存在: ${handlerId}`);
+      return await handler.run({ payload: event.payload } as never);
+    };
+
     // ── automation 工具的构造与注册：**每个会话的 toolRegistry 都要注册** ──
     // 背景（2026-10-30 真机实测踩坑，装配竞态）：
     //   toolRegistry 是**每会话新建**的（createBuiltInTools），但 automationWired 是
