@@ -2581,6 +2581,30 @@
     const refresh = $('#automation-refresh-btn');
     if (refresh) refresh.onclick = () => { loadSchedule(); };
 
+    // 子标签切换：自动化规则 / 定时任务（定时任务=自动化的一种形式，同页呈现）
+    const tabRules = $('#auto-tab-rules');
+    const tabTasks = $('#auto-tab-tasks');
+    const rulesForm = $('#auto-rules-form');
+    const tasksView = $('#auto-tasks-view');
+    const autoList = $('#automation-list');
+    const activeTabCls = ['bg-background', 'text-foreground', 'border', 'border-b-0', 'border-border'];
+    const inactiveTabCls = ['text-muted-foreground'];
+    const switchAutoTab = (which) => {
+      const isTasks = which === 'tasks';
+      if (rulesForm) rulesForm.hidden = isTasks;
+      if (autoList) autoList.hidden = isTasks;
+      if (tasksView) tasksView.hidden = !isTasks;
+      for (const b of [tabRules, tabTasks]) {
+        if (!b) continue;
+        const active = (b === tabTasks) === isTasks;
+        activeTabCls.forEach((c) => b.classList.toggle(c, active));
+        inactiveTabCls.forEach((c) => b.classList.toggle(c, !active));
+      }
+      if (isTasks) loadTasks();
+    };
+    if (tabRules) tabRules.onclick = () => switchAutoTab('rules');
+    if (tabTasks) tabTasks.onclick = () => switchAutoTab('tasks');
+
     const hint = (msg, ok) => {
       const h = $('#automation-hint');
       if (!h) return;
