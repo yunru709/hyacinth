@@ -259,7 +259,7 @@ turn 结束后：簇归类消费 → 历史回填 → 图片回收
 
 - 内置工具 **109**（+ MCP / 插件动态工具）
 - Provider 类型 **19**
-- 模块目录 **49**，可替换点 **48**，热重载 Watcher **15**（装配条目与 ui-protocol 契约域数随源码演进，见 `gateway/assembly-graph.ts` / `ui-protocol/types.ts`）
+- 模块目录 **49**，可替换点 **48**，热重载 Watcher **15**
 - 测试文件 **285**（`vitest run` 输出为准）
 
 ***
