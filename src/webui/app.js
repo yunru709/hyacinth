@@ -2098,46 +2098,69 @@
   /** 删除采用"两段点击"确认 —— 刻意不用 window.confirm ✗（无头探针遇原生对话框会卡 ✓） */
   let schedulePendingDelete = null;
 
-  // 触发摘要：把 when 翻成人话
-  function whenLabel(w) {
-    if (!w) return '—';
+  // 起点 = 触发(when) 的节点描述
+  function whenParts(w) {
+    if (!w) return { icon: '?', primary: '未知', detail: '' };
     if (w.kind === 'time') {
       const s = w.schedule || {};
-      if (s.intervalMs) return '⏰ 每 ' + Math.round(Number(s.intervalMs) / 60000) + ' 分钟';
-      if (s.time) return '⏰ 每天 ' + s.time;
-      if (s.expression) return '⏰ cron ' + s.expression;
-      return '⏰ ' + JSON.stringify(s);
+      let d = '';
+      if (s.intervalMs) d = '每 ' + Math.round(Number(s.intervalMs) / 60000) + ' 分钟';
+      else if (s.time) d = '每天 ' + s.time;
+      else if (s.expression) d = 'cron ' + s.expression;
+      else if (s.runAt) d = '单次 ' + String(s.runAt);
+      else d = JSON.stringify(s);
+      return { icon: '⏰', primary: '定时', detail: d };
     }
     if (w.kind === 'probe') {
       const kindMap = { file: '文件', http: '接口', process: '进程', port: '端口', ui_region: '画面' };
       const k = kindMap[w.probe && w.probe.kind] || (w.probe && w.probe.kind) || '条件';
       const sp = (w.probe && w.probe.spec) || {};
       const detail = sp.path || sp.url || sp.name || (sp.port ? ':' + sp.port : '') || '';
-      return '👁 ' + k + (detail ? ' ' + detail : '') + (sp.expect ? ' →' + sp.expect : '');
+      const exp = sp.expect ? '→' + sp.expect : '';
+      return { icon: '👁', primary: k, detail: (detail + (exp ? ' ' + exp : '')).trim() };
     }
-    if (w.kind === 'event') return '⚡ ' + w.event;
-    return w.kind || '—';
+    if (w.kind === 'event') return { icon: '⚡', primary: '事件', detail: w.event || '' };
+    return { icon: '?', primary: w.kind || '未知', detail: '' };
   }
 
-  // 动作链摘要：invoke/wake/gate/append 逐个翻成人话
-  function doLabel(doList) {
-    if (!Array.isArray(doList) || !doList.length) return '—';
-    return doList.map((a) => {
-      if (a.sink === 'invoke') return 'invoke ' + (a.tool || '?');
-      if (a.sink === 'wake') return 'wake.' + ((a.where && a.where.policy) || '?');
-      if (a.sink === 'gate') return 'gate 分支';
-      return a.sink || '?';
-    }).join(' → ');
+  // 过程 = 单个动作(do[i]) 的节点描述
+  function actionParts(a) {
+    if (!a) return { icon: '?', primary: '动作', detail: '' };
+    if (a.sink === 'invoke') return { icon: '⚙', primary: 'invoke', detail: a.tool || '?' };
+    if (a.sink === 'wake') return { icon: '💬', primary: 'wake', detail: (a.where && a.where.policy) || '?' };
+    if (a.sink === 'gate') return { icon: '⑂', primary: 'gate', detail: '条件分支' };
+    if (a.sink === 'append') return { icon: '📝', primary: 'append', detail: a.to || '' };
+    if (a.sink === 'safety') return { icon: '🛡', primary: 'safety', detail: '' };
+    return { icon: '•', primary: a.sink || '?', detail: '' };
+  }
+
+  // 一个节点模块：kind = start(起点) | mid(过程) | end(终点)
+  function chainNode(kind, parts) {
+    const styleMap = {
+      start: { bc: 'var(--hyacinth-primary)', bg: 'var(--primary-100, rgba(99,102,241,0.10))', label: '起点' },
+      mid: { bc: 'var(--hyacinth-border)', bg: 'var(--hyacinth-muted)', label: '过程' },
+      end: { bc: 'var(--state-success)', bg: 'rgba(34,197,94,0.10)', label: '终点' },
+    };
+    const st = styleMap[kind] || styleMap.mid;
+    const box = el('div', 'inline-flex flex-col gap-0.5 px-3 py-2 rounded-lg border text-xs min-w-[104px] max-w-[230px] shrink-0');
+    box.style.borderColor = st.bc;
+    box.style.backgroundColor = st.bg;
+    box.appendChild(el('div', 'text-[9px] uppercase tracking-widest text-muted-foreground leading-none', st.label));
+    box.appendChild(el('div', 'font-medium text-foreground leading-tight truncate', (parts.icon ? parts.icon + ' ' : '') + parts.primary));
+    if (parts.detail) box.appendChild(el('div', 'text-[10px] text-muted-foreground font-mono leading-tight truncate', parts.detail));
+    box.title = ((parts.icon ? parts.icon + ' ' : '') + parts.primary) + (parts.detail ? ' · ' + parts.detail : '');
+    return box;
+  }
+
+  function chainArrow() {
+    return el('span', 'text-muted-foreground text-sm select-none shrink-0', '→');
   }
 
   function automationRow(r) {
-    const row = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-3');
-    const left = el('div', 'min-w-[160px] flex-1');
-    left.appendChild(el('div', 'text-sm font-medium text-foreground', r.name || r.id));
-    left.appendChild(el('div', 'text-xs text-muted-foreground font-mono', whenLabel(r.when)));
-    left.appendChild(el('div', 'text-[11px] text-muted-foreground mt-0.5', '动作链：' + doLabel(r.do)));
-    row.appendChild(left);
-    // 启用开关 ⇒ automation.toggle
+    const card = el('div', 'bg-card border border-border rounded-lg px-4 py-3 flex flex-col gap-2.5');
+    // 头部：名称 + 启用 + 删除
+    const head = el('div', 'flex items-center gap-3');
+    head.appendChild(el('div', 'text-sm font-medium text-foreground flex-1 min-w-0 truncate', r.name || r.id));
     const sw = document.createElement('input');
     sw.type = 'checkbox';
     sw.checked = !!r.enabled;
@@ -2150,9 +2173,8 @@
         .then(() => { appendMsg('system', '规则「' + (r.name || r.id) + '」已' + (sw.checked ? '启用' : '停用')); loadSchedule(); })
         .catch((e) => { sw.checked = !sw.checked; sw.disabled = false; appendMsg('error', '切换失败: ' + (e && e.message)); });
     };
-    row.appendChild(sw);
-    // 删除（两段确认 ✓）
-    const del = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors', '删除');
+    head.appendChild(sw);
+    const del = el('button', 'text-[11px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors shrink-0', '删除');
     del.style.color = 'var(--state-error)';
     del.onclick = () => {
       if (!connected) return;
@@ -2168,8 +2190,21 @@
         .then((res) => { appendMsg('system', (res && res.ok) ? '规则「' + (r.name || r.id) + '」已删除' : '删除未生效'); loadSchedule(); })
         .catch((e) => { del.disabled = false; appendMsg('error', '删除失败: ' + (e && e.message)); });
     };
-    row.appendChild(del);
-    return row;
+    head.appendChild(del);
+    card.appendChild(head);
+
+    // 节点流：起点(触发) → 过程(动作链每个动作) → 终点(完成)
+    const flow = el('div', 'flex flex-wrap items-center gap-2 pb-1');
+    flow.appendChild(chainNode('start', whenParts(r.when)));
+    const actions = Array.isArray(r.do) ? r.do : [];
+    for (const a of actions) {
+      flow.appendChild(chainArrow());
+      flow.appendChild(chainNode('mid', actionParts(a)));
+    }
+    flow.appendChild(chainArrow());
+    flow.appendChild(chainNode('end', { icon: '🏁', primary: '完成', detail: '' }));
+    card.appendChild(flow);
+    return card;
   }
 
   async function loadSchedule() {
