@@ -125,8 +125,6 @@ DEEPSEEK_API_KEY=sk-...
 
 ### 本地模型（可选）
 
-> **发布的 npm 包不含任何模型权重 / 训练资产**（`libs/`、`models/`、`adapters/`、`training/` 全部排除）。模型一律在**运行期按需下载或配置**：llama.cpp 走 `pnpm run setup:llamacpp` 自动拉取预编译包；语音模型由 `stt.download` / 设置页按需下载；本地模型目录可用环境变量 `HYACINTH_MODELS_DIR` 或配置 `models.modelsDir` 指向你已有的位置——包体本身永远保持"只有代码"。
-
 ```bash
 pnpm run setup:llamacpp   # 一键编译 llama.cpp
 hyacinth -p local --start-model --model "qwen2.5-coder:7b"
