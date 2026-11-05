@@ -9,11 +9,20 @@ import { ToolRegistry } from './registry.js';
 export class FilteredToolRegistry extends ToolRegistry {
   private parentRegistry: ToolRegistry;
   private allowedTools: Set<string>;
+  /** 不受白名单限制的系统工具（如 report 汇报工具），始终对子 Agent 可见 */
+  private systemTools: Set<string>;
 
-  constructor(parentRegistry: ToolRegistry, allowedTools: string[]) {
+  constructor(parentRegistry: ToolRegistry, allowedTools: string[], systemTools: string[] = []) {
     super(); // 父类的 Map 为空，我们不使用它
     this.parentRegistry = parentRegistry;
     this.allowedTools = new Set(allowedTools);
+    this.systemTools = new Set(systemTools);
+  }
+
+  /** 白名单准入判据：allowedTools 为空=不限；命中白名单；或系统工具豁免 */
+  private allow(name: string): boolean {
+    if (this.allowedTools.size === 0) return true;
+    return this.allowedTools.has(name) || this.systemTools.has(name);
   }
 
   /**
@@ -34,7 +43,7 @@ export class FilteredToolRegistry extends ToolRegistry {
    * "register 进本 registry 后被 getAll/get 看见"这一契约。
    */
   override get(name: string): Tool | undefined {
-    if (this.allowedTools.size > 0 && !this.allowedTools.has(name)) return undefined;
+    if (!this.allow(name)) return undefined;
     return super.get(name) ?? this.parentRegistry.get(name);
   }
 
@@ -46,13 +55,13 @@ export class FilteredToolRegistry extends ToolRegistry {
   override getAll(): Tool[] {
     const merged = new Map<string, Tool>();
     for (const tool of this.parentRegistry.getAll()) {
-      if (this.allowedTools.size > 0 && !this.allowedTools.has(tool.name)) continue;
+      if (!this.allow(tool.name)) continue;
       merged.set(tool.name, tool);
     }
     // 本地注册（子 loop 自建实例 / 沙箱包装 / 工作区围栏）覆盖父同名。
     // 白名单对本地实例**同样**生效 —— 否则子 loop 自建的工具会绕过 agentDef.allowedTools。
     for (const tool of super.getAll()) {
-      if (this.allowedTools.size > 0 && !this.allowedTools.has(tool.name)) continue;
+      if (!this.allow(tool.name)) continue;
       merged.set(tool.name, tool);
     }
     return [...merged.values()];
@@ -73,7 +82,7 @@ export class FilteredToolRegistry extends ToolRegistry {
    * 检查指定名称的工具是否可用
    */
   override has(name: string): boolean {
-    if (this.allowedTools.size > 0 && !this.allowedTools.has(name)) return false;
+    if (!this.allow(name)) return false;
     return super.has(name) || this.parentRegistry.has(name);
   }
 }

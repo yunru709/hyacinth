@@ -11,6 +11,17 @@
     if (new URLSearchParams(location.search).get('embed') === '1') {
       document.documentElement.classList.add('is-embed');
     }
+    /* 主题预置（防 FOUC）：:root 兜底色是**暗色夜园**（#0a0b14），若等 app.js（body 末尾）
+       执行 applyTheme 才切主题，首帧会先刷一屏近黑再变目标主题（浅色主题用户看到"黑闪")。
+       这里在**首屏样式计算之前**把 localStorage 缓存的主题 id 先写到 <html data-theme>，
+       theme.css 的 html[data-theme='x'] 立即命中，第一帧就是对的主题。
+       校验正则与 app.js applyTheme 保持一致，避免把脏值写进属性。 */
+    try {
+      var cachedTheme = localStorage.getItem('hyacinth.theme');
+      if (cachedTheme && /^[a-z][a-z0-9-]{1,24}$/.test(cachedTheme)) {
+        document.documentElement.setAttribute('data-theme', cachedTheme);
+      }
+    } catch (e) { /* 隐私模式/禁用 localStorage：忽略，回落到 :root 与 app.js 的默认主题 */ }
   </script>
   <link rel="icon" type="image/svg+xml" href="/assets/concept-art.svg">
   <link rel="stylesheet" href="/theme.css">
@@ -54,6 +65,14 @@
       <i data-lucide="hexagon"></i>
       <span class="brand-wordmark">Hyacinth</span>
     </div>
+    <!-- 自主模式按钮（2026-11-04）：独立按钮 + **用按钮颜色表示状态**。
+         不塞进 brand 里：它是状态开关，不是品牌标识的一部分；
+         也不放模式弹层：本模式将改造为跨会话（进程级），弹层是会话级的。
+         颜色：灰=关 / 青=静默 / 琥珀=挂起 / 绿(呼吸)=运行中 -->
+    <button id="auto-btn" class="auto-btn" type="button"
+            title="自主模式：点击开启" aria-pressed="false" data-phase="off">
+      auto
+    </button>
     <div class="tb-sep"></div>
     <!-- 当前会话名：由 app.js 在切换/新建时写入（此前没有任何地方显示"我在哪个会话"） -->
     <div class="tb-title" id="session-title">新会话</div>

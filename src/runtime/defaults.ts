@@ -17,7 +17,8 @@ export function getDefaultConfig(): FullConfig {
   return {
     provider: {
       active: 'anthropic',
-      routeMode: 'auto',
+      // 'auto' → 'automatic'（2026-11-05 改名消歧；旧值由 applyRouteMode 兼容）
+      routeMode: 'automatic',
       defaultMode: 'balanced',
       temperature: 0.7,
       topP: 0.95,

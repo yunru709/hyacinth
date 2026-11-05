@@ -183,6 +183,14 @@ export interface TurnState {
    */
   sayStatus?: 'submitted' | 'aborted';
   /**
+   * 挂起状态（2026-11-02 · 自主模式 P2）。
+   *
+   * 'suspended' = 本轮以**挂起**结束（登记了唤醒条件），判停后 stopReason 写 'suspended'。
+   * 与 sayStatus 并列而非复用：两者都判停，但上层要据此区分
+   * 「去 arm 唤醒条件」还是「收工等人」。判定同样必须排在 toolCalled 之前。
+   */
+  suspendStatus?: 'suspended';
+  /**
    * goal 模式状态（runTurn 预填，消费即重置）：
    *   'achieved' = finish_goal 已通过审查 → finalize 判停（stopReason 'goal_achieved'）
    * undefined = 未达成。判定同样必须排在 toolCalled 之前（finish_goal 也是工具调用）。

@@ -543,7 +543,10 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 22px 24px 12px;
-  scroll-behavior: smooth;
+  /* 不用 scroll-behavior:smooth（2026-11-02）：流式期间 scrollHeight 持续增长，
+     平滑滚动的目标是「赋值瞬间」的旧高度 ⇒ 动画结束也到不了真正底部，且与用户
+     手动拖滚动条互抢 ⇒ 表现为「卡在某处、拖不到底」。跟随滚动一律用瞬时赋值。 */
+  scroll-behavior: auto;
   /* 内容不足一屏时贴底（聊天惯例）：只有两三条消息时从顶部排下来，
      中间到输入框之间会空出一大片，看着像"页面没加载完"。
      用 margin-top:auto 而不是 justify-content:flex-end —— 后者在内容超屏时
@@ -2653,6 +2656,18 @@ html.is-embed .body-area { height: 100%; }
 .askuser-box .au-pencil { color: var(--hyacinth-muted-foreground); }
 .askuser-box .au-custom input { flex: 1 1 auto; border: 0; background: transparent; color: inherit; font-size: 13px; outline: none; }
 
+/* 多问题分页（2026-11-02）：一页一题，问题区限高可滚动，底部 上一页/下一页 */
+.askuser-box .au-fields { display: flex; flex-direction: column; }
+.askuser-box .au-fields .ask-field[hidden] { display: none !important; }
+.askuser-box .au-fields { max-height: min(60vh, 460px); overflow-y: auto; }
+.askuser-box { max-height: 88vh; display: flex; flex-direction: column; }
+.askuser-box .au-nav { display: flex; gap: 8px; justify-content: space-between; margin-top: 12px; }
+.askuser-box .au-nav[hidden] { display: none !important; }
+.askuser-box .au-nav-btn { flex: 1 1 auto; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--hair-strong); background: transparent; color: inherit; font-size: 13px; cursor: pointer; transition: background .12s, border-color .12s, opacity .12s; }
+.askuser-box .au-nav-btn:hover:not(:disabled) { background: var(--s2); border-color: var(--hyacinth-primary); color: var(--hyacinth-primary); }
+.askuser-box .au-nav-btn:disabled { opacity: .4; cursor: default; }
+.askuser-box .au-nav-btn[hidden] { display: none !important; }
+
 /* ── 消息队列面板（忙碌时入队，编辑器/删除/立即推送）2026-10-28 ── */
 .composer-queue { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 8px; border: 1px solid var(--hair-strong); border-radius: 12px; background: var(--s1); }
 .composer-queue[hidden] { display: none; }
@@ -2666,3 +2681,188 @@ html.is-embed .body-area { height: 100%; }
 .queue-btn:hover { background: var(--s3, var(--s2)); color: var(--hyacinth-foreground); }
 .queue-btn.queue-sendnow:hover { color: var(--hyacinth-primary); }
 .queue-btn.queue-del:hover { color: #e5484d; }
+
+/* ============================================================
+   自主模式（2026-11-02）
+   排版全部复用 .mode-goal-*，只新增三样东西：
+   .mode-auto-budget（预算输入） / .mode-goal-btn.is-danger（急停） / .auto-chip（常驻徽标）
+   ============================================================ */
+
+.mode-auto-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.mode-auto-budget input {
+  width: 52px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 12px;
+}
+
+/* 急停：界面上唯一的红按钮 —— 必须"一眼能找到"，且与普通按钮拉得开 */
+.mode-goal-btn.is-danger {
+  background: #7f1d1d;
+  border-color: #991b1b;
+  color: #fee2e2;
+}
+.mode-goal-btn.is-danger:hover {
+  background: #991b1b;
+}
+
+/* 常驻徽标：弹层收起时唯一能看见"它开着"的地方。
+   hover 转红 = 点它的语义是急停，不是展开。 */
+.auto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.auto-chip[hidden] { display: none; }
+.auto-chip[data-phase='suspended'] {
+  border-color: #92400e;
+  color: #fbbf24;
+}
+.auto-chip.is-running {
+  border-color: #166534;
+  color: #4ade80;
+  animation: auto-chip-pulse 1.8s ease-in-out infinite;
+}
+.auto-chip:hover {
+  border-color: #b91c1c;
+  color: #f87171;
+  animation: none;
+}
+@keyframes auto-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ============================================================
+   自主模式入口（2026-11-04）—— 挂在左上角 brand 上
+   为什么不在模式弹层：该模式将改造为**跨会话**（进程级全局），
+   而弹层里的权限档位/goal 都是**会话级**的，语义不匹配。
+   ⚠️ 下方 2026-11-02 追加的 .mode-auto-budget / .auto-chip 已随入口迁移作废，
+      留着无害但要清理时一并删。
+   ============================================================ */
+
+.brand.brand-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 覆盖 button 默认样式，视觉上保持原 brand 的样子 */
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 8px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.brand.brand-auto:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.brand.brand-auto:focus-visible {
+  outline: 2px solid var(--hyacinth-primary, #818cf8);
+  outline-offset: 1px;
+}
+
+/* 状态点：只在开启时出现。三色对应 running / suspended / silent */
+.brand-auto-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  flex: none;
+}
+.brand-auto-dot[hidden] { display: none; }
+.brand-auto-dot[data-phase='suspended'] { background: #fbbf24; }
+.brand-auto-dot[data-phase='running'] {
+  background: #4ade80;
+  animation: brand-auto-pulse 1.8s ease-in-out infinite;
+}
+@keyframes brand-auto-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ============================================================
+   自主模式按钮（2026-11-04）—— 左上角 brand 旁
+   **用按钮颜色表示状态**（按孑遗要求，不再用小圆点）：
+     灰     = 关
+     青     = 静默（开着，但只等你说话，不烧钱）
+     琥珀   = 挂起（登记了唤醒条件，正等着）
+     绿+呼吸 = 运行中（正在跑回合）
+   颜色即状态：不用读文字也能一眼看出它有没有在动。
+   ============================================================ */
+
+.auto-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 22px;
+  padding: 0 8px;
+  flex: none;
+  border-radius: 999px;
+  /* ⚠️ 必须跟随顶栏文字色：顶栏是**浅色**底（#f8f9fa 一类）。
+     先前写死 rgba(255,255,255,0.45) ⇒ 白底白字，未启动时"看不见"（2026-11-04 实测报障）。
+     用 currentColor + opacity 派生，浅底深底都能成立。 */
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  opacity: 0.45;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.18s, border-color 0.18s, background 0.18s, opacity 0.18s;
+}
+.auto-btn:hover {
+  opacity: 1;
+}
+
+/* 静默：开着，但只在用户说话时才动（cyan-600：浅底上对比够） */
+.auto-btn[data-phase='silent'] {
+  color: #0891b2;
+  opacity: 1;
+  border-color: rgba(8, 145, 178, 0.5);
+  background: rgba(8, 145, 178, 0.1);
+}
+
+/* 挂起：已登记唤醒条件，正等着（amber-600） */
+.auto-btn[data-phase='suspended'] {
+  color: #d97706;
+  opacity: 1;
+  border-color: rgba(217, 119, 6, 0.55);
+  background: rgba(217, 119, 6, 0.12);
+}
+
+/* 运行中：正在跑回合 —— 呼吸提示"它在动"（green-600） */
+.auto-btn[data-phase='running'] {
+  color: #16a34a;
+  opacity: 1;
+  border-color: rgba(22, 163, 74, 0.6);
+  background: rgba(22, 163, 74, 0.14);
+  animation: auto-btn-pulse 1.6s ease-in-out infinite;
+}
+@keyframes auto-btn-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* off 用上面的默认灰，不另写 —— "安静"本身就是它的状态 */

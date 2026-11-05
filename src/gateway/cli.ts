@@ -1352,7 +1352,12 @@ export async function runCli(): Promise<void> {
       }
     });
 
-  // 守护进程（默认启用）：Agent 退出(code 42)时自动重新拉起
+  // 守护进程兜底判断（默认启用）：Agent 退出(code 42)时自动重新拉起。
+  // ⚠️ 主分流点已上移到 src/index.ts（在加载 cli.js 之前），目的是让 guardian
+  //    父进程不必背上整条 CLI 依赖链（省 ~70MB/后端）。这里保留一份是为
+  //    「绕过 index.ts、直接 import runCli()」的调用方兜底 —— 条件必须与
+  //    index.ts 一致，勿单方面改这里。正常启动时本分支恒不触发：
+  //    子进程带 GUARDIAN_ENV=1、手动则带 --no-guardian。
   // 子进程通过 GUARDIAN_ENV 环境变量避免递归
   const noGuardian = process.argv.includes('--no-guardian');
   process.argv = process.argv.filter(a => a !== '--no-guardian');

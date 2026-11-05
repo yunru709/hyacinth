@@ -15,7 +15,12 @@ export interface ProviderVendorConfig {
 export interface FullConfig {
   provider: {
     active: string; // 'anthropic' | 'openai' | 'deepseek' | ...
-    routeMode: 'auto' | 'manual';
+    /**
+     * 模型路由模式（2026-11-05 由 'auto' 改名，避免与「自主常驻模式」和
+     * 权限档 'auto-approve' 撞名）。旧值 'auto' 由 loop-provider 的
+     * applyRouteMode 归一化兼容，磁盘上残留不影响。
+     */
+    routeMode: 'automatic' | 'manual';
     /** 默认生成模式 */
     defaultMode: 'balanced' | 'creative';
     /** 温度 0.0~2.0 */

@@ -42,11 +42,32 @@ import { maybeCompressCluster, loadClusterIndex, type ClusterDeps, type ClusterI
 import { toggleProvider, switchProvider, tryCreateProviderFromConfig, subscribeConfig, switchToAutoRoute, getProviderRoutingInfo, setModelSource, getModelSources } from './loop-provider.js';
 import { createTurnState, type TurnState, type SessionState, type CacheTurnRecord } from './turn-state.js';
 import {
-  createGoalState, decideGoalGate, isToolForbiddenInGoal, isToolForcedVisibleInGoal,
-  GOAL_FORCED_VISIBLE_TOOLS, loadGoalState, saveGoalState, DEFAULT_GOAL_BUDGET,
+  createGoalState, createGoalExitPolicy, DEFAULT_GOAL_BUDGET,
+  GOAL_FORCED_VISIBLE_TOOLS, loadGoalState, saveGoalState,
   type GoalState, type GoalReviewRequest, type GoalReviewResult,
 } from './goal.js';
+// P1（2026-11-02）：出口从"硬编码 goal 分支"改成"策略链"。
+// 见 exit-policy.ts 文件头：goal 只是链上的第一条策略，将来 suspend / end_turn 同形态接入。
+import {
+  applyExitPolicies, resolveToolVerdict, createEndTurnBlockPolicy,
+  type ExitPolicy,
+} from './exit-policy.js';
+// 出口配置（<sessionDir>/exit.json）：声明本会话允许哪些出口。
+// 2026-11-02 P2 后半 —— 文件不存在 ⇒ 不装任何拦截（零回归）。
+import { loadExitConfig, isExitAllowed, saveExitConfig, clearExitConfig, type ExitConfig } from './exit-config.js';
 import { averageHitRate, formatCacheDisplay } from './cache-rate.js';
+// P3（2026-11-02）：挂起条件落盘 —— 没它的话"睡下去"跨不过进程重启。
+import { saveSuspendState, clearSuspendState, loadSuspendState } from '../tools/suspend.js';
+// P5（2026-11-04）：非定时条件（file / ui_region / process / port / http）走全局 WatchService。
+// 注意：这里**不传 owner** —— 传了会被 wakeOwner 再唤醒一次，与我们自己的 run() 撞车。
+import { getWatchService, onWatchEvent } from '../watch/service-instance.js';
+// P4（2026-11-02）：自主唤醒的预算闸门（静默时段 + 每小时/每日上限）。
+// ⚠️ 闸门必须与唤醒同批上线 —— 没有闸门的 tick = 装闹钟不装日历。
+import { AutoBudgetCounter, getGlobalAutoBudget, resetGlobalAutoBudget } from './auto-budget.js';
+// 全局开关（2026-11-04）：auto 是**进程级**状态，不再只挂在单个会话的 exit.json 里。
+import { loadGlobalAuto, saveGlobalAuto } from './auto-global.js';
+// 统一调度器（2026-11-04 第三步）：从「每个 loop 一个 setTimeout」改成「进程一个 tick」。
+import { scheduleWake, cancelWake } from './auto-supervisor.js';
 import { Pipeline, type SlotSpec } from '../kernel/pipeline.js';
 import { createKernel, DEFAULT_PIPELINE_SLOTS, type KernelComponents } from './create-kernel.js';
 import { StageServiceMap, StageServiceKey, KernelStageContext } from './stage-services.js';
@@ -363,6 +384,204 @@ export class AgentLoop {
   /** deliver 工具：本回合交付状态（'submitted' 已交付 → finalize 判停 /
    *  'aborted' 连续失败超限 → 强制结束）。say 说话**不再**置此状态。 */
   private sayStatus: 'submitted' | 'aborted' | null = null;
+
+  /**
+   * suspend 状态（2026-11-02 · 自主模式 P2）。
+   *
+   * 'suspended' = 本轮以「挂起」结束，而不是「收工」。两者都会让回合停下，
+   * 但 finalize 判停后写出的 stopReason 必须不同（'suspended' vs 'end_turn'）——
+   * 上层要靠它区分"该去 arm 唤醒条件"和"该等人来"。
+   * 混成一个 ⇒ 自主模式直接失效（没人知道该 arm 什么）。
+   */
+  private suspendStatus: 'suspended' | null = null;
+
+  /** 挂起时登记的条件（null = 本轮没挂起）。由 submitSuspend 写入，takeSuspendStatus 消费并重置。 */
+  private pendingSuspend: import('../tools/suspend.js').SuspendPayload | null = null;
+
+  /**
+   * 自主唤醒的预算闸门（P4 引入；2026-11-04 全局化）。
+   *
+   * 现在是**进程级单例** —— 各会话共享一本账。
+   * 理由：每个 loop 各记一本，"6 次/小时"实际等于"6 次 × 会话数"，闸门形同虚设。
+   */
+  private get autoBudget(): AutoBudgetCounter {
+    return getGlobalAutoBudget();
+  }
+
+  /**
+   * 挂起后的定时唤醒器。
+   *
+   * 为什么在 loop 而不是 HeartbeatScheduler：scheduler 拿不到"枚举所有会话"的端口
+   * （SchedulerSessionPort 只有 getOrCreateLoop/createEphemeralSession/destroy），
+   * 而挂起是**会话内**状态。谁挂的谁负责叫醒自己，边界最干净。
+   *
+   * ⚠️ 这是 P4 的最小闭环：只处理 `until.afterMs`（定时兜底）。
+   *    按条件触发（file/ui_region/process/port/http）已由 P5 补上 —— 见
+   *    `armSuspendWatch()`，走全局 WatchService 单例（零模型采样）。
+   * ✅ 进程重启后的恢复**已实现**（2026-11-04）：`restoreAutoMode()` 读 suspend.json
+   *    重挂定时器 / 重 arm 监控；`afterMs` 已过期的用 setTimeout(0) 立刻醒一次，
+   *    否则"每 10 分钟看看"会因重启变成"永远不看"。
+   *    （旧注释曾写"未做"，已失效 —— 别据此判断功能缺失。）
+   */
+  /**
+   * 是否已向调度器登记了定时唤醒（2026-11-04 第三步）。
+   * 从 setTimeout 句柄改成 boolean：定时器现在归 `auto-supervisor` 统一持有，
+   * 本实例只记"我挂没挂"（`getAutoSnapshot` 的 phase 判断要用）。
+   */
+  private suspendArmed = false;
+
+  /** 本会话在调度器里的唯一 key（取消唤醒时用） */
+  private readonly autoWakeKey = `auto:${Math.random().toString(36).slice(2, 10)}`;
+
+  /**
+   * P5（2026-11-04）：按条件挂起的 WatchService 监控句柄。
+   * 与定时唤醒二选一 —— 定时走调度器，条件（file/ui_region/process/port/http）走这个。
+   */
+  private suspendWatch: { watchId: string; unsub: () => void } | null = null;
+
+  // ── 自主模式总开关（2026-11-04）────────────────────────────────────
+  // 开关**只做一件事**：写/清 `<sessionDir>/exit.json` 的出口白名单。
+  // 它不主动起回合 —— 第一轮要么等用户说话，要么等 suspend 的定时唤醒。
+  // 这样"开自主模式"和"开始烧钱"是两件事，用户能先开、再观察、再决定。
+  private autoModeEnabled = false;
+  private autoModeSince: string | null = null;
+
+  /** 开/关自主模式。返回 exit.json 是否落盘成功（失败仍切内存态，但留痕）。 */
+  setAutoMode(enabled: boolean): boolean {
+    // 2026-11-04 全局化：开关写 ~/.agent/auto.json（进程级），**不再写会话级 exit.json**。
+    // 理由：auto 是全局状态（未来要在 session 之上加调度），挂单会话里语义就错。
+    // 会话级 exit.json 依旧优先（可作单会话例外），所以关的时候要顺手清掉它，
+    // 否则"关不掉"——会话级文件会一直盖住全局的 false。
+    // ⚠️ 必须带上已有的预算字段：saveGlobalAuto 是**整份覆盖**，只传 enabled 会把
+    //    auto.json 里的 budgetPerHour/budgetPerDay 抹掉（等于点一下开关，预算配置回归默认）。
+    const prev = loadGlobalAuto();
+    const ok = saveGlobalAuto({
+      enabled,
+      budgetPerHour: prev.budgetPerHour,
+      budgetPerDay: prev.budgetPerDay,
+    });
+    // 预算单例按配置构造 ⇒ 配置变过就要重建，否则沿用旧 cfg（改了预算不生效）
+    resetGlobalAutoBudget();
+    if (!enabled) clearExitConfig(this.sessionDir);
+    this.autoModeEnabled = enabled;
+    this.autoModeSince = enabled ? new Date().toISOString() : null;
+    // 缓存必须失效 —— 下一次 activeExitPolicies 要读到新配置
+    this.exitConfigCache = undefined;
+    if (!enabled) this.clearSuspendTimer();
+    if (!ok) this.logger?.warn?.('auto: 全局配置落盘失败，开关仅内存生效');
+    return ok;
+  }
+
+  /**
+   * 运行期改自主唤醒预算（2026-11-05 补）。
+   *
+   * 背景：以前协议 `auto.setBudget` 的后端是个空实现（只回快照），所以 TUI
+   * `/auto budget 6 100` 会"显示成功但数字不变"。这里把写入真正接通。
+   *
+   * 三件事必须一起做，少一件就是假的：
+   *   1. **写盘** —— `~/.agent/auto.json` 是唯一真相源，不落盘重启就回退
+   *   2. **重建预算单例** —— `getGlobalAutoBudget()` 是进程级单例、按 cfg 构造，
+   *      不 reset 就沿用旧上限（改了等于没改）
+   *   3. **不动开关** —— 预算与开关是两个正交维度，改上限不该顺带开/关自主模式
+   *
+   * ⚠️ `resetGlobalAutoBudget()` 会**连同滑动窗口计数一起清零**（stamps 是内存态），
+   *    也就是"调高上限"同时会清空今日已用次数。方向上是"多给机会"，与既有取向
+   *    一致（重启同样归零），故接受；若要精确保留计数，需让 counter 支持换 cfg 不换 stamps。
+   */
+  setAutoBudget(budget: { perHour?: number; perDay?: number }): boolean {
+    const prev = loadGlobalAuto();
+    const ok = saveGlobalAuto({
+      enabled: prev.enabled,
+      // undefined = 保持原值（调用方只改其中一个维度是合法的）
+      budgetPerHour: budget.perHour ?? prev.budgetPerHour,
+      budgetPerDay: budget.perDay ?? prev.budgetPerDay,
+    });
+    resetGlobalAutoBudget();
+    if (!ok) this.logger?.warn?.('auto: 预算落盘失败，仅内存生效');
+    return ok;
+  }
+
+  /**
+   * 启动时恢复自主模式（2026-11-04）。
+   *
+   * 恢复两件事：
+   *   1. **开关**：`exit.json` 允许 suspend 且不允许 end_turn ⇒ 视为自主模式开着
+   *   2. **挂起条件**：`suspend.json` 存在 ⇒ 重新 arm（定时 / 按事件）
+   *
+   * ⚠️ 过期处理：`afterMs` 已经过去的要**立即唤醒一次**而不是丢弃 ——
+   *    否则进程每重启一次，"每 10 分钟看看"就变成"永远不看了"。
+   *    用 `setTimeout(0)` 而非在 constructor 里同步起回合：后者会在装配中途递归进 run()。
+   */
+  private restoreAutoMode(): void {
+    // 2026-11-04 全局化：会话级 exit.json 优先（单会话例外），否则看全局开关。
+    const sessionCfg = loadExitConfig(this.sessionDir);
+    this.autoModeEnabled = sessionCfg
+      ? isExitAllowed(sessionCfg, 'suspend') && !isExitAllowed(sessionCfg, 'end_turn')
+      : loadGlobalAuto().enabled;
+    if (this.autoModeEnabled) this.autoModeSince = new Date().toISOString();
+
+    const pending = loadSuspendState(this.sessionDir);
+    if (!pending) return;
+    if (!this.autoModeEnabled) {
+      // 条件还在但自主模式已关：清掉残留，免得下次开启时冒出「幽灵唤醒」
+      clearSuspendState(this.sessionDir);
+      return;
+    }
+
+    const ms = pending.until.afterMs;
+    if (typeof ms === 'number' && ms > 0) {
+      const armedAt = Date.parse(pending.armedAt ?? '');
+      const remain = (Number.isFinite(armedAt) ? armedAt : Date.now()) + ms - Date.now();
+      this.logger?.info?.('auto: 恢复挂起条件（定时）', { remainMs: remain });
+      if (remain <= 0) {
+        // 已经过期 ⇒ 下一拍立刻唤醒，别丢掉
+        this.suspendArmed = true;
+        scheduleWake(this.autoWakeKey, 0, () => {
+          this.suspendArmed = false;
+          this.onSuspendTimerFire(pending);
+        });
+        return;
+      }
+      this.armSuspendTimer({ ...pending, until: { ...pending.until, afterMs: remain } });
+      return;
+    }
+
+    this.logger?.info?.('auto: 恢复挂起条件（按事件）', { kind: pending.until.kind });
+    this.armSuspendWatch(pending);
+  }
+
+  isAutoModeEnabled(): boolean {
+    return this.autoModeEnabled;
+  }
+
+  /** 自主模式快照（返回普通对象，不引 ui-protocol 类型，避免反向依赖） */
+  getAutoSnapshot(): {
+    phase: 'off' | 'running' | 'suspended' | 'silent';
+    since: string;
+    budget: { usedThisHour: number; limitThisHour: number; usedToday: number; limitToday: number };
+    armed: Array<{ id: string; kind: string; note?: string }>;
+  } {
+    const usage = this.autoBudget.usage();
+    // 上限读**生效配置**（autoBudget.config），不是 DEFAULT_AUTO_BUDGET ——
+    // 否则 auto.json 把每日额改成 100，UI 仍显示 30（配置回声式欺骗）。
+    const budgetCfg = this.autoBudget.config;
+    const phase: 'off' | 'running' | 'suspended' | 'silent' = !this.autoModeEnabled
+      ? 'off'
+      : this.suspendArmed || this.suspendWatch || this.pendingSuspend
+        ? 'suspended'
+        : 'silent';
+    return {
+      phase,
+      since: this.autoModeSince ?? new Date(0).toISOString(),
+      budget: {
+        usedThisHour: usage.usedThisHour,
+        limitThisHour: budgetCfg.perHour,
+        usedToday: usage.usedToday,
+        limitToday: budgetCfg.perDay,
+      },
+      armed: [],
+    };
+  }
   /** 连续校验失败次数（deliver 失败时 toolCalled 仍为 true，会重置
    *  idleTurnCount 使空转兜底失效，故需独立上限，防空转到 maxTurns） */
   private sayFailureCount = 0;
@@ -814,6 +1033,10 @@ export class AgentLoop {
     // ① 从盘上恢复 goal 状态（跨 restart 存活 —— 用户要的「自我递归改进」场景）；
     // ② 给 context 阶段注入工具过滤器，与执行侧 makeToolExecContext **同源**（避免两处不同序）。
     this.goalState = loadGoalState(sessionDir);
+    // 自主模式恢复（2026-11-04）：读 exit.json 定开关，读 suspend.json 重新 arm。
+    // ⚠️ 必须放在 goalState 之后；且内部用 setTimeout(0) 延迟起回合 ——
+    //    构造期间同步 run() 会递归进还没装配完的 pipeline。
+    this.restoreAutoMode();
     this.stageServices.set('getGoalState', () => this.getGoalState());
     this.stageServices.set('filterToolsForGoal', (defs: ToolDefinition[]) => this.filterToolsForGoal(defs));
     // ── P1 M5：llm/tools 阶段服务注册 ──
@@ -1210,6 +1433,184 @@ export class AgentLoop {
   }
 
   /**
+   * suspend 的落点（2026-11-02 · 自主模式 P2）。
+   *
+   * 与 submitDeliver 的分工：
+   *   deliver → 置 sayStatus      → finalize 判停，stopReason = 'end_turn'（收工，等人来）
+   *   suspend → 置 suspendStatus  → finalize 判停，stopReason = 'suspended'（挂起，等条件）
+   *
+   * ⚠️ 两者都让回合停下来，但 stopReason **必须不同** —— 上层靠它决定
+   *    「去 arm 唤醒条件」还是「就等人说话」。混成一个，自主模式等于没做。
+   *
+   * 条件落盘不交给工具做：`<sessionDir>/suspend.json` 的路径是 loop 的私有知识，
+   * 工具层不该认识它（与 say/deliver 的 pendingOutputs 同一取舍）。
+   */
+  async submitSuspend(
+    payload: import('../tools/suspend.js').SuspendPayload,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    // goal 模式下不许挂起：否则就成了绕过验收官的后门（"我不干了，我去睡"）。
+    // goal 的唯一合法出口是 finish_goal（过审）或 exit_goal（主动解除）。
+    if (this.goalState?.active) {
+      return {
+        ok: false,
+        error: 'goal 模式下不能 suspend：目标未达成前不许停。继续工作并在达成后调用 finish_goal，或 exit_goal 主动解除。',
+      };
+    }
+    if (!payload?.until?.kind) {
+      return { ok: false, error: 'suspend 需要 until.kind（如 "user" / "file" / "time"）。' };
+    }
+    this.pendingSuspend = payload;
+    this.suspendStatus = 'suspended';
+    return { ok: true };
+  }
+
+  /**
+   * 消费挂起登记（回合收尾调用一次，消费即重置）。
+   *
+   * P2 只做「把状态交给 finalize 判停」这一件事；**条件落盘与 arm 属于 P3**
+   * （复用 automation/store.ts 的读盘→逐条校验→装填模式）。
+   * 这里先把 pendingSuspend 取出来 —— 落盘接上时只改此方法内部，调用点不动。
+   */
+  private takeSuspendStatus(): 'suspended' | undefined {
+    const pending = this.pendingSuspend;
+    const status = this.suspendStatus ?? undefined;
+    this.pendingSuspend = null;
+    this.suspendStatus = null;
+    if (status === 'suspended' && pending) {
+      // P3：落盘 <sessionDir>/suspend.json —— 跨进程重启后条件还在。
+      // 没这一步，"睡下去"只在进程活着时成立，重启即失忆。
+      // 落盘失败**不阻断**回合收尾（这时本来就该结束了），但必须留痕 ——
+      // 否则就是"以为挂上了，重启后什么都没有"。
+      const persisted = saveSuspendState(this.sessionDir, pending);
+      this.logger?.info?.('suspend: 本轮以挂起结束，等待条件', {
+        kind: pending.until.kind,
+        note: pending.note ?? pending.until.note,
+        persisted,
+      });
+      if (!persisted) {
+        this.logger?.warn?.('suspend: 条件落盘失败 —— 重启后该条件会丢', {
+          kind: pending.until.kind,
+        });
+      }
+      // P4：挂上定时唤醒器（只有给了 afterMs 才挂）
+      this.armSuspendTimer(pending);
+    }
+    return status;
+  }
+
+  /** 挂起后挂唤醒器：定时走 `suspendTimer`，条件走 WatchService（P5）。 */
+  private armSuspendTimer(pending: import('../tools/suspend.js').SuspendPayload): void {
+    this.clearSuspendTimer();
+    const ms = pending.until.afterMs;
+    if (!ms || ms <= 0) {
+      // ⚠️ 2026-11-05 加护栏（实测事故）：kind='time' 却拿不到 afterMs ⇒ 根本没法定时。
+      //    以前会静默掉进 armSuspendWatch，而 WatchService **不支持 'time'**，那边
+      //    start() 抛错被 catch 吞掉（只留一条 warn）⇒ 现象是「已挂起（等待：60 秒）」
+      //    然后永远不醒 —— 最难查的一类 bug。
+      //    根因：afterMs 被写进了 spec（工具描述曾这么教），已在 parseSuspendUntil 里兼容提升；
+      //    这里再兜一道：宁可不 arm 并明确留痕，也不要静默失败。
+      if (pending.until.kind === 'time') {
+        this.logger?.warn?.('suspend: kind=time 但缺少 afterMs —— 无法定时唤醒', {
+          until: pending.until,
+        });
+        return;
+      }
+      // 没给兜底时间 ⇒ 交给 WatchService 按条件轮询（file / ui_region / process / port / http）
+      this.armSuspendWatch(pending);
+      return;
+    }
+    // 2026-11-04 第三步：不再自己起 setTimeout，交给进程级调度器统一管。
+    // 好处：全进程只有一个 tick，将来做优先级 / 并发上限 / 用户说话时让路，
+    //       都只需要改 auto-supervisor 一处，而不是改 N 个 loop。
+    this.suspendArmed = true;
+    scheduleWake(this.autoWakeKey, ms, () => {
+      this.suspendArmed = false;
+      this.onSuspendTimerFire(pending);
+    });
+    this.logger?.info?.('suspend: 已挂定时唤醒', { afterMs: ms, kind: pending.until.kind });
+  }
+
+  /**
+   * 按条件挂监控（P5，2026-11-04）：走全局 WatchService 单例。
+   *
+   * 为什么复用而不是新建：`service-instance.ts` 里已经挂了 `onWatchEvent → wakeOwner`，
+   * 以及 tool-links 派发 —— 再起一套会重复采样、watchId 也冲突。
+   *
+   * ⚠️ 刻意**不传 owner**：传了会被 `wakeOwner` 按 owner 再 runPrompt 一次，
+   *    与我们自己的 `run()` 撞车（两轮抢同一会话）。这里只用自己的订阅。
+   */
+  private armSuspendWatch(pending: import('../tools/suspend.js').SuspendPayload): void {
+    const kind = pending.until.kind;
+    if (kind === 'user') return; // 合法静默：只等用户说话，不挂任何监控
+    try {
+      const spec = {
+        kind,
+        ...(pending.until.spec ?? {}),
+      } as unknown as import('../watch/types.js').WatchSpec;
+      const info = getWatchService().start(spec, { once: true, note: pending.until.note });
+      const unsub = onWatchEvent((event) => {
+        if (event.watchId !== info.watchId) return;
+        unsub();
+        this.suspendWatch = null;
+        this.onSuspendTimerFire(pending);
+      });
+      this.suspendWatch = { watchId: info.watchId, unsub };
+      this.logger?.info?.('suspend: 已挂条件监控', { kind, watchId: info.watchId });
+    } catch (err) {
+      // 未知 kind / probe 构造失败：留痕即可，不阻断收尾（这条回合本来就要结束）
+      this.logger?.warn?.('suspend: 条件监控挂载失败', { kind, error: (err as Error).message });
+    }
+  }
+
+  private clearSuspendTimer(): void {
+    if (this.suspendWatch) {
+      this.suspendWatch.unsub();
+      this.suspendWatch = null;
+    }
+    if (this.suspendArmed) {
+      cancelWake(this.autoWakeKey);
+      this.suspendArmed = false;
+    }
+  }
+
+  /**
+   * 定时到点：**先过预算闸，再自唤醒**。
+   *
+   * 顺序不能反：先 record 再检查等于"先花了钱再看余额"。
+   * 被闸门拒绝时**不做任何事**（不重新挂定时器 —— 静默时段里反复重挂是无意义的唤醒风暴）。
+   */
+  private onSuspendTimerFire(pending: import('../tools/suspend.js').SuspendPayload): void {
+    const decision = this.autoBudget.canWake();
+    if (!decision.ok) {
+      this.logger?.warn?.('auto-wake: 预算闸门拒绝本次自主唤醒', {
+        reason: decision.reason,
+        usedThisHour: decision.usedThisHour,
+        usedToday: decision.usedToday,
+      });
+      return;
+    }
+    this.autoBudget.record();
+    clearSuspendState(this.sessionDir);
+    const note = pending.note ?? pending.until.note ?? pending.until.kind;
+    this.logger?.info?.('auto-wake: 自主唤醒', {
+      note,
+      usedThisHour: decision.usedThisHour + 1,
+      usedToday: decision.usedToday + 1,
+    });
+    // ── 唤醒 prompt（2026-11-05 孑遗定稿）─────────────────────────────────
+    // 措辞刻意做成「又醒来了 / 没有就继续等着了」：把"醒来"说成**常态**而不是事件。
+    // 原措辞「你之前挂起的条件已到期。请判断是否需要行动」隐含"每次醒来都得交点什么"，
+    // 会把 agent 推向「为证明自己没空转而制造行动」（改注释 / 挪文件 / 写没人要的报告）
+    // —— 那比安静地睡危险得多，因为留痕。醒来判断"没事"、继续挂起，是**正确结局**。
+    // 末尾的挂起条件必须保留：不给 note，模型不知道自己在等什么，只能瞎猜或乱动。
+    void this.run(
+      `又醒来了，有需要处理的事情？没有就继续等着了。（挂起条件：${note}）`,
+    ).catch((err: unknown) => {
+      this.logger?.warn?.('auto-wake: 唤醒回合失败', { error: (err as Error).message });
+    });
+  }
+
+  /**
    * 空内容统一失败计数（say / deliver 共用）。
    * 为什么要独立设限：工具调用失败时 toolCalled 仍为 true，会重置 idleTurnCount
    * 使空转兜底失效，只能靠 maxTurns —— 故此处独立设 3 次上限，超限强制收尾。
@@ -1321,17 +1722,30 @@ export class AgentLoop {
   }
 
   /**
-   * goal 工具过滤器（装配侧注入 context 阶段；与执行侧 makeToolExecContext **同源**）。
-   * goal 未激活 → 原样返回；激活 → 去掉「换环境 / 宣布完成」类，并**强制可见 finish_goal**。
+   * 出口策略的工具过滤器（装配侧注入 context 阶段；与执行侧 isToolAllowedForExecution
+   * **同源**，两处必须走同一套谓词）。
+   *
+   * P1（2026-11-02）：原实现是硬编码 goal 黑名单，现改为按**当前启用的策略链**裁决。
+   * 行为等价：没有策略时不碰工具表；goal 激活时与旧实现完全一致。
    */
   filterToolsForGoal(defs: ToolDefinition[]): ToolDefinition[] {
-    if (!this.goalState?.active) return defs;
-    const kept = defs.filter((d) => !isToolForbiddenInGoal(d.name));
+    const policies = this.activeExitPolicies();
+    if (policies.length === 0) return defs;
+
+    // 1) 剔除被任一策略 forbid 的（forbid 压过 force，见 exit-policy.resolveToolVerdict）
+    const kept = defs.filter((d) => resolveToolVerdict(policies, d.name) !== 'forbid');
+
+    // 2) 补回被策略 force、但不在当前表里的（goal 的 finish_goal / exit_goal：
+    //    不补就是「进得去、出不来」—— 这行是那条老坑的防线，别删）
     const have = new Set(kept.map((d) => d.name));
     for (const name of GOAL_FORCED_VISIBLE_TOOLS) {
       if (have.has(name)) continue;
+      if (resolveToolVerdict(policies, name) !== 'force') continue;
       const forced = this.toolRegistry.getToolDefinitions().find((d) => d.name === name);
-      if (forced) kept.push(forced);
+      if (forced) {
+        kept.push(forced);
+        have.add(name);
+      }
     }
     return kept;
   }
@@ -1497,26 +1911,98 @@ export class AgentLoop {
   }
 
   /**
-   * goal 出口闸门：未达成而想停 → 拽回继续（带预算兜底）。与验证门 / 证据门同构。
-   * 判定是纯逻辑（goal.decideGoalGate）；这里只做副作用（注入消息、累加 nudges、触顶解除）。
+   * 当前生效的出口策略链。
+   *
+   * P1（2026-11-02）：目前只有 goal 一条 —— 与重构前"goal 未激活就原样放行"严格等价。
+   * P2 之后按 `<sessionDir>/exit.json` 的 `exits` 声明装配：
+   *   · **没被声明的策略不进链**，这就是"屏蔽"（旧 policy 代码一行不动）
+   *   · 顺序 = 声明顺序；goal 保持在最前（它最严格，先拦）
+   */
+  /**
+   * 出口配置的惰性缓存。
+   * `undefined` = 还没读；`null` = 文件不存在/损坏（⇒ **完全不介入**，零回归）。
+   * P2 阶段不做热更（改 exit.json 后需重启会话）；热更放 P4 与触发表一起。
+   */
+  private exitConfigCache: ExitConfig | null | undefined = undefined;
+
+  private getExitConfig(): ExitConfig | null {
+    // ① 会话级 `<sessionDir>/exit.json` 优先（允许单会话例外；文件 IO 故缓存）
+    if (this.exitConfigCache === undefined) {
+      this.exitConfigCache = loadExitConfig(this.sessionDir);
+    }
+    if (this.exitConfigCache) return this.exitConfigCache;
+
+    // ② 全局开关（2026-11-04）：**每次读内存缓存、不落本实例缓存** ——
+    //    这样任一会话点了 auto 按钮，其它会话下一次装配就立刻生效。
+    //    缓存全局值会导致"只有点按钮的那个会话生效"，那正是要修的问题。
+    if (loadGlobalAuto().enabled) return { exits: ['suspend'], inherit: true };
+
+    // ③ 都没有 ⇒ 不介入（零回归）
+    return null;
+  }
+
+  private activeExitPolicies(): ExitPolicy[] {
+    const policies: ExitPolicy[] = [];
+    if (this.goalState?.active) policies.push(createGoalExitPolicy(this.goalState));
+
+    // 出口白名单（2026-11-02 P2 后半）：exit.json 声明"允许哪些出口"。
+    // 典型自主模式配置 = { exits: ['suspend'] } ⇒ 下面这条把 end_turn 拦掉，
+    // 于是"不再调用工具"不再能结束回合，唯一出口变成 suspend。
+    // 文件不存在 ⇒ cfg 为 null ⇒ 不装任何拦截（老会话行为逐字不变）。
+    const cfg = this.getExitConfig();
+    if (cfg && !isExitAllowed(cfg, 'end_turn')) {
+      policies.push(createEndTurnBlockPolicy());
+    }
+    return policies;
+  }
+
+  /**
+   * 出口闸门链：任一策略说"继续"就继续（带预算兜底）。与验证门 / 证据门同构。
+   * 判定是纯逻辑（各 policy.gate）；这里只做副作用（注入消息、累加 nudges、触顶解除）。
+   *
+   * P1 重构说明：原实现是硬编码 `if (!goalState?.active) return` + 直调 decideGoalGate。
+   * 行为不变，只是把"goal 特例"换成"链上第一条策略"，为 suspend 等新出口腾位置。
    */
   private async applyGoalGate(
     stop: boolean,
     stopReason?: string,
   ): Promise<{ stop: boolean; stopReason?: string }> {
-    if (!this.goalState?.active) return { stop, stopReason };
-    const decision = decideGoalGate(stop, stopReason, this.goalState, DEFAULT_GOAL_BUDGET);
-    if (decision.message) {
-      this.goalState.nudges++;
+    const policies = this.activeExitPolicies();
+    // 没有任何启用策略 → 原样放行（这正是"屏蔽"的落地形态）
+    if (policies.length === 0) return { stop, stopReason };
+
+    const result = applyExitPolicies(policies, stop, stopReason);
+
+    // ── 副作用（policy 是纯逻辑，这些必须留在 loop 里做）──
+    // 两类副作用必须分开处理：
+    //   ① goal 专属 —— nudges 计数 + 落盘（只有 goal 策略带这份状态）
+    //   ② 所有策略共用 —— 把 message 注入对话 + 推状态栏
+    //
+    // ⚠️ 2026-11-05 修 bug：以前这里写的是 `if (id !== 'goal' || !this.goalState) continue;`
+    //    ⇒ `end_turn-blocked` 策略的提示语（"本会话只允许 suspend 作为出口…"）
+    //    **从来没被注入过**。后果：自主模式拦下回合时，模型收不到"为什么停不下来"，
+    //    只会无声地被迫续轮、换个姿势再试，最后撞 maxTurns —— 与
+    //    createEndTurnBlockPolicy 注释里"必须让模型知道原因"的设计意图正好相反。
+    //    现在：任何策略说"你不能停"，原因都会作为一条 user 消息回到对话里。
+    for (const { id, decision } of result.decisions) {
+      const msg = decision.message;
+      if (!msg) continue;
+
+      // ① goal 专属状态
+      if (id === 'goal' && this.goalState) {
+        this.goalState.nudges++;
+        saveGoalState(this.sessionDir, this.goalState);
+      }
+
+      // ② 注入对话 + 状态栏（goal / end_turn-blocked / 未来任何策略共用）
       await this.conversationStore.append(this.sessionDir, {
         role: 'user',
-        content: { type: 'text', text: decision.message },
+        content: { type: 'text', text: msg },
       }).catch(() => {});
-      this.outputHandler?.onStatus?.(decision.message.slice(0, 120), 'warn');
-      saveGoalState(this.sessionDir, this.goalState);
+      this.outputHandler?.onStatus?.(msg.slice(0, 120), decision.warn ? 'warn' : 'info');
     }
-    if (decision.stopReason === 'goal_budget_exceeded') this.exitGoal('预算触顶');
-    return { stop: decision.stop, stopReason: decision.stopReason };
+    if (result.stopReason === 'goal_budget_exceeded') this.exitGoal('预算触顶');
+    return { stop: result.stop, stopReason: result.stopReason };
   }
 
   /** 获取当前 active Provider（考虑 Router 路由） */
@@ -1676,6 +2162,18 @@ export class AgentLoop {
    * 运行一轮对话（从用户输入到 Agent 停止或调用工具后继续）
    */
   async run(userInput: string): Promise<void> {
+    // 用户（或上游）主动发起回合 ⇒ 取消挂着的自主唤醒定时器（2026-11-02 P4）。
+    // 不清的后果：用户正聊着，定时器到点又自起一轮 ⇒ 两轮抢同一会话，历史写乱。
+    // 自主唤醒自己调 run 时定时器已被 onSuspendTimerFire 置空，这里是幂等的。
+    this.clearSuspendTimer();
+    // ⚠️ 2026-11-05 补：**同时清掉落盘的 suspend.json**。
+    //    clearSuspendTimer() 只取消内存里的定时器/监控句柄，**不动文件** ⇒ 留下「幽灵条件」：
+    //    用户中途说了一句话（本轮挂起已作废），但 suspend.json 还躺在磁盘上；
+    //    下次重启时 restoreAutoMode() 仍会读到它，把一条早已不该有效的条件重新挂上、
+    //    并按旧条件把我唤醒一次 —— 而我这一轮根本没打算等那个东西。
+    //    语义上「用户/上游介入 ⇒ 本轮挂起作废」，所以文件也该一并清掉。
+    //    幂等：自主唤醒路径（onSuspendTimerFire，L1593）本来就先清过一次，再清无害。
+    clearSuspendState(this.sessionDir);
     return new Promise<void>((resolve, reject) => {
       this._runMutex = this._runMutex.then(async () => {
         // 记录本回合缓存记录起点（回合结束时据此算"本回合加权均值"）
@@ -2569,7 +3067,10 @@ export class AgentLoop {
       // ── P1 M3：finalize 阶段（endTurn + 暂定 stop 判定，经内核管道执行） ──
       // report 提交/中止状态预填（消费即重置）：判停由 finalize 在 toolCalled 之前完成。
       // stop 门链与 stop 事件统一由 _runInternal 在「真正决定是否结束」时处理。
-      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus(), goalStatus: this.takeGoalStatus() }, this.makeStageCtx());
+      // suspendStatus 与 sayStatus 并列传入（2026-11-02 自主模式 P2）。
+      // finalize 据此给出两个**不同**的 stopReason：'suspended' vs 'say_submitted' ——
+      // 上层靠它区分"挂条件睡了（该 arm 触发项）"和"收工（等人说话）"。
+      const finA = await this.pipeline.runSlot('finalize', { ...stateRef, toolCalled: true, sayStatus: await this.takeSayStatus(), suspendStatus: this.takeSuspendStatus(), goalStatus: this.takeGoalStatus() }, this.makeStageCtx());
       return { stop: finA.stop, stopReason: finA.stopReason, toolCalled: finA.toolCalled };
     }
 
@@ -2718,11 +3219,14 @@ export class AgentLoop {
    * 曾经可以无视 goal 黑名单直接跑 say/switch_mode/new_session/update_config）。
    */
   isToolAllowedForExecution(name: string): boolean {
-    // goal 模式工具管制：黑名单优先（拦住「换环境 / 宣布完成」类）；
-    // finish_goal / exit_goal 强制放行。
-    if (this.goalState?.active) {
-      if (isToolForbiddenInGoal(name)) return false;
-      if (isToolForcedVisibleInGoal(name)) return true;
+    // 出口策略的工具管制（P1：原 goal 黑名单，现按当前策略链裁决）。
+    // 与装配侧 filterToolsForGoal 走同一套谓词 —— 两处不同序会重演
+    // 「看得见、调不通」（2026-10-10 陪伴工具踩过）。
+    const policies = this.activeExitPolicies();
+    if (policies.length > 0) {
+      const verdict = resolveToolVerdict(policies, name);
+      if (verdict === 'forbid') return false;
+      if (verdict === 'force') return true;
     }
     if (!this.bundleRegistry) return true;
     const router = this.activeRouter;

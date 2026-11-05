@@ -99,6 +99,10 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
     private Icon? _formIcon;          // 窗体/任务栏图标（取 256 大图，Alt-Tab 不糊），同样自持有
     private bool _balloonShown;       // 气泡只弹一次：每次关窗都弹会让人关不掉提示
     private bool _exiting;            // 托盘「退出」已发起 ⇒ FormClosing 不得再拦截
+    // 壳层崩溃兜底限流（2026-11-01）：guardian/后端反复退出时壳重拉但限流，防崩溃循环。
+    private readonly System.Collections.Generic.List<System.DateTime> _relaunchTimes = new System.Collections.Generic.List<System.DateTime>();
+    private const int RelaunchWindowMs = 60_000;
+    private const int RelaunchMaxInWindow = 5;
 
     /// <summary>
     /// 单实例"唤回"消息（RegisterWindowMessage）。第二实例 EnumWindows 找到本窗口后
@@ -646,6 +650,14 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         return args;
     }
 
+    /// <summary>重拉限流（2026-11-01）：滑动窗口内重拉次数达上限则判定崩溃循环、停止重拉。</summary>
+    private bool RelaunchAllowed()
+    {
+        var now = System.DateTime.UtcNow;
+        _relaunchTimes.RemoveAll(t => (now - t).TotalMilliseconds >= RelaunchWindowMs);
+        return _relaunchTimes.Count < RelaunchMaxInWindow;
+    }
+
     /// <summary>后端退出：agent 调 restart 工具时后端以 42 退出，壳需重新拉起后端</summary>
     private void OnBackendExited(object? sender, EventArgs e)
     {
@@ -653,7 +665,16 @@ html,body{margin:0;height:100%;background:{BG};color:{FG};font-family:system-ui,
         int code = -1;
         try { code = _backend?.ExitCode ?? -1; } catch { }
         Debug.WriteLine($"[shell] backend exited code={code}");
-        if (code != 42) return;
+        // 2026-11-01：code==0 视为正常退出不重拉；其余（42 restart / guardian 崩溃 / 异常）都尝试重拉。
+        // 背景：guardian 模式下 worker 的 42 被 guardian 内部吃掉、壳看不到；壳真正该兜的是 guardian 自身崩溃。
+        // 限流防「拉起→启动即崩→再拉起」的崩溃循环。
+        if (code == 0) return;
+        if (!RelaunchAllowed())
+        {
+            Debug.WriteLine("[shell] backend 反复退出，判定崩溃循环，停止重拉（请查 shell-backend.log）");
+            return;
+        }
+        _relaunchTimes.Add(System.DateTime.UtcNow);
         try { BeginInvoke(new Action(() => { _ = RelaunchBackendAsync(); })); } catch { }
     }
 

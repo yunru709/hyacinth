@@ -105,11 +105,18 @@ export async function registerLoopDependentTools(deps: LoopDependentToolDeps): P
   {
     const { createSayTool } = await import('../tools/say.js');
     const { createDeliverTool } = await import('../tools/deliver.js');
+    const { createSuspendTool } = await import('../tools/suspend.js');
     toolRegistry.register(
       createSayTool((content, voice) => loop.submitSay(content, voice)),
     );
     toolRegistry.register(
       createDeliverTool((content, title) => loop.submitDeliver(content, title)),
+    );
+    // suspend（2026-11-02 · 自主模式 P2）：本回合以「挂起」结束 —— 登记唤醒条件后去睡。
+    // 与 deliver/say 同构（都是注入提交函数，工具自身零业务依赖），区别只在
+    // finalize 写出的 stopReason：'suspended'（挂条件）vs 'say_submitted'（收工）。
+    toolRegistry.register(
+      createSuspendTool((payload) => loop.submitSuspend(payload)),
     );
   }
 

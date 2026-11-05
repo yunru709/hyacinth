@@ -233,7 +233,8 @@ function normalizeConfig(persisted: Record<string, unknown>): Record<string, unk
       id === providerName ? (modelName || providerDefault(id)) : '';
     normalized.provider = {
       active: providerName,
-      routeMode: 'auto',
+      // 'auto' → 'automatic'（2026-11-05 改名消歧；旧值由 applyRouteMode 兼容）
+      routeMode: 'automatic',
       anthropic: { model: modelFor('anthropic'), apiKeyEnv: 'ANTHROPIC_API_KEY' },
       openai: { model: modelFor('openai'), apiKeyEnv: 'OPENAI_API_KEY' },
       deepseek: { model: modelFor('deepseek'), apiKeyEnv: 'DEEPSEEK_API_KEY' },

@@ -451,8 +451,13 @@ export function subscribeConfig(
   // 把 routeMode 投影到 router：唯一真相源是配置，router 的 defaultName
   // 只是它的投影，不独立存在。manual 时钉住 provider.active，route() 便不会
   // 再抢回注册表第一个。
-  const applyRouteMode = (mode: string): void => {
+  // 2026-11-05 改名：routeMode 的 'auto' → 'automatic'（消歧，仓库里另有「自主常驻
+  // 模式」和权限档 auto-approve 都曾叫 auto）。归一化旧值：磁盘 config.json 或外部
+  // 工具仍可能传 'auto'，不映射的话会落到 else 分支——既不 manual 也不 automatic
+  // ⇒ 静默什么都不做，表现为"设了自动路由却钉死了默认 Provider"。
+  const applyRouteMode = (rawMode: string): void => {
     if (!providerRouter) return;
+    const mode = rawMode === 'auto' ? 'automatic' : rawMode;
     if (mode === 'manual') {
       const activeName = configCenter.get<string>('provider.active');
       if (!activeName) return;
@@ -465,7 +470,7 @@ export function subscribeConfig(
         // 等价（'main' 按构造即当前活跃 Provider），否则钉住会被跳过。
         providerRouter.setDefault('main');
       }
-    } else if (mode === 'auto') {
+    } else if (mode === 'automatic') {
       providerRouter.clearDefault();
     }
   };
@@ -480,7 +485,7 @@ export function subscribeConfig(
   // 变更事件被永久错过 → defaultName 停留 null → 每轮 route() 抢回注册表第一个
   // Provider，用户持久化的 provider.active 在重启后静默丢失。
   // 故注册后立即按「当前值」应用一次，让持久化选择在启动时即生效。
-  applyRouteMode(configCenter.get<string>('provider.routeMode') ?? 'auto');
+  applyRouteMode(configCenter.get<string>('provider.routeMode') ?? 'automatic');
 
   // session.maxTurns 变更 → 即时更新
   // 去重：只在**本会话实际生效值变化**时才提示 ✓

@@ -8,6 +8,7 @@ import { LayeredContextComposer } from '../context/composer.js';
 import { CompressorOrchestrator, StructuredSummarizer } from '../context/compressor.js';
 import { TokenCounter } from '../context/tokenizer.js';
 import { FilteredToolRegistry } from '../tools/filtered-registry.js';
+import { ReportTool } from './report-tool.js';
 import { createSandboxedTool } from '../tools/path-sandbox.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ConversationStore } from '../memory/conversation.js';
@@ -189,7 +190,7 @@ export async function createSubAgentLoop(
   agentDef: AgentDefinition,
   task: string,
   parentContext: SubAgentContext,
-  opts?: { systemPromptOverride?: string },
+  opts?: { systemPromptOverride?: string; workspaceOverride?: string },
 ): Promise<{ loop: AgentLoop; sessionDir: string; isNew: boolean }> {
   const instanceId = agentDef.instanceId ?? `${agentDef.name}-default`;
   const subSessionDir = path.join(parentContext.sessionDir, 'sub-agents', instanceId);
@@ -240,15 +241,19 @@ export async function createSubAgentLoop(
   }
 
   // 2. 创建 FilteredToolRegistry
-  const filteredRegistry = new FilteredToolRegistry(parentContext.toolRegistry, agentDef.allowedTools);
+  const filteredRegistry = new FilteredToolRegistry(parentContext.toolRegistry, agentDef.allowedTools, ['report']);
 
   // 2.5 路径沙箱包装（若设置了 sandboxRoot）
-  if (parentContext.sandboxRoot) {
+  const sandboxRoot = opts?.workspaceOverride ?? parentContext.sandboxRoot;
+  if (sandboxRoot) {
     for (const tool of filteredRegistry.getAll()) {
-      const wrapped = createSandboxedTool(tool, parentContext.sandboxRoot);
+      const wrapped = createSandboxedTool(tool, sandboxRoot);
       filteredRegistry.register(wrapped);
     }
   }
+
+  // 2.6 注入 report 汇报工具（系统工具，豁免白名单）——子 Agent 必须用它交付结果
+  filteredRegistry.register(new ReportTool());
 
   // 3. 创建独立的 LayeredContextComposer，注入子 Agent 的 systemPrompt
   // 子 Agent 的独立 Provider（唯一 userId，与主 Agent 和其他子 Agent 缓存隔离）。
@@ -265,6 +270,8 @@ export async function createSubAgentLoop(
   // 这样每次 compose() 调用时都会自动注册，不会被 builder 重置清除
   // system prompt 已在上方按「首次落定、复用冻结」解析（{{task}} → 固定指引，任务走 user 消息）
   let systemPrompt = resolvedSystemPrompt;
+  // 强制：子 Agent 必须调用 report 工具交付结果（2026-11-01）
+  systemPrompt = (systemPrompt ?? '') + '\n\n## 交付要求\n任务结束前你必须调用 `report` 工具提交最终结果（status/summary/artifacts/data）——主 Agent 只认 report 的内容，不看你在普通回答里写的文字。';
 
   // 结构化输出：追加 JSON 格式指令
   if (agentDef.outputFormat === 'json') {
@@ -389,6 +396,10 @@ export class DelegateToAgentTool implements Tool {
         type: 'boolean' as const,
         description: '异步结果是否允许跨 turn。默认 false——子Agent完成后结果在当前 turn 内自动注入对话，LLM 立即看到并继续处理。设为 true 时结果不自动注入，需手动用 get_sub_agent_result 获取（适用于需要跨多轮对话的后台任务）。仅在 async=true 时生效。',
       },
+      workspace: {
+        type: 'string' as const,
+        description: '可选：指定子 Agent 的可执行工作区（绝对路径，如桌面目录 D:\\xxx 或 C:\\Users\\xxx\\Desktop）。设置后子 Agent 的 read/write/edit/grep/glob 被限制在该目录内，覆盖默认的父 Agent 工作区围栏——用于让子 Agent 写主 Agent 工作区之外的位置。',
+      },
     },
     required: ['task'],
   };
@@ -409,6 +420,7 @@ export class DelegateToAgentTool implements Tool {
     const systemPromptOverride = args.system_prompt as string | undefined;
     const runAsync = args.async === true;
     const acrossTurns = args.across_turns === true;
+    const workspaceOverride = args.workspace as string | undefined;
 
     if (!agentName && !instanceId) {
       return 'Error: either agent_name or instance_id is required. Use list_sub_agents to see available agents and their instance IDs.';
@@ -439,10 +451,10 @@ export class DelegateToAgentTool implements Tool {
 
     try {
       if (runAsync) {
-        return await this.executeAsync(agentDef, fullTask, acrossTurns, systemPromptOverride);
+        return await this.executeAsync(agentDef, fullTask, acrossTurns, systemPromptOverride, workspaceOverride);
       }
 
-      return await this.executeDelegate(agentDef, fullTask, systemPromptOverride);
+      return await this.executeDelegate(agentDef, fullTask, systemPromptOverride, workspaceOverride);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return `Sub-agent delegation failed: ${message}`;
@@ -453,12 +465,12 @@ export class DelegateToAgentTool implements Tool {
    * 异步委托：在后台启动子 Agent，立即返回任务句柄。
    * 子 Agent 的 loop.run() 在后台 Promise 中执行，完成后结果写入 AsyncSubAgentTask。
    */
-  private async executeAsync(agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string): Promise<string> {
+  private async executeAsync(agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string, workspaceOverride?: string): Promise<string> {
     const instanceId = agentDef.instanceId!;
     const handle = registerAsyncTask(agentDef.name, instanceId, task);
 
     // 在后台启动子 Agent，不阻塞。catch 兜底防止未处理的 Promise rejection
-    this.runAsyncInBackground(handle, agentDef, task, acrossTurns, systemPromptOverride).catch((err) => {
+    this.runAsyncInBackground(handle, agentDef, task, acrossTurns, systemPromptOverride, workspaceOverride).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       failAsyncTask(handle, message);
       if (!acrossTurns) {
@@ -473,10 +485,10 @@ export class DelegateToAgentTool implements Tool {
   }
 
   /** 后台执行子 Agent 任务 */
-  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string): Promise<void> {
+  private async runAsyncInBackground(handle: string, agentDef: AgentDefinition, task: string, acrossTurns: boolean, systemPromptOverride?: string, workspaceOverride?: string): Promise<void> {
     const instanceId = agentDef.instanceId!;
     try {
-      const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride });
+      const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride, workspaceOverride });
       registerRunningLoop(instanceId, loop);
       if (!isNew) {
         await fs.utimes(path.join(sessionDir, 'meta.json'), new Date(), new Date()).catch(() => {});
@@ -502,9 +514,9 @@ export class DelegateToAgentTool implements Tool {
   /**
    * 委托模式：单个子 Agent 执行任务（同步阻塞）
    */
-  private async executeDelegate(agentDef: AgentDefinition, task: string, systemPromptOverride?: string): Promise<string> {
+  private async executeDelegate(agentDef: AgentDefinition, task: string, systemPromptOverride?: string, workspaceOverride?: string): Promise<string> {
     const instanceId = agentDef.instanceId!;
-    const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride });
+    const { loop, sessionDir, isNew } = await createSubAgentLoop(agentDef, task, this.parentContext, { systemPromptOverride, workspaceOverride });
     registerRunningLoop(instanceId, loop);
     try {
       if (!isNew) {
@@ -545,6 +557,7 @@ export class DelegateToAgentTool implements Tool {
       const assistantTexts: string[] = [];
       let turnCount = 0;
       const modifiedFiles = new Set<string>();
+      let lastReport: Record<string, unknown> | null = null;
 
       for (const line of lines) {
         try {
@@ -569,6 +582,7 @@ export class DelegateToAgentTool implements Tool {
               if (block.type === 'tool_use') {
                 const toolName = block.name ?? block.tool_name ?? '';
                 const input = block.input ?? {};
+                if (toolName === 'report') lastReport = input;
                 const filePath = input.file_path ?? input.path ?? '';
                 if (['write', 'edit', 'bash'].includes(toolName) && filePath) {
                   modifiedFiles.add(filePath);
@@ -579,17 +593,22 @@ export class DelegateToAgentTool implements Tool {
         } catch { /* skip malformed lines */ }
       }
 
-      const summary = assistantTexts.length > 0
-        ? assistantTexts[assistantTexts.length - 1]
-        : 'No text output';
+      const rpt = lastReport as { status?: unknown; summary?: unknown; artifacts?: unknown } | null;
+      const summary = rpt && typeof rpt.summary === 'string'
+        ? `[report:${String(rpt.status ?? 'done')}] ${rpt.summary}`
+        : (assistantTexts.length > 0 ? assistantTexts[assistantTexts.length - 1] : 'No text output');
+      const artifacts = rpt && Array.isArray(rpt.artifacts) ? (rpt.artifacts as string[]) : [];
+      const finalSummary = rpt
+        ? summary
+        : `${summary}\n\n⚠️ [未结构化] 子Agent未调用 report 工具，以上为其末条消息（可能含中间态/注入内容，谨慎采信）。`;
 
       return {
         agentName,
         task,
         status: 'completed',
-        summary,
+        summary: finalSummary,
         turns: Math.ceil(turnCount / 2), // user+assistant 成对
-        filesModified: [...modifiedFiles],
+        filesModified: [...new Set([...modifiedFiles, ...artifacts])],
       };
     } catch {
       return { ...baseResult, summary: 'Failed to read sub-agent output' };

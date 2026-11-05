@@ -18,6 +18,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+// P1（2026-11-02）：goal 的三件套以 ExitPolicy 形态对外暴露，供 loop 统一走闸门链。
+// 同层互引（orchestrator 内部），不涉及分层规则。
+import type { ExitPolicy } from './exit-policy.js';
 
 /** goal 状态（session 级；进入时锁定 objective，达成或解除后清空） */
 export interface GoalState {
@@ -224,3 +227,33 @@ export interface GoalReviewResult {
 export type GoalToolFilter = (
   defs: import('../types.js').ToolDefinition[],
 ) => import('../types.js').ToolDefinition[];
+
+// ── ExitPolicy 形态（2026-11-02 P1：把三件套从 loop 里抽出来）────────────────
+
+/**
+ * goal 作为一条 ExitPolicy。
+ *
+ * 为什么是"工厂"而不是常量：闸门要读**当前** GoalState（nudges / reviewAttempts
+ * 每轮都在变），常量会锁死旧快照。
+ *
+ * 纯逻辑约定：这里只返回判定，**不做任何副作用** —— 注入消息、nudges++、
+ * saveGoalState、预算触顶解除模式，全部留在 loop.applyGoalGate。
+ * 那些需要会话上下文（conversationStore / outputHandler / sessionDir），
+ * policy 不该认识它们，否则又变成不可单测的一坨。
+ *
+ * 与重构前严格等价（验收靠 goal.test.ts 全绿 + 行为逐字一致）：
+ *   · gate        ← decideGoalGate(stop, stopReason, state, DEFAULT_GOAL_BUDGET)
+ *   · toolVerdict ← isToolForbiddenInGoal() / isToolForcedVisibleInGoal()
+ */
+export function createGoalExitPolicy(state: GoalState): ExitPolicy {
+  return {
+    id: 'goal',
+    gate: (stop, stopReason) => decideGoalGate(stop, stopReason, state, DEFAULT_GOAL_BUDGET),
+    toolVerdict: (name) => {
+      // 顺序要紧：黑名单优先。若先判 force，finish_goal 之类万一被列进黑名单就矛盾了。
+      if (isToolForbiddenInGoal(name)) return 'forbid';
+      if (isToolForcedVisibleInGoal(name)) return 'force';
+      return 'allow';
+    },
+  };
+}

@@ -50,6 +50,15 @@ export class DependencyAnalyzer {
   /** 全量构建依赖图 */
   private async fullBuild(): Promise<void> {
     const files = await this.parser.scanFiles(this.rootDir);
+    // 护栏②（2026-11-05）：文件数上限，防「误把大目录当项目根」把启动拖死。
+    //   事故：在 `C:\Users\74689\Desktop` 下跑 tui，扫到 41031 个文件、耗时 52.8s。
+    //   正常仓库 ~900 文件；20000 留足余量。超限即抛错，调用方降级为「无依赖分析」。
+    const MAX_FULLBUILD_FILES = 20000;
+    if (files.length > MAX_FULLBUILD_FILES) {
+      throw new Error(
+        `dependency fullBuild refused: ${files.length} files under "${this.rootDir}" exceeds limit ${MAX_FULLBUILD_FILES}（疑似误把大目录/非项目根当作分析目标）`,
+      );
+    }
     const allDeps: FileDependency[] = [];
 
     for (const file of files) {

@@ -411,6 +411,8 @@ export class SetupWizard {
     const choice = await p.select({
       message: '本地模型需要 llama.cpp 推理引擎，是否自动下载编译？',
       options: [
+        // 'auto' = 自动下载编译 llama.cpp。与「自主常驻模式」无关
+        // （同名不同物，见 orchestrator/permission-profile.ts 顶部的 6 处 auto 清单）。
         { value: 'auto', label: '是，自动下载编译', hint: '推荐' },
         { value: 'installed', label: '我已安装（跳过）', hint: '使用系统 PATH 中的 llama-server' },
         { value: 'skip', label: '跳过，稍后手动执行', hint: 'npm run setup:llamacpp' },

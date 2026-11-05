@@ -19,6 +19,21 @@ import { AgentLoop } from './loop.js';
 import type { AgentLoopServices } from './loop.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { Provider } from '../provider/interface.js';
+import { saveSuspendState, loadSuspendState } from '../tools/suspend.js';
+
+// ⚠️ 测试隔离（2026-11-05 补）：`~/.agent/auto.json` 是**进程级单例 + 真实 home 路径**，
+// 没有注入点。用户在 WebUI 顶栏一旦开了 AUTO（enabled:true），本文件构造的每个 AgentLoop
+// 都会拿到 `{ exits: ['suspend'] }` ⇒ end_turn 出口被拦 ⇒ 回合空转到 maxTurns ⇒
+// 「正常结束 / evidence_pending / verification_pending」4 条用例集体假红。
+// 测试不该依赖用户的全局开关，这里把它钉成关闭，并阻止写真实文件。
+vi.mock('./auto-global.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./auto-global.js')>();
+  return {
+    ...actual,
+    loadGlobalAuto: () => ({ enabled: false }),
+    saveGlobalAuto: () => true, // 不落盘到真实 ~/.agent/auto.json
+  };
+});
 
 const tmpDirs: string[] = [];
 function tmpdir(): string {
@@ -627,5 +642,23 @@ describe('goal 逃逸口封堵', () => {
 
     expect(eleventh.ok).toBe(false);
     expect(loop.getGoalState()).toBeNull();
+  });
+});
+
+describe('挂起条件生命周期（幽灵条件防回归）', () => {
+  it('用户介入（run）会清掉落盘的 suspend.json（2026-11-05 修）', async () => {
+    const { provider } = makeProvider();
+    const dir = tmpdir();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: dir });
+
+    // 模拟"上一轮挂了一个等文件变化的条件"
+    saveSuspendState(dir, { until: { kind: 'file', spec: { path: 'x.ts' } }, note: '旧条件' });
+    expect(loadSuspendState(dir)).not.toBeNull();
+
+    // 用户直接说话 ⇒ 本轮挂起作废；文件必须一并清掉，
+    // 否则下次重启 restoreAutoMode() 会把它当有效条件重新挂上（幽灵唤醒）。
+    await loop.run('用户说话');
+
+    expect(loadSuspendState(dir)).toBeNull();
   });
 });

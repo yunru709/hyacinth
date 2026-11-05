@@ -139,6 +139,8 @@ export class CosyVoiceService {
     const missing = missingFiles(this.variant);
     return {
       variant: this.variant,
+      // 'auto' = 镜像自动选择。与「自主常驻模式」无关（同名不同物，见
+      // orchestrator/permission-profile.ts 顶部的 6 处 auto 清单）。
       mirror: this.mirrorPref || 'auto',
       missingFiles: missing.map((f) => f.path),
       ready: missing.length === 0,

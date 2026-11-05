@@ -36,7 +36,7 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
     name: 'turn-finalize',
     version: '1.1.0',
     // 契约：声明读写的 TurnState 字段；槽位 requires 必须 ⊆ 此处声明
-    reads: ['stop', 'toolCalled', 'flowStillActive', 'sayStatus', 'goalStatus'],
+    reads: ['stop', 'toolCalled', 'flowStillActive', 'sayStatus', 'goalStatus', 'suspendStatus'],
     writes: ['stop', 'stopReason'],
     async run(state: TurnState, ctx: KernelStageContext): Promise<TurnState> {
       // ── 回合回滚：回合结束记录（尽力而为，不阻塞主循环） ──
@@ -52,6 +52,16 @@ export function createFinalizeStage(): StageModule<TurnState, StageServiceMap> {
       // 若排在 toolCalled 之后便永远停不下来（与 say 同理）。
       if (state.goalStatus === 'achieved') {
         return { ...state, stop: true, stopReason: 'goal_achieved' };
+      }
+
+      // ── suspend 挂起判停（2026-11-02 · 自主模式 P2；必须先于 toolCalled）──
+      // suspend 本身也是一次工具调用（toolCalled=true），排在它后面就永远停不下来 ——
+      // 与下面 sayStatus 同理。
+      // ⚠️ reason 必须是独立的 'suspended'：上层靠它区分
+      //    「挂条件睡了 → 该去 arm 触发项」与「收工 → 等人说话」。
+      //    混进 'end_turn' ⇒ 没人知道该 arm 什么，自主模式直接失效。
+      if (state.suspendStatus === 'suspended') {
+        return { ...state, stop: true, stopReason: 'suspended' };
       }
 
       // ── report 交付/中止判停（必须先于 toolCalled）──

@@ -97,7 +97,18 @@ describe('subscribeConfig — routeMode 电平触发（重启后持久化选择�
     expect(router.route({ complexity: 'medium' }).getProviderType()).toBe('volcengine');
   });
 
-  it('routeMode=auto → 清除钉住，回到自动路由', () => {
+  it('routeMode=automatic → 清除钉住，回到自动路由', () => {
+    const router = new ProviderRouter();
+    router.register('main', fakeProvider('volcengine'));
+    router.setDefault('main');
+    const cc = fakeConfigCenter({ 'provider.routeMode': 'automatic' });
+
+    subscribeConfig(makeDeps(router, cc), hooks);
+
+    expect(router.getRoutingInfo().mode).toBe('automatic');
+  });
+
+  it('旧值 routeMode=auto 仍被归一化（2026-11-05 改名兼容）', () => {
     const router = new ProviderRouter();
     router.register('main', fakeProvider('volcengine'));
     router.setDefault('main');
@@ -105,16 +116,17 @@ describe('subscribeConfig — routeMode 电平触发（重启后持久化选择�
 
     subscribeConfig(makeDeps(router, cc), hooks);
 
-    expect(router.getRoutingInfo().mode).toBe('auto');
+    // 磁盘上残留的旧值必须等价于 automatic，否则会静默不生效
+    expect(router.getRoutingInfo().mode).toBe('automatic');
   });
 
-  it('运行时由 auto 切到 manual → 变更回调仍然生效', () => {
+  it('运行时由 automatic 切到 manual → 变更回调仍然生效', () => {
     const router = new ProviderRouter();
     router.register('main', fakeProvider('volcengine'));
-    const cc = fakeConfigCenter({ 'provider.routeMode': 'auto', 'provider.active': 'volcengine' });
+    const cc = fakeConfigCenter({ 'provider.routeMode': 'automatic', 'provider.active': 'volcengine' });
 
     subscribeConfig(makeDeps(router, cc), hooks);
-    expect(router.getRoutingInfo().mode).toBe('auto');
+    expect(router.getRoutingInfo().mode).toBe('automatic');
 
     cc._emit('provider.routeMode', 'manual');
     expect(router.getRoutingInfo().mode).toBe('manual');
@@ -126,7 +138,7 @@ describe('subscribeConfig — routeMode 电平触发（重启后持久化选择�
     const cc = fakeConfigCenter({ 'provider.routeMode': 'manual' });
 
     expect(() => subscribeConfig(makeDeps(router, cc), hooks)).not.toThrow();
-    expect(router.getRoutingInfo().mode).toBe('auto');
+    expect(router.getRoutingInfo().mode).toBe('automatic');
   });
 });
 

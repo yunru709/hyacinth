@@ -97,19 +97,20 @@ export type SayVoiceNoticeFn = (opts: SayVoiceOptions) => string | null;
 export function createSayTool(submit: SaySubmitFn, voiceNotice?: SayVoiceNoticeFn): Tool {
   return {
     name: 'say',
+    // 【2026-11-01 描述重写 · 孑遗定调】
+    // 旧描述自相矛盾地把 say 说成"只是说话，不是交付"，于是模型默认走正文、几乎不用它。
+    // 现在的定位：say = **过程插话**（边干边说），deliver = 收尾交付。
+    // 另：say 明确不判停（见文件头注释），所以"说完还得结束回合"不算缺陷 —— 它本来就不是出口。
+    // 描述里刻意保留正向触发（"能口语说完就交给 say"），只有负向约束时模型会绕开这个工具。
     description:
-      '你可以通过这个工具用扬声器说话 —— 内容会被原样朗读出来。' +
-      '**一句话一次 say**：想说的多就分几次说，别在一句里塞多个要点。' +
-      '不要放特殊符号：Markdown 标记、表格、代码块、列表、引号括号星号都不要，只写纯口语的话。' +
-      '它只是「说话」，不是「交付」：要交长篇 / 结构化内容请用 deliver。' +
-      '**调用后不结束回合**，说完还能继续调用别的工具干活。' +
-      '语音侧参数（可选，取决于本地语音引擎能力，不支持的项会被忽略）：' +
-      'voice=音色 id、speed=语速 0.5~2、emotion=语气（如 warm）；' +
-      'extras=引擎特有参数（如 temperature/top_k/seed/text_chunk_mode；具体支持哪些取决于当前引擎，' +
-      '不在白名单里的会被静默丢弃，不影响朗读）；' +
-      'broadcast=false 表示这次只出文字、不要朗读（比如用户正在开会）。' +
-      '**笑声等非语言效果**：直接在 content 里写 [laughter] 或 [laugh] 这类方括号标签，' +
-      '当前引擎若支持会自动合成（实测 BreezeTTS 生效，时长增加约 1.4s）。',
+      '在干活的过程中用嘴说一句 —— 内容会被朗读出来，同时显示在对话里。' +
+      '**定位是过程插话**：汇报进度、表个态、提醒一句，边干边说，别攒到最后一次性写进正文。' +
+      '调用后不结束回合，说完继续干活；本轮的正式交付仍由正文或 deliver 完成。' +
+      '**能口语说完的话就交给 say，不要在最终回复里再复述一遍**（重复是它最主要的使用浪费）。' +
+      '适合：进度、短提醒、态度与情绪、用户可能不在屏幕前。不适合：清单、代码、表格、长分析。' +
+      '一次一句话，别在一句里塞多个要点。只写纯口语：不要 Markdown、表格、代码块、列表、引号括号星号。' +
+      '可选语音参数 voice / speed / emotion / broadcast（引擎不支持则忽略）；' +
+      '笑声等效果直接在 content 里写 [laughter]（BreezeTTS 支持）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -157,8 +158,10 @@ export function createSayTool(submit: SaySubmitFn, voiceNotice?: SayVoiceNoticeF
       // 最小返回值：Tool.execute 必须返回 string，且 tool_result 不可缺失
       // （缺失会被严格厂商判为孤儿 tool_use、整请求拒绝），所以只能精简不能删。
       // 语音侧不可用（用户开了播报但服务/模型没就绪）时附带明示 —— 交付不受影响。
+      // 返回值语义（2026-11-01 孑遗指定）：用「已说完」替代裸 ok ——
+      // 它表达的是**话已交付**（已落盘/已排队播报），不是播放完成回执（拿不到那个）。
       const notice = voiceNotice?.(parseSayVoiceOptions(args)) ?? null;
-      return notice ? `ok（语音播报：${notice}）` : 'ok';
+      return notice ? `已说完（语音播报：${notice}）` : '已说完';
     },
   };
 }

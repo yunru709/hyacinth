@@ -10,7 +10,7 @@ describe('say 工具', () => {
     const out = await tool.execute({ content: '任务已完成，产出如下…' });
 
     expect(submit).toHaveBeenCalledWith('任务已完成，产出如下…', {});
-    expect(out).toBe('ok');
+    expect(out).toBe('已说完');
   });
 
   it('提交方拒绝（ok:false）→ 抛错（框架落 is_error → loop 自动续轮重试）', async () => {
@@ -24,7 +24,7 @@ describe('say 工具', () => {
     const submit = vi.fn().mockResolvedValue({ ok: true });
     const tool = createSayTool(submit);
 
-    await expect(tool.execute({ content: 'x' })).resolves.toBe('ok');
+    await expect(tool.execute({ content: 'x' })).resolves.toBe('已说完');
   });
 
   it('缺省 content 视为空串（交给 submit 校验，工具自身不判空）', async () => {
@@ -41,16 +41,16 @@ describe('say 工具', () => {
     const tool = createSayTool(submit, (opts) =>
       opts.broadcast === false ? null : '未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型');
     const out = await tool.execute({ content: '结论' });
-    expect(out).toBe('ok（语音播报：未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型）');
-    // broadcast:false（本次不朗读）→ 无提示，返回裸 ok
+    expect(out).toBe('已说完（语音播报：未执行 —— TTS 模型未就绪，请在 设置 → 语音 下载模型）');
+    // broadcast:false（本次不朗读）→ 无提示，只返回「已说完」
     const out2 = await tool.execute({ content: '结论', broadcast: false });
-    expect(out2).toBe('ok');
+    expect(out2).toBe('已说完');
   });
 
   it('voiceNotice 缺省（未注入）：返回值保持裸 ok（零开销路径）', async () => {
     const submit = vi.fn().mockReturnValue({ ok: true });
     const out = await createSayTool(submit).execute({ content: 'x' });
-    expect(out).toBe('ok');
+    expect(out).toBe('已说完');
   });
 
   it('只读副作用：不触发权限审批（sideEffect=read）', () => {

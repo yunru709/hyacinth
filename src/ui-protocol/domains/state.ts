@@ -162,7 +162,9 @@ export function buildStateSnapshot(
     // 而非 providerRouter 的通道名（如 main）。active.getProviderType() 是真实来源。
     providerLabel: active.getProviderType(),
     isLocal: routing?.isLocal ?? false,
-    routeMode: routing?.mode === 'auto' ? 'auto' : 'manual',
+    // 2026-11-05 改名：routeMode 的 'auto' → 'automatic'（消歧）。
+    // 注意这里判的是归一化后的值 —— ProviderRouter.getRoutingInfo() 已返回 'automatic'。
+    routeMode: routing?.mode === 'automatic' ? 'automatic' : 'manual',
     mode: routing?.mode,
     turnCount: info.turnCount,
     maxTurns: info.maxTurns,

@@ -8,13 +8,10 @@
  * 三者都只能靠断言挡住，肉眼读代码看不出来。
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  SayPlaybackQueue,
-  wavDurationMs,
-  defaultTimeoutMs,
-  prependSilence,
-  SAY_LEAD_SILENCE_MS,
-} from './say-playback-queue.js';
+import { SayPlaybackQueue, wavDurationMs, defaultTimeoutMs } from './say-playback-queue.js';
+// ⚠️ prependSilence 已迁到 tts 层（见 src/tts/wav.ts）。
+// gateway 本体不得直连业务核心（规则 5），但**测试文件豁免** —— 直接从新位置引即可。
+import { prependSilence, SAY_LEAD_SILENCE_MS } from '../tts/wav.js';
 
 /** 造一个合法的最小 WAV 头（PCM 16bit）—— 只求解析器认，不求能播 */
 function makeWav(opts: { sampleRate?: number; channels?: number; bits?: number; seconds?: number } = {}): Buffer {

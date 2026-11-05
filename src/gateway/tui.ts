@@ -88,7 +88,7 @@ import { createTuiAskUser } from './tui-ask-user.js';
 import { showWelcome } from './tui-welcome.js';
 import { createModelLocalCmds } from './tui-model-local.js';
 import { createCompressCmds } from './tui-compress-cmds.js';
-import { SayPlaybackQueue, prependSilence, SAY_LEAD_SILENCE_MS } from './say-playback-queue.js';
+import { SayPlaybackQueue } from './say-playback-queue.js';
 import { createChannelCmds, createChannelDispatch, type ChannelRegistryLike } from './tui-channel-cmds.js';
 import { createSessionCmds } from './tui-session-cmds.js';
 import { formatDeclaredToolLinks, getCurrentToolLinks } from '../utils/tool-links.js';
@@ -202,6 +202,12 @@ export async function runTui(
   const chatLog = new ChatLog();
 
   const footerText = new Text('', 0, 0);
+/**
+ * 自主模式状态片段（2026-11-04）。
+ * 由 `/auto` 命令与协议刷新时更新，footer 常驻显示 ——
+ * 这功能可能整晚在跑，用户必须一眼看见它开着（与 webui 的 brand 圆点同职责）。
+ */
+let autoFooterText = '';
 
   const editor = new CustomEditor(tui, editorTheme);
 
@@ -814,16 +820,14 @@ export async function runTui(
       try {
         const dir = path.join(os.homedir(), '.agent', 'work', 'say-cache');
         fs.mkdirSync(dir, { recursive: true });
-        // ⚠️ 垫静音（2026-10-26 孑遗实听「听不到第一个字」）：
-        // 每次播放都新起一个 powershell ⇒ 音频设备冷启动要几十~几百毫秒才出声，
-        // 这段唤醒期送进去的音频被吞掉 ⇒ 每句开头都缺一点。
-        // 实测：同一份 wav 直接播听不到「一」，前垫 300ms 静音后完整听到。
-        // （波形已证明合成端清白：开头 0-190ms 的 RMS 是全文件 p90 水平。）
-        const padded = prependSilence(wav, SAY_LEAD_SILENCE_MS);
+        // 【2026-11-01 移除本地垫静音】原来在这里 prependSilence(wav, 300) ——
+        // 当时只修了 TUI，webui 的 <audio> 路径漏了，于是"有时候听不到第一个字"。
+        // 现在改由**合成出口**统一垫（src/tts/wav.ts + say-voice-plugin 投递前），
+        // 所有播放端一次生效。此处**不能再垫**，否则叠加成 600ms，每句起播多等 0.3 秒。
         // 文件名加随机后缀：Date.now() 在快速连发时会同毫秒撞名，
         // 后者覆盖前者 ⇒ 播的是同一段音频（也是"听着像重复"的一个来源）。
         const file = path.join(dir, `say-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
-        fs.writeFileSync(file, padded);
+        fs.writeFileSync(file, wav);
         // ⚠️ 2026-10-25 修正：原实现用 `start /b` + 静默 catch，播放成败**完全不可知**
         // （say-cache 里的 wav 被删只证明 powershell 起来了，不证明扬声器真出了声）。
         // 违反「catch 里必须打日志」⇒ 改成 spawn + exit code/stderr 留痕。
@@ -1416,6 +1420,11 @@ export async function runTui(
 
     if (messageQueue.size > 0) {
       footer += theme.fg(` | Queue: ${messageQueue.size}`);
+    }
+    // 自主模式状态（2026-11-04）：可能整晚在跑，必须一眼可见
+    // （与 webui 左上角 brand 的状态点同职责）
+    if (autoFooterText) {
+      footer += theme.accent(` | ${autoFooterText}`);
     }
     footerText.setText(footer);
   }
@@ -2010,6 +2019,91 @@ export async function runTui(
       chatLog.addSystem(theme.accent(arg === 'off' ? '正在解除 goal 模式…' : '正在进入 goal 模式…'));
       tui.requestRender();
       await processBatch(directive);
+      return;
+    }
+
+    // ── /auto —— 自主模式（2026-11-02）──────────────────────────────────
+    // 与 /goal 的关键差异：goal 是**任务**（要写 objective），走消息注入、耗一回合；
+    // auto 是**状态**（一个开关），走协议直改、零回合 —— 一秒切换不该花 token。
+    // 这也正是 /goal 注释里说的"将来要瞬时切换的落点"，现在这里已经有了现成的域。
+    if (input === '/auto' || input.startsWith('/auto ')) {
+      const arg = input.slice('/auto'.length).trim();
+      type AutoSnapLike = {
+        phase?: string;
+        budget?: {
+          usedToday?: number; limitToday?: number;
+          usedThisHour?: number; limitThisHour?: number;
+        };
+      };
+      const renderAuto = (st: AutoSnapLike | undefined | null): void => {
+        if (!st) {
+          chatLog.addSystem(theme.dim('自主模式状态不可用（控制器尚未装配）'));
+          return;
+        }
+        const b = st.budget || {};
+        const phase = st.phase ?? 'off';
+        // 同步到 footer 常驻片段（2026-11-04）：/auto 每次执行都刷新，
+        // 不必额外起定时器 —— 状态变化的入口只有这里和协议刷新。
+        autoFooterText =
+          phase === 'off'
+            ? ''
+            : `\u25d0 自主·${phase === 'running' ? '运行中' : phase === 'suspended' ? '挂起' : '静默'}`;
+        tui.requestRender();
+        chatLog.addSystem(
+          theme.accent(`自主模式：${phase}`) +
+            theme.dim(
+              `　今日 ${b.usedToday ?? 0}/${b.limitToday ?? 0}` +
+                ` · 本小时 ${b.usedThisHour ?? 0}/${b.limitThisHour ?? 0}`,
+            ),
+        );
+      };
+
+      if (!arg || arg === 'status') {
+        const r = (await protocolSend('auto.status')) as { auto?: AutoSnapLike } | null | undefined;
+        renderAuto(r?.auto);
+        tui.requestRender();
+        return;
+      }
+      if (arg === 'on' || arg === 'off') {
+        const r = (await protocolSend('auto.setEnabled', { enabled: arg === 'on' })) as
+          | { auto?: AutoSnapLike }
+          | null
+          | undefined;
+        renderAuto(r?.auto);
+        tui.requestRender();
+        return;
+      }
+      // stop 与 off 的差别：stop = 急停（连挂起条件一起清），off = 只关开关
+      if (arg === 'stop') {
+        const r = (await protocolSend('auto.stop')) as { auto?: AutoSnapLike } | null | undefined;
+        renderAuto(r?.auto);
+        tui.requestRender();
+        return;
+      }
+      if (arg.startsWith('budget')) {
+        const parts = arg.split(/\s+/).slice(1);
+        const perHour = Number(parts[0]);
+        const perDay = Number(parts[1]);
+        const params: Record<string, number> = {};
+        if (Number.isFinite(perHour) && perHour > 0) params.perHour = perHour;
+        if (Number.isFinite(perDay) && perDay > 0) params.perDay = perDay;
+        if (Object.keys(params).length === 0) {
+          chatLog.addSystem(theme.dim('用法： /auto budget <每小时> <每日>'));
+          tui.requestRender();
+          return;
+        }
+        const r = (await protocolSend('auto.setBudget', params)) as
+          | { auto?: AutoSnapLike }
+          | null
+          | undefined;
+        renderAuto(r?.auto);
+        tui.requestRender();
+        return;
+      }
+      chatLog.addSystem(
+        theme.dim('用法： /auto [on|off|stop|status]  ｜  /auto budget <每小时> <每日>'),
+      );
+      tui.requestRender();
       return;
     }
 

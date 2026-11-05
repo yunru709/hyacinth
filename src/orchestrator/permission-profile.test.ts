@@ -4,7 +4,7 @@
 // 这张表是「用户看到档位 → 实际发生什么」的唯一映射，改判定前先改这里：
 //   plan    写工具/bash 一律 block；其它 allow
 //   confirm 敏感或越界 → legacy（走 allowlist/命令白名单/弹窗）；其余 allow
-//   auto    只有越界 → ask；其余 allow
+//   auto-approve 只有越界 → ask；其余 allow（2026-11-05 由 'auto' 改名，避免与自主常驻模式撞名）
 //   full    永远 allow
 // ============================================================
 
@@ -28,9 +28,9 @@ const cases = [
   ['confirm', 'write', true, true, 'legacy'],
   ['confirm', 'read', false, false, 'allow'],
   ['confirm', 'read', false, true, 'legacy'],
-  ['auto', 'write', true, false, 'allow'],
-  ['auto', 'bash', true, false, 'allow'],
-  ['auto', 'write', true, true, 'ask'],
+  ['auto-approve', 'write', true, false, 'allow'],
+  ['auto-approve', 'bash', true, false, 'allow'],
+  ['auto-approve', 'write', true, true, 'ask'],
   ['full', 'write', true, true, 'allow'],
   ['full', 'bash', true, false, 'allow'],
 ] as const;

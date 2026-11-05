@@ -25,13 +25,21 @@ import path from 'node:path';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 
-/** 动态注册、无法从 TS 字面量推导的工具名（含理由，必须写明） */
+/**
+ * 归包豁免名单（含理由，必须写明）。两类：
+ *   ① 动态注册、无法从 TS 字面量推导的工具名
+ *   ② **有意不归属任何包**的工具 —— 进包会让它出现在主 Agent 的工具表里，那是 bug
+ */
 const DYNAMIC_TOOLS: Record<string, string> = {
   'delegate_to_agent': '运行时注册，name 声明形式与其他 Tool 类不同（src/agents/delegate-tool.ts）',
   'view_image': 'multimodal 内联对象工具（src/multimodal/index.ts）',
   'view_media': '同上',
   'docx_read': 'Python 桥：名字来自 .py 元数据，不在 TS 源码里',
   'xlsx_read': '同上',
+  // ── ② 类：子 Agent 专属通道，**不能**归包 ──
+  'report': '子 Agent → 父 Agent 的结果回传通道（src/agents/report-tool.ts）。'
+    + '只在 delegate 建子 loop 时经白名单注入（delegate-tool.ts:244 的 FilteredToolRegistry）；'
+    + '主 Agent 的工具表**不该**含它，归进 agent 包会让主 Agent 也看得见、调得动 —— 那是 bug 而非遗漏。',
 };
 /** 前缀形式（MCP 工具名来自服务器端工具列表，只能按前缀识别）
  *  ⚠️ 决定（2026-09-19，用户确认）：MCP 工具**有意只让 `all` 模式可用** ——

@@ -29,6 +29,9 @@ import type { TtsVoiceInfo } from '../tts/cosyvoice.js';
 // 契约见 src/tts/engine.ts，可用实现见 src/tts/engines/*。
 import { getTtsEngine } from '../tts/index.js';
 import type { TtsEngine } from '../tts/engine.js';
+// 垫前导静音：必须在**合成出口**统一做一次，而不是各播放端自己做。
+// 见 src/tts/wav.ts 头部注释（2026-11-01：webui 的 <audio> 路径曾漏修）。
+import { prependSilence, SAY_LEAD_SILENCE_MS } from '../tts/wav.js';
 
 // UI 卡片契约住在内核原语（plugin-host），此处 re-export 方便插件开发者
 export type { PluginUiCard } from '../kernel/plugin-host.js';
@@ -165,12 +168,19 @@ class SayVoiceBroadcast {
     try {
       // extras 原样透传给引擎：白名单过滤是**引擎自己的事**（capabilities().extras），
       // 插件层不认识任何具体引擎，在这里过滤等于把引擎知识漏进来。
-      const wav = await this.deps.engine.synthesize(speech, {
-        voice,
-        speed: opts.speed,
-        emotion: opts.emotion,
-        extras: opts.extras,
-      });
+      // 【2026-11-01】在**合成出口**统一垫前导静音（设备唤醒余量）。
+      // 为什么放这里而不是播放端：播放端有多套（TUI 的 powershell / webui 的 <audio> /
+      // 未来任何新通道），各修一遍必然漏 —— 事实就是 TUI 修过、webui 漏了，孑遗听到
+      // 「有时候吞掉第一个字」。垫在这里，所有播放端自动受益，且只垫一次（不会叠加）。
+      const wav = prependSilence(
+        await this.deps.engine.synthesize(speech, {
+          voice,
+          speed: opts.speed,
+          emotion: opts.emotion,
+          extras: opts.extras,
+        }),
+        SAY_LEAD_SILENCE_MS,
+      );
       const payload: SayVoiceEvent = {
         state: 'ready',
         audioWavBase64: wav.toString('base64'),

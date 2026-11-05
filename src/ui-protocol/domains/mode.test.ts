@@ -135,7 +135,8 @@ describe('mode 域', () => {
     // 全文匹配会把它们一起算进来（实测过一次，多出 off/minimal/… 直接红）
     const start = src.indexOf('const MODE_DEFS');
     const block = src.slice(start, src.indexOf('];', start));
-    const ids = [...block.matchAll(/\{ id: '([a-z]+)', label: '/g)].map((m) => m[1]);
+    // id 允许连字符（2026-11-05 起有 'auto-approve'；原来的 [a-z]+ 会把它截断/漏掉）
+    const ids = [...block.matchAll(/\{ id: '([a-z-]+)', label: '/g)].map((m) => m[1]);
     expect(ids).toEqual([...PERMISSION_PROFILES]);
   });
 

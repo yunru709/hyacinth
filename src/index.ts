@@ -25,8 +25,25 @@ import { bootstrapSecurity } from './kernel/security/index.js';
 // 之后才创建命名空间（scripts/security-spike.mjs 实测结论）。
 bootstrapSecurity();
 
-const { createLogger } = await import('./logging/logger.js');
-const { runCli } = await import('./gateway/cli.js');
+// ── 守护进程分流（必须在加载 cli.js **之前**）──────────────────────────
+// 为什么在这里：guardian 父进程的职责只有「spawn 子进程 + 守候退出码」，
+// 完全不需要 CLI 依赖链（commander / 全量命令定义 / provider 装配）。
+// 历史上该判断埋在 cli.ts runCli() 的 program.parse() 之前（~L1357）——
+// 那时 cli.js 及其整条 import 图已加载完 ⇒ 每个后端白白多背一份「半个 CLI」
+// （实测本机父进程 17008 私有内存 74.7 MB，子进程 320 MB；父子 argv 逐字相同
+//  就是本机制造成的，曾被误判成「两个后端抢端口」）。
+// 挪到 index.ts 后，guardian 侧只加载 supervisor/protocol + supervisor/guardian。
+// ⚠️ 与 cli.ts 内保留的同名兜底判断**条件必须一致**（--no-guardian / GUARDIAN_ENV）：
+//    cli.ts 那份用于「绕过 index.ts 直接调 runCli()」的场景，勿删勿改条件。
+const { GUARDIAN_ENV } = await import('./supervisor/protocol.js');
+const noGuardian = process.argv.includes('--no-guardian');
 
-const logger = createLogger('app');
-runCli().catch((err) => logger.error('Unhandled error', err instanceof Error ? err : undefined));
+if (!noGuardian && !process.env[GUARDIAN_ENV]) {
+  const { runGuardian } = await import('./supervisor/guardian.js');
+  runGuardian(process.argv.slice(2));
+} else {
+  const { createLogger } = await import('./logging/logger.js');
+  const { runCli } = await import('./gateway/cli.js');
+  const logger = createLogger('app');
+  runCli().catch((err) => logger.error('Unhandled error', err instanceof Error ? err : undefined));
+}

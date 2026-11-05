@@ -88,6 +88,10 @@ export { createProcessDomain } from './domains/process.js';
 export type { BackgroundRegistryLike, ProcessDomainOptions } from './domains/process.js';
 export { createOrchestratorDomain } from './domains/orchestrator.js';
 export type { BypassManagerLike, OrchestratorDomainOptions } from './domains/orchestrator.js';
+export { createAutoDomain, createStubAutoController } from './domains/auto.js';
+export type {
+  AutoStateView, AutoPhase, AutoTriggerView, AutoControllerLike, AutoDomainOptions,
+} from './domains/auto.js';
 export { createScheduleDomain } from './domains/schedule.js';
 export type { SchedulerLike, SchedulerStatusLike, ScheduleDomainOptions } from './domains/schedule.js';
 export { createContextDomain } from './domains/context.js';

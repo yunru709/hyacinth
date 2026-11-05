@@ -23,7 +23,7 @@ import { UI_DOMAIN, UI_METHOD, UI_EVENT } from './types.js';
 
 function makeBackend(overrides: Partial<UiProtocolSessionBackend> = {}): UiProtocolSessionBackend {
   const configState = {
-    provider: { active: 'anthropic', routeMode: 'auto' },
+    provider: { active: 'anthropic', routeMode: 'automatic' },
     session: { maxTurns: 100, maxContext: 200000, maxMessages: 10000 },
     context: { compressThreshold: 0.75 },
   };
@@ -169,11 +169,11 @@ describe('UiProtocolSession 单一装配器', () => {
     expect(session.pending).toBeTruthy();
   });
 
-  it('全部 26 域注册到协议服务器（25 业务域 + 内建 meta）', async () => {
+  it('全部 27 域注册到协议服务器（26 业务域 + 内建 meta）', async () => {
     const { session } = await setup();
     const domains = session.server.listDomains().sort();
     expect(domains).toEqual(
-      ['arch', 'automation', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'preview', 'process', 'schedule', 'session', 'skill', 'state', 'stt', 'supervisor', 'tool', 'tts'].sort(),
+      ['arch', 'auto', 'automation', 'bundle', 'command', 'companion', 'config', 'context', 'kb', 'mcp', 'message', 'meta', 'mode', 'model', 'orchestrator', 'permission', 'plugin', 'preview', 'process', 'schedule', 'session', 'skill', 'state', 'stt', 'supervisor', 'tool', 'tts'].sort(),
     );
   });
 

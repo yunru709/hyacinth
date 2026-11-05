@@ -77,3 +77,14 @@ arch-report/
 # 2026-10-25：此前未忽略，`git status` 里会混进 __pycache__/*.pyc，容易误提交
 __pycache__/
 *.pyc
+
+# 一次性调试产物（2026-11-06 清理）
+# 来历：曾被 auto: pre-turn-* 自动提交误入库，混在仓库根目录里。
+# 均已核对「无任何代码引用」，属纯临时产物：
+#   _delayed_*     —— 延迟构建的一次性脚本与日志（等待 N 秒后 kill+build）
+#   _wmi_test.txt  —— WMI 能力探测的一次性输出
+#   test_*.cjs     —— 读会话 events.jsonl / 渲染 markdown 的一次性调试脚本
+#                     （test_seq / test_allruns / test_hist_render / test_runs / test_ts）
+_delayed_*
+_wmi_test.txt
+/test_*.cjs

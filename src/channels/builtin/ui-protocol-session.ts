@@ -38,6 +38,8 @@ import { createMessageDomain } from '../../ui-protocol/domains/message.js';
 import { createStateDomain, type LoopLike } from '../../ui-protocol/domains/state.js';
 import { createPermissionDomain } from '../../ui-protocol/domains/permission.js';
 import { createModeDomain, type ModeLoopLike } from '../../ui-protocol/domains/mode.js';
+// 自主模式域（2026-11-04）：已接真实控制器 —— 开关直接落 exit.json，不再是 stub。
+import { createAutoDomain, createLoopAutoController } from '../../ui-protocol/domains/auto.js';
 import { createScheduleDomain, type SchedulerLike } from '../../ui-protocol/domains/schedule.js';
 import { createKbDomain, type KnowledgeBaseLike } from '../../ui-protocol/domains/kb.js';
 import { createProcessDomain, type BackgroundRegistryLike } from '../../ui-protocol/domains/process.js';
@@ -442,6 +444,19 @@ export class UiProtocolSession {
         const loop = this.loop as unknown as { bypassManager?: import('../../ui-protocol/domains/orchestrator.js').BypassManagerLike } | null;
         return loop?.bypassManager ?? null;
       },
+    }));
+    // auto 域（2026-11-02）：自主模式的 UI 面（webui 卡片 + TUI /auto）。
+    // ⚠️ 后端 P2（suspend 出口）/ P3（触发表）/ P4（tick 唤醒）尚未落地 ⇒ 先用内存 stub：
+    //    只记开关与预算，**不会真的唤醒任何东西**。目的是让前端先能联调，
+    //    等 P4 装配真实控制器时改成 createAutoDomain({ getController }) 即可，UI 不用动。
+    // auto 域（2026-11-04）：已接真实控制器。
+    // 点 brand / /auto on ⇒ loop.setAutoMode(true) ⇒ 写 exit.json（exits:['suspend']）
+    // ⇒ end_turn 被拦 ⇒ 唯一出口变成 suspend。不再是"只改内存 phase"的 stub。
+    // 用闭包延迟解析：this.loop 在 initialize 之后才就绪（与 orchestrator 域同理）。
+    this.server.registerDomain('auto', createAutoDomain({
+      controller: createLoopAutoController(
+        () => (this.loop as unknown as import('../../ui-protocol/domains/auto.js').AutoLoopLike | null) ?? null,
+      ),
     }));
     // context 域：依赖 AgentLoop（previewContextZone 组装真实 Zone 文本），延迟解析；
     // zone 开关走 ManifestLoader 适配（.agent/context-manifest.json 真实开关源）

@@ -406,7 +406,12 @@
     histPending = [];
   }
 
-  // 自动跟随：只在用户已贴底(gap<80px)时才滚到底；用户上翻看历史时不打断（2026-10-28 修）
+  // 自动跟随：只在用户「接近底部」时才滚到底；用户上翻看历史时不打断（2026-10-28 修）
+  // ⚠️ 阈值 80→120（2026-11-02 修「上翻后拉不回底、卡在半路」）：
+  //   流式增量让 scrollHeight 持续增长，阈值太紧时用户刚拖到「几乎到底」就被判成
+  //   「已离开底部」⇒ 跟随断开、scrollTop 与增长互相抢 ⇒ 表现为卡住拉不下去。
+  //   放宽后：一旦进入底部 120px 内就自动接管跟随，无需精确拖到底。
+  const CHAT_STICK_GAP = 120;
   let _chatStick = true;
   let _chatStickBound = false;
   function scrollChat() {
@@ -415,9 +420,11 @@
     if (!_chatStickBound) {
       _chatStickBound = true;
       ml.addEventListener('scroll', () => {
-        _chatStick = (ml.scrollHeight - ml.scrollTop - ml.clientHeight) < 80;
+        _chatStick = (ml.scrollHeight - ml.scrollTop - ml.clientHeight) < CHAT_STICK_GAP;
       }, { passive: true });
     }
+    // 跟随一律**瞬时**赋值（CSS 已去掉 scroll-behavior:smooth）：
+    // 平滑动画的目标是赋值瞬间的旧 scrollHeight，内容增长后永远到不了真正底部。
     if (_chatStick) ml.scrollTop = ml.scrollHeight;
   }
 
@@ -674,33 +681,41 @@
 
 
   // ── 历史渲染（协议 message.history 返回 HistoryMessage[]）──
-  // ── 历史回放的「过程缓冲」（与实时路径同一套折叠规则 ✓）──────────────
-  // 实测事实（读真实 events.jsonl ✓）：交付正文**没有独立 text 事件**，
-  // 它藏在 say 的 tool_call 里（input.content）⇒ 原先一律当折叠小条渲染，
-  // 于是刷新后**回复被埋在 JSON 里** ✗ ⇒ 现在认出 say 并单独渲染 ✓
-  let histPending = [];   // 延迟渲染：折不折叠取决于「后面有没有交付」✓
-  // 「无 say」会话的助手回复是以一串 text 增量事件下发 ⇒ 历史回放需把同一回合的 text
-  // 累积成一条助手气泡（否则每个增量成一段碎片、还夹着思考中…，重开就是一团乱）2026-10-28
-  let histTurnText = '';
+  // ⚠️ 必须与**实时路径同构**，否则刷新后重建出来的顺序和刚看到的不一样 ⇒ 用户观感"乱"。
+  // 实时路径语义（见 handleEvent）：
+  //   · 一个用户回合内的 text / thinking / tool_call / tool_result **按到达顺序**全部塞进
+  //     同一个「过程」块（appendProcessText / appendProcess）✓
+  //   · say（交付）到达 ⇒ 结束过程块并**收起**它，然后插一条醒目的交付气泡 ✓
+  //   · 无 say 的回合 ⇒ 过程块保持**展开**（否则正文被埋进折叠块里看不见）✓
+  //
+  // 旧实现把 text 单独攒进 histTurnText、只在 say / user_input 时冲刷，且固定「先过程块、
+  // 后文本气泡」⇒ 文字与工具的相对顺序被抹平、所有正文被甩到回合末尾（2026-11-02 实测复现：
+  // 刷新后 98 个过程项坍成一个折叠块、几段正文挤成一条丢在最下面）。现改为**逐条保序**累积。
+  let histPending = [];      // 当前「过程」块的节点（文本节点 + 工具/思考节点），按盘上顺序
+  let histTextNode = null;   // 当前累积中的文本节点（仅当它是 histPending 末尾时才续写）
+  let histTextRaw = '';      // 该文本节点的原文（markdown 需要全文才能正确配对围栏）
 
-  function histPush(node) { if (node) histPending.push(node); }
+  function histPush(node) { if (node) { histPending.push(node); histTextNode = null; histTextRaw = ''; } }
 
-  /** 把本回合累积的助手正文作为一条气泡渲染，并收起过程块（无 say 会话的关键修复） */
-  function flushHistTurn() {
-    if (!histTurnText.trim()) return;
-    flushHistoryProcess(true);
-    const ml = $('#message-list');
-    if (ml) { const dw = bubbleAssistant(histTurnText, { delivery: true }); if (dw) ml.appendChild(dw); }
-    histTurnText = '';
+  /** 把一段助手正文按顺序并入过程块：紧接上一段文本就连写，否则（中间隔了工具）新起一段 */
+  function histAppendText(content) {
+    if (!content) return;
+    if (!histTextNode || histPending[histPending.length - 1] !== histTextNode) {
+      histTextNode = el('div', 'process-text msg-rich', '');
+      histPending.push(histTextNode);
+      histTextRaw = '';
+    }
+    histTextRaw += content;
+    renderRichInto(histTextNode, histTextRaw);
   }
 
-  /** 冲刷过程块：collapse=true（后面有交付）⇒ 收起；false ⇒ **保持展开**（不藏正文 ✓） */
+  /** 冲刷过程块：collapse=true（本块以交付收尾）⇒ 收起；false（无交付的回合）⇒ 保持展开 ✓ */
   function flushHistoryProcess(collapse) {
     if (!histPending.length) return;
     const ml = $('#message-list');
     if (ml) {
       const det = el('details', 'process-group');
-      det.open = false;   // 历史过程块一律收起(2026-10-28)
+      det.open = !collapse;
       det.appendChild(el('summary', '', `过程（${histPending.length}）`));
       const body = el('div', 'process-body');
       for (const n of histPending) body.appendChild(n);
@@ -708,6 +723,8 @@
       ml.appendChild(det);
     }
     histPending = [];
+    histTextNode = null;
+    histTextRaw = '';
   }
 
   /** 从历史条目里取出「交付正文」（只认 say 的 tool_call ✓） */
@@ -720,10 +737,9 @@
   function renderHistoryMsg(m) {
     const ml = $('#message-list');
     if (!ml) return;
-    // ① say 交付 ⇒ 醒目气泡，并把之前累积的过程收起 ✓
+    // ① say 交付 ⇒ 收束并收起当前过程块，插醒目交付气泡 ✓
     const sayText = historySayText(m);
     if (sayText) {
-      flushHistTurn();
       flushHistoryProcess(true);
       const dwrap = bubbleAssistant(sayText, { delivery: true, time: m.timestamp });
       ml.appendChild(dwrap);
@@ -736,16 +752,17 @@
     switch (type) {
       case 'user_input':
       case 'user':
-        flushHistTurn();
-        flushHistoryProcess(true);
+        // 上一回合到此结束：无交付的回合过程块保持展开，正文才看得见 ✓
+        flushHistoryProcess(false);
         ml.appendChild(bubbleUser(content, undefined, m.timestamp));
         break;
       case 'text':
       case 'assistant':
-        histTurnText += content;
+        // 关键修复：不再攒到最后再甩出来，而是按盘上顺序就地并入过程块 ✓
+        histAppendText(content);
         break;
       case 'thinking':
-        // 历史 thinking 多为空内容（渲染成"思考中…"占位、无信息）⇒ 跳过，避免重开满屏「思考中…」(2026-10-28)
+        // 历史 thinking 多为空内容（渲染成"思考中…"占位、无信息）⇒ 跳过 (2026-10-28)
         if (content && String(content).trim()) histPush(bubbleThinking(content));
         break;
       case 'tool_call':
@@ -791,8 +808,7 @@
         return;
       }
       msgs.forEach(renderHistoryMsg);
-      flushHistTurn();
-      flushHistoryProcess(true);
+      flushHistoryProcess(false);   // 末尾未收尾的回合：保持展开，正文可见 ✓
       scrollChat();
       // 档位是会话级的：切会话 = 换一套权限状态，这里顺手对齐一次
       //（否则按钮上还写着上个会话的档位，用户会以为"设置丢了"）
@@ -1255,23 +1271,38 @@
   }
 
   // ── ask_user 对话框（message.ask_user → askUserResolve）──
+  // 多问题分页（2026-11-02）：问题多时一页塞不下会超出视口 ⇒ 改为「一页一题」，
+  // 底部提供 上一页/下一页，最后一页才显示「提交」。所有问题节点**全部建好只切换显隐**，
+  // 否则翻页会丢已选答案（重建 DOM = 状态清零）。
   let pendingAsk = null;
+  let askPage = 0;
 
   function showAskUser(payload) {
     if (!payload || !payload.questions) return;
     pendingAsk = payload;
+    askPage = 0;
     const box = $('#askuser-questions');
     if (!box) return;
     box.innerHTML = '';
-    const n = payload.questions.length;
+    const questions = payload.questions || [];
+    const n = questions.length;
+
+    // 分页头：页码 + 关闭
     const head = el('div', 'au-head');
-    head.appendChild(el('span', 'au-page', n > 1 ? ('1 / ' + n) : '1 / 1'));
+    const pageLabel = el('span', 'au-page', n > 1 ? ('1 / ' + n) : '1 / 1');
+    head.appendChild(pageLabel);
     const close = el('button', 'au-close', '✕');
     close.type = 'button';
     close.addEventListener('click', () => { const d = $('#askuser-dialog'); if (d) d.hidden = true; pendingAsk = null; });
     head.appendChild(close);
     box.appendChild(head);
-    (payload.questions || []).forEach((q, i) => {
+
+    // 问题容器（所有页都建好，只切显隐 ⇒ 翻页保留答案）
+    const fieldsWrap = el('div', 'au-fields');
+    box.appendChild(fieldsWrap);
+
+    const fields = [];
+    questions.forEach((q, i) => {
       const field = el('div', 'ask-field');
       field.dataset.qi = String(i);
       field.appendChild(el('div', 'ask-q', q.question));
@@ -1302,8 +1333,39 @@
         wrap.appendChild(input);
         field.appendChild(wrap);
       }
-      box.appendChild(field);
+      fieldsWrap.appendChild(field);
+      fields.push(field);
     });
+
+    // 分页导航（上一页 / 下一页）；单题时整条隐藏
+    const nav = el('div', 'au-nav');
+    const prev = el('button', 'au-nav-btn', '上一页');
+    prev.type = 'button';
+    const next = el('button', 'au-nav-btn', '下一页');
+    next.type = 'button';
+    nav.appendChild(prev);
+    nav.appendChild(next);
+    box.appendChild(nav);
+
+    const submitBtn = $('#askuser-submit');
+    const actions = submitBtn ? submitBtn.parentElement : null;
+
+    function renderPage() {
+      fields.forEach((f, i) => { f.hidden = i !== askPage; });
+      if (n > 1) pageLabel.textContent = (askPage + 1) + ' / ' + n;
+      prev.disabled = askPage === 0;
+      const isLast = askPage === n - 1;
+      next.hidden = isLast;                    // 最后一页：用「提交」取代「下一页」
+      // 「提交」只在最后一页出现；连同其动作条容器一起显隐（否则非末页留一条空白）
+      if (submitBtn) submitBtn.hidden = !isLast;
+      if (actions) actions.hidden = !isLast;
+      nav.hidden = n <= 1;
+      if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+    }
+    prev.onclick = () => { if (askPage > 0) { askPage -= 1; renderPage(); } };
+    next.onclick = () => { if (askPage < n - 1) { askPage += 1; renderPage(); } };
+    renderPage();
+
     const d = $('#askuser-dialog');
     if (d) d.hidden = false;
   }
@@ -2968,7 +3030,11 @@
       // 新消息追加时也要重算（否则"正在底部收到新消息"时按钮不出现）
       new MutationObserver(syncFab).observe(ml, { childList: true });
       fab.addEventListener('click', () => {
-        ml.scrollTo({ top: ml.scrollHeight, behavior: 'smooth' });
+        // 点「回到底部」= 用户明确要跟最新回复 ⇒ 恢复自动跟随并瞬时到底。
+        // 不能用 scrollTo(smooth)：目标是点击瞬间的旧 scrollHeight，动画期间内容继续
+        // 增长 ⇒ 落到旧底就停，且没恢复 _chatStick ⇒ 后续新内容不再跟随（2026-11-02 修）。
+        _chatStick = true;
+        ml.scrollTop = ml.scrollHeight;
         fab.hidden = true;
       });
       syncFab();
@@ -3591,7 +3657,11 @@
   const MODE_DEFS = [
     { id: 'plan', label: '计划模式', desc: '只能读，先给方案再动手', icon: 'list-tree' },
     { id: 'confirm', label: '变更前确认', desc: '改文件 / 跑命令前先问', icon: 'check-circle-2' },
-    { id: 'auto', label: '自主模式', desc: '常规改动不问，越界才问', icon: 'zap' },
+    // ⚠️ 2026-11-05 改名：原 id 'auto' → 'auto-approve'。原因是它和「自主模式」
+    //    （顶栏 AUTO 按钮那套常驻自主，见 auto-budget/auto-global）同名不同物：
+    //    这一档管的是"要不要弹窗"，不是"能不能自己醒来"。后端
+    //    permission-profile.ts 有同批改名 + 旧值 'auto' 的兼容映射。
+    { id: 'auto-approve', label: '自动确认', desc: '常规改动不问，越界才问', icon: 'zap' },
     { id: 'full', label: '完全访问', desc: '跳过所有确认（仅本会话）', icon: 'unlock', danger: true },
   ];
   const modeState = { profile: 'confirm', goal: null };
@@ -3823,6 +3893,55 @@
         e.stopPropagation();
       });
     }
+
+    // ── 自主模式（2026-11-04）──────────────────────────────────────────
+    // 入口在左上角 brand 上，不在模式弹层里：
+    //   该模式要改造为**跨会话**（进程级全局），而模式弹层是**会话级**
+    //   （权限档位 / goal 都是 per-session）—— 放在那里语义就错了。
+    // 与 goal 的另一个差异：goal 改的是任务（写 objective、走消息注入耗一回合），
+    // 自主模式改的是**状态**（一个开关），走协议直改 ⇒ 零回合。
+    const autoBtn = $('#auto-btn');
+
+    /** 用一份 AutoState 快照刷新按钮颜色与文案 */
+    function autoApply(st) {
+      const phase = (st && st.phase) || 'off';
+      const on = phase !== 'off';
+      if (!autoBtn) return;
+      autoBtn.classList.toggle('is-on', on);
+      autoBtn.dataset.phase = phase;
+      autoBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      // suspended 与 silent 必须分开说：用户最关心"它会不会自己动 / 会不会花钱"
+      const label = phase === 'running' ? '运行中' : phase === 'suspended' ? '挂起' : '静默';
+      autoBtn.title = on ? `自主模式：${label}（点击关闭）` : '自主模式：点击开启';
+      // 用按钮本身说话：开着显示状态词，关着显示 auto
+      autoBtn.textContent = on ? label : 'auto';
+    }
+
+    async function autoLoad() {
+      try {
+        const r = await client.request('auto.status', {});
+        if (r && r.ok && r.auto) autoApply(r.auto);
+      } catch {
+        // 控制器尚未装配时"看一眼"不该报错打断（stub 返回 phase:'off'）
+      }
+    }
+
+    /** 点击按钮 = 切换开/关（关走 auto.stop：急停语义，连挂起条件一起清） */
+    async function autoToggle() {
+      const cur = (autoBtn && autoBtn.dataset.phase) || 'off';
+      try {
+        const r = cur === 'off'
+          ? await client.request('auto.setEnabled', { enabled: true })
+          : await client.request('auto.stop', {});
+        if (r && r.ok) autoApply(r.auto);
+      } catch (e) {
+        // 开关类操作失败不弹错：不该打断对话，留控制台即可
+        console.warn('auto toggle failed', e);
+      }
+    }
+
+    if (autoBtn) autoBtn.onclick = () => { void autoToggle(); };
+    void autoLoad();
   }
 
   // ════════════════════════════════════════════════════════════
@@ -4194,6 +4313,10 @@
 
   function sttBtnSet(phase, hint) {
     sttState.phase = phase;
+    // 强约束：只要不是录音态，就立即切断麦克风流——杜绝「没在录音却占着麦」的僵尸流（2026-10-31）
+    if (phase !== 'recording' && sttState.stream) {
+      try { sttState.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+    }
     const btn = $('#stt-btn');
     if (!btn) return;
     btn.classList.toggle('is-recording', phase === 'recording');
@@ -4269,7 +4392,7 @@
 
   async function sttToggle() {
     const btn = $('#stt-btn');
-    if (!btn || sttState.phase === 'transcribing') return;
+    if (!btn || sttState.phase === 'transcribing' || sttState.phase === 'starting') return;
 
     // 设置页开关联动：stt.enabled=false 时按钮只提示（状态即时查，不依赖事件）
     try {
@@ -4282,6 +4405,9 @@
     } catch (e) { /* config 查询失败不拦输入（默认启用） */ }
 
     if (sttState.phase === 'idle') {
+      // 同步切到 starting 中间态（先于任何 await）——防止 await getUserMedia 期间再点一次，
+      // 并发开两次麦、第一条 stream 被覆盖后永久泄漏（2026-10-31 深查「反复开关」泄漏根因）
+      sttState.phase = 'starting';
       try {
         sttState.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (err) {
@@ -4366,6 +4492,13 @@
     const btn = $('#stt-btn');
     if (!btn) return;
     btn.addEventListener('click', (e) => { e.stopPropagation(); void sttToggle(); });
+    // 页面隐藏 / 关闭时若在录音，立即停麦——杜绝"切走/关页面忘停"导致设备一直被占（2026-10-31）
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && sttState.phase === 'recording') { sttCleanup(); sttBtnSet('idle'); }
+    });
+    window.addEventListener('beforeunload', () => {
+      try { sttState.stream?.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+    });
   }
 
   // ── 设置页「语音」分区（stt.status + config stt.enabled）──────────

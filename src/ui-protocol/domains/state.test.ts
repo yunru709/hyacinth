@@ -34,7 +34,7 @@ function makeLoop(overrides?: Partial<LoopLike>): LoopLike {
         { turn: 1, timestamp: 't', inputTokens: 1500, outputTokens: 300, hitTokens: 1000, missTokens: 500, hitRate: 66.7 },
       ],
     }),
-    getProviderRoutingInfo: () => ({ providerLabel: 'main', isLocal: false, mode: 'auto' }),
+    getProviderRoutingInfo: () => ({ providerLabel: 'main', isLocal: false, mode: 'automatic' }),
     getActiveProvider: () => ({
       getProviderType: () => 'deepseek',
       getModel: () => 'deepseek-v4-flash',
@@ -80,8 +80,8 @@ describe('状态域', () => {
       provider: 'deepseek',
       providerLabel: 'deepseek', // providerLabel 语义为 provider 类型名（active provider type），非通道名
       isLocal: false,
-      routeMode: 'auto',
-      mode: 'auto',
+      routeMode: 'automatic',
+      mode: 'automatic',
       turnCount: 5,
       maxTurns: 20,
       tokensUsed: 40000,

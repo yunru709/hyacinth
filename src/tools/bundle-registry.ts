@@ -83,7 +83,16 @@ const BUILTIN_COMMON: ToolBundle = {
     // say = 说话（短、会朗读、不结束回合）；deliver = 交付（长文、不朗读、结束回合）。
     // 两者都是「能不能开口」的基础设施 ⇒ 与 interrupt/switch_mode 同级必须常驻，
     // 否则默认 coding 包下我会变成哑巴（说不了、也交不了）。
-    'say', 'deliver', 'ask_user',
+    // suspend = 挂起（2026-11-02 自主模式 P2）：本轮以「挂起」结束、登记唤醒条件后去睡。
+    // 与 deliver 同为「出口」，故同级常驻。
+    //
+    // ⚠️ 2026-11-05 更正：这里曾写「唤醒侧（arm/tick）尚未落地（P3/P4），现在调用只会
+    //    让回合停下、没有东西来叫醒它」——**那句已失效**，P3/P4 早落地了：
+    //      · 定时侧：armSuspendTimer → scheduleWake（进程级调度器）
+    //      · 条件侧：armSuspendWatch → WatchService 单例（file/http/process/port/ui_region）
+    //      · 跨重启：restoreAutoMode() 读 suspend.json 重挂，过期条件立刻醒一次
+    //    所以 suspend 是**完整可用**的出口，不是半成品。别据旧注释判断功能缺失。
+    'say', 'deliver', 'suspend', 'ask_user',
     // ── 模式进出 ──
     // switch_mode 是**模式无关**的通用入口：任何模式下都必须能用它进出 ⇒ 漏了它
     // = 默认 coding 包下「进得去、出不来」✗（由 bundle-consistency 守卫测试抓出过）。

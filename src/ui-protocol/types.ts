@@ -140,6 +140,8 @@ export const UI_DOMAIN = {
   STT: 'stt',
   /** 语音合成（本地 Fun-CosyVoice3）：环境/模型（base|rl）/服务启停/合成 */
   TTS: 'tts',
+  /** 自主模式（出口即入口，2026-11-02）：status / setEnabled / stop / setBudget / removeTrigger */
+  AUTO: 'auto',
   /** 协议元信息（P5-3）：版本/能力协商 get */
   META: 'meta',
 } as const;
@@ -156,6 +158,12 @@ export const UI_DOMAIN = {
  * `message.interrupt` 是**事件**（见 UI_EVENT），不是方法。
  */
 export const UI_METHOD = {
+  // auto（自主模式，2026-11-02）：开关、急停、预算、删除单条触发项
+  AUTO_STATUS: 'auto.status',
+  AUTO_SET_ENABLED: 'auto.setEnabled',
+  AUTO_STOP: 'auto.stop',
+  AUTO_SET_BUDGET: 'auto.setBudget',
+  AUTO_REMOVE_TRIGGER: 'auto.removeTrigger',
   // message
   MESSAGE_CHAT: 'message.chat',
   MESSAGE_STOP: 'message.stop',
@@ -375,7 +383,7 @@ export interface StateSnapshot {
   /** 是否本地模型（ollama/llamacpp） */
   isLocal?: boolean;
   /** 路由模式：auto | manual */
-  routeMode?: 'auto' | 'manual';
+  routeMode?: 'automatic' | 'manual'; // 2026-11-05 由 'auto' 改名；后端兼容旧值
   /** 上下文模式：normal | companion */
   mode?: string;
   turnCount: number;

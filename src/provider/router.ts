@@ -13,8 +13,8 @@ export interface AssessmentInput {
 export interface RoutingInfo {
   /** 当前使用的 Provider 名称 */
   providerName: string;
-  /** 路由模式：'auto' | 'manual' */
-  mode: 'auto' | 'manual';
+  /** 路由模式：'automatic' | 'manual'（2026-11-05 由 'auto' 改名，避免与其他 auto 撞名） */
+  mode: 'automatic' | 'manual';
   /** Provider 是否本地 */
   isLocal: boolean;
 }
@@ -140,7 +140,7 @@ export class ProviderRouter {
    */
   getRoutingInfo(): RoutingInfo {
     let providerName: string;
-    let mode: 'auto' | 'manual';
+    let mode: 'automatic' | 'manual';
     let isLocal: boolean;
 
     if (this.defaultName !== null) {
@@ -149,14 +149,14 @@ export class ProviderRouter {
       const provider = this.registry.get(this.defaultName);
       isLocal = provider ? this.isLocalProvider(provider) : false;
     } else {
-      mode = 'auto';
+      mode = 'automatic';
       // 自动模式下，优先报告在线 Provider（high 复杂度路径）
       const entries = Array.from(this.registry.entries());
 
       if (entries.length === 0) {
         return {
           providerName: '(none)',
-          mode: 'auto',
+          mode: 'automatic',
           isLocal: false,
         };
       }

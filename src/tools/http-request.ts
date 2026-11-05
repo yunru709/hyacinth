@@ -63,6 +63,9 @@ export class HttpRequestTool implements Tool {
       },
       format: {
         type: 'string',
+        // ⚠️ 这里的 'auto' 是「响应体自动提取正文」，与「自主常驻模式」无关
+        // （后者在 orchestrator/auto-budget.ts）。仓库里同名不同物的 auto 有 6 处，
+        // 详见 permission-profile.ts 顶部注释的清单。此值作用域仅本工具参数。
         enum: ['auto', 'text', 'raw'],
         description:
           '响应体处理方式。"auto"（默认）= 对 HTML/XML 提取可读正文，其他类型保持原样。"text" = 强制提取。"raw" = 返回未经处理的响应体。',
