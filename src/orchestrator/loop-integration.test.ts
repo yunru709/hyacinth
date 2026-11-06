@@ -662,3 +662,44 @@ describe('挂起条件生命周期（幽灵条件防回归）', () => {
     expect(loadSuspendState(dir)).toBeNull();
   });
 });
+
+describe('deliver 不等于退出自主（2026-11-06 修）', () => {
+  // 背景：以前 deliver 只置 sayStatus ⇒ finalize 判停 ⇒ takeSuspendStatus 因
+  // pendingSuspend 为 null 而什么都不挂 ⇒ 自主模式被一次交付终止掉。
+  // 现象：自主模式下 deliver 交完报告后就再也不自己动了。
+  type PendingPeek = { pendingSuspend: { until: { kind: string; note?: string } } | null };
+
+  it('自主模式下 deliver 默认登记 {kind:"user"}（交付完继续待命）', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.setAutoMode(true);
+
+    await loop.submitDeliver('一份报告');
+
+    expect((loop as unknown as PendingPeek).pendingSuspend).toEqual({
+      until: { kind: 'user', note: '交付后继续待命' },
+    });
+  });
+
+  it('自主模式下 deliver 显式给 until 时用它（交付完继续盯某件事）', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    loop.setAutoMode(true);
+
+    await loop.submitDeliver('一份报告', undefined, { kind: 'file', spec: { path: 'x.ts' } });
+
+    expect((loop as unknown as PendingPeek).pendingSuspend).toEqual({
+      until: { kind: 'file', spec: { path: 'x.ts' } },
+    });
+  });
+
+  it('非自主模式下 deliver 不登记任何条件（零回归）', async () => {
+    const { provider } = makeProvider();
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
+    // autoModeEnabled 默认 false（见文件顶部 auto-global mock）
+
+    await loop.submitDeliver('一份报告');
+
+    expect((loop as unknown as PendingPeek).pendingSuspend).toBeNull();
+  });
+});
