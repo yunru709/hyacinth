@@ -663,43 +663,42 @@ describe('挂起条件生命周期（幽灵条件防回归）', () => {
   });
 });
 
-describe('deliver 不等于退出自主（2026-11-06 修）', () => {
-  // 背景：以前 deliver 只置 sayStatus ⇒ finalize 判停 ⇒ takeSuspendStatus 因
-  // pendingSuspend 为 null 而什么都不挂 ⇒ 自主模式被一次交付终止掉。
-  // 现象：自主模式下 deliver 交完报告后就再也不自己动了。
-  type PendingPeek = { pendingSuspend: { until: { kind: string; note?: string } } | null };
+describe('deliver 按模式区分（2026-11-06 定调）', () => {
+  // 定调（孑遗）：**交付是否等于结束，取决于模式**。
+  //   普通模式 → deliver 收工，回合结束。
+  //   自主模式 → deliver 只把内容送出去，回合继续；要停必须显式 suspend。
+  // 关键：实现不在 deliver 里，而在 exit-policy —— createEndTurnBlockPolicy
+  // **只在自主模式下被挂上**，且 'say_submitted' 不在它的放行名单里。
+  // 所以普通模式压根没有这个策略，行为零回归。
+  type Gates = {
+    resolveStopGates(r: { stop: boolean; stopReason?: string }): Promise<{ stop: boolean; stopReason?: string }>;
+  };
 
-  it('自主模式下 deliver 默认登记 {kind:"user"}（交付完继续待命）', async () => {
+  it('自主模式下 deliver（say_submitted）不结束回合', async () => {
     const { provider } = makeProvider();
     const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
     loop.setAutoMode(true);
 
-    await loop.submitDeliver('一份报告');
-
-    expect((loop as unknown as PendingPeek).pendingSuspend).toEqual({
-      until: { kind: 'user', note: '交付后继续待命' },
+    const out = await (loop as unknown as Gates).resolveStopGates({
+      stop: true,
+      stopReason: 'say_submitted',
     });
+
+    expect(out.stop).toBe(false);            // 被 end_turn-blocked 拦下 ⇒ 回合继续
+    expect(out.stopReason).toBe('exit_blocked');
   });
 
-  it('自主模式下 deliver 显式给 until 时用它（交付完继续盯某件事）', async () => {
+  it('普通模式下 deliver 照常结束回合（零回归）', async () => {
     const { provider } = makeProvider();
     const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
-    loop.setAutoMode(true);
+    // autoModeEnabled 默认 false（见文件顶部 auto-global mock）⇒ policies 为空 ⇒ 直接放行
 
-    await loop.submitDeliver('一份报告', undefined, { kind: 'file', spec: { path: 'x.ts' } });
-
-    expect((loop as unknown as PendingPeek).pendingSuspend).toEqual({
-      until: { kind: 'file', spec: { path: 'x.ts' } },
+    const out = await (loop as unknown as Gates).resolveStopGates({
+      stop: true,
+      stopReason: 'say_submitted',
     });
-  });
 
-  it('非自主模式下 deliver 不登记任何条件（零回归）', async () => {
-    const { provider } = makeProvider();
-    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
-    // autoModeEnabled 默认 false（见文件顶部 auto-global mock）
-
-    await loop.submitDeliver('一份报告');
-
-    expect((loop as unknown as PendingPeek).pendingSuspend).toBeNull();
+    expect(out.stop).toBe(true);
+    expect(out.stopReason).toBe('say_submitted');
   });
 });
