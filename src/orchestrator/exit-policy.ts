@@ -159,8 +159,17 @@ export const END_TURN_BLOCKED_REASON = 'exit_blocked';
  */
 const EXPLICIT_EXIT_REASONS: ReadonlySet<string> = new Set([
   'suspended',             // suspend 工具：挂起等条件（自主模式的正常出口）
-  'say_submitted',         // say / deliver 交付完成
-  'say_failed',            // say 中止
+  // ⚠️⚠️ 2026-11-06 定调（孑遗）：「交付」和「结束」要按模式区分。
+  //    · 普通模式：deliver 就是收工 ⇒ 但那时本策略**压根不存在**（policies 为空），
+  //      移除 'say_submitted' 完全影响不到普通模式 ✓
+  //    · 自主模式：deliver **不结束回合** —— 内容照常送出，但回合继续，
+  //      要停必须显式 suspend。交付 ≠ 结束，两件事正交。
+  //    安全性：takeSayStatus() 每轮都把 sayStatus 清成 null ⇒ 判停只发生一次，
+  //    不会出现"deliver 一直被拦、一直续轮"的死循环。
+  //    （曾短暂实现成"suspend 时默认挂 {kind:'user'}" —— 那是错的：它仍然是回合结束，
+  //      只是换了个理由。用户要的是回合本身不结束。）
+  // 'say_submitted' —— 已移出，见上。
+  'say_failed',            // say 中止（错误态，不该被当成"自主循环的出口"来要求 suspend）
   'goal_achieved',         // goal 验收通过
   'goal_budget_exceeded',  // goal 预算触顶放行（模式已解除）
 ]);
