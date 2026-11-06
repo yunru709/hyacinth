@@ -1483,13 +1483,7 @@ export class AgentLoop {
     const status = this.suspendStatus ?? undefined;
     this.pendingSuspend = null;
     this.suspendStatus = null;
-    // ⚠️ 2026-11-06：判据从「必须是 suspend 出口」放宽到「只要登记了条件就 arm」。
-    //   deliver 在自主模式下也会写 pendingSuspend（交付 ≠ 退出自主），但它的
-    //   stopReason 是 'say_submitted'、suspendStatus 是 null。死守
-    //   `status === 'suspended'` 会让 deliver 登记的条件**被静默丢弃** ——
-    //   那正是「交付一次就退出自主」这个 bug 的另一半。
-    //   返回的 status 不变（finalize 仍靠它区分 suspended 出口），只是 arm 不再受它约束。
-    if (pending) {
+    if (status === 'suspended' && pending) {
       // P3：落盘 <sessionDir>/suspend.json —— 跨进程重启后条件还在。
       // 没这一步，"睡下去"只在进程活着时成立，重启即失忆。
       // 落盘失败**不阻断**回合收尾（这时本来就该结束了），但必须留痕 ——
