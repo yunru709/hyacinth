@@ -677,8 +677,14 @@ describe('deliver 按模式区分（2026-11-06 定调）', () => {
 
   it('自主模式下 deliver（say_submitted）不结束回合', async () => {
     const { provider } = makeProvider();
-    const loop = new AgentLoop(makeServices(provider), { sessionDir: tmpdir() });
-    loop.setAutoMode(true);
+    const dir = tmpdir();
+    // ⚠️ auto 模式的生效路径是 <sessionDir>/exit.json 声明「只允许 suspend」
+    //   （getExitConfig 三级解析：会话级 > loadGlobalAuto().enabled > null）。
+    //   这里**不能**用 loop.setAutoMode(true)：它只设实例字段 autoModeEnabled，
+    //   而 getExitConfig() 读的是 loadGlobalAuto()——本文件把后者 mock 成 false。
+    //   （这条教训值得记：setAutoMode 改的是"UI 显示态"，不是"拦截生效态"。）
+    saveExitConfig(dir, { exits: ['suspend'] });
+    const loop = new AgentLoop(makeServices(provider), { sessionDir: dir });
 
     const out = await (loop as unknown as Gates).resolveStopGates({
       stop: true,
