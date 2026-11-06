@@ -12,6 +12,7 @@
 // ============================================================
 
 import type { Tool } from './interface.js';
+import { parseSuspendUntil, type SuspendUntilSpec } from './suspend.js';
 
 /** 提交结果：ok=false 时带原因，工具转为抛错以获得 is_error 语义 */
 export type DeliverSubmitResult = { ok: true } | { ok: false; error: string };
@@ -20,6 +21,8 @@ export type DeliverSubmitResult = { ok: true } | { ok: false; error: string };
 export type DeliverSubmitFn = (
   content: string,
   title?: string,
+  /** 交付后登记的下次唤醒条件；不传 ⇒ 自主模式下默认 {kind:'user'} */
+  until?: SuspendUntilSpec,
 ) => Promise<DeliverSubmitResult> | DeliverSubmitResult;
 
 /**
@@ -29,6 +32,16 @@ export type DeliverSubmitFn = (
  * 屏显（与 say 同一条通道，只是不朗读）。若将来需要「产出为文件」，那是
  * write / 生成类工具的职责，不该混进交付语义 —— 交付工具只管「说到」，
  * 不管「存到」。
+ *
+ * ⚠️ 2026-11-06 语义修正（孑遗指出）：
+ *    以前 deliver = 「交付 + 退出自主」。自主模式里这是个错误绑定 ——
+ *    交付完一份结果，不代表我就不该继续待命了；结果一交付就掉回"等用户说话"，
+ *    自主模式事实上被一次交付终止掉。
+ *    现在：交付仍然结束**本回合**，但**不等于退出自主**：
+ *      · 给了 until  → 按它登记（交付完继续盯着某件事）
+ *      · 没给 until  → 自主模式下默认 {kind:'user'}（交付完继续待命）
+ *      · 非自主模式  → 什么都不挂（行为和以前一样，零回归）
+ *    换句话说：**deliver 管"这一轮说到这儿"，until 管"下次什么时候再来"，两件事正交。**
  */
 export function createDeliverTool(submit: DeliverSubmitFn): Tool {
   return {
@@ -38,7 +51,9 @@ export function createDeliverTool(submit: DeliverSubmitFn): Tool {
       '长篇说明、报告、分析、表格、清单、代码块 —— 需要结构化排版、需要被反复阅读的内容。' +
       '只出文字、不朗读（要说话用 say）。' +
       'content 用 Markdown 写全 —— 工具不会二次加工、不会截断。' +
-      '调用后本回合立即结束，所以只在**活儿干完、东西要交给用户**时调用。',
+      '调用后本回合立即结束，所以只在**活儿干完、东西要交给用户**时调用。' +
+      '⚠️ 自主模式下交付**不会退出自主**：不给 until 时默认挂 {"kind":"user"}（交付完继续待命）；' +
+      '若交付后还要去盯某件事，用 until 指定（与 suspend 的 until 语法相同）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -50,6 +65,19 @@ export function createDeliverTool(submit: DeliverSubmitFn): Tool {
           type: 'string',
           description: '可选标题（一句话概括这次交付的内容），用于消息列表与折叠展示。',
         },
+        until: {
+          type: 'object',
+          description:
+            '可选。交付后登记的下次唤醒条件（与 suspend 的 until 同语法）。' +
+            '不传 ⇒ 自主模式下默认 {"kind":"user"}（交付完继续待命），非自主模式下不挂。',
+          properties: {
+            kind: { type: 'string', description: '条件类型：user / time / file / ui_region / process / port / http' },
+            spec: { type: 'object', description: '该类型的参数（user 不需要）', additionalProperties: true },
+            note: { type: 'string', description: '人话描述' },
+            afterMs: { type: 'number', description: '兜底：最迟多少毫秒后无条件醒一次' },
+          },
+          required: ['kind'],
+        },
       },
       required: ['content'],
     },
@@ -58,7 +86,13 @@ export function createDeliverTool(submit: DeliverSubmitFn): Tool {
     async execute(args: Record<string, unknown>): Promise<string> {
       const content = typeof args.content === 'string' ? args.content : '';
       const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
-      const result = await submit(content, title);
+      let until: SuspendUntilSpec | undefined;
+      if (args.until !== undefined) {
+        const parsed = parseSuspendUntil(args.until);
+        if (!parsed.ok) throw new Error(parsed.error);
+        until = parsed.until;
+      }
+      const result = await submit(content, title, until);
       if (!result.ok) {
         // 抛错 → 框架落 is_error tool_result → loop 自动续轮让模型重写
         throw new Error(result.error);
