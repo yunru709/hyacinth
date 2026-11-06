@@ -201,7 +201,7 @@ export function createEndTurnBlockPolicy(hint?: string): ExitPolicy {
     id: 'end_turn-blocked',
     gate(stop: boolean, stopReason: string | undefined): ExitDecision {
       if (!stop) return { stop };
-      // 显式出口放行（含 deliver → say_submitted，故拦截提示里"或用 deliver 交付结论"成立）
+      // 显式出口放行（deliver → 'say_submitted' 已移出白名单 ⇒ 自主模式下交付不结束回合）
       if (typeof stopReason === 'string' && EXPLICIT_EXIT_REASONS.has(stopReason)) {
         return { stop, stopReason };
       }
@@ -211,8 +211,8 @@ export function createEndTurnBlockPolicy(hint?: string): ExitPolicy {
         message:
           hint ??
           '本会话只允许 suspend 作为出口：不能靠"不再调用工具"来结束回合。' +
-            '请用 suspend 登记唤醒条件（无值得等的条件就用 {"kind":"user"}），' +
-            '或用 deliver 交付结论。',
+            '请用 suspend 登记唤醒条件（无值得等的条件就用 {"kind":"user"}）。' +
+            '注意：deliver 在自主模式下**也不结束回合** —— 内容会送出，但你还得再挂一个条件。',
         warn: true,
       };
     },
