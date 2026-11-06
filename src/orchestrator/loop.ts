@@ -1418,6 +1418,7 @@ export class AgentLoop {
   async submitDeliver(
     content: string,
     title?: string,
+    until?: import('../tools/suspend.js').SuspendUntilSpec,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (this.goalState?.active) {
       return {
@@ -1428,6 +1429,22 @@ export class AgentLoop {
     const text = (content ?? '').trim();
     if (!text) return this.noteOutputFailure('deliver');
     this.pendingOutputs.push({ kind: 'deliver', content: text, title });
+    // ⚠️ 2026-11-06（孑遗指出）：**交付 ≠ 退出自主**。
+    //   以前 deliver 只置 sayStatus ⇒ finalize 判停（'say_submitted'）⇒ takeSuspendStatus
+    //   因为 pendingSuspend 为 null 而什么都不挂 ⇒ 交付一次就掉回"等用户说话"，
+    //   自主模式事实上被一次交付终止掉。现象：我在自主模式下用 deliver 交了份报告，
+    //   然后就再也不自己动了 —— 用户明确指出的就是这个。
+    //   现在：交付仍然结束**本回合**，但会同时登记"下次什么时候再来"：
+    //     · 显式给了 until → 用它（交付完继续盯某件事）
+    //     · 没给 + 自主模式开着 → 默认 {kind:'user'}（交付完继续待命）
+    //     · 没给 + 非自主模式 → 什么都不挂（行为与以前完全一致，零回归）
+    //   stopReason 仍是 'say_submitted'（UI 应显示"交付"，不是"挂起"），
+    //   真正 arm 的判据在 takeSuspendStatus 里放宽。
+    if (until?.kind) {
+      this.pendingSuspend = { until };
+    } else if (this.autoModeEnabled) {
+      this.pendingSuspend = { until: { kind: 'user', note: '交付后继续待命' } };
+    }
     this.sayStatus = 'submitted';   // 全场唯一置停的入口
     return { ok: true };
   }
