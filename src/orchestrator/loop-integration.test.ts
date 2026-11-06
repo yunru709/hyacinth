@@ -20,6 +20,7 @@ import type { AgentLoopServices } from './loop.js';
 import type { RuntimeConfigCenter } from '../runtime/config-center.js';
 import type { Provider } from '../provider/interface.js';
 import { saveSuspendState, loadSuspendState } from '../tools/suspend.js';
+import { saveExitConfig } from './exit-config.js';
 
 // ⚠️ 测试隔离（2026-11-05 补）：`~/.agent/auto.json` 是**进程级单例 + 真实 home 路径**，
 // 没有注入点。用户在 WebUI 顶栏一旦开了 AUTO（enabled:true），本文件构造的每个 AgentLoop
