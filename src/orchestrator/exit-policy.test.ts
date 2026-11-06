@@ -25,6 +25,11 @@ describe('createEndTurnBlockPolicy 白名单', () => {
     [undefined, '部分流式实现不给 reason'],
     ['length', '截断（不应静默结束）'],
     ['某个未来新增的 reason', '未知值一律视为自然结束'],
+    // ⚠️ 2026-11-06 定调（孑遗）：交付与结束要**按模式区分**。
+    //    本策略只在自主模式下被挂上 ⇒ 拦掉它不影响普通模式（那时 policies 为空，
+    //    deliver 照常结束回合）。自主模式下 deliver 只把内容送出去、回合继续，
+    //    要停必须显式 suspend。
+    ['say_submitted', 'deliver 交付：自主模式下不结束回合'],
   ] as const;
 
   for (const [reason, why] of mustBlock) {
@@ -39,9 +44,8 @@ describe('createEndTurnBlockPolicy 白名单', () => {
 
   // ── 必须放行：显式声明的出口 ──
   const mustAllow = [
-    'suspended',            // suspend 工具
-    'say_submitted',        // deliver / say 交付（拦截提示里明确允许这条路）
-    'say_failed',
+    'suspended',            // suspend 工具（自主模式唯一的正常出口）
+    'say_failed',           // say 中止：错误态，不该被要求改成 suspend
     'goal_achieved',
     'goal_budget_exceeded',
   ];
