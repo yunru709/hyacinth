@@ -134,7 +134,17 @@ export interface AgentFactory {
    * 重启续工取用器（gateway 装配层注入）：消费 .restart-continuation，匹配当前会话/渠道则返回 message。
    * UI 会话建好 loop 后调用它实现“重启后继续”；UI 侧不直连 supervisor（规则5）。
    */
-  takeRestartContinuation?: (ctx: { launchChannel?: string; sessionId?: string }) => { message?: string; skippedChannel?: string };
+  takeRestartContinuation?: (ctx: { launchChannel?: string; sessionId?: string }) => {
+    message?: string;
+    skippedChannel?: string;
+    /**
+     * ⚠️ 2026-11-07：同渠道跨会话注入（指令原本属于 from，却注入了 to）。
+     * webui 多标签并行时可能出现 —— 调用方据此打 warn，让串台可追查。
+     * 判定层不收紧：重启后无法区分「某会话还活着只是没连上」和「已不存在」，
+     * 收紧会破坏 TUI 的 sessionId 变化兜底（详见 protocol.ts 同名注释）。
+     */
+    crossSession?: { from: string; to: string };
+  };
 }
 
 /** 回复函数类型 */
