@@ -212,7 +212,8 @@ export function createEndTurnBlockPolicy(hint?: string): ExitPolicy {
           hint ??
           '本会话只允许 suspend 作为出口：不能靠"不再调用工具"来结束回合。' +
             '请用 suspend 登记唤醒条件（无值得等的条件就用 {"kind":"user"}）。' +
-            '注意：deliver 在自主模式下**也不结束回合** —— 内容会送出，但你还得再挂一个条件。',
+            '注意：自主模式下 deliver 只把内容**格式化显示**给你（与 loop 的过程输出区分开），' +
+            '它不是出口、也不结束回合 —— 要停必须 suspend。',
         warn: true,
       };
     },
