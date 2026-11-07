@@ -2332,6 +2332,31 @@ export class AgentLoop {
       };
       // 纯旁白轮：旁路产出仅作瞬态触发，不落盘（不污染档案、不被误当用户消息）
       if (!this.activeRouter.ephemeralInput) {
+        // ⚠️ 2026-11-07 修：「连续 user」守卫（严格厂商会**整请求拒绝**）。
+        //   典型触发：restart 的续工注入走 run(msg)，此时历史尾部停在
+        //   user(tool_result)（restart 工具的返回值），再 append 一条 user(text)
+        //   就构成连续 user ⇒ 注入那一轮请求直接失败 ⇒ 被上层 .catch 吞掉
+        //   ⇒ 现象是"restart 递的 message 没能进入 loop"。
+        //   实测取证（2026-11-07 20:46）：conversation.jsonl 出现
+        //     L261 user/tool_result → L262 user/text 紧邻，中间无 assistant。
+        //   DeepSeek 兼容层容忍连续 user，所以平时不暴露；换成 Anthropic 就必崩。
+        //   做法：若尾部已是 user，补一条 assistant 桥接打破它（合法且语义正确：
+        //   "上一轮我说完了"）。成本 = 每轮多读一次 history；只在真连续时才写。
+        try {
+          const history = await this.conversationStore.readAll(this.sessionDir);
+          if (history[history.length - 1]?.role === 'user') {
+            await this.conversationStore.append(this.sessionDir, {
+              role: 'assistant',
+              content: [{ type: 'text', text: '（接续）' }],
+            });
+            this.logger?.info?.('consecutive-user guard: inserted assistant bridge', {
+              sessionDir: this.sessionDir,
+            });
+          }
+        } catch (err) {
+          // 守卫失败不能阻断用户输入本身（宁可让厂商报连续 user，也不能吞掉这条消息）
+          this.logger?.warn?.('consecutive-user guard failed', { error: (err as Error).message });
+        }
         // 时间锚点：按概率把「这句是什么时候说的」并排写进这条消息（用户裁定 2026-09-30）。
         // 只问**入站消息** —— 工具续跑轮次即便命中也不落盘，那些时间只该留在本轮 Zone 5。
         const stamp = this.activeRouter.stampInboundMessage?.({
