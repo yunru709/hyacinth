@@ -887,10 +887,32 @@ export class UiProtocolSession {
         const taken = agentFactory.takeRestartContinuation?.({ launchChannel: ch, sessionId: this.sessionId ?? undefined });
         if (taken?.message) {
           const msg = taken.message;
-          logger.info('restart-continuation injected', { sessionId: this.sessionId });
-          void Promise.resolve().then(() => this.loop?.run(msg)).catch(() => { /* 续工注入失败不影响连接 */ });
+          // ⚠️ 2026-11-07 修：这里以前是 `this.loop?.run(msg)` + `.catch(() => {})` ——
+          //    · `this.loop?` 为 null 时**静默 no-op**（续工指令直接蒸发，无痕迹）
+          //    · `.catch(() => {})` **吞掉一切错误**（run 失败等于没发生）
+          //    实测后果：restart 带 message 后看起来"没进入 loop"，但日志里查不到任何线索，
+          //    最后只能靠翻 conversation.jsonl 逐条比对才定位到根因（连续 user ⇒ 整请求被拒）。
+          //    纪律：catch 必打日志；静默放弃必须留痕。
+          if (!this.loop) {
+            logger.warn('restart-continuation 丢弃：loop 尚未就绪', { sessionId: this.sessionId });
+          } else {
+            logger.info('restart-continuation injected', { sessionId: this.sessionId });
+            void Promise.resolve()
+              .then(() => this.loop!.run(msg))
+              .catch((err: unknown) => {
+                logger.error(
+                  'restart-continuation run failed',
+                  err instanceof Error ? err : new Error(String(err)),
+                );
+              });
+          }
         }
-      } catch { /* 续工注入失败不阻断连接 */ }
+      } catch (err) {
+        logger.error(
+          'restart-continuation 注入异常',
+          err instanceof Error ? err : new Error(String(err)),
+        );
+      }
 
       // 陪伴场景推送：scene_render 落盘（被动产物、无事件源）⇒ UI 侧监视目录，
       // 变化即广播 COMPANION_SCENE，前端据此即时换背景（替代此前的 15s 轮询）。
