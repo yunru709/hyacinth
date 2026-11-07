@@ -885,6 +885,13 @@ export class UiProtocolSession {
       try {
         const ch = this.backend.channel ?? 'webui';
         const taken = agentFactory.takeRestartContinuation?.({ launchChannel: ch, sessionId: this.sessionId ?? undefined });
+        // ⚠️ 2026-11-07：同渠道跨会话注入告警。
+        //   webui 可以多标签并行（实测本机有 4 个 webui_ 会话），指令本属于另一个会话
+        //   却被注入了本会话 —— 判定层不收紧（收紧会破坏 TUI 的 sessionId 变化兜底），
+        //   这里只把事实暴露出来，让串台可追查。
+        if (taken?.crossSession) {
+          logger.warn('restart-continuation 跨会话注入（同渠道多标签可能串台）', taken.crossSession);
+        }
         if (taken?.message) {
           const msg = taken.message;
           // ⚠️ 2026-11-07 修：这里以前是 `this.loop?.run(msg)` + `.catch(() => {})` ——
