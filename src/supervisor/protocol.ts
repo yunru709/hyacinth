@@ -260,7 +260,26 @@ export function shouldInjectContinuation(
 export function takeRestartContinuation(ctx: {
   launchChannel?: string;
   sessionId?: string;
-}): { message?: string; skippedChannel?: string } {
+}): {
+  message?: string;
+  skippedChannel?: string;
+  /**
+   * ⚠️ 2026-11-07 加（只做可观测性，不改判定）：
+   *   本次注入是「同渠道跨会话」—— 指令原本属于 `from`，却注入了 `to`。
+   *
+   * 为什么会出现：`shouldInjectContinuation` 的 `same-channel` 兜底是为
+   * TUI 场景保留的（重启后恢复的 sessionId 可能与触发时不同，没有兜底就丢续工）。
+   * 但 webui 可以多标签并行（实测本机有 4 个 webui_ 会话），此时
+   * 「后触发的会话」若先连上，会把指令抢走。
+   *
+   * 为什么不在判定层收紧：重启后所有 loop 都是新建的，
+   * **无法区分「会话 A 还活着只是还没连上」和「A 已不存在（TUI 换了会话）」**——
+   * 两者从外部看完全一样。收紧 = 用低概率串台换高概率丢消息，不划算。
+   *
+   * 因此本轮只把事实暴露给调用方（打 warn），让真串台时可追查。
+   */
+  crossSession?: { from: string; to: string };
+} {
   const raw = consumeMarker(RESTART_CONTINUATION_MARKER);
   if (raw === null) return {};
   const parsed = parseRestartContinuation(raw);
@@ -269,7 +288,18 @@ export function takeRestartContinuation(ctx: {
     writeMarker(RESTART_CONTINUATION_MARKER, raw);
     return { skippedChannel: parsed.channel };
   }
-  return { message: parsed.message.trim() || undefined };
+  const out: { message?: string; crossSession?: { from: string; to: string } } = {
+    message: parsed.message.trim() || undefined,
+  };
+  if (
+    decision.reason === 'same-channel' &&
+    parsed.sessionId &&
+    ctx.sessionId &&
+    parsed.sessionId !== ctx.sessionId
+  ) {
+    out.crossSession = { from: parsed.sessionId, to: ctx.sessionId };
+  }
+  return out;
 }
 
 /**
