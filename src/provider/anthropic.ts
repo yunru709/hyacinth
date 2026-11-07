@@ -89,7 +89,7 @@ export class AnthropicProvider implements Provider {
     // 2026-10-02：移除第三层硬编码模型名（'claude-sonnet-5'）。
     // 该层实际不可达（opts.model 由 createProviderFromConfig 填好，已含出厂快照兜底），
     // 留着等于"代码里藏了一份配置"。缺值时应以哨兵显形，而不是静默换一个模型。
-    this.model = opts.model ?? 'unknown';
+    this.model = opts.model?.trim() || 'unknown';
     // 模型目录一律按**实例自身厂商类型**查询。
     // AnthropicProvider 同时承载 anthropic / qwen / minimax / mimo 等 Anthropic 协议厂商，
     // 此前这里写死 'anthropic' ⇒ 那些厂商的模型元数据永远查不到，表现为三重静默偏差：

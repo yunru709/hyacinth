@@ -617,7 +617,8 @@ export class ModelChannelRegistry {
       const providerConfig: ProviderConfig = {
         type: cfg.provider as ProviderType,
         apiKey,
-        model: cfg.model ?? meta?.defaultModel ?? 'unknown',
+        // || 而非 ??：空串不是合法模型名（见 compatible.ts / 2026-11-08 事故）
+        model: cfg.model || meta?.defaultModel || 'unknown',
         baseUrl: cfg.baseUrl ?? meta?.baseUrl,
         // 未显式配置 userId ⇒ 按**名字派生**一个独立池（2026-10-02）。
         // 此前留空的下场：翻译层兜底成 DEFAULT_USER_ID ⇒ 所有"没配 id"的通道共用同一个池，

@@ -331,7 +331,12 @@ export class ProviderManager {
     // model 的优先级：显式 override > 回落厂商的默认模型 > provider.<type>.model > 顶层 model
     // （fallbackDefaultModel 必须排在 providerModel 前：回落时 providerSection 取到的是
     //  新厂商的 section，它的 model 可能为空字符串，会把默认模型盖成空）
-    const model = overrides?.model ?? fallbackDefaultModel ?? providerModel ?? agentConfig.model;
+    // ⚠️ 用 || 而非 ??：**空串必须等价于"未配置"**。
+    // 2026-11-08 事故：DEFAULT_CONFIG 顶层 model 是 ''（空串，不是 undefined），
+    // 而 config.json 里 provider.<type> 段常常整个缺失 ⇒ 这条链全命中空串 ⇒
+    // 主 provider 拿到 model='' ⇒ 请求体 model:"\"\" " ⇒ 上游 400
+    // `model must be a non-empty string`。厂商默认模型只能靠工厂层回落，别指望这里。
+    const model = overrides?.model || fallbackDefaultModel || providerModel || agentConfig.model;
 
     // userId：优先从配置读取（provider.<type>.userId > provider.userId），用于 KVCache 隔离
     const providerUserId = typeof providerSection?.userId === 'string' ? providerSection.userId : undefined;
