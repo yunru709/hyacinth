@@ -559,7 +559,11 @@ export function createGroqProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'GROQ_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.groq.com/openai/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'groq',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -576,7 +580,11 @@ export function createXAIProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'XAI_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.x.ai/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'xai',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -593,7 +601,11 @@ export function createMistralProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'MISTRAL_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.mistral.ai/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'mistral',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -610,7 +622,11 @@ export function createOpenRouterProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'OPENROUTER_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://openrouter.ai/api/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'openrouter',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -631,7 +647,11 @@ export function createMoonshotProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'MOONSHOT_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.moonshot.cn/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'moonshot',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -655,7 +675,11 @@ export function createVolcengineProvider(config?: CompatibleFactoryConfig) {
     // 兜底只留哨兵：具体模型名属配置（providers.json 的 volcengine.defaultModel）。
     // ⚠️ 注意：volcengine 的名字属**火山 Plan 端点短名体系**（doubao-seed-* / deepseek-v4.1-flash …），
     // 与 DeepSeek 官方的 id（deepseek-flash）不是同一套命名，别互相套用。
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'volcengine',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -710,7 +734,11 @@ export function createOpenCodeProvider(config?: CompatibleFactoryConfig) {
     apiKey,
     envKey,
     baseUrl: resolveOpenCodeBaseUrl(config?.baseUrl ?? provCfg?.baseUrl, apiKey),
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'opencode',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
@@ -743,7 +771,11 @@ export function createCommandCodeProvider(config?: CompatibleFactoryConfig) {
     apiKey: config?.apiKey,
     envKey: 'COMMANDCODE_API_KEY',
     baseUrl: config?.baseUrl ?? provCfg?.baseUrl ?? 'https://api.commandcode.ai/provider/v1',
-    model: config?.model ?? provCfg?.defaultModel ?? 'unknown',
+    // ⚠️ 必须用 || 而非 ??：空字符串**不是**合法模型名。
+    // 2026-11-08 事故现场：config.json 缺 provider.opencode 段时 model 取到 ''，
+    // `??` 不把空串当缺失 ⇒ 一路穿透到请求体 `model: ""` ⇒ 上游 400
+    // `model must be a non-empty string`，而 providers.json 里的正确默认值永远用不上。
+    model: config?.model || provCfg?.defaultModel || 'unknown',
     providerType: 'commandcode',
     userId: config?.userId,
     maxOutputTokens: config?.maxOutputTokens,
