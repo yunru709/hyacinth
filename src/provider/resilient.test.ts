@@ -1,8 +1,47 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ResilientProvider } from './resilient.js';
+import { ResilientProvider, isAbortError } from './resilient.js';
 import { FallbackProviderChain } from './fallback.js';
 import type { Provider } from './interface.js';
 import type { Message, StreamEvent, ProviderType } from '../types.js';
+
+/**
+ * 2026-11-08 修复的守卫：**SDK 的 APIUserAbortError 不设置 `name`**。
+ *
+ * 旧实现 `err.name === 'AbortError' || err.name === 'APIUserAbortError'` 对
+ * openai / @anthropic-ai/sdk 两个 SDK 族**恒为 false** ⇒ Ctrl+C 被当 provider 故障
+ * ⇒ 降级链继续切厂商烧 token。dist 探针实测：`new APIUserAbortError().name === 'Error'`。
+ *
+ * 这里刻意用**与 SDK 同构的本地类**而非 `import('openai')`：既复现了真实形态
+ * （name 继承为 'Error'，仅 constructor.name 暴露真身），又不把测试绑死在 SDK 版本上。
+ */
+describe('isAbortError：SDK 中断形态识别', () => {
+  class APIUserAbortError extends Error {
+    constructor() {
+      super('Request was aborted.');
+    }
+  }
+
+  it('SDK 形态（name 继承为 "Error"）必须识别为中断', () => {
+    const e = new APIUserAbortError();
+    expect(e.name).toBe('Error'); // 前置事实：SDK 确实不设 name
+    expect(isAbortError(e)).toBe(true);
+  });
+
+  it('原生 DOMException(AbortError) 仍被识别', () => {
+    expect(isAbortError(new DOMException('aborted', 'AbortError'))).toBe(true);
+  });
+
+  it('普通错误不得误判为中断', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+    expect(isAbortError(new TypeError('bad type'))).toBe(false);
+  });
+
+  it('中断藏在 cause 链里也识别（undici 包装形态）', () => {
+    const outer = new Error('wrapped');
+    (outer as { cause?: unknown }).cause = new DOMException('aborted', 'AbortError');
+    expect(isAbortError(outer)).toBe(true);
+  });
+});
 
 // ── Mock Provider ─────────────────────────────────────────────────
 
