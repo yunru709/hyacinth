@@ -206,7 +206,7 @@ export class FallbackProviderChain implements Provider {
         errors.push(`[${label}] ${err.message}`);
         lastFailed = provider;
         lastErr = err;
-        this.stripCacheControl(messages);
+        messages = this.stripCacheControl(messages);
         // 进入降级：静态链失败且后续仍有可用项（静态或候选池）→ 标记降级并回调
         const hasNext = i < this.providers.length - 1 || this.candidates.length > 0;
         if (hasNext) {
@@ -255,7 +255,7 @@ export class FallbackProviderChain implements Provider {
           this.probe.invalidate(cand.meta, cand.apiKey);
           lastFailed = rp;
           lastErr = err;
-          this.stripCacheControl(messages);
+          messages = this.stripCacheControl(messages);
         }
       }
     }
