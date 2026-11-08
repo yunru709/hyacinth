@@ -165,3 +165,32 @@ describe('qqChannelPlugin.autoRegister', () => {
     expect(channelsInfo[0].name).toBe('qq');
   });
 });
+
+// ── 双栈回退（2026-11-08 实测 NapCat WS 绑 IPv6-only）──────────
+
+describe('buildWsCandidates', () => {
+  it('127.0.0.1 时追加 [::1] 候选', () => {
+    const c = buildWsCandidates('ws://127.0.0.1:3001');
+    expect(c).toHaveLength(2);
+    expect(c[0]).toBe('ws://127.0.0.1:3001');
+    expect(c[1]).toContain('[::1]');
+    expect(c[1]).toContain('3001');
+  });
+
+  it('localhost 同样追加', () => {
+    const c = buildWsCandidates('ws://localhost:3001');
+    expect(c).toHaveLength(2);
+    expect(c[1]).toContain('[::1]');
+  });
+
+  it('非 loopback 地址不追加（远端主机没有 ::1 语义）', () => {
+    const c = buildWsCandidates('ws://192.168.1.10:3001');
+    expect(c).toHaveLength(1);
+    expect(c[0]).toBe('ws://192.168.1.10:3001');
+  });
+
+  it('非法 URL 时原样返回单候选（不抛错）', () => {
+    const c = buildWsCandidates('not a url');
+    expect(c).toEqual(['not a url']);
+  });
+});
