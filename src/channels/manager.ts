@@ -55,6 +55,12 @@ export class ChannelManager {
       registerChannelPrefixes(handler.sessionPrefix, channelName);
       logger.debug('registered channel session prefix', { id: handler.id, channel: channelName, prefix: handler.sessionPrefix });
     }
+    // 渠道能力登记（2026-11-08）：供 loop.getExitConfig 判断「本会话是否继承全局自主模式」。
+    // 消息渠道（persistent）不继承 —— 见 session-channel.ts 的能力注册表注释。
+    registerChannelCapabilities(
+      handler.sessionChannel ?? handler.id,
+      handler.loopCapabilities,
+    );
     logger.info('channel registered', { id: handler.id, name: handler.name });
   }
 
