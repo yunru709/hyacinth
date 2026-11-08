@@ -354,34 +354,66 @@ function checkXrefCache(fix: boolean): CheckResult {
 }
 
 function checkApiKeys(): CheckResult {
-  const envKeys = [
-    'ANTHROPIC_API_KEY',
-    'OPENAI_API_KEY',
-    'DEEPSEEK_API_KEY',
-    'GEMINI_API_KEY',
-    'MINIMAX_API_KEY',
-    'GROQ_API_KEY',
-  ];
-  const found: string[] = [];
-  for (const k of envKeys) {
-    if (process.env[k]) found.push(k);
+  // ⚠️ 2026-11-08 修复，两个独立缺陷叠在一起：
+  //  ① 这里硬编码 6 个 env 名，而真源 PROVIDER_META 有 16 个 ⇒ 用 ARK_API_KEY /
+  //     OPENCODE_API_KEY / COMMANDCODE_API_KEY / DASHSCOPE_API_KEY 的机器会被误报
+  //     「未检测到任何 API Key」。
+  //  ② doctor 子命令**从不调用 loadEnvKeys**，只查 process.env ⇒ 对"把 key 写在
+  //     ~/.agent/.env 里"的用户（这是常态用法）**恒为误报**，且原兜底去查
+  //     config.provider.apiKey（这个字段根本不存在）。三处各说各话。
+  // 现在：真源遍历 + 额外读 .env 的**键名**（只读键名，不读值，不打印值）。
+  const envNames = new Set<string>();
+  for (const meta of Object.values(PROVIDER_META)) {
+    if (meta.envKey) envNames.add(meta.envKey);
   }
 
-  if (found.length > 0) {
+  const fromProcess: string[] = [];
+  for (const k of envNames) {
+    if (process.env[k]) fromProcess.push(k);
+  }
+
+  const fromFile: string[] = [];
+  const envFile = path.join(os.homedir(), '.agent', '.env');
+  if (fs.existsSync(envFile)) {
+    try {
+      for (const rawLine of fs.readFileSync(envFile, 'utf-8').split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const m = /^(?:export\s+)?([A-Za-z0-9_]+)\s*=/.exec(line);
+        if (m?.[1]) fromFile.push(m[1]);
+      }
+    } catch { /* 读不到就当没有，不影响其它检查项 */ }
+  }
+
+  const all = new Set([...fromProcess, ...fromFile]);
+  if (all.size > 0) {
+    const sources: string[] = [];
+    if (fromProcess.length > 0) sources.push(`进程环境 ${fromProcess.length}`);
+    if (fromFile.length > 0) sources.push(`.env ${fromFile.length}`);
     return {
-      label: 'API Keys (环境变量)',
+      label: 'API Keys',
       ok: true,
-      detail: `${found.length} 个: ${found.map(k => k.split('_')[0]).join(', ')}`,
+      // 只显示变量名前缀（去掉 _API_KEY），绝不输出值
+      detail: `${all.size} 个（${sources.join(' / ')}）: ${[...all]
+        .map((k) => k.replace(/_API_KEY$/, ''))
+        .join(', ')}`,
     };
   }
 
-  // 检查 config.json
-  const configPath = path.join(os.homedir(), '.agent', 'config.json');
-  if (fs.existsSync(configPath)) {
+  // 兜底：通道里显式写死了 apiKey
+  const channelsPath = path.join(os.homedir(), '.agent', 'model-channels.json');
+  if (fs.existsSync(channelsPath)) {
     try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      if (config.provider?.apiKey || config.providers) {
-        return { label: 'API Keys', ok: true, detail: '已配置于 config.json' };
+      const channels = JSON.parse(fs.readFileSync(channelsPath, 'utf-8'));
+      const withKey = Object.entries(channels?.channels ?? {}).filter(
+        ([, cfg]) => typeof (cfg as { apiKey?: unknown })?.apiKey === 'string',
+      );
+      if (withKey.length > 0) {
+        return {
+          label: 'API Keys',
+          ok: true,
+          detail: `已配置于 model-channels.json（${withKey.length} 个通道）`,
+        };
       }
     } catch { /* ignore */ }
   }
