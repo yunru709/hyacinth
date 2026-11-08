@@ -39,6 +39,7 @@ import {
   extractText,
   isMentioned,
   chunkText,
+  stripMarkdown,
   type Ob11AnyEvent,
   type Ob11MessageEvent,
 } from './qq-client.js';
