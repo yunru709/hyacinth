@@ -48,11 +48,11 @@ export class ProviderConfigLoader {
         return this.cache;
       }
       // 权限 / 磁盘错误：不能假装"没有配置"，否则会用出厂快照覆盖用户真实意图
-      logger.error('Provider config unreadable, falling back to in-memory defaults', {
-        path: this.configPath,
-        code: (err as NodeJS.ErrnoException)?.code,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error(
+        'Provider config unreadable, falling back to in-memory defaults',
+        err instanceof Error ? err : undefined,
+        { path: this.configPath, code: (err as NodeJS.ErrnoException)?.code },
+      );
       this.cache = { ...DEFAULT_PROVIDERS };
       return this.cache;
     }
@@ -66,10 +66,8 @@ export class ProviderConfigLoader {
       // ★ 关键：这里**不能写盘**。用户的文件保持原样，等他自己去改。
       logger.error(
         'Provider config JSON parse failed — file left untouched, using in-memory defaults',
-        {
-          path: this.configPath,
-          error: err instanceof Error ? err.message : String(err),
-        },
+        err instanceof Error ? err : undefined,
+        { path: this.configPath },
       );
       this.cache = { ...DEFAULT_PROVIDERS };
       return this.cache;
