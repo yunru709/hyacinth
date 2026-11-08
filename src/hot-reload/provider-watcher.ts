@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { getProviderConfigLoader } from '../provider/config.js';
+import { invalidateProviderModels } from '../setup/model-defaults.js';
 import { createWatcher, type WatcherHandle } from './watcher-base.js';
 
 interface ProviderWatcherDeps {
