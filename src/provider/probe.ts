@@ -229,6 +229,24 @@ export class ProviderProbe {
   }
 }
 
+/**
+ * 把 apiKey 压成一个不可逆的短指纹，用于探测缓存键。
+ *
+ * ⚠️ 2026-11-08：原实现直接把 `apiKey.slice(-4)` 拼进缓存键 —— 凭据片段进入内存键，
+ * 一旦有人 dump 缓存 / 打日志 / 报错带上下文，密钥尾巴就泄露了。
+ * 这里用 djb2 同步哈希（不引 crypto 依赖，probe 是热路径上的轻模块）：
+ * 仍然"按 key 隔离探测结果"（不同 key → 不同指纹），但无法反推原文。
+ */
+function apiKeyFingerprint(apiKey: string): string {
+  if (!apiKey) return 'none';
+  let h = 5381;
+  for (let i = 0; i < apiKey.length; i++) {
+    h = ((h << 5) + h + apiKey.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
 function cacheKey(meta: ProviderFactoryMeta, apiKey: string): string {
-  return `${meta.id}|${meta.baseUrl}|${meta.defaultModel}|${apiKey.slice(-4)}`;
+  // 2026-11-08：不再拼 apiKey 后 4 位，改用不可逆指纹（见上）。
+  return `${meta.id}|${meta.baseUrl}|${meta.defaultModel}|${apiKeyFingerprint(apiKey)}`;
 }
