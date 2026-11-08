@@ -134,7 +134,8 @@ describe('qq-client 纯函数', () => {
 
     it('列表统一成 · 且保留缩进', () => {
       expect(stripMarkdown('- 一\n- 二')).toBe('· 一\n· 二');
-      expect(stripMarkdown('  * 子项')).toBe('  · 子项');
+      // 首行的缩进会被整体 trim 掉（纯文本里无意义），行间缩进必须保留
+      expect(stripMarkdown('- 一\n  * 子项')).toBe('· 一\n  · 子项');
     });
 
     it('表格删分隔行，竖线缩成两空格', () => {
