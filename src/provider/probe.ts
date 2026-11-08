@@ -12,7 +12,7 @@
  *
  * 并发安全：pending Map 共享在途探测，同一候选并发调用只发一次请求。
  */
-import type { ProviderFactoryMeta } from './provider-meta.js';
+import { PROVIDER_META, type ProviderFactoryMeta } from './provider-meta.js';
 
 export type ProbeStatus = 'ok' | 'unavailable' | 'uncertain';
 

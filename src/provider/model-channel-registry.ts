@@ -474,7 +474,9 @@ export class ModelChannelRegistry {
 
   /** 删除通道（main 不可删除） */
   removeChannel(name: string): void {
-    if (name === DEFAULT_CHANNEL) throw new Error('Cannot remove the "main" channel.');
+    // 2026-11-08：文案修正 —— 判的是 DEFAULT_CHANNEL（'default'），却报 "main"（旧名）。
+    // 用户看到 "Cannot remove the main channel" 时会去找一个叫 main 的通道，找不到。
+    if (name === DEFAULT_CHANNEL) throw new Error(`Cannot remove the "${DEFAULT_CHANNEL}" channel.`);
     delete this.config.channels[name];
     this.channelProviders.delete(name);
     // 更新 roles 中引用此通道的条目回退到 main
