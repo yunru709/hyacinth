@@ -265,11 +265,19 @@ export class OpenAIProvider implements Provider {
         yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
+      // 2026-11-08：message **一字不变**（下游 context/compressor.ts:91、mcp/client.ts:199、
+      // tools/result-buffer.ts:82 仍在匹配这些字符串），只额外挂结构化 kind/status，
+      // 让「上下文超限」从此可被 `kind === 'context_overflow'` 精确识别。见 errors.ts 文件头。
       if (error instanceof OpenAI.APIError) {
-        throw new Error(`OpenAI API error (${error.status}): ${error.message}`);
+        throw toProviderError(`OpenAI API error (${error.status}): ${error.message}`, error, {
+          providerType: 'openai',
+          status: error.status,
+        });
       }
       if (error instanceof Error) {
-        throw new Error(`OpenAI stream error: ${error.message}`);
+        throw toProviderError(`OpenAI stream error: ${error.message}`, error, {
+          providerType: 'openai',
+        });
       }
       throw error;
     }

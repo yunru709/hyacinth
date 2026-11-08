@@ -213,8 +213,9 @@ export class GeminiProvider implements Provider {
         yield { type: 'STOP', reason: lastFinishReason.toLowerCase() };
       }
     } catch (error: unknown) {
+      // 2026-11-08：message 一字不变，只挂结构化 kind/status（见 errors.ts 文件头）。
       if (error instanceof Error) {
-        throw new Error(`Gemini API error: ${error.message}`);
+        throw toProviderError(`Gemini API error: ${error.message}`, error, { providerType: 'gemini' });
       }
       throw error;
     }

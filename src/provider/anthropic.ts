@@ -310,11 +310,17 @@ export class AnthropicProvider implements Provider {
         yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
+      // 2026-11-08：message 一字不变，只挂结构化 kind/status（见 errors.ts 文件头）。
       if (error instanceof Anthropic.APIError) {
-        throw new Error(`Anthropic API error (${error.status}): ${error.message}`);
+        throw toProviderError(`Anthropic API error (${error.status}): ${error.message}`, error, {
+          providerType: 'anthropic',
+          status: error.status,
+        });
       }
       if (error instanceof Error) {
-        throw new Error(`Anthropic stream error: ${error.message}`);
+        throw toProviderError(`Anthropic stream error: ${error.message}`, error, {
+          providerType: 'anthropic',
+        });
       }
       throw error;
     }

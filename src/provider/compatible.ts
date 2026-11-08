@@ -372,11 +372,17 @@ export class OpenAICompatibleProvider implements Provider {
         yield { type: 'STOP', reason: 'incomplete' };
       }
     } catch (error: unknown) {
+      // 2026-11-08：message 一字不变，只挂结构化 kind/status（见 errors.ts 文件头）。
       if (error instanceof OpenAI.APIError) {
-        throw new Error(`${this.providerType} API error (${error.status}): ${error.message}`);
+        throw toProviderError(`${this.providerType} API error (${error.status}): ${error.message}`, error, {
+          providerType: this.providerType,
+          status: error.status,
+        });
       }
       if (error instanceof Error) {
-        throw new Error(`${this.providerType} stream error: ${error.message}`);
+        throw toProviderError(`${this.providerType} stream error: ${error.message}`, error, {
+          providerType: this.providerType,
+        });
       }
       throw error;
     }

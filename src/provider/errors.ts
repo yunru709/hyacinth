@@ -155,6 +155,13 @@ export function toProviderError(
   original: unknown,
   init: Omit<ProviderErrorInit, 'original'> = {},
 ): ProviderError {
+  // ⚠️ 中断必须**原样上抛**，绝不能被包装成本类：一旦包装，`name` 变成 'ProviderError'，
+  // resilient/fallback 的 isAbortError 就再也认不出来 ⇒ 直接退回「Ctrl+C 停不下来」。
+  // 因此本函数对中断有**副作用**（直接 throw 原始错误）。调用方写
+  //     throw toProviderError(...)
+  // 依然安全：中断时内层先抛，外层那个 throw 永不执行。
+  if (isAbortLike(original)) throw original;
+
   const status = init.status ?? extractStatus(original);
   const codes = collectCodes(original);
   const kind = classifyProviderError({ message, status, codes });
