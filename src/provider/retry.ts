@@ -64,6 +64,15 @@ export function isRetryableError(error: unknown): boolean {
     if (msg.includes('econnrefused')) return true;
     if (msg.includes('timeout') || msg.includes('network')) return true;
     if (msg.includes('fetch failed') || msg.includes('socket hang up')) return true;
+    // ⚠️ 2026-11-08：以下判定从 resilient.ts 的旧本地实现收敛过来 —— 那里**只看
+    // error.message、且不穿透 cause**，与 C-06 修好的本文件形成"同一错误两套口径"。
+    // 收敛时取**并集**（只增不减），避免削弱任何一侧的判定。
+    //   ① 裸状态码形态："HTTP 503" / "429 Too Many Requests" 不含 `status: ` 前缀
+    if (/\b(429|500|502|503|504)\b/.test(msg)) return true;
+    //   ② 厂商措辞
+    if (msg.includes('too many requests') || msg.includes('service unavailable')) return true;
+    if (msg.includes('internal server error')) return true;
+    if (msg.includes('bad gateway') || msg.includes('gateway timeout')) return true;
     // HTTP status codes in message
     if (msg.includes('status: 5') || msg.includes('status: 429')) return true;
     if (msg.includes('status: 502') || msg.includes('status: 503') || msg.includes('status: 504')) return true;
