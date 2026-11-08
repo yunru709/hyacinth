@@ -28,6 +28,9 @@ import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { UI_EVENT } from '../events.js';
+// 渠道能力反查（2026-11-08）：getExitConfig 用它判断「本会话是否持久消息渠道」，
+// 从而决定要不要继承全局 auto.json 自主模式（消息渠道 = 人找我说话 = 不继承）。
+import { resolveChannelFromSessionId, getChannelCapabilities } from '../session-channel.js';
 import { ImageStore, buildUserContentWithMedia, createViewImageTool, createViewMediaTool } from '../multimodal/index.js';
 import { createLoopHookBus, type LoopHookBus, type LoopHooks } from './loop-hooks.js';
 import { type ToolExecContext } from './loop-tools.js';
