@@ -25,6 +25,9 @@ export function watchProviderConfig(deps: ProviderWatcherDeps): WatcherHandle[] 
     paths: () => [watchPath],
     reload: async () => {
       await getProviderConfigLoader().reload();
+      // 2026-11-08：同步失效 setup 层的模型清单缓存。此前只刷 ProviderConfigLoader，
+      // 而 PROVIDER_MODELS 的模块级缓存永不失效 ⇒ 与 modelCatalog 分叉（见该函数注释）。
+      invalidateProviderModels();
     },
   });
 }

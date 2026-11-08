@@ -50,6 +50,21 @@ function getProviderModels(): Record<string, ModelMeta[]> {
   return _providerModels;
 }
 
+/**
+ * 失效模块级缓存（2026-11-08 补）。
+ *
+ * 此前 `_providerModels` 构建一次后**永不失效**，而热重载链路只刷 `modelCatalog`
+ * （`hot-reload/model-catalog-watcher.ts`）⇒ 用户改了 `providers.json` 里的 models
+ * 声明后，两个"模型事实源"会分叉：
+ *    · `PROVIDER_MODELS`（本文件的旧路径，CLI 的 `/model list` 用）→ 旧清单
+ *    · `ModelCatalogLoader`（新路径，实际调用与上下文窗口用）→ 新清单
+ * 表现为"界面显示的模型和真正调用的模型不一致"，且不报任何错。
+ * 必须由 provider watcher 在重载后显式失效。
+ */
+export function invalidateProviderModels(): void {
+  _providerModels = null;
+}
+
 /** @deprecated 使用 ModelCatalogLoader 代替 */
 export const PROVIDER_MODELS: Record<string, ModelMeta[]> = new Proxy({} as Record<string, ModelMeta[]>, {
   get(_target, prop: string) {
