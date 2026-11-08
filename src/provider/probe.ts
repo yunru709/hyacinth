@@ -258,7 +258,14 @@ function apiKeyFingerprint(apiKey: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-function cacheKey(meta: ProviderFactoryMeta, apiKey: string): string {
+/**
+ * 探测缓存键。
+ *
+ * ⚠️ 2026-11-08：导出**仅用于测试可见性**（生产调用点仍在下方 ProviderProbe 内部）。
+ * 之所以要能测：这个键以前含 `apiKey.slice(-4)`，是"凭据片段进内存键"的具体形态，
+ * 必须有一条断言锁住"键里不得出现密钥原文"。
+ */
+export function cacheKey(meta: ProviderFactoryMeta, apiKey: string): string {
   // 2026-11-08：不再拼 apiKey 后 4 位，改用不可逆指纹（见上）。
   return `${meta.id}|${meta.baseUrl}|${meta.defaultModel}|${apiKeyFingerprint(apiKey)}`;
 }

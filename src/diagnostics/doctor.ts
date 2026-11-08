@@ -353,7 +353,14 @@ function checkXrefCache(fix: boolean): CheckResult {
   return { label: 'xref cache', ok, detail };
 }
 
-function checkApiKeys(): CheckResult {
+/**
+ * API Key 检查项。
+ *
+ * ⚠️ 2026-11-08：导出**仅用于测试可见性**（生产入口是 runDoctor）。
+ * 导出原因：这个函数曾经硬编码 6 个 env 名、且只查 process.env（doctor 从不加载 .env）
+ * ⇒ 对 .env 用户恒为误报。行为必须被断言锁住，否则很容易被"顺手简化"回去。
+ */
+export function checkApiKeys(): CheckResult {
   // ⚠️ 2026-11-08 修复，两个独立缺陷叠在一起：
   //  ① 这里硬编码 6 个 env 名，而真源 PROVIDER_META 有 16 个 ⇒ 用 ARK_API_KEY /
   //     OPENCODE_API_KEY / COMMANDCODE_API_KEY / DASHSCOPE_API_KEY 的机器会被误报
