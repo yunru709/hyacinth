@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import Database from '../tools/sqlite.js';
 import { isForbiddenAnchor } from '../tools/xref/anchor.js';
 import { checkConfigConsistency } from './config-consistency.js';
+import { PROVIDER_META } from '../provider/provider-meta.js';
 
 // 本文件编译为 ESM，作用域内没有 require。
 // doctor 由 dist/index.js 运行，createRequire 以 dist/diagnostics/ 本文件为基准解析，

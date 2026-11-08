@@ -396,12 +396,25 @@ export class ModelChannelRegistry {
     return Object.keys(this.config.channels);
   }
 
-  /** 列出所有通道配置 */
+  /**
+   * 列出所有通道配置 —— **apiKey 默认脱敏**（2026-11-08）。
+   *
+   * 原实现 `{ name, ...cfg }` 把明文 `apiKey` 原样带出：registry 是公开 API，
+   * 任何直接调用方（含未来新增的 UI 命令、第三方插件）都能拿到密钥。
+   * UI 协议层虽然主动丢弃了该字段，但**不能指望每个调用方都自觉**。
+   *
+   * 这里保留"是否配置过 key"这一信息（有 → `'***'`），值本身不外泄。
+   * 确需明文的路径应当显式读 `this.config`，而不是经由这个"列配置"接口。
+   */
   listChannels(): Array<ChannelConfig & { name: string }> {
-    return Object.entries(this.config.channels).map(([name, cfg]) => ({
-      name,
-      ...cfg,
-    }));
+    return Object.entries(this.config.channels).map(([name, cfg]) => {
+      const { apiKey, ...rest } = cfg;
+      return {
+        name,
+        ...rest,
+        ...(apiKey ? { apiKey: '***' } : {}),
+      };
+    });
   }
 
   /**
