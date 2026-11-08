@@ -296,6 +296,21 @@ export class OpenAIProvider implements Provider {
     for (const msg of messages) {
       const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
 
+      // ⚠️ 2026-11-08 修复：此前**没有 system 分支** ⇒ system 消息落进 else 被当 user 发送，
+      // 整个系统提示词（人设 / Anchor / 系统指令）以"用户发言"的身份送达模型。
+      // 损失：指令优先级下降、提示注入抵抗力下降、个别严格端点对首条消息角色更挑剔。
+      // 实测（dist 探针）：改前 roles=["user","user"]，改后 ["system","user"]。
+      // 注意：OpenAI **Chat Completions 没有"顶层 system 字段"**，system 只能作为
+      // messages 里的一条；多条 system 保持原顺序各自成条（不合并，避免改变语义）。
+      if (msg.role === 'system') {
+        const text = blocks
+          .map((b) => (b.type === 'text' ? sanitizeText(b.text) : ''))
+          .filter(Boolean)
+          .join('');
+        if (text) result.push({ role: 'system', content: text });
+        continue;
+      }
+
       if (msg.role === 'assistant') {
         // ---- assistant 消息 ----
         const textParts: string[] = [];
