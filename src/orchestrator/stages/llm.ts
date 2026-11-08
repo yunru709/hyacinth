@@ -247,8 +247,10 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
           }
         }
       } catch (err) {
-        const name = (err instanceof Error) ? err.name : '';
-        if (name !== 'AbortError' && name !== 'APIUserAbortError') {
+        // ⚠️ 2026-11-08：旧判定只看 `err.name`，而两个 SDK 的 `APIUserAbortError`
+        // **不设置 name**（详见 provider/resilient.ts 的 isAbortError 注释）⇒
+        // 这里同样识别不出用户中断，会把 Ctrl+C 当异常继续往上抛成"Agent error"。
+        if (!(err instanceof Error) || !isAbortError(err)) {
           // 非用户中断 → 重新抛出（调用方 catch 兜底通知）
           throw err;
         }

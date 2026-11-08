@@ -132,7 +132,35 @@ function isRetryableError(error: Error): boolean {
  * 导出给 FallbackProviderChain 复用，保证两侧判定口径一致。
  */
 export function isAbortError(err: Error): boolean {
-  return err.name === 'AbortError' || err.name === 'APIUserAbortError';
+  // ⚠️ 2026-11-08 修复：旧实现是 `err.name === 'AbortError' || 'APIUserAbortError'`，
+  // 但 **openai 与 @anthropic-ai/sdk 的 `APIUserAbortError` 都不设置 `name`**
+  // （继承 `Error.prototype.name` = 'Error'）。dist 探针实测：
+  //     openai     new APIUserAbortError() → name="Error", constructor.name="APIUserAbortError"
+  //     anthropic  同上
+  //     DOMException('…','AbortError')     → name="AbortError"
+  // ⇒ 旧判定对两个 SDK 族**恒为 false** ⇒ 用户 Ctrl+C 被当成 provider 故障 ⇒
+  //   fallback 继续切厂商、继续烧 token，界面表现为"停不下来 / 越停越慢 / 报聚合错误"。
+  //
+  // 判定改为「name / constructor.name / cause 链」三重取一命中。
+  // 刻意**不用 `instanceof`**：那会强迫本模块引入两个 SDK 依赖；而 `constructor.name`
+  // 在 tsc 产物（未压缩）里保持原样，且 SDK 版本升级换类名时会自然失效为"不判定"，
+  // 不会误判成中断。
+  const ABORT_NAMES = new Set(['AbortError', 'APIUserAbortError']);
+
+  const names = (e: unknown): string[] => {
+    if (!e || typeof e !== 'object') return [];
+    const out: string[] = [];
+    const n = (e as { name?: unknown }).name;
+    // 'Error' 是继承来的默认值，不含信息量；真正有辨识度的是 constructor.name
+    if (typeof n === 'string' && n !== 'Error') out.push(n);
+    const c = (e as { constructor?: { name?: unknown } }).constructor?.name;
+    if (typeof c === 'string') out.push(c);
+    return out;
+  };
+
+  if (names(err).some((n) => ABORT_NAMES.has(n))) return true;
+  // 有些包装层把中断塞进 cause（如 undici 的 AbortError）
+  return names((err as { cause?: unknown }).cause).some((n) => ABORT_NAMES.has(n));
 }
 
 function sleep(ms: number): Promise<void> {
