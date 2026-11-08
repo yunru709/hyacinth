@@ -3920,7 +3920,14 @@
     async function autoLoad() {
       try {
         const r = await client.request('auto.status', {});
-        if (r && r.ok && r.auto) autoApply(r.auto);
+        // ⚠️ 2026-11-08 修：**不能判 `r.ok`**。`client.request()` resolve 的是
+        // `msg.result`（server.ts dispatch 的 ok 在外层信封上），而 `auto.status`
+        // 返回的是 `{ auto: AutoStateView }` —— **没有 ok 字段** ⇒ 旧条件
+        // `if (r && r.ok && r.auto)` 恒假 ⇒ autoApply 从未执行 ⇒ 按钮永远停在
+        // HTML 初始的「关闭」，即使后端 auto.json 是 true 且每轮都在拦 end_turn。
+        // 现象：用户以为自主模式已关，实际一直开着（本次排查的原因）。
+        // 对比 autoToggle()：它判 r.ok 是对的，因为 setEnabled/stop 返回 `{ok:true, auto}`。
+        if (r && r.auto) autoApply(r.auto);
       } catch {
         // 控制器尚未装配时"看一眼"不该报错打断（stub 返回 phase:'off'）
       }
