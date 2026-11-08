@@ -65,8 +65,52 @@ export class ModelCatalogLoader {
             if (m.maxOutputTokens === undefined && typeof legacy.maxTokens === 'number') {
               m.maxOutputTokens = legacy.maxTokens;
             }
+            // ⚠️ 2026-11-08 补：此前**不做任何校验**就并入目录。后果是缺 contextWindow /
+            // maxOutputTokens 时，适配器静默回落 128000 / 8192（compatible.ts:135-164、
+            // anthropic.ts:98-101）⇒ 用户以为配好了，实际窗口与输出上限全是猜的，
+            // 且没有任何提示，直到上游报「context too long」才发现。
+            // 处理原则：能修正的修正并 warn，无法索引的（缺 id）才剔除。
+            if (typeof m.id !== 'string' || !m.id.trim()) {
+              logger.warn('模型目录条目缺少 id，已忽略', {
+                provider: pid,
+                raw: JSON.stringify(raw).slice(0, 120),
+              });
+              continue;
+            }
+            // 校验必须在**合并之后**做：条目允许只写要改的字段（如只补 cost），
+            // 此时 m 的 contextWindow 是 undefined，但 prev 里有值。
             const prev = merged.get(m.id);
-            merged.set(m.id, prev ? { ...prev, ...m } : m);
+            const next: ModelCatalogEntry = prev ? { ...prev, ...m } : m;
+
+            if (typeof next.contextWindow !== 'number' || !(next.contextWindow > 0)) {
+              logger.warn('模型条目 contextWindow 非法，已剔除（避免静默回落 128000）', {
+                provider: pid,
+                id: next.id,
+                contextWindow: next.contextWindow,
+              });
+              continue;
+            }
+            if (typeof next.maxOutputTokens !== 'number' || !(next.maxOutputTokens > 0)) {
+              const fallback = Math.min(8192, next.contextWindow);
+              logger.warn('模型条目 maxOutputTokens 非法，已按 min(8192, contextWindow) 回落', {
+                provider: pid,
+                id: next.id,
+                given: next.maxOutputTokens,
+                fallback,
+              });
+              next.maxOutputTokens = fallback;
+            }
+            if (next.maxOutputTokens > next.contextWindow) {
+              logger.warn('模型条目 maxOutputTokens 超过 contextWindow，已截断', {
+                provider: pid,
+                id: next.id,
+                given: next.maxOutputTokens,
+                contextWindow: next.contextWindow,
+              });
+              next.maxOutputTokens = next.contextWindow;
+            }
+
+            merged.set(next.id, next);
           }
           models.push(...merged.values());
         }
