@@ -24,7 +24,7 @@ import type {
 } from './interface.js';
 import type { SessionService } from '../session-service.js';
 import { createLogger } from '../logging/logger.js';
-import { registerChannelPrefixes, unregisterChannelPrefixes } from '../session-channel.js';
+import { registerChannelPrefixes, unregisterChannelPrefixes, registerChannelCapabilities, unregisterChannelCapabilities } from '../session-channel.js';
 
 const logger = createLogger('channels');
 
