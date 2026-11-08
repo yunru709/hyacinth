@@ -13,7 +13,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 const { qqChannelPlugin } = await import('./index.js');
 const { resolveQqConfig, validateQqConfig, isAllowedUser, isAllowedGroup } = await import('./qq-config.js');
-const { extractText, isMentioned, chunkText, buildWsCandidates } = await import('./qq-client.js');
+const { extractText, isMentioned, chunkText, buildWsCandidates, stripMarkdown } = await import('./qq-client.js');
 
 // ── ① 配置解析与安全默认 ──────────────────────────────────────
 
