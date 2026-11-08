@@ -19,6 +19,7 @@
 import type { Message, ToolCall, ThinkingContent, TextContent, ToolUseContent } from '../../types.js';
 import { OutputRouter } from '../../parser/router.js';
 import { getModelInfo } from '../../provider/catalog.js';
+import { isAbortError } from '../../provider/resilient.js';
 import { scavengeToolCalls } from '../../repair/scavenge.js';
 import { isFlowTool } from '../../tools/flow.js';
 import { appendEvent } from '../../memory/events.js';
