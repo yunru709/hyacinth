@@ -120,9 +120,12 @@ export class ModelCatalog {
     return Array.from(this.models.values());
   }
 
-  getDefault(provider: ProviderType): ModelInfo | undefined {
-    return this.models.get(`${provider}:__default__`);
-  }
+  // ⚠️ 2026-11-08 删除 `getDefault(provider)` 死代码。
+  // 原实现查的是 `${provider}:__default__` 这个 key —— **目录里从来不存在这种 id**
+  // （`setup/model-defaults.ts:25` 反而把 `__default__` 显式列为要排除的 id）。
+  // 即：这个方法自诞生起必然返回 undefined，且全仓零调用方。
+  // 需要"某厂商的默认模型"请用 `getModelCatalogLoader().getByProvider(type)[0]`
+  // 或 `ProviderConfigLoader.getProvider(type)?.defaultModel`。
 
   init(cwd: string): void {
     getModelCatalogLoader(cwd);
