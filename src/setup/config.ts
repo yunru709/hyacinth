@@ -148,10 +148,41 @@ export interface WebUiChannelConfigEntry {
   apiKey?: string;
 }
 
+/** QQ 渠道配置（NapCat / OneBot v11） */
+export interface QqChannelConfigEntry {
+  /** 是否启用（默认 false） */
+  enabled?: boolean;
+  /** OneBot HTTP API（默认 http://127.0.0.1:3000） */
+  httpUrl?: string;
+  /** OneBot WS 事件地址（默认 ws://127.0.0.1:3001） */
+  wsUrl?: string;
+  /** OneBot access token（NapCat 默认空） */
+  accessToken?: string;
+  /**
+   * 私聊白名单（QQ 号）。**空 = 谁都不理**（安全默认，写错不会变成对全世界开放）。
+   */
+  allowFrom?: Array<number | string>;
+  /** 群聊白名单（群号）。空 = 不进任何群 */
+  groupAllowFrom?: Array<number | string>;
+  /** 群聊是否必须 @我（默认 true） */
+  requireMention?: boolean;
+  /** 自己的 QQ 号（留空自动从 get_login_info 取） */
+  selfId?: number | string;
+  /** 是否同步到 TUI */
+  tuiSync?: boolean;
+  /** 单条消息最大长度（默认 4000） */
+  textChunkLimit?: number;
+  /** HTTP 超时毫秒（默认 15000） */
+  httpTimeoutMs?: number;
+  /** WS 重连间隔毫秒（默认 3000） */
+  reconnectIntervalMs?: number;
+}
+
 export interface ChannelsConfig {
   feishu?: FeishuChannelConfigEntry;
   clawbot?: ClawbotChannelConfigEntry;
   webui?: WebUiChannelConfigEntry;
+  qq?: QqChannelConfigEntry;
 }
 
 /** Agent 配置（非敏感） */
