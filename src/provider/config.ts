@@ -31,15 +31,46 @@ export class ProviderConfigLoader {
   }
 
   async load(): Promise<ProvidersConfig> {
+    // ⚠️ 2026-11-08 修复：原实现用一个 `catch {}` 同时兜住「文件不存在」和「JSON 解析失败」，
+    // 两者都走 writeDefault() ⇒ **用户手写的 providers.json 一旦写错一个逗号就被出厂快照
+    // 整个覆盖**，且没有任何提示。用户配置丢失是不可逆的，必须区分处理：
+    //   · ENOENT（真的没有）→ 生成默认文件，合理；
+    //   · 其他 IO 错误 / 解析失败 → **绝不动磁盘上的原文件**，只回退内存快照 + 报 error。
+    // 这与 reload() 的策略保持一致（那里解析失败也只 warn、不写盘）。
+    let content: string;
     try {
-      const content = await fs.readFile(this.configPath, 'utf-8');
+      content = await fs.readFile(this.configPath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        logger.info('Provider config not found, generating default', { path: this.configPath });
+        await this.writeDefault();
+        this.cache = { ...DEFAULT_PROVIDERS };
+        return this.cache;
+      }
+      // 权限 / 磁盘错误：不能假装"没有配置"，否则会用出厂快照覆盖用户真实意图
+      logger.error('Provider config unreadable, falling back to in-memory defaults', {
+        path: this.configPath,
+        code: (err as NodeJS.ErrnoException)?.code,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      this.cache = { ...DEFAULT_PROVIDERS };
+      return this.cache;
+    }
+
+    try {
       const parsed = JSON.parse(content) as ProvidersConfig;
       this.cache = parsed;
       logger.info('Provider config loaded', { path: this.configPath });
       return parsed;
-    } catch {
-      logger.info('Provider config not found, generating default', { path: this.configPath });
-      await this.writeDefault();
+    } catch (err) {
+      // ★ 关键：这里**不能写盘**。用户的文件保持原样，等他自己去改。
+      logger.error(
+        'Provider config JSON parse failed — file left untouched, using in-memory defaults',
+        {
+          path: this.configPath,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
       this.cache = { ...DEFAULT_PROVIDERS };
       return this.cache;
     }
