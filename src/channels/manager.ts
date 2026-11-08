@@ -72,6 +72,10 @@ export class ChannelManager {
       unregisterChannelPrefixes(state.handler.sessionPrefix);
       logger.debug('unregistered channel session prefix', { id, prefix: state.handler.sessionPrefix });
     }
+    // 能力登记同步清理（2026-11-08）：否则渠道卸载后 loop 仍按旧能力判定
+    if (existed) {
+      unregisterChannelCapabilities(state?.handler.sessionChannel ?? id);
+    }
     if (existed) logger.info('channel unregistered', { id });
     return existed;
   }
