@@ -392,6 +392,19 @@ export class OpenAICompatibleProvider implements Provider {
     for (const msg of messages) {
       const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
 
+      // ⚠️ 2026-11-08 修复：此前**没有 system 分支** ⇒ system 消息落进 else 被当 user 发送。
+      // 本文件是 11 家 OpenAI 兼容厂商的共用实现（deepseek/openai/groq/xai/mistral/
+      // openrouter/moonshot/zhipu/opencode/commandcode/volcengine）⇒ 一次修复覆盖全部。
+      // 实测（dist 探针）：改前 roles=["user","user"]，改后 ["system","user"]。
+      if (msg.role === 'system') {
+        const text = blocks
+          .map((b) => (b.type === 'text' ? sanitizeText(b.text) : ''))
+          .filter(Boolean)
+          .join('');
+        if (text) result.push({ role: 'system', content: text });
+        continue;
+      }
+
       if (msg.role === 'assistant') {
         const textParts: string[] = [];
         const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
