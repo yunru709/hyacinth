@@ -15,6 +15,7 @@ import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
 import { extractCacheUsage } from './usage-cache.js';
+import { toProviderError } from './errors.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {

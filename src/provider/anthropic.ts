@@ -13,6 +13,7 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { toProviderError } from './errors.js';
 import { buildAnthropicThinking, normalizeThinkingStyle, type ThinkingStyle } from './thinking-style.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {

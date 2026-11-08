@@ -11,6 +11,7 @@ import type {
 import type { Provider, ProviderCapabilities } from './interface.js';
 import { getModelInfo } from './catalog.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { toProviderError } from './errors.js';
 import type { ProviderSampling } from './fields.js';
 
 export interface GeminiProviderOptions {

@@ -17,6 +17,7 @@ import {
   type ThinkingStyle,
 } from './thinking-style.js';
 import { getProviderConfigLoader } from './config.js';
+import { toProviderError } from './errors.js';
 import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
