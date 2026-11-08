@@ -162,6 +162,11 @@ export class GeminiProvider implements Provider {
         maxOutputTokens: this.maxOutputTokens,
         ...(this.sampling?.temperature !== undefined ? { temperature: this.sampling.temperature } : {}),
         ...(this.sampling?.topP !== undefined ? { topP: this.sampling.topP } : {}),
+        // 2026-11-08：关闭思考时显式下发 `thinkingBudget: 0`（Gemini 官方的关闭方式）。
+        // 开启时不写该字段 —— 用上游默认，比按 effort 猜一个数字安全（见 setThinking 注释）。
+        ...(this.thinkingEnabled
+          ? {}
+          : { thinkingConfig: { thinkingBudget: 0 } as Record<string, unknown> }),
       },
       history: history.length > 0 ? history : undefined,
     });
