@@ -232,7 +232,7 @@ export class QqChannel implements ChannelHandler {
   /** 跨渠道借用：type=user → id 是 QQ 号；type=chat → id 是群号 */
   async send(target: ChannelTarget, content: ChannelReply): Promise<string> {
     if (!this.client) return 'QQ 渠道未就绪';
-    const text = content.content?.trim();
+    const text = stripMarkdown(content.content ?? '');
     if (!text) return '内容为空';
     try {
       for (const c of chunkText(text, this.config.textChunkLimit)) {
