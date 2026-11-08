@@ -87,6 +87,60 @@ export function listChannelPrefixes(): Array<{ prefix: string; channel: string }
   return [...channelPrefixMap.entries()].map(([prefix, channel]) => ({ prefix, channel }));
 }
 
+// ============================================================
+// 渠道能力注册表（2026-11-08）
+// ============================================================
+//
+// 【为什么需要】`getExitConfig()`（loop.ts）要判断「本会话该不该继承全局自主模式」。
+// 判据是「这个渠道是不是消息渠道」——但那属于**渠道自身的能力声明**
+// （ChannelHandler.loopCapabilities），内核不该认识具体渠道名，故走注册表：
+// ChannelManager.register() 时把 handler.loopCapabilities 登记进来，loop 反查。
+//
+// 【首个消费方：QQ 事故】auto.json 全局 enabled=true 曾让**所有**会话继承
+// 「只允许 suspend 出口」。消息渠道（qq/feishu/clawbot）语义是「人来找我说话」——
+// 回完就该结束回合，被强制 suspend 会让模型陷入「我得赶紧挂起」而写不出正常回复。
+// ⇒ persistent 渠道不继承全局 auto；本地渠道（tui 声明 localDefault、webui 不声明）
+// 行为不变。
+//
+// 【类型独立】这里只声明**结构子集**，不 import channels/interface.ts
+// （本文件是根级基础文件，import UI 适配层会触发 verify:layers 规则 5 违规）。
+export interface ChannelCapabilityFlags {
+  /** 持久消息渠道（用户离线也能收到）—— 判据：人找我说话的渠道 */
+  persistent?: boolean;
+  /** 本地默认渠道（TUI / 本地主 loop） */
+  localDefault?: boolean;
+}
+
+const channelCapabilityMap = new Map<string, ChannelCapabilityFlags>();
+
+/** 登记某渠道的能力声明（幂等覆盖；传 undefined 等价于清除） */
+export function registerChannelCapabilities(
+  channel: string,
+  caps?: ChannelCapabilityFlags,
+): void {
+  if (!channel) return;
+  if (!caps) {
+    channelCapabilityMap.delete(channel);
+    return;
+  }
+  channelCapabilityMap.set(channel, { ...caps });
+}
+
+/** 注销渠道能力（渠道 unregister 时清理） */
+export function unregisterChannelCapabilities(channel: string): boolean {
+  return channelCapabilityMap.delete(channel);
+}
+
+/** 取渠道能力声明；未注册的渠道返回 undefined（= 按「非消息渠道」处理，保持旧行为） */
+export function getChannelCapabilities(channel: string): ChannelCapabilityFlags | undefined {
+  return channelCapabilityMap.get(channel);
+}
+
+/** 测试隔离：清空能力注册表 */
+export function clearChannelCapabilities(): void {
+  channelCapabilityMap.clear();
+}
+
 /**
  * 归属受限的会话 getter（本地主 loop 快照用）：
  * 只在 loop 当前会话**归属本渠道**时实时返回；切到别渠道会话（switch_session
