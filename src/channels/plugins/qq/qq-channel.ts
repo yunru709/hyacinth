@@ -220,7 +220,10 @@ export class QqChannel implements ChannelHandler {
       this.logger.error(`sendProactiveMessage: session ${sessionId} unknown (no message received yet)`);
       return;
     }
-    for (const c of chunkText(text, this.config.textChunkLimit)) {
+    // 主动推送同样降级成纯文本（定时任务/别渠道转发的文本也会落到这里）
+    const plain = stripMarkdown(text);
+    if (!plain) return;
+    for (const c of chunkText(plain, this.config.textChunkLimit)) {
       if (target.isGroup && target.groupId !== undefined) await this.client.sendGroup(target.groupId, c);
       else await this.client.sendPrivate(target.userId, c);
     }
