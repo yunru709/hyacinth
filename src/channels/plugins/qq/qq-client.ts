@@ -98,6 +98,34 @@ export function isMentioned(event: Ob11MessageEvent, selfId: string): boolean {
 
 // ── 客户端 ────────────────────────────────────────────────────
 
+/**
+ * 构造 WS 候选地址列表（双栈回退）。
+ *
+ * 背景（2026-11-08 实测）：NapCat 的 websocketServers 配 `host:0.0.0.0`，
+ * 但实际 `ss -ltn` 显示绑定为 `*:3001`（IPv6 通配），而 HTTP 侧是 `0.0.0.0:3000`。
+ * WSL2 的 localhost 转发只映射 IPv4 通配绑定 ⇒ Windows 侧连 127.0.0.1:3001
+ * 得到 ECONNREFUSED；连 [::1]:3001 才行。
+ *
+ * 因此：当 URL 的主机是 127.0.0.1 / localhost 时，追加 IPv6 loopback 作为
+ * 第二候选。这样用户不必知道 NapCat 绑到了哪个地址族。
+ */
+export function buildWsCandidates(wsUrl: string): string[] {
+  const out: string[] = [wsUrl];
+  try {
+    const u = new URL(wsUrl);
+    const host = u.hostname.toLowerCase();
+    if (host === '127.0.0.1' || host === 'localhost' || host === '0.0.0.0') {
+      const alt = new URL(wsUrl);
+      alt.hostname = '[::1]';
+      const altStr = alt.toString();
+      if (altStr !== wsUrl) out.push(altStr);
+    }
+  } catch {
+    // URL 解析失败就只用原值（让上层报连接错误，信息更直白）
+  }
+  return out;
+}
+
 export class QqClient {
   private httpUrl: string;
   private wsUrl: string;
