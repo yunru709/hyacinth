@@ -3,6 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { MODEL_CATALOG, type ModelCatalogEntry, type ModelsCatalogConfig } from './model-types.js';
 import type { ProviderSampling } from './fields.js';
+import { createLogger } from '../logging/logger.js';
+
+const logger = createLogger('model-catalog-loader');
 
 export type { ModelCatalogEntry, ModelsCatalogConfig } from './model-types.js';
 
