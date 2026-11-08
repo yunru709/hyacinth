@@ -627,11 +627,20 @@ export class ModelChannelRegistry {
         ?? process.env[cfg.apiKeyEnv ?? meta?.envKey ?? '']
         ?? '';
 
+      // local 三态（local / ollama / llamacpp）**不在 PROVIDER_META 里**（它们不进
+      // DEFAULT_PROVIDERS），所以 meta 恒为 undefined。
+      // ⚠️ 2026-11-08：此前 model 会落到字面量 'unknown' 并被当成**有效模型名**传下去，
+      // 而 LocalProvider 的 `opts.model ?? cfg.defaultModel` 对非空串不兜底
+      // ⇒ 通道实际拿 'unknown' 去请求本地服务，必然 404。
+      // 现在 local 三态传空串，交由 LocalProvider 回落 local-config 的 defaultModel。
+      // （baseUrl 无需特判：LocalProvider 内部自己有 `?? LOCAL_BASE_URL ?? cfg.baseUrl`。）
+      const isLocalType =
+        cfg.provider === 'local' || cfg.provider === 'ollama' || cfg.provider === 'llamacpp';
       const providerConfig: ProviderConfig = {
         type: cfg.provider as ProviderType,
         apiKey,
         // || 而非 ??：空串不是合法模型名（见 compatible.ts / 2026-11-08 事故）
-        model: cfg.model || meta?.defaultModel || 'unknown',
+        model: cfg.model || meta?.defaultModel || (isLocalType ? '' : 'unknown'),
         baseUrl: cfg.baseUrl ?? meta?.baseUrl,
         // 未显式配置 userId ⇒ 按**名字派生**一个独立池（2026-10-02）。
         // 此前留空的下场：翻译层兜底成 DEFAULT_USER_ID ⇒ 所有"没配 id"的通道共用同一个池，

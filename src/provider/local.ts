@@ -45,7 +45,10 @@ export class LocalProvider implements Provider {
     const cfg = getLocalProviderConfigLoader();
     const baseUrl = opts.baseUrl ?? process.env.LOCAL_BASE_URL ?? cfg.baseUrl;
     this.client = new OpenAI({ apiKey: 'local', baseURL: baseUrl });
-    this.model = opts.model ?? process.env.LOCAL_MODEL ?? cfg.defaultModel;
+    // || 而非 ??：空串不是合法模型名（与 compatible.ts 的 2026-11-08 修复同源）。
+    // 通道层对 local 三态会显式传 '' 表示"由本类兜底"，用 ?? 的话 '' 会被当成有效值
+    // ⇒ 请求体里 model:"" （或更糟：上游收到 'unknown'）。
+    this.model = opts.model?.trim() || process.env.LOCAL_MODEL || cfg.defaultModel;
     this.maxTokens = opts.maxOutputTokens ?? opts.maxTokens ?? cfg.maxOutputTokens ?? cfg.maxTokens ?? 4096;
     // 推断后端类型
     const backend = opts.backend ?? (baseUrl.includes(':11434') ? 'ollama' : 'llamacpp');
