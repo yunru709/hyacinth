@@ -85,11 +85,8 @@ export interface Provider {
    */
   setMaxOutputTokens?(maxOutputTokens: number): void;
 
-  /**
-   * 运行时切换 KVCache 隔离 ID。
-   * 仅对 DeepSeek/OpenAI 等将 user_id 发送到 API 的 Provider 有效。
-   * 用于主Agent 模式切换（普通↔陪伴）等场景。
-   * @param userId 新的隔离标识
-   */
-  setUserId?(userId: string): void;
+  // ⚠️ 2026-11-08：此处原有**第二份** `setUserId?(userId: string): void;` 声明，
+  // 与上方 getModel() 之后那份完全重复（TypeScript 对同名可选方法只取其一，
+  // 所以能编译，但会让读者以为两者语义不同）。
+  // 已删除 —— `setUserId` 的唯一权威声明在文件上半部分。
 }
