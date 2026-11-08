@@ -33,6 +33,14 @@ export interface ModelInfo {
   cost?: ModelCost;
   status: 'available' | 'preview' | 'deprecated' | 'disabled';
   replacedBy?: string;
+  /**
+   * 是否支持推理（reasoning）。
+   *
+   * ⚠️ 2026-11-08 补：此前 `ModelInfo` **没有这个字段**，而 `ModelCatalogEntry` 有
+   * （model-types.ts 每条模型都声明了 `reasoning: true/false`）⇒ 目录里明明有信息，
+   * 转到 `ModelInfo` 时被静默丢弃，调用方只能靠 `reasoningEffort` 是否存在来猜。
+   */
+  reasoning?: boolean;
   /** 推理/思考强度（仅支持 reasoning 的模型有效） */
   reasoningEffort?: ReasoningEffort;
   /** 模型级思考接线覆盖（优先于厂商级；见 model-types.ts 同名字段说明） */
