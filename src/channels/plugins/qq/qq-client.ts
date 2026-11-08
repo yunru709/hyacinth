@@ -207,6 +207,8 @@ export class QqClient {
   /** 建立 WS 连接（不阻塞；连上后通过 onConnected 通知） */
   connect(): void {
     this.stopped = false;
+    this.wsCandidates = buildWsCandidates(this.wsUrl);
+    this.wsCandidateIdx = 0;
     this.openSocket();
   }
 
@@ -216,8 +218,9 @@ export class QqClient {
     const headers: Record<string, string> = {};
     if (this.accessToken) headers.Authorization = `Bearer ${this.accessToken}`;
 
-    this.logger.info(`connecting ws ${this.wsUrl} ...`);
-    const ws = new WebSocket(this.wsUrl, { headers });
+    const url = this.wsCandidates[this.wsCandidateIdx] ?? this.wsUrl;
+    this.logger.info(`connecting ws ${url} ...`);
+    const ws = new WebSocket(url, { headers });
     this.ws = ws;
 
     ws.on('open', () => {
