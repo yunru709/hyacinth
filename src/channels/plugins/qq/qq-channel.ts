@@ -184,7 +184,8 @@ export class QqChannel implements ChannelHandler {
       this.logger.error(`reply failed: session ${sessionId} not bound`);
       return;
     }
-    const text = reply.content?.trim();
+    // QQ 不渲染 Markdown ⇒ 出口统一降级成纯文本（见 qq-client.ts stripMarkdown 头注释）
+    const text = stripMarkdown(reply.content ?? '');
     if (!text) return;
 
     try {
