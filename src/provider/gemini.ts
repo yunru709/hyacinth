@@ -217,10 +217,16 @@ export class GeminiProvider implements Provider {
         // usage 通常只在最后一个 chunk 出现
         const um = chunk.usageMetadata;
         if (um && (um.promptTokenCount !== undefined || um.candidatesTokenCount !== undefined)) {
+          // 2026-11-08：补缓存命中字段。Gemini 的隐式缓存通过 `cachedContentTokenCount`
+          // 暴露，此前没读 ⇒ 命中部分被当成全价输入计入成本（对比 anthropic 的
+          // cache_read_input_tokens、compatible 的多候选探测，只有这一家漏了）。
+          // 字段缺失时不写该键 —— 下游用 undefined 区分"厂商不支持"而不是"命中 0"。
+          const cached = (um as { cachedContentTokenCount?: number }).cachedContentTokenCount;
           yield {
             type: 'USAGE',
             input_tokens: um.promptTokenCount ?? 0,
             output_tokens: um.candidatesTokenCount ?? 0,
+            ...(typeof cached === 'number' ? { cache_read_input_tokens: cached } : {}),
           };
         }
       }
