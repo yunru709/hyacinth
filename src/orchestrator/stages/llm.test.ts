@@ -226,8 +226,13 @@ describe('llm 阶段（builtin:provider-stream）', () => {
     expect(onText).not.toHaveBeenCalled();
     // 但 thinking 本身要保留（它仍是有价值的推理记录）
     expect(st.toolCalls.map((c: { name: string }) => c.name)).toContain('suspend');
-    const assistant = st.messages.filter((m: { role: string }) => m.role === 'assistant').at(-1);
-    const kinds = (assistant?.content as Array<{ type: string }>).map((b) => b.type);
+    // assistant 消息经 store.append 落盘（不在 state.messages 里）
+    const store = ctx.require('conversationStore') as { append: ReturnType<typeof vi.fn> };
+    const appended = store.append.mock.calls
+      .map((c) => c[1] as { role?: string; content?: Array<{ type: string }> })
+      .filter((m) => m?.role === 'assistant');
+    expect(appended).toHaveLength(1);
+    const kinds = (appended[0].content ?? []).map((b) => b.type);
     expect(kinds).toContain('thinking');
     expect(kinds).not.toContain('text');
   });
