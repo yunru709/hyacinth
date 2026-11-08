@@ -89,8 +89,64 @@ describe('createOwnedSessionGetter（归属受限 getter：重启放弃临时共
     unregisterChannelPrefixes(['tui_', 'feishu_']);
   });
 
-  it('初始会话即作为本渠道回落基准（启动会话不归属时也保持）', () => {
+   it('初始会话即作为本渠道回落基准（启动会话不归属时也保持）', () => {
     const getter = createOwnedSessionGetter(() => 'tui_main', 'tui');
     expect(getter()).toBe('tui_main');
+  });
+});
+
+// ============================================================
+// 渠道能力注册表（2026-11-08 · QQ 内心独白泄漏事故的伴生修复）
+// ============================================================
+//
+// 目的：让 loop.getExitConfig() 能判断「本会话是不是消息渠道」，从而决定要不要
+// 继承全局 auto.json（消息渠道不继承 —— 那是"人来找我说话"，回完就该结束回合）。
+import {
+  registerChannelCapabilities,
+  unregisterChannelCapabilities,
+  getChannelCapabilities,
+  clearChannelCapabilities,
+} from './session-channel.js';
+
+describe('渠道能力注册表', () => {
+  it('未登记 ⇒ undefined（loop 按"非消息渠道"处理 = 旧行为）', () => {
+    clearChannelCapabilities();
+    expect(getChannelCapabilities('qq')).toBeUndefined();
+  });
+
+  it('登记 persistent 后能读回（qq/feishu/clawbot 这类消息渠道）', () => {
+    clearChannelCapabilities();
+    registerChannelCapabilities('qq', { persistent: true });
+    expect(getChannelCapabilities('qq')).toEqual({ persistent: true });
+    clearChannelCapabilities();
+  });
+
+  it('localDefault（tui）与 persistent 并存时各自独立', () => {
+    clearChannelCapabilities();
+    registerChannelCapabilities('tui', { localDefault: true });
+    registerChannelCapabilities('qq', { persistent: true });
+    expect(getChannelCapabilities('tui')).toEqual({ localDefault: true });
+    expect(getChannelCapabilities('qq')).toEqual({ persistent: true });
+    clearChannelCapabilities();
+  });
+
+  it('登记是覆盖而非合并（幂等），传 undefined 等价清除', () => {
+    clearChannelCapabilities();
+    registerChannelCapabilities('qq', { persistent: true, localDefault: true });
+    registerChannelCapabilities('qq', { persistent: true });
+    expect(getChannelCapabilities('qq')).toEqual({ persistent: true });
+    registerChannelCapabilities('qq', undefined);
+    expect(getChannelCapabilities('qq')).toBeUndefined();
+    clearChannelCapabilities();
+  });
+
+  it('unregister 能清掉，空 channel 名被忽略', () => {
+    clearChannelCapabilities();
+    registerChannelCapabilities('qq', { persistent: true });
+    expect(unregisterChannelCapabilities('qq')).toBe(true);
+    expect(getChannelCapabilities('qq')).toBeUndefined();
+    registerChannelCapabilities('', { persistent: true }); // 空名不登记
+    expect(getChannelCapabilities('')).toBeUndefined();
+    clearChannelCapabilities();
   });
 });
