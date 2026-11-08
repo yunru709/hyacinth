@@ -92,36 +92,17 @@ export const DEFAULT_CB: CircuitBreakerConfig = {
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
-const RETRYABLE_ERROR_PATTERNS = [
-  /ECONNREFUSED/i,
-  /ECONNRESET/i,
-  /ETIMEDOUT/i,
-  /ENOTFOUND/i,
-  /EAI_AGAIN/i,
-  /socket hang up/i,
-  /timeout/i,
-  /rate.?limit/i,
-  /too many requests/i,
-  /service.?unavailable/i,
-  /internal.?server.?error/i,
-  /bad gateway/i,
-  /gateway.?timeout/i,
-];
-
-function isRetryableError(error: Error): boolean {
-  const message = error.message ?? '';
-  // Check status code in message — match " 429 ", "HTTP 429", "status 429", etc.
-  // Use word-boundary-like matching to avoid false positives (e.g. "tried 429 times")
-  for (const code of RETRYABLE_STATUS_CODES) {
-    if (new RegExp(`\\b${code}\\b`).test(message)) return true;
-  }
-  // Check known error patterns
-  for (const pattern of RETRYABLE_ERROR_PATTERNS) {
-    if (pattern.test(message)) return true;
-  }
-  return false;
-}
+// ⚠️ 2026-11-08：删除本地 isRetryableError（只看 `message`、不穿透 `cause` 的旧实现）。
+//
+// 同一错误存在两套判定是隐患：Node 内置 fetch 连接被拒时 `message` 只有 'fetch failed'，
+// 真错码在 `error.cause.code`（如 ECONNREFUSED）⇒ 旧实现判"不可重试"、**一次都不重试**；
+// 而 retry.ts 早在 C-06（2026-10-22）就修好了这一点，只是修复没同步到这条热路径
+// （`retry.ts` 当时只服务 llamacpp，主链路跑的是本文件这份）。
+//
+// 收敛时取**并集**，不削弱任何一侧：retry.ts 已补上本文件原有的裸状态码形态
+// （"HTTP 503"）与厂商措辞（bad gateway / gateway timeout / too many requests）。
+// import 放在此处而非文件头，是为了让"这次收敛"成为一条完整、可回溯的差异。
+import { isRetryableError } from './retry.js';
 
 /**
  * 判定"用户主动中断"（Ctrl+C / message.stop → AbortController.abort）。
