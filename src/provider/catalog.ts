@@ -56,6 +56,7 @@ function entryToModelInfo(entry: ModelCatalogEntry): ModelInfo {
     provider: entry.provider as ProviderType,
     contextWindow: entry.contextWindow,
     maxOutputTokens: entry.maxOutputTokens,
+    reasoning: entry.reasoning,
     reasoningEffort: entry.reasoningEffort,
     thinkingStyle: entry.thinkingStyle,
     capabilities: {
