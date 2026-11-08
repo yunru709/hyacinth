@@ -113,6 +113,20 @@ export class QqClient {
   private onConnected: (() => void) | null = null;
   private onDisconnected: (() => void) | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * WS 候选地址（双栈回退）。
+   *
+   * 为什么需要：NapCat 的 `websocketServers` 虽然配 `host: "0.0.0.0"`，
+   * 实际 `ss` 显示绑定成 `*:3001`（IPv6 通配），而 HTTP 那侧是 `0.0.0.0:3000`。
+   * WSL2 的 localhost 端口转发只处理 **IPv4** 通配绑定 ⇒ Windows 侧连
+   * `127.0.0.1:3001` 得到 ECONNREFUSED，但 `[::1]:3001` 实测可连。
+   * （2026-11-08 实测：3000 IPv4 通，3001 IPv4 拒 / IPv6 ::1 通）
+   *
+   * 处理：127.0.0.1 / localhost 时额外追加 IPv6 loopback 作为备选，
+   * 连不上就换下一个 —— 避免把「本机 NapCat 的绑定细节」变成用户必须懂的配置项。
+   */
+  private wsCandidates: string[] = [];
+  private wsCandidateIdx = 0;
 
   constructor(
     opts: { httpUrl: string; wsUrl: string; accessToken?: string; httpTimeoutMs?: number; reconnectIntervalMs?: number },
