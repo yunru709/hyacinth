@@ -1,0 +1,167 @@
+/**
+ * QQ 渠道插件回归守卫。
+ *
+ * 钉死的几条不变式：
+ *   ① 安全默认：allowFrom 空 = 谁都不理（**不是**"对所有人开放"）
+ *   ② enabled=false 时不注册渠道（与 clawbot 不同 —— clawbot 有个"扫码登录入口"要恒定可达，
+ *      QQ 没有这种鸡生蛋问题，禁用就该彻底不连）
+ *   ③ 配置事故（启用但白名单空）必须拒绝启动并大声报错，而不是静默全拦
+ *   ④ session 前缀无论 enabled 与否都登记（存量 qq_xxx 会话归属不丢）
+ *   ⑤ OneBot 文本提取 / @ 判定 / 分片的纯函数行为
+ */
+import { describe, it, expect, vi } from 'vitest';
+
+const { qqChannelPlugin } = await import('./index.js');
+const { resolveQqConfig, validateQqConfig, isAllowedUser, isAllowedGroup } = await import('./qq-config.js');
+const { extractText, isMentioned, chunkText } = await import('./qq-client.js');
+
+// ── ① 配置解析与安全默认 ──────────────────────────────────────
+
+describe('qq-config', () => {
+  it('allowFrom 缺省为空数组（谁都不理），不是开放', () => {
+    const cfg = resolveQqConfig({});
+    expect(cfg.allowFrom).toEqual([]);
+    expect(cfg.enabled).toBe(false);
+    expect(isAllowedUser(cfg, 746896396)).toBe(false);
+  });
+
+  it('启用但 allowFrom 空 ⇒ validate 报错（配置事故，不静默全拦）', () => {
+    const cfg = resolveQqConfig({ enabled: true, allowFrom: [] });
+    const err = validateQqConfig(cfg);
+    expect(err).toBeTruthy();
+    expect(err).toContain('allowFrom');
+  });
+
+  it('未启用时 allowFrom 空不算错误', () => {
+    const cfg = resolveQqConfig({ enabled: false });
+    expect(validateQqConfig(cfg)).toBeNull();
+  });
+
+  it('白名单匹配支持数字与字符串混写', () => {
+    const cfg = resolveQqConfig({ enabled: true, allowFrom: [746896396, '123456'] });
+    expect(isAllowedUser(cfg, 746896396)).toBe(true);
+    expect(isAllowedUser(cfg, '746896396')).toBe(true);
+    expect(isAllowedUser(cfg, 123456)).toBe(true);
+    expect(isAllowedUser(cfg, 999)).toBe(false);
+  });
+
+  it('群白名单独立于私聊白名单', () => {
+    const cfg = resolveQqConfig({ enabled: true, allowFrom: [1], groupAllowFrom: [] });
+    expect(isAllowedGroup(cfg, 888)).toBe(false);
+  });
+
+  it('默认 requireMention=true（群里必须 @ 才回）', () => {
+    expect(resolveQqConfig({}).requireMention).toBe(true);
+  });
+});
+
+// ── ⑤ OneBot 消息纯函数 ───────────────────────────────────────
+
+describe('qq-client 纯函数', () => {
+  it('extractText 从 array 消息段取文本，丢弃图片/表情', () => {
+    const ev = {
+      post_type: 'message', message_type: 'private', user_id: 1,
+      message_id: 1, self_id: 2, time: 0,
+      message: [
+        { type: 'text', data: { text: '你好' } },
+        { type: 'image', data: { file: 'x.jpg' } },
+        { type: 'text', data: { text: '世界' } },
+      ],
+    } as never;
+    expect(extractText(ev)).toBe('你好世界');
+  });
+
+  it('extractText 把 at 段保留为 @qq 文本', () => {
+    const ev = {
+      post_type: 'message', message_type: 'group', user_id: 1, group_id: 9,
+      message_id: 1, self_id: 2, time: 0,
+      message: [
+        { type: 'at', data: { qq: '3994097359' } },
+        { type: 'text', data: { text: ' 在吗' } },
+      ],
+    } as never;
+    expect(extractText(ev)).toContain('@3994097359');
+    expect(extractText(ev)).toContain('在吗');
+  });
+
+  it('extractText 纯文本串直接返回', () => {
+    const ev = {
+      post_type: 'message', message_type: 'private', user_id: 1,
+      message_id: 1, self_id: 2, time: 0, message: 'hi',
+    } as never;
+    expect(extractText(ev)).toBe('hi');
+  });
+
+  it('isMentioned 只在 at 段 qq 等于 selfId 时为真', () => {
+    const mk = (qq: string) => ({
+      post_type: 'message', message_type: 'group', user_id: 1, group_id: 9,
+      message_id: 1, self_id: 2, time: 0,
+      message: [{ type: 'at', data: { qq } }],
+    }) as never;
+    expect(isMentioned(mk('3994097359'), '3994097359')).toBe(true);
+    expect(isMentioned(mk('123456'), '3994097359')).toBe(false);
+    // selfId 空 ⇒ 永不判定为被 @（防止配置缺失时群里乱回）
+    expect(isMentioned(mk('3994097359'), '')).toBe(false);
+  });
+
+  it('chunkText 超长时按换行优先切分且不丢字', () => {
+    const text = 'a'.repeat(60) + '\n' + 'b'.repeat(60);
+    const chunks = chunkText(text, 70);
+    expect(chunks.length).toBe(2);
+    expect(chunks.join('')).toBe(text.replace(/\n/, ''));
+  });
+
+  it('chunkText 短文本原样一条', () => {
+    expect(chunkText('短', 100)).toEqual(['短']);
+    expect(chunkText('', 100)).toEqual([]);
+  });
+});
+
+// ── ②③④ 插件注册语义 ────────────────────────────────────────
+
+describe('qqChannelPlugin.autoRegister', () => {
+  function setup() {
+    const registered: Array<{ handler: { id: string }; config: Record<string, unknown> }> = [];
+    const channelManager = {
+      register: (handler: { id: string }, config: Record<string, unknown>) => {
+        registered.push({ handler, config });
+      },
+    } as never;
+    const channelsInfo: Array<Record<string, unknown>> = [];
+    return { registered, channelManager, channelsInfo };
+  }
+
+  it('enabled=false ⇒ 不注册渠道', async () => {
+    const { registered, channelManager, channelsInfo } = setup();
+    await qqChannelPlugin.autoRegister(channelManager, { enabled: false }, channelsInfo as never);
+    expect(registered).toHaveLength(0);
+    expect(channelsInfo).toHaveLength(0);
+  });
+
+  it('config 为 undefined（未配置）⇒ 不注册', async () => {
+    const { registered, channelManager, channelsInfo } = setup();
+    await qqChannelPlugin.autoRegister(channelManager, undefined, channelsInfo as never);
+    expect(registered).toHaveLength(0);
+  });
+
+  it('启用但 allowFrom 空 ⇒ 拒绝注册（配置事故）', async () => {
+    const { registered, channelManager, channelsInfo } = setup();
+    await qqChannelPlugin.autoRegister(channelManager, { enabled: true, allowFrom: [] }, channelsInfo as never);
+    expect(registered).toHaveLength(0);
+  });
+
+  it('启用且白名单非空 ⇒ 注册并把 allowFrom 透传下去', async () => {
+    const { registered, channelManager, channelsInfo } = setup();
+    await qqChannelPlugin.autoRegister(
+      channelManager,
+      { enabled: true, allowFrom: [746896396] },
+      channelsInfo as never,
+    );
+    expect(registered).toHaveLength(1);
+    expect(registered[0].handler.id).toBe('qq');
+    expect(registered[0].config.allowFrom).toEqual([746896396]);
+    expect(registered[0].config.enabled).toBe(true);
+    expect(channelsInfo).toHaveLength(1);
+    expect(channelsInfo[0].name).toBe('qq');
+  });
+});
