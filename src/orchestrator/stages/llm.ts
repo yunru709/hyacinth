@@ -303,7 +303,20 @@ export function createLlmStage(): StageModule<TurnState, StageServiceMap> {
       }
 
       // ── 7. thinking-only 模型兜底：thinking 有内容但 text 为空时提升为 text ──
-      if (textParts.length === 0 && thinkingParts.length > 0) {
+      //
+      // ⚠️ **必须排除「本轮有工具调用」的情形**（2026-11-08 修）。
+      //
+      // 起因（QQ 渠道实测事故，证据在会话 qq_20261108-141521-9f81）：
+      //   模型判断「该 say / 该 suspend」时，会**思考完直接调工具**，本轮
+      //   一个 TEXT 事件都没有（events.jsonl 里只有 thinking + tool_call）。
+      //   旧条件只看 `textParts 为空`，于是把整段内心独白提成正文发出去 ——
+      //   用户在 QQ 上收到的就是「用户只是打了招呼…本会话只允许 suspend 出口」
+      //   这类系统规则原文 + 思考流水账，等于**把私有推理泄漏到外部渠道**。
+      //
+      // 判据：调了工具 = 模型本轮有表达渠道（工具本身/其结果），不是
+      // 「只思考不输出」的退化状态 ⇒ 不该替它说话。scavenge（步骤 6）恢复出的
+      // 工具调用同样计入，故用其后的 toolCalls 现值为准。
+      if (textParts.length === 0 && thinkingParts.length > 0 && toolCalls.length === 0) {
         const thinkingText = thinkingParts.join('');
         textParts.push(thinkingText);
         oh?.onText?.(thinkingText);
