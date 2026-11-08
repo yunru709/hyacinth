@@ -312,6 +312,22 @@ const DEFAULT_CONFIG: AgentConfig = {
       pollTimeoutSec: 28,
       pollRetryIntervalMs: 3000,
     },
+    // QQ（NapCat / OneBot v11）：默认**不开**。
+    // ⚠️ allowFrom 空 = 谁都不理（安全默认）——启用时必须填自己的 QQ 号。
+    qq: {
+      enabled: false,
+      httpUrl: 'http://127.0.0.1:3000',
+      wsUrl: 'ws://127.0.0.1:3001',
+      accessToken: '',
+      allowFrom: [],
+      groupAllowFrom: [],
+      requireMention: true,
+      selfId: '',
+      tuiSync: false,
+      textChunkLimit: 4000,
+      httpTimeoutMs: 15_000,
+      reconnectIntervalMs: 3000,
+    },
   },
   memoryFile: path.join(os.homedir(), '.agent', 'prompts', 'persona', 'memory.md'),
 };
