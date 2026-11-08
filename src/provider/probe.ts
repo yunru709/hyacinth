@@ -57,7 +57,19 @@ type ProbeProtocol = 'openai' | 'anthropic' | 'gemini';
  *  - gemini 无 /chat/completions，走 generateContent REST
  *  - 其余 → openai 系
  */
-const ANTHROPIC_PROTOCOL_TYPES = new Set(['anthropic', 'qwen', 'minimax', 'mimo']);
+/**
+ * anthropic 协议族的**兜底名单** —— 从出厂元数据推导，不再手工维护。
+ *
+ * ⚠️ 2026-11-08：原实现硬编码 `['anthropic','qwen','minimax','mimo']`。
+ * `meta.protocol` 才是权威真源（provider-meta.ts:55），硬编码只为"meta 缺失时兜底"。
+ * 但新增一家 anthropic 协议厂商时若忘了同步这里，探测会按 openai 形态打端点
+ * ⇒ 探测永远失败 ⇒ 降级链永远跳过这家（聊天却可能是通的），归因极难。
+ */
+const ANTHROPIC_PROTOCOL_TYPES = new Set(
+  Object.entries(PROVIDER_META)
+    .filter(([, meta]) => meta.protocol === 'anthropic')
+    .map(([id]) => id),
+);
 
 function resolveProtocol(type: string, meta: ProviderFactoryMeta): ProbeProtocol {
   if (meta.protocol) return meta.protocol;
