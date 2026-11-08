@@ -362,8 +362,8 @@ export function stripMarkdown(text: string): string {
   // ① 代码围栏：```lang ... ``` → 内容（去围栏与语言标记）
   s = s.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_m, code: string) => String(code).replace(/\n+$/, ''));
 
-  // ② 表格分隔行（|---|---|）整行删
-  s = s.replace(/^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/gm, '');
+  // ② 表格分隔行（|---|---|）整行删（连同行尾换行，避免留下空行把表格撑开）
+  s = s.replace(/^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*\n?/gm, '');
 
   // ③ 表格行：| a | b | → a  b（| 变空格，丢空单元格）
   s = s.replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_m, row: string) =>
