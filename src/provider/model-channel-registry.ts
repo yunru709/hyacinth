@@ -349,7 +349,13 @@ export class ModelChannelRegistry {
    * 降级链：role → channelName → channelProvider → mainProvider
    */
   getProvider(role: string): Provider | null {
-    const channelName = this.config.roles[role] ?? DEFAULT_CHANNEL;
+    // ⚠️ 2026-11-08：与 createScopedProvider 对齐兜底语义。
+    // 原来普通路径是 `roles[role] ?? DEFAULT_CHANNEL`，scoped 路径是 `roles[role] ?? role`
+    // ⇒ 同一个调用点（比如新增的 role）在两条路径上会落到**不同通道**，
+    // 而 UI 记录的是 scoped 的结果 ⇒ 界面显示的通道未必是实际在用的。
+    // 现统一为「显式角色映射 → 同名通道 → default」。
+    const channelName =
+      this.config.roles[role] ?? (this.config.channels[role] ? role : DEFAULT_CHANNEL);
     this.noteDiscoveredRole(role, channelName);
     const provider = this.channelProviders.get(channelName);
 
