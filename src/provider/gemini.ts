@@ -110,6 +110,28 @@ export class GeminiProvider implements Provider {
     this.maxOutputTokens = maxOutputTokens;
   }
 
+  /**
+   * 思考开关状态。
+   *
+   * ⚠️ 2026-11-08 补：此前 Gemini **完全没有实现 `setThinking`** —— 而 `ResilientProvider`
+   * / `FallbackProviderChain` / `ModelChannelRegistry` 三处包装层都在正常转发
+   * （`provider.setThinking?.(...)`），Optional 链让"内层没实现"变成**静默无声**：
+   * 用户把通道的 thinking 设为 false，Gemini 照旧思考、照旧计费，没有任何提示。
+   * 这正是 `interface.ts` 注释里点名的失效模式。
+   */
+  private thinkingEnabled = true;
+
+  /**
+   * 关闭思考时下发 `thinkingConfig.thinkingBudget = 0`（Gemini 的官方关闭方式）。
+   *
+   * 开启时**不干预**（不写 thinkingConfig），交给上游默认策略 —— reason:
+   * `budget` 在 Gemini 2.5/3 各代语义不同（0=关、-1=动态、正数=上限），
+   * 擅自按 effort 映射出一个数字，比"用上游默认"更容易出错。
+   */
+  setThinking(enabled: boolean, _effort?: string | number): void {
+    this.thinkingEnabled = enabled;
+  }
+
   getCapabilities(): ProviderCapabilities {
     const info = getModelInfo('gemini', this.model);
     return {
