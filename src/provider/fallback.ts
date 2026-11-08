@@ -304,14 +304,31 @@ export class FallbackProviderChain implements Provider {
   }
 
   /** 切换厂商前剥离 Anthropic cache_control 标记（对下一厂商无效） */
-  private stripCacheControl(messages: Message[]): void {
-    for (const msg of messages) {
+  /**
+   * 返回一份**剔除 `cache_control` 的消息副本**（不修改调用方数组）。
+   *
+   * ⚠️ 2026-11-08：原实现直接 `delete` 掉调用方 block 上的字段 ⇒ 副作用外溢到上层
+   * 会话状态（loop 的 `state.messages`）。后果很隐蔽：降级到不支持显式缓存的厂商之后，
+   * 就算后来恢复到原 provider，消息上的缓存标记也已经被永久抹掉 ⇒
+   * 「降级一次之后缓存命中率再也回不来」，且从日志看不出是谁改的。
+   *
+   * 现在改为纯函数式：只在降级链内部用新数组继续，调用方的原始消息保持不动。
+   * （调用处因此必须接收返回值：`messages = this.stripCacheControl(messages)`。）
+   */
+  private stripCacheControl(messages: Message[]): Message[] {
+    return messages.map((msg) => {
       const blocks = Array.isArray(msg.content) ? msg.content : [msg.content];
-      for (const block of blocks) {
+      let changed = false;
+      const cleaned = blocks.map((block) => {
         if ('cache_control' in block) {
-          delete (block as unknown as Record<string, unknown>).cache_control;
+          changed = true;
+          const { cache_control: _dropped, ...rest } = block as unknown as Record<string, unknown>;
+          void _dropped;
+          return rest as unknown as typeof block;
         }
-      }
-    }
+        return block;
+      });
+      return changed ? ({ ...msg, content: cleaned } as Message) : msg;
+    });
   }
 }
