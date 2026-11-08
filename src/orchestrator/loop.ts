@@ -1942,10 +1942,45 @@ export class AgentLoop {
     // ② 全局开关（2026-11-04）：**每次读内存缓存、不落本实例缓存** ——
     //    这样任一会话点了 auto 按钮，其它会话下一次装配就立刻生效。
     //    缓存全局值会导致"只有点按钮的那个会话生效"，那正是要修的问题。
-    if (loadGlobalAuto().enabled) return { exits: ['suspend'], inherit: true };
+    //
+    // ⚠️ 2026-11-08 收窄（QQ 渠道事故）：**持久消息渠道不继承全局 auto**。
+    //    起因：auto.json 全局 enabled=true 时，QQ 会话（qq_20261108-141521-9f81）
+    //    也被塞进 exits:['suspend'] ⇒ 每轮都被注入"本会话只允许 suspend 作为出口"，
+    //    模型注意力全在"我得赶紧挂起"，思考完直接调工具、本轮没有正文，
+    //    再叠加 llm.ts 的 thinking-only 兜底 ⇒ **内心独白被当正文发给用户**
+    //    （用户实测收到「本会话只允许 suspend 出口…直接 suspend。」）。
+    //
+    //    语义判据：持久消息渠道（qq/feishu/clawbot，声明 persistent）是「人来找我
+    //    说话」的入口，回完就该结束回合 —— 全局自主模式讲的是"我自己常驻干活"，
+    //    不该外溢到别人来敲门的渠道。本地渠道（tui 声明 localDefault、webui 不声明）
+    //    行为完全不变。
+    //
+    //    注意只排除**全局开关**：路径① 的会话级 exit.json 仍然生效 ⇒
+    //    "在某消息渠道里单独开自主模式"仍可做到，只是必须显式声明。
+    if (loadGlobalAuto().enabled && !this.isPersistentMessageSession()) {
+      return { exits: ['suspend'], inherit: true };
+    }
 
     // ③ 都没有 ⇒ 不介入（零回归）
     return null;
+  }
+
+  /**
+   * 本会话是否属于**持久消息渠道**（人来找我说话的渠道，如 qq/feishu/clawbot）。
+   *
+   * 判据来自渠道自己登记的能力声明（见 session-channel.ts 的渠道能力注册表，
+   * ChannelManager.register 时写入）。渠道未注册/未声明 ⇒ false（按旧行为处理 ——
+   * 宁可继承全局配置，也不要因为"进程里没加载这个渠道"而悄悄改变语义）。
+   */
+  private isPersistentMessageSession(): boolean {
+    try {
+      const sid = path.basename(this.sessionDir);
+      const channel = resolveChannelFromSessionId(sid);
+      if (!channel) return false;
+      return getChannelCapabilities(channel)?.persistent === true;
+    } catch {
+      return false;
+    }
   }
 
   private activeExitPolicies(): ExitPolicy[] {
