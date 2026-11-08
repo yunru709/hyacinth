@@ -199,7 +199,11 @@ describe('ModelCatalogLoader 行为契约', () => {
         envKey: 'GW_API_KEY',
         models: [
           makeEntry({ id: 'gpt-4o', provider: '' as never, contextWindow: 128000 }), // 省略 provider
-          makeEntry({ id: 'dall-e-3', provider: 'openai', contextWindow: 0 }), // 显式指定其它厂商
+          // ⚠️ 2026-11-08：这里原本写的是 `contextWindow: 0`（非法值）。本用例只验
+          // "provider 字段的归属"，但 0 会被目录校验剔除——合法性检查是 2026-11-08 新增的，
+          // 因为非法窗口会让适配器静默回落 128000，比直接剔除更难排查。
+          // 故改用合法值，用例意图（归属判定）不变。
+          makeEntry({ id: 'dall-e-3', provider: 'openai', contextWindow: 128000 }), // 显式指定其它厂商
         ],
       },
     });
