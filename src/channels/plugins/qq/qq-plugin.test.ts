@@ -115,6 +115,54 @@ describe('qq-client 纯函数', () => {
     expect(chunkText('短', 100)).toEqual(['短']);
     expect(chunkText('', 100)).toEqual([]);
   });
+
+  // QQ 不渲染 Markdown（2026-11-08 孑遗要求）⇒ 出口必须降级成纯文本。
+  // 这里钉的是**渲染契约**：任何 markdown 记号出现在发出去的正文里都是 bug。
+  describe('stripMarkdown', () => {
+    it('标题/粗体/斜体/删除线/行内代码 全部去符号留文字', () => {
+      expect(stripMarkdown('## 标题')).toBe('标题');
+      expect(stripMarkdown('**粗体**')).toBe('粗体');
+      expect(stripMarkdown('__粗体__')).toBe('粗体');
+      expect(stripMarkdown('~~删掉~~')).toBe('删掉');
+      expect(stripMarkdown('用 `chunkText` 切分')).toBe('用 chunkText 切分');
+    });
+
+    it('代码围栏去围栏与语言标记，保留代码内容', () => {
+      const md = '```ts\nconst a = 1;\n```';
+      expect(stripMarkdown(md)).toBe('const a = 1;');
+    });
+
+    it('列表统一成 · 且保留缩进', () => {
+      expect(stripMarkdown('- 一\n- 二')).toBe('· 一\n· 二');
+      expect(stripMarkdown('  * 子项')).toBe('  · 子项');
+    });
+
+    it('表格删分隔行，竖线缩成两空格', () => {
+      const md = '| 名 | 值 |\n|---|---|\n| a | 1 |';
+      expect(stripMarkdown(md)).toBe('名  值\na  1');
+    });
+
+    it('链接降级成 文案（url）', () => {
+      expect(stripMarkdown('[文档](https://x.com)')).toBe('文档（https://x.com）');
+    });
+
+    it('引用与分隔线去符号', () => {
+      expect(stripMarkdown('> 引用')).toBe('引用');
+      expect(stripMarkdown('---')).toBe('');
+    });
+
+    it('不误伤正文：snake_case / 路径 / 乘号 / 下划线', () => {
+      expect(stripMarkdown('use session_identity.json please')).toBe('use session_identity.json please');
+      expect(stripMarkdown('C:\\Users\\74689\\Desktop')).toBe('C:\\Users\\74689\\Desktop');
+      expect(stripMarkdown('2 * 3 = 6')).toBe('2 * 3 = 6');
+      expect(stripMarkdown('a_b_c')).toBe('a_b_c');
+    });
+
+    it('空串 / 纯空白 ⇒ 空', () => {
+      expect(stripMarkdown('')).toBe('');
+      expect(stripMarkdown('   \n  ')).toBe('');
+    });
+  });
 });
 
 // ── ②③④ 插件注册语义 ────────────────────────────────────────
