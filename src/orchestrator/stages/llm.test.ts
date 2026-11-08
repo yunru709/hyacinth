@@ -200,6 +200,38 @@ describe('llm 阶段（builtin:provider-stream）', () => {
     expect(onText).toHaveBeenCalledWith('让我想想');
   });
 
+  /**
+   * 守卫（2026-11-08 QQ 渠道事故）：**有工具调用时不得把 thinking 提成 text**。
+   *
+   * 事故现场：模型判断「该 say / 该 suspend」时会思考完直接调工具，本轮
+   * 一个 TEXT 事件都没有（events.jsonl 只记 thinking + tool_call）。
+   * 旧条件只看 textParts 为空，于是把整段内心独白当正文发到 QQ —— 用户收到的是
+   * 「用户只是打了招呼…本会话只允许 suspend 出口」这类私有推理 + 系统规则原文。
+   *
+   * 判据：调了工具 = 本轮有表达渠道，不是「只思考不输出」的退化状态。
+   */
+  it('thinking + tool_use 时不得把 thinking 提升为 text（防内心独白泄漏）', async () => {
+    const provider = mkProvider([
+      { type: 'THINKING', content: '用户只是打了招呼，本会话只允许 suspend 出口。直接 suspend。' },
+      { type: 'TOOL_USE', id: 't1', name: 'suspend', input: { until: { kind: 'user' } } },
+      { type: 'STOP', reason: 'tool_calls' },
+    ]);
+    const onText = vi.fn();
+    const ctx = makeCtx({ outputHandler: { onText, onThinking: vi.fn(), onFlush: vi.fn(), onToolUse: vi.fn(), onTurnStart: vi.fn() } });
+
+    const st = await stage.run(baseState({ activeProvider: provider as never }), ctx);
+
+    // 正文必须为空：thinking 只进 assistant 的 thinking 块，不冒充 text
+    expect(st.streamText).toBe('');
+    expect(onText).not.toHaveBeenCalled();
+    // 但 thinking 本身要保留（它仍是有价值的推理记录）
+    expect(st.toolCalls.map((c: { name: string }) => c.name)).toContain('suspend');
+    const assistant = st.messages.filter((m: { role: string }) => m.role === 'assistant').at(-1);
+    const kinds = (assistant?.content as Array<{ type: string }>).map((b) => b.type);
+    expect(kinds).toContain('thinking');
+    expect(kinds).not.toContain('text');
+  });
+
   it('参数截断保护（C）：incomplete 的 tool_use 不执行，改为回注合成 tool_result', async () => {
     const provider = mkProvider([
       { type: 'TOOL_USE', id: 'trunc1', name: 'write', input: { file_path: 'a.ts', content: 'half' }, incomplete: true },
