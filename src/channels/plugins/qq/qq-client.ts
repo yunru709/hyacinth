@@ -281,6 +281,21 @@ export class QqClient {
     ws.on('close', (code: number) => {
       this.logger.warn(`ws closed (code=${code})`);
       this.ws = null;
+      // 双栈回退：连不上就换下一个候选地址，而不是立刻退避。
+      //
+      // 为什么必须有这段：NapCat 的 websocketServers 配 host:0.0.0.0，实际绑成
+      // `*:3001`（IPv6 通配），而 WSL2 的 localhost 转发只映射 IPv4 通配 ⇒
+      // Windows 侧 127.0.0.1:3001 得到 ECONNREFUSED，只有 [::1]:3001 能连。
+      // 没有这段切换，候选列表就是摆设，永远卡在第一个地址上退避重试。
+      //
+      // 只在「尚未成功连过」时切换（reconnectAttempts===0）——已连上后断开
+      // 属于后端重启，应原地重连原地址，不该漂移。
+      if (this.reconnectAttempts === 0 && this.wsCandidateIdx < this.wsCandidates.length - 1) {
+        this.wsCandidateIdx += 1;
+        this.logger.info(`switch ws candidate -> ${this.wsCandidates[this.wsCandidateIdx]}`);
+        this.openSocket();
+        return;
+      }
       this.onDisconnected?.();
       this.scheduleReconnect();
     });
