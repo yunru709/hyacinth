@@ -121,8 +121,7 @@ describe('P1-4 目录条目非法时不得静默流入生效区', () => {
     });
 
     const loader = new ModelCatalogLoader(process.cwd(), p);
-    const entry = loader.getByModelIdSafe?.('wide-model', 'gw')
-      ?? loader.getByProvider('gw').find((m) => m.id === 'wide-model');
+    const entry = loader.getByProvider('gw').find((m) => m.id === 'wide-model');
 
     expect(entry).toBeDefined();
     expect(entry!.maxOutputTokens).toBeLessThanOrEqual(entry!.contextWindow);
