@@ -26,7 +26,7 @@ param(
   [string]$OutDir = 'release',
   [switch]$SkipBuild,
   [switch]$SkipPublish,
-  [string]$NodeExe = 'F:\Node\node.exe'
+  [string]$NodeExe = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +35,11 @@ Set-Location $repo
 
 $pkg = Get-Content (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json
 $ver = $pkg.version
+# node.exe 解析：显式参数 > PATH（打包机需要 node 来装生产依赖）
+if (-not $NodeExe) {
+  $cmd = Get-Command node -ErrorAction SilentlyContinue
+  if ($cmd) { $NodeExe = $cmd.Source }
+}
 $name = "hyacinth-portable-$ver-win-x64"
 $stage = Join-Path $env:TEMP $name
 $zip = Join-Path $repo "$OutDir\$name.zip"
