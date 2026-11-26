@@ -73,6 +73,10 @@ arch-report/
 # 无任何代码引用（2026-10-24 核对），纯临时产物；此前 auto: pre-turn-* 提交误入库已清出
 .tmp*
 
+# 根目录一次性调试日志（2026-11-26：.npm-pub.log / .pub-build.log 曾被 auto: pre-turn 收进出）
+# 形如 .<name>.log 的点前缀文件，不是源码
+.*.log
+
 # Python 字节码缓存（CosyVoice server.py 的编译产物，非源码）
 # 2026-10-25：此前未忽略，`git status` 里会混进 __pycache__/*.pyc，容易误提交
 __pycache__/
