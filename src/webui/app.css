@@ -101,7 +101,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--muted-foreground);
         font-family: var(--font-mono);
       }
@@ -133,7 +133,7 @@
         gap: 4px;
       }
       .media-audio-title {
-        font-size: 13px;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--foreground);
         font-family: var(--font-mono);
@@ -142,7 +142,7 @@
         text-overflow: ellipsis;
       }
       .media-audio-sub {
-        font-size: 11px;
+        font-size: var(--text-xs);
         color: var(--muted-foreground);
         font-family: var(--font-mono);
       }
@@ -333,7 +333,7 @@
     .chat-suggestion {
       padding: 7px 14px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: var(--text-sm);
       border: 1px solid var(--hyacinth-border);
       background-color: var(--hyacinth-card);
       color: var(--hyacinth-foreground);
@@ -384,8 +384,8 @@
        否则「无会话时整块隐藏」不生效（同 #chat-empty[hidden] 那个坑，见下方说明） */
     #sidebar-recent[hidden] { display: none; }
     .sidebar-recent-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 4px; }
-    .sidebar-recent-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
-    .sidebar-recent-all { font-size: 11px; color: var(--hyacinth-muted-foreground); text-decoration: none; }
+    .sidebar-recent-heading { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
+    .sidebar-recent-all { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); text-decoration: none; }
     .sidebar-recent-all:hover { color: var(--hyacinth-primary); }
     .sidebar-recent-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; }
     .sidebar-recent-item {
@@ -397,7 +397,7 @@
       border: 0;
       border-radius: 6px;
       background: transparent;
-      font-size: 12px;
+      font-size: var(--text-sm);
       color: var(--hyacinth-foreground);
       text-align: left;
       cursor: pointer;
@@ -413,7 +413,7 @@
       white-space: nowrap;
       font-family: var(--font-mono, monospace);
     }
-    .sidebar-recent-time { flex: 0 0 auto; font-size: 10px; color: var(--hyacinth-muted-foreground); white-space: nowrap; }
+    .sidebar-recent-time { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--hyacinth-muted-foreground); white-space: nowrap; }
     .sidebar-recent-item.is-current .sidebar-recent-time { color: var(--hyacinth-primary); }
   
 
@@ -433,18 +433,18 @@
         .settings-tab-radio { position: absolute; opacity: 0; pointer-events: none; }
         .settings-frame { display: flex; height: 100%; width: 100%; min-width: 0; }
         .settings-tabs { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; border-right: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); }
-        .settings-tabs-header { padding: 0 10px 12px; font-size: 14px; font-weight: 600; color: var(--hyacinth-foreground); }
-        .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+        .settings-tabs-header { padding: 0 10px 12px; font-size: var(--text-md); font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: var(--text-base); color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
         .settings-tab:hover { background-color: var(--hyacinth-muted); }
         /* A5：分组标题（常用 / 行为 / 系统）—— 只是 <div>，不参与 radio 选中逻辑 ✓ */
-        .settings-group-label { margin: 10px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
+        .settings-group-label { margin: 10px 10px 2px; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; color: var(--hyacinth-muted-foreground); }
         .settings-group-label:first-of-type { margin-top: 0; }
         /* :first-of-type 实际命中的是「设置」标题（它也是 div）⇒ 首组额外间距要靠相邻选择器消掉 */
         .settings-tabs-header + .settings-group-label { margin-top: 0; }
         /* 模型 tab 子页签：并入设置后单页高 3060px，按「提供商/推理与本地/通道/生成参数」拆 4 组。
            显隐由 app.js mergeModelPanelIntoSettings() 里的 applySub() 控制，这里只管外观。 */
         .model-subtabs { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--hyacinth-border); }
-        .model-subtab { padding: 6px 14px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-muted-foreground); background: transparent; border: 1px solid transparent; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
+        .model-subtab { padding: 6px 14px; border-radius: 6px; font-size: var(--text-base); color: var(--hyacinth-muted-foreground); background: transparent; border: 1px solid transparent; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
         .model-subtab:hover { background-color: var(--hyacinth-muted); color: var(--hyacinth-foreground); }
         .model-subtab.is-active { background-color: var(--primary-100); color: var(--hyacinth-primary); border-color: var(--hyacinth-primary); font-weight: 600; }
         #tab-context:checked ~ .settings-frame .settings-tabs label[for="tab-context"],
@@ -465,55 +465,55 @@
         #tab-modes:checked ~ .settings-frame .settings-content #panel-modes,
         #tab-repair:checked ~ .settings-frame .settings-content #panel-repair { display: flex; }
         .settings-card { background-color: var(--hyacinth-card); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 16px; }
-        .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: var(--text-md); font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid transparent; }
         .settings-row + .settings-row { border-top: 1px solid var(--hyacinth-border); }
         .settings-row-stack { display: flex; flex-direction: column; gap: 8px; }
-        .settings-label { font-size: 13px; color: var(--hyacinth-foreground); }
-        .settings-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
-        .settings-input { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; font-family: var(--font-mono); }
+        .settings-label { font-size: var(--text-base); color: var(--hyacinth-foreground); }
+        .settings-desc { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); }
+        .settings-input { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); font-family: var(--font-mono); }
         .settings-input:focus { outline: none; border-color: var(--hyacinth-primary); }
-        .settings-textarea { min-height: 88px; padding: 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; line-height: 1.5; resize: vertical; }
+        .settings-textarea { min-height: 88px; padding: 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); line-height: 1.5; resize: vertical; }
         .settings-textarea:focus { outline: none; border-color: var(--hyacinth-primary); }
-        .settings-select { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; }
+        .settings-select { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); }
         .settings-select:focus { outline: none; border-color: var(--hyacinth-primary); }
         .settings-toggle { position: relative; width: 40px; height: 22px; appearance: none; border-radius: 999px; background-color: var(--hyacinth-muted); cursor: pointer; transition: background-color 120ms ease; }
         .settings-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 999px; background-color: var(--hyacinth-foreground); transition: transform 120ms ease; }
         .settings-toggle:checked { background-color: var(--hyacinth-primary); }
         .settings-toggle:checked::after { transform: translateX(18px); background-color: var(--hyacinth-primary-foreground); }
-        .settings-unit { font-size: 12px; color: var(--hyacinth-muted-foreground); margin-left: 6px; }
+        .settings-unit { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); margin-left: 6px; }
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
         .command-shortcuts { display: flex; flex-direction: column; gap: 8px; }
         .command-shortcut-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .command-shortcut-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-        .command-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); background-color: var(--primary-100); padding: 2px 6px; border-radius: 4px; width: fit-content; }
-        .command-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
-        .command-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); color: var(--hyacinth-foreground); font-size: 12px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap; }
+        .command-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); background-color: var(--primary-100); padding: 2px 6px; border-radius: 4px; width: fit-content; }
+        .command-desc { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); }
+        .command-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); color: var(--hyacinth-foreground); font-size: var(--text-sm); cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap; }
         .command-link:hover { background-color: var(--hyacinth-muted); border-color: var(--hyacinth-primary); }
         .prompt-source-list { display: flex; flex-direction: column; gap: 8px; }
         .prompt-source-item { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .prompt-source-main { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-        .prompt-source-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
-        .prompt-source-type { font-size: 10px; padding: 1px 6px; border-radius: 999px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); text-transform: uppercase; }
+        .prompt-source-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); }
+        .prompt-source-type { font-size: var(--text-2xs); padding: 1px 6px; border-radius: 999px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); text-transform: uppercase; }
         .prompt-source-type.conditional { background-color: var(--primary-100); color: var(--hyacinth-primary); }
         .prompt-source-type.runtime { background-color: color-mix(in srgb, var(--state-info) 12%, transparent); color: var(--state-info); }
-        .prompt-source-path { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
-        .prompt-source-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); margin-top: 4px; }
+        .prompt-source-path { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .prompt-source-desc { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); margin-top: 4px; }
         .settings-subcard { background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 12px; }
-        .assembly-pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .assembly-pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); }
         .assembly-pipeline-step { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .assembly-pipeline-arrow { color: var(--hyacinth-primary); display: inline-flex; }
         .zone-list { display: flex; flex-direction: column; gap: 12px; }
-        .zone-header { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); padding: 6px 10px; border-radius: 6px; background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); }
+        .zone-header { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); font-weight: 600; color: var(--hyacinth-foreground); padding: 6px 10px; border-radius: 6px; background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); }
         .zone-sections { display: flex; flex-direction: column; gap: 6px; padding-left: 8px; }
         .zone-section-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .zone-section-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .zone-section-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
+        .zone-section-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); }
         .zone-section-name .prompt-source-type { margin-left: 6px; }
-        .zone-section-source { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
-        .zone-section-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .zone-section-source { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .zone-section-desc { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); }
         .mechanism-legend { display: flex; flex-wrap: wrap; gap: 6px; }
-        .mechanism-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-muted-foreground); }
+        .mechanism-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: var(--text-xs); border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-muted-foreground); }
       
 
 /* ── SPA 路由导航高亮（app.js 切换 .nav-active）── */
@@ -543,20 +543,20 @@
   overflow: hidden; padding: 18px;
 }
 .cmd-box h4 { margin: 0 0 12px; }
-.cmd-box p { font-size: 13px; margin: 0 0 14px; word-break: break-all; }
+.cmd-box p { font-size: var(--text-base); margin: 0 0 14px; word-break: break-all; }
 .permission-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .dialog-btn {
   background: var(--hyacinth-muted); color: var(--hyacinth-foreground);
   border: 1px solid var(--hyacinth-border);
-  padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: var(--text-base);
 }
 .dialog-btn:hover { border-color: var(--hyacinth-primary); color: var(--hyacinth-primary); }
 .ask-field { margin-bottom: 12px; }
-.ask-field .ask-q { display: block; font-size: 13px; margin-bottom: 6px; }
+.ask-field .ask-q { display: block; font-size: var(--text-base); margin-bottom: 6px; }
 .ask-field select, .ask-field input {
   width: 100%; background: var(--hyacinth-muted); color: var(--hyacinth-foreground);
   border: 1px solid var(--hyacinth-border);
-  padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  padding: 8px 10px; border-radius: 8px; font-size: var(--text-base);
 }
 .ask-field input { box-sizing: border-box; }
 
@@ -615,7 +615,7 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   cursor: pointer;
   list-style: none;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--hyacinth-muted-foreground);
 }
 .process-group > summary::-webkit-details-marker { display: none; }
@@ -624,72 +624,12 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
 .process-group[open] > summary { border-bottom: 1px solid var(--hyacinth-border); }
 .process-body { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; }
 .process-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.65;
   color: var(--hyacinth-muted-foreground);
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-/* ── 助手内容块（say / 普通回复）—— **不用气泡** ─────────────────────────
-   设计取向（2026-10-17 按体验调整）：
-     助手回复的信息量远大于用户提问（表格 / 围栏 / 长列表），气泡的 max-width 与内边距
-     会把长内容挤窄 ✗ ⇒ 改为**全宽文档流**，横向空间全部留给正文。
-     用户消息仍是气泡（短、且需与助手区分）⇒ 纵向节奏变成「右气泡 / 左文档」。
-
-   交付与普通助手的区别只靠两处低成本标记（**不整块着色** —— 长回答会被压得很重）：
-     · 左侧 2px primary 细线
-     · 头行的 `交付` 徽章 + 复制按钮
-   两类共用同样的 padding-left / border 宽度 ⇒ 左缘对齐、切换时不跳动。 */
-.assistant-block {
-  min-width: 0;
-  padding-left: 10px;
-  border-left: 2px solid transparent;
-}
-.assistant-block.is-delivery { border-left-color: var(--hyacinth-primary); }
-
-.delivery-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.delivery-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  line-height: 1.4;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: color-mix(in srgb, var(--hyacinth-primary) 15%, transparent);
-  color: var(--hyacinth-primary);
-  user-select: none;
-}
-.delivery-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--hyacinth-muted-foreground);
-  font-size: 10px;
-  line-height: 1.6;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
-}
-.delivery-copy:hover { opacity: 1; background: color-mix(in srgb, var(--hyacinth-foreground) 7%, transparent); }
-.delivery-copy:focus-visible { opacity: 1; outline: 2px solid var(--hyacinth-ring); outline-offset: 1px; }
-.delivery-copy.is-copied { opacity: 1; color: var(--hyacinth-primary); }
-.delivery-copy.is-selected { opacity: 1; color: var(--hyacinth-accent); }
-.delivery-copy.is-failed { opacity: 1; color: #d94343; }
-
-/* 头行之后的首个正文块去掉上边距（否则标题会多出 0.9em 空隙） */
-.delivery-head + .msg-rich > *:first-child { margin-top: 0; }
 
 /* ── markdown 渲染样式（助手正文）────────────────────────────────────
    背景：助手正文是 markdown，此前被 esc() 塞进单个 <p>，
@@ -708,11 +648,11 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
    ⚠️ 必须覆盖 .process-text 的 white-space: pre-wrap —— 否则 HTML 源码里的换行
    会被原样保留，渲染出一堆多余空行。两个类选择器特异度更高，稳定生效。 */
 .process-text.msg-rich {
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: normal;
   color: var(--hyacinth-muted-foreground);
 }
-.process-text.msg-rich .md-pre { font-size: 11.5px; }
+.process-text.msg-rich .md-pre { font-size: var(--text-sm); }
 
 .msg-rich .md-p { margin: 0 0 0.625em; line-height: 1.65; }
 
@@ -865,7 +805,7 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 16px;
   text-align: center;
   background: rgba(0, 0, 0, 0.55);
@@ -903,7 +843,7 @@ html, body, body.h-screen { height: 100vh; height: 100dvh; width: 100%; }
   align-items: center;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 18px;
   background: var(--tint-strong, rgba(127, 127, 127, 0.15));
   color: var(--hyacinth-muted-foreground, var(--hyacinth-foreground));

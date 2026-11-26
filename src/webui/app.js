@@ -135,6 +135,19 @@
   }
 
   /**
+   * 多行输入框的自适应高度：先归零再按 scrollHeight 撑开，封顶 maxPx。
+   *
+   * ⚠️ **清空 value 之后必须再调一次**。高度是内联 style，`input.value = ''`
+   * 不会把它收回去：发送三行内容后会留下 68px 的空盒子，直到下一次 input 事件
+   * 才被重算（用户实报，2026-11-26）。所有"程序化清空输入框"的地方都要跟一次。
+   */
+  function fitTextarea(el, maxPx) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, maxPx) + 'px';
+  }
+
+  /**
    * 交付正文（say 的 content）是 **markdown** —— 此前直接 esc() 塞进单个 <p>，
    * 于是 `**加粗**`、``` 围栏、`| 表格 |`、`# 标题` 全部按字面显示 ✗
    * （TUI 有自己的渲染器，WebUI 没有 ⇒ 两端观感不一致）。
@@ -197,11 +210,9 @@
     }
   }
 
-  function fmtTokens(n) {
-    if (n == null) return '—';
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(n);
-  }
+  // 2026-11-19 审计删除：此处原有一份 fmtTokens（1000→"1.2k" 风格）。同一 IIFE 内
+  // 4139 行还有一份（1024→"K"、1M→"M" 风格），函数声明提升后**后者胜出** ⇒ 这一份
+  // 从未执行过。两套格式并存只会让下一个人改错那份，故删前保后（行为零变化）。
 
   // ════════════════════════════════════════════════════════════
   // 共享状态
@@ -219,9 +230,12 @@
   // ════════════════════════════════════════════════════════════
   // SPA hash 路由
   // ════════════════════════════════════════════════════════════
-  const VIEWS = ['chat', 'model', 'sessions', 'settings', 'schedule', 'plugins', 'skills', 'companion'];
-  // data-view → data-nav-item 映射（导航里 model 对应 models）
-  const NAV_BY_VIEW = { chat: 'chat', model: 'models', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins', skills: 'skills' };
+  // 「model」不再是可达视图（2026-10-27 并入设置）⇒ 不列在这里：
+  // 它唯一的作用是让 #/model 通过白名单，而下一行已经先把它改写成 settings。
+  const VIEWS = ['chat', 'sessions', 'settings', 'schedule', 'plugins', 'skills', 'companion'];
+  // data-view → data-nav-item 映射。没有 model 条目：侧栏的「模型选择」入口也随合一起去掉了，
+  // 保留它只会留下一个永远匹配不上的死键。
+  const NAV_BY_VIEW = { chat: 'chat', sessions: 'sessions', settings: 'settings', schedule: 'schedule', plugins: 'plugins', skills: 'skills' };
 
   function currentView() {
     // embed 本页 = 并行会话标签的一格：只承担一条会话，忽略 hash（父页 hash 不该泄漏进来）
@@ -394,7 +408,27 @@
     if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
     if (text) text.textContent = `${fmtTokens(snap.tokensUsed)} / ${fmtTokens(snap.maxContextTokens)}`;
     if (snap.maxContextTokens) lastMaxContextTokens = snap.maxContextTokens;   // 供迭代级刷新复用 ✓
+    renderPlanChip(snap);
     if (embedMode) wsPostToParent({ type: 'hyacinth:ctx', snap });
+  }
+
+  /**
+   * 计划进度（planStepsDone/Total）。
+   *
+   * 后端 StateSnapshot 一直在发这两个字段（loop.getTurnInfo ← activePlan），TUI 也
+   * 一直在显示 `Plan: 1/3`；WebUI 之前完全没读 ⇒ 有计划的任务里只能靠"过程（17）"
+   * 猜还剩多少。这里只做呈现，不臆造百分比：没有 plan 就整块隐藏。
+   */
+  function renderPlanChip(snap) {
+    const chip = $('#plan-chip');
+    const text = $('#plan-chip-text');
+    if (!chip || !text) return;
+    const total = snap && snap.planStepsTotal;
+    const done = (snap && snap.planStepsDone) || 0;
+    if (!total || total <= 0) { chip.hidden = true; text.textContent = ''; return; }
+    chip.hidden = false;
+    text.textContent = `计划 ${Math.min(done, total)}/${total}`;
+    chip.title = `本回合计划：已完成 ${done} / 共 ${total} 步`;
   }
 
   // ════════════════════════════════════════════════════════════
@@ -403,29 +437,76 @@
   function clearChat() {
     const ml = $('#message-list');
     if (ml) ml.innerHTML = '';
+    // 卡片索引必须一起清：toolCardsById 里存的是即将被丢弃的节点，
+    // 不清会让下一次 attachToolResult 把结果写进已经不在文档里的卡。
+    toolCardsById.clear();
+    outputToolIds.clear();
     histPending = [];
+    // 换会话/清屏 = 新语境，应当从"跟随最新"这个默认态开始。
+    // 不重置的话：上一个会话里上翻过 ⇒ _chatStick 停在 false ⇒ 新会话历史加载完
+    // 停在顶部，看起来像"没滚到底"（2026-11-11）。
+    _chatStick = true;
+    // 2026-11-19：这里原先还有一句 `_chatScrollOwned = false;` —— 该标志位所属的
+    // 「程序自己写的滚动不参与判定」机制已在 2026-11-11 用**方向判定**取代并删除，
+    // 但两句赋值留在了原地。本文件是 `'use strict'` ⇒ 未声明变量赋值直接抛
+    // ReferenceError ⇒ clearChat() 一抛，loadHistory() 就被静默 catch 吞掉，
+    // 表现为「打开历史会话是空白，后端明明有消息」。删干净，别再长回来。
   }
 
-  // 自动跟随：只在用户「接近底部」时才滚到底；用户上翻看历史时不打断（2026-10-28 修）
-  // ⚠️ 阈值 80→120（2026-11-02 修「上翻后拉不回底、卡在半路」）：
-  //   流式增量让 scrollHeight 持续增长，阈值太紧时用户刚拖到「几乎到底」就被判成
-  //   「已离开底部」⇒ 跟随断开、scrollTop 与增长互相抢 ⇒ 表现为卡住拉不下去。
-  //   放宽后：一旦进入底部 120px 内就自动接管跟随，无需精确拖到底。
-  const CHAT_STICK_GAP = 120;
+  // 自动跟随：由「用户意图」驱动，几何只用来复位（2026-11-11 重写）
+  //
+  // 旧实现的病根（孑遗实报「滚轮/滚动条卡住」）：
+  //   `_chatStick` 只在 scroll 事件里按「距底 < 120px」重算，而流式期间每个 delta 都会
+  //   调 scrollChat() 把 scrollTop 打到底 ⇒ 用户上翻一格（Chrome 约 100px）仍在 120px
+  //   阈值内 ⇒ 下一个 delta 立刻拉回底 ⇒ **永远滚不上去**；拖滚动条时则是 thumb 在
+  //   光标下被弹回，表现为抽搐。把阈值 80→120 只会让这个"粘住窗口"更大，方向是反的。
+  //
+  // 新规则：
+  //   1) **向上滚轮 / 触摸** = 用户明确要离开底部 ⇒ 立刻断开跟随（不等几何判定）；
+  //   2) 程序自己写的 scrollTop 不参与判定（否则跟随状态被自己的滚动覆盖）；
+  //   3) 只有真·贴近底部（<=24px）才恢复跟随；
+  //   4) 所有到底赋值合并到 rAF，每帧最多一次 —— 避免每个 delta 各触发一次强制布局。
+  const CHAT_STICK_GAP = 24;
   let _chatStick = true;
   let _chatStickBound = false;
+  let _chatScrollRaf = 0;
+  let _lastScrollTop = 0;
+
   function scrollChat() {
     const ml = $('#message-list');
     if (!ml) return;
     if (!_chatStickBound) {
       _chatStickBound = true;
+      _lastScrollTop = ml.scrollTop;
+      // 用户往上拨一格就断开跟随：这比"看离底多远"更贴近意图，也不受流式增量干扰。
+      ml.addEventListener('wheel', (e) => {
+        if (e.deltaY < 0) _chatStick = false;
+      }, { passive: true });
+      // 触摸同理：手指在消息流上按下即可视为"要自己滚"（想在底部时再滚一下会自动复位）
+      ml.addEventListener('touchstart', () => { _chatStick = false; }, { passive: true });
+      // ⚠️ 拖滚动条**不能**靠 pointerdown：Chrome 的原生滚动条在 UA 内部消费事件，
+      //    元素上收不到 pointerdown（2026-11-11 实测推翻前一次的写法）。
+      //    通用判据是**移动方向**：scrollTop 比上一帧小 ⇒ 用户在往上走 ⇒ 断开跟随。
+      //    这条同时覆盖 滚轮 / 拖 scrollbar / 触摸 / PageUp / 键盘。
+      // ⚠️ 也**不用**"这次 scroll 是不是我自己写的"标志位：那要靠 rAF 时序清标志，
+      //    标签页隐藏/掉帧时标志会卡在 true ⇒ 之后所有用户滚动都被忽略 ⇒ 永久粘底。
       ml.addEventListener('scroll', () => {
-        _chatStick = (ml.scrollHeight - ml.scrollTop - ml.clientHeight) < CHAT_STICK_GAP;
+        const st = ml.scrollTop;
+        const movedUp = st < _lastScrollTop - 1;
+        _lastScrollTop = st;
+        if (movedUp) { _chatStick = false; return; }
+        _chatStick = (ml.scrollHeight - st - ml.clientHeight) <= CHAT_STICK_GAP;
       }, { passive: true });
     }
+    if (!_chatStick || _chatScrollRaf) return;
     // 跟随一律**瞬时**赋值（CSS 已去掉 scroll-behavior:smooth）：
     // 平滑动画的目标是赋值瞬间的旧 scrollHeight，内容增长后永远到不了真正底部。
-    if (_chatStick) ml.scrollTop = ml.scrollHeight;
+    _chatScrollRaf = requestAnimationFrame(() => {
+      _chatScrollRaf = 0;
+      if (!_chatStick) return;
+      ml.scrollTop = ml.scrollHeight;
+      _lastScrollTop = ml.scrollTop;   // 自己这一跳不算"用户移动"，同步基线
+    });
   }
 
   function bubbleUser(text, images, timestamp) {
@@ -589,6 +670,30 @@
     return wrap;
   }
 
+  /**
+   * 过程插话（say）：边干边说的一句口语，**不是交付**。
+   *
+   * 与交付的区别只落在「头行标签 + 左轨图标 + 淡一档的文字」：
+   * 用第三种低调形态，既不抢交付的视觉锚点（胶囊徽章 + 主色），
+   * 也不至于像早先那样被标成"交付"，让真正的结论淹没在插话里。
+   * 内容是纯口语（工具描述明确要求不带 Markdown/表格/代码块）⇒ 走 textContent，
+   * 不再过 markdown 渲染，避免一句话里的 `*` `#` 被吃掉。
+   */
+  function bubbleInterjection(text, timestamp) {
+    const wrap = el('div', 'msg msg-assistant is-say');
+    const rail = el('div', 'msg-rail');
+    rail.innerHTML = '<i data-lucide="message-circle"></i>';
+    const body = el('div', 'msg-body');
+    const head = el('div', 'msg-head');
+    head.appendChild(el('span', 'msg-who', '说'));
+    body.appendChild(head);
+    body.appendChild(el('div', 'msg-text msg-say-text', text));
+    body.appendChild(el('span', 'msg-time', eventTime(timestamp)));
+    wrap.appendChild(rail);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
   function bubbleThinking(text) {
     const wrap = el('div', 'msg msg-assistant');
     const rail = el('div', 'msg-rail');
@@ -603,15 +708,27 @@
   /**
    * 工具调用 = **一行卡片**，不是大气泡。
    * 理由：一轮里常有 10+ 次工具调用，每次占一整块会把对话切碎；
-   * 结果本身落在「过程」块里（文本），卡片只需要说明"调了什么"。
+   * 结果落在卡片第二行（见 attachToolResult），而不是另起一条注记。
+   *
+   * toolId 来自 `message.tool_use` 的 id —— `message.tool_result` 带同一个 id，
+   * 于是「调用」与「结果」可以合并成一张有状态的卡（2026-11-24）。
+   * 早先丢掉了 id ⇒ 调用 / 结果 / 差异各自成块，读起来像三条 RPC 日志。
    */
-  function bubbleTool(name, detail) {
+  function bubbleTool(name, detail, toolId, startedAt) {
     const wrap = el('div', 'tool-card');
+    wrap.dataset.state = 'running';
+    if (toolId) wrap.dataset.toolId = toolId;
     wrap.appendChild(el('span', 'tool-dot'));
     wrap.appendChild(el('span', 'tool-name', name));
     const args = el('span', 'tool-args', detail || '');
     args.title = detail || '';
     wrap.appendChild(args);
+    // 耗时：结果到达时填（空节点由 CSS :empty 隐藏，不会占位）
+    wrap.appendChild(el('span', 'tool-elapsed'));
+    // 结果槽：默认隐藏，attachToolResult 到达后填内容并展开
+    const out = el('div', 'tool-out');
+    out.hidden = true;
+    wrap.appendChild(out);
     // 参数里像路径 ⇒ 整卡可点，一键在右侧预览栏打开这个文件。
     // 猜错不致命（打开失败会提示），但猜对时省掉"复制路径→去别处翻"这一轮。
     const p = pvPathFromDetail(detail);
@@ -624,11 +741,73 @@
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pvRevealPath(p); }
       };
     }
+    if (toolId) {
+      toolCardsById.set(toolId, { node: wrap, out, startedAt: startedAt || Date.now() });
+      // 长会话里卡片会无限累积：只保留最近 400 条 id 映射（节点已被 message-list 持有，
+      // 这里丢的只是"能不能配对"的索引）
+      if (toolCardsById.size > 400) {
+        const oldest = toolCardsById.keys().next().value;
+        if (oldest !== undefined) toolCardsById.delete(oldest);
+      }
+    }
     return wrap;
   }
 
-  function bubbleSystem(text) {
-    return el('div', 'msg-note', text);
+  /** toolId → 卡片记录；把 tool_result 挂回对应调用 */
+  const toolCardsById = new Map();
+
+  /**
+   * say / deliver 的 tool_use id。
+   *
+   * 这两个工具的"内容"走 message.say（渲染成「说」/「交付」块），它们的 tool_use 卡
+   * 与 tool_result（内容是 "ok"）都是纯噪音 ⇒ 记下 id 直接跳过。
+   * 为什么靠 id 而不是 name：message.tool_result 的载荷只有 { id, content, isError }，
+   * 不带工具名；历史条目里 tool_result 也只有 toolUseId。
+   */
+  const outputToolIds = new Set();
+
+  /** 这个工具的输出是否已经由「说」/「交付」块承载（yes ⇒ 不再出卡、不再出回执注记） */
+  function isOutputTool(name) {
+    return name === 'say' || name === 'deliver';
+  }
+
+  /**
+   * 把工具结果并入对应卡片。
+   * 返回 false = 没有可配对的卡片（无 id / 卡片已被清屏移除）⇒ 调用方回退成注记，
+   * 保证结果**永不丢失**（宁可多一条 ↳，也不能吞掉输出）。
+   */
+  function attachToolResult(toolId, content, isError) {
+    if (!toolId) return false;
+    const rec = toolCardsById.get(toolId);
+    // 不查 isConnected：历史回放里卡片是"先建节点、后 append"（flushHistoryProcess
+    // 才挂进文档），查连通性会让历史侧永远配不上对。
+    // 清屏/换会话时由 clearChat() 清空映射，避免指向已丢弃的节点。
+    if (!rec || !rec.node) return false;
+    const text = String(content == null ? '' : content);
+    rec.out.hidden = false;
+    rec.out.textContent = text;
+    rec.out.title = '点击展开 / 收起完整输出';
+    rec.node.classList.add(isError ? 'is-error' : 'is-done');
+    rec.node.dataset.state = isError ? 'error' : 'ok';
+    const dur = rec.node.querySelector('.tool-elapsed');
+    if (dur) {
+      const ms = Math.max(0, Date.now() - rec.startedAt);
+      dur.textContent = ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms';
+    }
+    // 展开/收起：只认结果行自身的点击（整卡的点击留给"打开预览"）
+    rec.out.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      rec.node.classList.toggle('is-open');
+    });
+    return true;
+  }
+
+  function bubbleSystem(text, level) {
+    // level 来自 message.status：warn/error 有各自配色，不再统一显示成 `[warn] 文本`
+    const n = el('div', 'msg-note', text);
+    if (level === 'warn') n.classList.add('is-warn');
+    else if (level === 'error') n.classList.add('is-error');
+    return n;
   }
 
   function nowTime() {
@@ -714,39 +893,71 @@
     if (!histPending.length) return;
     const ml = $('#message-list');
     if (ml) {
-      const det = el('details', 'process-group');
+      bindProcessToggleOnce();
+      const { det, body } = makeProcessGroup(`过程（${histPending.length}）`);
       det.open = !collapse;
-      det.appendChild(el('summary', '', `过程（${histPending.length}）`));
-      const body = el('div', 'process-body');
       for (const n of histPending) body.appendChild(n);
-      det.appendChild(body);
       ml.appendChild(det);
+      // 历史块默认就受 60vh 封顶：挂载后量一次，超高的立刻给出「展开全部」
+      syncProcessOverflow(det);
     }
     histPending = [];
     histTextNode = null;
     histTextRaw = '';
   }
 
-  /** 从历史条目里取出「交付正文」（只认 say 的 tool_call ✓） */
-  function historySayText(m) {
-    if (!m || m.type !== 'tool_call' || m.name !== 'say') return null;
+  /** 从历史条目里取出「模型的嘴」说的内容（say 插话 / deliver 交付都要认）。
+   *
+   *  ⚠️ 只认 say 时（旧实现）：刷新后 say 被还原成交付块、deliver 退化成过程区里
+   *  一张显示原始 JSON 的工具卡 ⇒ **真正的最终交付反而看不见**（2026-11-24）。
+   *  两种工具在 events.jsonl 里都只有 tool_call（正文落在 conversation store，
+   *  不进事件流），所以这里是历史侧唯一的还原点。 */
+  function historyOutput(m) {
+    if (!m || m.type !== 'tool_call') return null;
     const raw = m.input && typeof m.input === 'object' ? m.input.content : null;
-    return typeof raw === 'string' && raw.trim() ? raw : null;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    if (m.name === 'deliver') return { text: raw, kind: 'deliver' };
+    if (m.name === 'say') return { text: raw, kind: 'say' };
+    return null;
+  }
+
+  /** 历史侧的工具参数摘要：历史只存完整 input，没有后端产出的 inputSummary。
+   *  这里做「取第一个有意义的标量字段 + 单行 + 截断」，只为让卡片不至于被整段 JSON 撑开；
+   *  完整参数仍保留在 title 里（hover 可见），不丢信息。 */
+  function historyInputSummary(input) {
+    if (!input || typeof input !== 'object') return '';
+    const prefer = ['file_path', 'path', 'command', 'cmd', 'pattern', 'query', 'url', 'prompt'];
+    for (const k of prefer) {
+      const v = input[k];
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120);
+    }
+    for (const k of Object.keys(input)) {
+      const v = input[k];
+      if (typeof v === 'string' && v.trim()) return v.trim().replace(/\s+/g, ' ').slice(0, 120);
+      if (typeof v === 'number' || typeof v === 'boolean') return `${k}=${v}`;
+    }
+    return '';
   }
 
   function renderHistoryMsg(m) {
     const ml = $('#message-list');
     if (!ml) return;
-    // ① say 交付 ⇒ 收束并收起当前过程块，插醒目交付气泡 ✓
-    const sayText = historySayText(m);
-    if (sayText) {
-      flushHistoryProcess(true);
-      const dwrap = bubbleAssistant(sayText, { delivery: true, time: m.timestamp });
-      ml.appendChild(dwrap);
+    // ① deliver 交付 ⇒ 收束并收起当前过程块，插醒目交付气泡 ✓
+    //    say 插话 ⇒ 只插一条「说」，过程块继续开着（回合还没结束）
+    const out = historyOutput(m);
+    if (out) {
+      // 记下 id：它的 tool_result（"ok"）随后到达，必须跳过（历史里 tool_result 不带 name）
+      if (m.id || m.toolUseId) outputToolIds.add(m.id || m.toolUseId);
+      if (out.kind === 'deliver') {
+        flushHistoryProcess(true);
+        ml.appendChild(bubbleAssistant(out.text, { delivery: true, time: m.timestamp }));
+      } else {
+        ml.appendChild(bubbleInterjection(out.text, m.timestamp));
+      }
       return;
     }
-    // ② say 的工具回执只是 ok 噪音 ⇒ 跳过 ✓
-    if (m && m.type === 'tool_result' && m.name === 'say') return;
+    // ② say/deliver 的工具回执只是 ok 噪音 ⇒ 跳过 ✓
+    if (m && m.type === 'tool_result' && m.toolUseId && outputToolIds.has(m.toolUseId)) return;
     const type = m && m.type;
     const content = (m && (m.content || m.text)) || '';
     switch (type) {
@@ -768,12 +979,24 @@
       case 'tool_call':
         histPush(bubbleTool(
           (m && m.name) || '工具',
-          (m && (m.inputSummary || (m.input ? JSON.stringify(m.input) : ''))) || content
+          // ⚠️ HistoryMessage 里**没有** inputSummary 字段（早期写的 m.inputSummary 永远
+          // undefined）⇒ 历史卡片一直显示整段 JSON，实时侧显示的是后端摘要，同一次调用
+          // 两种长相。摘要由后端 summarizeToolInput 产出、只随 tool_use 事件走；
+          // 历史侧没有它，就退到「单行化 + 截断」的本地近似，至少不比实时更吵。
+          (m && (m.inputSummary || (m.input ? historyInputSummary(m.input) : ''))) || content,
+          m && (m.id || m.toolUseId),
         ));
         break;
-      case 'tool_result':
-        histPush(bubbleSystem('  ↳ ' + content));
+      case 'tool_result': {
+        // 与实时路径同构：能按 tool_use_id 配到卡就并入卡，配不上才落注记 ✓
+        const attached = attachToolResult(
+          m && (m.toolUseId || m.id),
+          content,
+          false,
+        );
+        if (!attached) histPush(bubbleSystem('  ↳ ' + content));
         break;
+      }
       case 'system':
       case 'status':
         histPush(bubbleSystem(content));
@@ -809,12 +1032,23 @@
       }
       msgs.forEach(renderHistoryMsg);
       flushHistoryProcess(false);   // 末尾未收尾的回合：保持展开，正文可见 ✓
+      // 历史渲染路径自己建节点（bubbleTool / bubbleAssistant / bubbleInterjection 都写
+      // <i data-lucide>），而 createIcons 只在实时路径按需调用 ⇒ 不补这一下，刷新后的
+      // 消息图标全是空方块（交付/说的 rail 最明显）。
+      if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
       scrollChat();
       // 档位是会话级的：切会话 = 换一套权限状态，这里顺手对齐一次
       //（否则按钮上还写着上个会话的档位，用户会以为"设置丢了"）
       void modeLoad();
     } catch (e) {
-      // 历史加载失败静默（聊天可继续发送）
+      // 历史加载失败不阻断聊天（可继续发送），但**必须留痕**：
+      // 静默 catch 的真实代价（2026-11-19 实测）：某条会话的历史渲染抛错时，
+      // 用户只看到「开始对话」空状态 —— 后端有 138 条消息、连接正常、无任何提示，
+      // 排查全靠猜。日志走 console.error（可经 CDP 抓），屏上也留一条可点掉的提示。
+      try {
+        console.error('[history] loadHistory failed', e && (e.stack || e.message || e));
+        appendMsg('error', '历史加载失败：' + ((e && (e.message || e.code)) || '未知错误'));
+      } catch (_) { /* 提示本身失败就算了 */ }
     }
   }
 
@@ -833,36 +1067,115 @@
   let processRawText = '';
   let processRenderTimer = null;
 
-  /** 把累积的原始文本渲染成 markdown（节流调用，见 appendProcessText） */
+  /** 把累积的原始文本渲染成 markdown（节流调用，见 appendProcessText）
+   *
+   *  ⚠️ 绝不要在这里按"用户是否在底部"跳过渲染（2026-11-11 踩过一次）：
+   *  跳过之后 `processRawText` 继续累积而 DOM 停在旧内容 ⇒ 表现为"渲染落后、
+   *  最后一次性涌出来"，而且和滚动状态耦合出一个看不见的依赖。
+   *  渲染是正确性，手感问题靠**调低频率**解决（见 appendProcessText 的自适应节流），
+   *  不靠"不渲染"。*/
   function renderProcessText() {
     processRenderTimer = null;
-    if (processTextNode && processTextNode.isConnected) {
-      renderRichInto(processTextNode, processRawText);
-    }
+    if (!processTextNode || !processTextNode.isConnected) return;
+    renderRichInto(processTextNode, processRawText);
+    // 正文变长 ⇒ 是否被裁切可能变了。sync 在 is-live 时短路（不读 scrollHeight），
+    // 所以流式期间不会因为这一行引入每帧强制回流。
+    const det = processTextNode.closest && processTextNode.closest('details.process-group');
+    if (det) syncProcessOverflow(det);
   }
 
   /** 立即冲刷待渲染的过程正文（收起 / 重置前调用，避免丢掉最后一小段 ✓） */
   function flushProcessText() {
     if (processRenderTimer) { clearTimeout(processRenderTimer); processRenderTimer = null; }
-    renderProcessText();
+    renderProcessText(true);
   }
 
   function resetProcessGroup() {
     flushProcessText();
+    // 回合结束/切会话：摘掉 is-live ⇒ 恢复 60vh 封顶（历史回放不该一屏被旁注占满）。
+    // 摘之前量一次：没有 say 收尾的回合，这块会停在"打开 + 被封顶"的状态，
+    // 必须让「展开全部」按钮当场出现，否则正文被裁掉且没有入口。
+    const det = turnProcessBody && turnProcessBody.parentElement;
+    if (det && det.classList) det.classList.remove('is-live');
+    if (det) syncProcessOverflow(det);
     turnProcessBody = null;
     processTextNode = null;
     processRawText = '';
+  }
+
+  /**
+   * 过程块 = `<details>` + summary + body + 「展开全部」按钮。
+   *
+   * 为什么需要那个按钮：过程区被封顶在 min(60vh,680px)。早先靠 `overflow-y:auto`
+   * 让超出部分在**块内**滚动，结果制造了嵌套滚动 —— 滚轮在块上被内层吃掉、页面
+   * 原地不动，而且内层藏起来的几千像素不计入页面 scrollHeight（实测 8196px 内容
+   * 只贡献 540px），页面到底时仍有 90% 文字不可达（2026-11-26 用户实报）。
+   * 现在改为「裁切 + 显式展开」：滚轮永远只有外层一个目标。
+   */
+  function makeProcessGroup(summaryText) {
+    const det = el('details', 'process-group');
+    det.appendChild(el('summary', '', summaryText));
+    const body = el('div', 'process-body');
+    det.appendChild(body);
+    const more = el('button', 'process-more', '展开全部');
+    more.type = 'button';
+    det.appendChild(more);
+    return { det, body, more };
+  }
+
+  /**
+   * 量一次「这个块是否被裁切」，决定「展开全部」按钮出不出现。
+   * `overflow:hidden` 下 scrollHeight 仍报告完整内容高度 ⇒ 可以直接判定，不需要
+   * 临时解除封顶去量（那会闪一下）。展开态必须保持按钮可见，否则没法收起。
+   */
+  function syncProcessOverflow(det) {
+    if (!det || det.tagName !== 'DETAILS' || !det.classList.contains('process-group')) return;
+    const body = det.querySelector('.process-body');
+    const more = det.querySelector('.process-more');
+    if (!body || !more) return;
+    if (!det.open) { det.classList.remove('has-overflow'); return; }
+    const expanded = det.classList.contains('is-expanded');
+    const live = det.classList.contains('is-live');
+    // 运行中的块不封顶 ⇒ 无需展开按钮；展开后要留住按钮才能收起
+    const clipped = !live && !expanded && body.scrollHeight > body.clientHeight + 8;
+    det.classList.toggle('has-overflow', expanded || clipped);
+    more.textContent = expanded ? '收起' : '展开全部';
+    more.title = expanded ? '收起过程' : '展开全部过程内容（仍由页面滚动）';
+  }
+
+  /** 「展开全部 / 收起」：事件委托 —— 过程块是动态生成的，逐块绑定必漏 */
+  let processToggleBound = false;
+  function bindProcessToggleOnce() {
+    if (processToggleBound) return;
+    processToggleBound = true;
+    document.addEventListener('click', (ev) => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('.process-more') : null;
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const det = btn.closest('.process-group');
+      if (!det) return;
+      det.classList.toggle('is-expanded');
+      syncProcessOverflow(det);
+      scrollChat();          // 展开把内容变高，跟随态下应继续贴底
+    });
+    // toggle 不冒泡，用捕获阶段接（打开旧块时也要量一次，那时按钮才该出现）
+    document.addEventListener('toggle', (ev) => {
+      const t = ev.target;
+      if (t && t.classList && t.classList.contains('process-group')) syncProcessOverflow(t);
+    }, true);
   }
 
   function ensureProcessBody() {
     const ml = $('#message-list');
     if (!ml) return null;
     if (turnProcessBody && turnProcessBody.isConnected) return turnProcessBody;
-    const det = el('details', 'process-group');
+    bindProcessToggleOnce();
+    const { det, body } = makeProcessGroup('过程');
     det.open = true;                    // 默认展开 ⇒ 万一本回合没有 say，正文仍看得见 ✓
-    det.appendChild(el('summary', '', '过程'));
-    const body = el('div', 'process-body');
-    det.appendChild(body);
+    // is-live = 「本回合正在输出」。CSS 用它**解除 60vh 封顶**（见 shell.css .process-body）：
+    // 一旦封顶，超出的正文会被裁掉；历史回放保留封顶（避免一屏被一段旁注占满）。
+    det.classList.add('is-live');
     ml.appendChild(det);
     turnProcessBody = body;
     processTextNode = null;
@@ -878,7 +1191,12 @@
     const det = body.parentElement;
     const summary = det && det.querySelector ? det.querySelector('summary') : null;
     if (summary) summary.textContent = `过程（${body.children.length}）`;
-    if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
+    // 只在**新节点里真的有图标**时才重扫：lucide.createIcons() 是整文档扫描 + 替换，
+    // 流式期间每追加一个纯文本节点都全量扫一遍，长回答下就是持续性掉帧（2026-11-11）。
+    if (window.lucide && node.querySelector && node.querySelector('[data-lucide]')) {
+      try { lucide.createIcons(); } catch (e) { /* ignore */ }
+    }
+    if (det) syncProcessOverflow(det);
     scrollChat();
   }
 
@@ -897,7 +1215,15 @@
       appendProcess(processTextNode);
     }
     processRawText += content;
-    if (!processRenderTimer) processRenderTimer = setTimeout(renderProcessText, 120);
+    if (!processRenderTimer) {
+      // 自适应节流（2026-11-11）：整段重渲是 O(全文) —— markdown 解析 + innerHTML
+      // 重建 + 代码块全量重着色。固定 120ms 在长回答下单次就可能超过 120ms，
+      // 渲染链一路追不上，观感就是"渲染落后、最后一次性涌出来"。
+      // 文本越长放宽间隔（用户在流式中途也不会逐字盯），但**绝不跳过渲染**。
+      const len = processRawText.length;
+      const delay = len > 60000 ? 400 : len > 20000 ? 220 : 120;
+      processRenderTimer = setTimeout(renderProcessText, delay);
+    }
     scrollChat();
   }
 
@@ -907,6 +1233,9 @@
     const body = turnProcessBody;
     const det = body && body.parentElement;
     if (det && det.tagName === 'DETAILS') det.open = false;
+    // 本回合已交付 ⇒ 这段过程变成"历史"，摘掉 is-live 恢复 60vh 封顶
+    // （否则长回答交付后整块会一直铺满屏，把下面 say 的正文挤到很远）
+    if (det && det.classList) det.classList.remove('is-live');
   }
 
   function handleEvent(type, payload) {
@@ -1018,19 +1347,28 @@
         }
         break;
       case 'message.say': {
-        // ★ say = 交付结论（模型的"嘴"）。后端一直在发这个事件，而前端此前**没有这个分支** ✗
-        //   ⇒「最终输出看不到」的根因就在这一处 ✓（TUI 走 onText 回退路，所以它显示得出来）
-        //   现在：渲染成**醒目的交付气泡**，并把本回合的「过程」块自动收起 ✓
+        // 两种"张嘴"在 2026-11-24 之前被渲染成同一个交付块：
+        //   · say     = 过程插话（边干边说）→ 插一条低调的「说」，回合继续
+        //   · deliver = 收尾交付（长文）    → 交付块 + 收起本回合过程
+        // 后端在 loop.takeSayStatus 里带出 kind；缺省按 'say'（老调用方没有这个信息，
+        // 误标交付比误标插话更伤：用户会以为活干完了）。
         showThinking(false);
         if (companionActive) break;      // 陪伴会话走 companion.say，不进主界面 ✓
         const sayText = (payload && payload.content) || '';
+        const sayKind = (payload && payload.kind) || 'say';
         if (sayText) {
-          const wrap = bubbleAssistant(sayText, { delivery: true });   // 专属样式 ⇒ 一眼看出「这是交付」✓
+          const wrap = sayKind === 'deliver'
+            ? bubbleAssistant(sayText, { delivery: true })
+            : bubbleInterjection(sayText);
           const ml = $('#message-list');
           if (ml) ml.appendChild(wrap);
         }
-        collapseProcessGroup();
-        resetProcessGroup();             // 交付之后若还有过程，另起一块 ✓
+        // 只有交付才收束过程块：插话之后还要继续干活，收起过程等于把现场藏起来，
+        // 而且 reset 会把后续工具调用拆成一串碎片块。
+        if (sayKind === 'deliver') {
+          collapseProcessGroup();
+          resetProcessGroup();
+        }
         if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
         scrollChat();
         break;
@@ -1043,26 +1381,36 @@
         showThinking(true, (payload && payload.content) || '思考中…');
         if (currentView() === 'companion') companionSetDialogue('💭 ' + ((payload && payload.content) || '思考中…'));
         break;
-      case 'message.tool_use':
+      case 'message.tool_use': {
         showThinking(false);
         if (companionActive) break; // 陪伴会话的工具调用在陪伴视图呈现
-        appendProcess(bubbleTool((payload && payload.name) || '工具', (payload && payload.inputSummary) || ''));
+        const tName = (payload && payload.name) || '工具';
+        const tId = payload && payload.id;
+        // say / deliver 的正文由 message.say 单独渲染；这里再出一张卡就是重复，
+        // 且它的 tool_result（"ok"）会变成一条无意义的 ↳ 注记。
+        if (isOutputTool(tName) && tId) { outputToolIds.add(tId); break; }
+        appendProcess(bubbleTool(tName, (payload && payload.inputSummary) || '', tId, Date.now()));
         break;
-      case 'message.tool_result':
+      }
+      case 'message.tool_result': {
         if (companionActive) break;
+        const err = !!(payload && payload.isError);
+        const text = (payload && payload.content) || '';
+        const rid = payload && payload.id;
+        if (rid && outputToolIds.has(rid)) break;   // say / deliver 的回执是噪音
+        // 优先挂回原卡片（同一 id）⇒ 一张有状态、有输出的行动卡；
+        // 配不上（无 id / 卡片已被清屏）才退回注记，输出永不丢失。
+        if (attachToolResult(rid, text, err)) break;
         // 工具级错误通过 isError 标志醒目显示（不触发回合级 message.error，避免误收起过程块）
-        if (payload && payload.isError) {
-          appendProcess(bubbleSystem('⚠️  ↳ ' + ((payload && payload.content) || '')));
-        } else {
-          appendProcess(bubbleSystem('  ↳ ' + ((payload && payload.content) || '')));
-        }
+        appendProcess(bubbleSystem(err ? '⚠️  ↳ ' + text : '  ↳ ' + text, err ? 'error' : 'info'));
         break;
+      }
       case 'message.status': {
         const msg = (payload && payload.message) || '';
         const level = (payload && payload.level) || 'info';
         // 过滤旁路 agent 内部标记，不渲染到聊天区
         if (msg === 'bypass-start' || msg === 'bypass-end') break;
-        appendProcess(bubbleSystem(`[${level}] ${msg}`));
+        appendProcess(bubbleSystem(msg, level));
         break;
       }
       case 'message.error':
@@ -2483,7 +2831,9 @@
     listEl.appendChild(el('div', 'text-xs font-semibold text-muted-foreground uppercase tracking-wide', '目录插件'));
     if (!dir) {
       listEl.appendChild(el('div', 'text-sm text-state-error', '取不到目录插件清单（后端可能未就绪）'));
-    } else if (!dir.plugins.length) {
+    } else if (!dir.plugins || !dir.plugins.length) {
+      // ⚠️ 判空要覆盖「dir 在、但 plugins 不是数组」：局部接口返回意外形状时，
+      // 直接 .length 会抛，整块插件视图停在空壳（上面 statusEl 那行就是同一顾虑）。
       listEl.appendChild(el('div', 'text-sm text-muted-foreground',
         '还没有目录插件。把带 plugin.json 的插件目录放进 ~/.agent/plugins/ 后点「刷新」。'));
     } else {
@@ -3022,9 +3372,16 @@
     const fab = $('#scroll-fab');
     const ml = $('#message-list');
     if (fab && ml) {
+      // 合并到 rAF：流式期间 childList 每追加一个节点都会触发一次，
+      // 而 syncFab 读 scrollHeight = 强制同步布局 ⇒ 逐条触发就是持续掉帧。
+      let fabRaf = 0;
       const syncFab = () => {
-        const gap = ml.scrollHeight - ml.scrollTop - ml.clientHeight;
-        fab.hidden = gap < 160;
+        if (fabRaf) return;
+        fabRaf = requestAnimationFrame(() => {
+          fabRaf = 0;
+          const gap = ml.scrollHeight - ml.scrollTop - ml.clientHeight;
+          fab.hidden = gap < 160 || _chatStick;
+        });
       };
       ml.addEventListener('scroll', syncFab, { passive: true });
       // 新消息追加时也要重算（否则"正在底部收到新消息"时按钮不出现）
@@ -4517,6 +4874,12 @@
   async function loadVoiceSettings() {
     const stateEl = $('#stt-model-state');
     if (!stateEl) return;
+    // 2026-11-19 审计修复：本函数是「语音输入」卡的**唯一**数据面，
+    // 而它的事件绑定在 bindVoiceSettingsOnce() 里 —— 那个函数此前**没有任何调用点**
+    // （全文件 0 处），于是开关 / 下载 / 删除三个按钮以及「切到语音 tab 刷新」
+    // 全部静默无效：点下去既不报错也没反应。绑定本身幂等（voiceSettingsBound），
+    // 挂在这里 = 任何拉取语音状态的路径都会顺手把绑定补齐。
+    bindVoiceSettingsOnce();
     let st = null;
     try { st = await client.request('stt.status'); } catch (e) { st = null; }
     let enabled = true;
@@ -5935,6 +6298,7 @@
     const images = pendingImages.slice();
     if (!text && !images.length) return;
     input.value = '';
+    fitTextarea(input, 180);   // 清空后要收回高度，否则留下一个三行高的空盒子
     pendingImages = [];
     renderAttachments();
     // 忙碌中：入队到输入框上方队列面板（不硬插进对话），回合结束自动发下一条
@@ -7430,10 +7794,10 @@
 
   // 对话框流式追加（message.text 是流式事件，逐段累积）
   let companionDialogueBuf = '';
-  function companionAppendDialogue(content) {
-    companionDialogueBuf += (content || '');
-    companionSetDialogue(companionDialogueBuf);
-  }
+  // 2026-11-19 审计删除：原 `companionAppendDialogue(content)` 把流式台词累加进
+  // companionDialogueBuf 再整段重设。现已无任何调用点 —— 实时路径改为
+  // companionSetDialogue()/companionResetDialogue() 直接设值（见 handleEvent 的
+  // companion.say / message.thinking 分支）；buffer 只在 reset 调用处读取，故保留。
   function companionResetDialogue(text) {
     companionDialogueBuf = '';
     companionSetDialogue(text || '');
@@ -7793,6 +8157,7 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    fitTextarea(input, 140);   // 同主输入框：清空后必须把高度收回去
     if (!connected) { companionSetDialogue('尚未连接后端，无法发送'); return; }
     if (window.lucide) { try { lucide.createIcons(); } catch (e) { /* ignore */ } }
     client.request('message.chat', { content: text }).catch((e) => {
@@ -7812,10 +8177,7 @@
           sendCompanion();
         }
       });
-      input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-      });
+      input.addEventListener('input', () => fitTextarea(input, 140));
     }
 
     // 历史浮层开关（message.history 数据驱动）
@@ -8738,10 +9100,7 @@
     if (input) {
       // 自动增高：单行起步，随内容长到 180px 再滚（CSS 里的 max-height 是硬上限）。
       // 之前只有陪伴视图的输入框做了这件事，主输入框一直是固定单行 —— 写多段需求时只能看到一行。
-      const autoGrow = () => {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 180) + 'px';
-      };
+      const autoGrow = () => fitTextarea(input, 180);
       input.addEventListener('input', autoGrow);
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
@@ -8868,6 +9227,47 @@
       window.visualViewport.addEventListener('resize', syncAppVh);
     }
 
+    // 滚动跟随的监听器**在启动时就绑**（2026-11-11）：原先懒绑定在 scrollChat() 里，
+    // 而 scrollChat 只在 appendMsg/流式事件路径上被调 ⇒ 空会话、历史加载前的
+    // "用户先滚一把" 完全没人接；调试注入内容时也永远绑不上（实测 stick 不翻转）。
+    // scrollChat() 自身幂等（_chatStickBound 守卫），此处调用只为触发绑定。
+    scrollChat();
+
+    // ── 滚动诊断（`?debug=scroll`）────────────────────────────────────
+    // 为什么写进产品代码：滚动"卡住"只在实机复现（无头跑不出来），但 DOM 度量是
+    // 客观的。打开后左下角常驻读数，能一眼分清三种完全不同的病因：
+    //   ⓪ sh-ch ≈ 0        ⇒ 元素根本没有滚动范围（你拖的是别的滚动条）
+    //   ① sh-ch 大但 st 不涨 ⇒ 有范围却滚不动（有人在抢 scrollTop）
+    //   ② 范围比内容大      ⇒ 幻影空白（布局撑开了但没有可见内容）
+    // 不传参数 = 这段完全不执行，零开销。
+    if (/[?&]debug=scroll/.test(location.search)) {
+      const dbg = document.createElement('div');
+      dbg.style.cssText =
+        'position:fixed;left:8px;bottom:8px;z-index:9999;font:11px/1.35 ui-monospace,monospace;' +
+        'background:rgba(0,0,0,.85);color:#8df;padding:6px 8px;border-radius:6px;' +
+        'white-space:pre;pointer-events:none';
+      document.body.appendChild(dbg);
+      const dump = (label, el) => {
+        if (!el) return label + ': -';
+        const cs = getComputedStyle(el);
+        return label + ' sh=' + el.scrollHeight + ' ch=' + el.clientHeight +
+          ' st=' + Math.round(el.scrollTop) + ' box=' + Math.round(el.getBoundingClientRect().height) +
+          ' ov=' + cs.overflowY;
+      };
+      const dbgTick = () => {
+        dbg.textContent = [
+          dump('msg ', $('#message-list')),
+          dump('empty', $('#chat-empty')),
+          dump('wrap', $('#chat-wrapper')),
+          dump('doc ', document.scrollingElement),
+          'stick=' + _chatStick + ' raf=' + _chatScrollRaf,
+        ].join('\n');
+      };
+      dbgTick();
+      setInterval(dbgTick, 400);
+      window.addEventListener('scroll', dbgTick, true);
+    }
+
     // ── 对话空状态（首屏引导）──────────────────────────────────────
     // 背景：原先首屏是一大片空区 ✗（新用户不知道该干什么 ✓）。
     // 现在：无消息 ⇒ 显示引导 + 三条建议；有消息 ⇒ 收起 ✓。
@@ -8969,6 +9369,18 @@
   //    不一致，说明上游有嵌套错误，挪源码不一定生效（已实测）。
   // ⚠️ 必须在 bindUI()/navigate() 之前执行，否则第一次导航拿到的还是坏布局。
   // ════════════════════════════════════════════════════════════
+  // 结构修正：把散落在 #app-shell 下的视图收进 #hyacinth-main。
+  //
+  // ⚠️ 这不是空转代码（2026-11-19 审计曾误判并删除，已恢复）：index.html 的
+  //    `<section data-view="companion">` 一直写在 `</main>` 之后、`#app-shell` 之内
+  //    （它是全屏沉浸视图，与 #preview-dock 同属"main 的兄弟"），本函数每次启动
+  //    都会把它挪进 main —— 也就是说，用户当前看到的陪伴布局**是补丁后的结果**。
+  //    删掉它 = 改变实际布局，不是清理死代码。
+  // 历史：2026-10-27 修「切设置页时整块内容消失」时加的（当时 6 个视图都被浏览器
+  //    解析成了 #app-shell 直属子元素，带 h-full ⇒ 主体高度塌成 0）。那 6 个已经在
+  //    HTML 里修好，现在只剩 companion 这一处仍靠它归位。
+  // 判据：`section[data-view]` 里除 companion 外都必须直接在 main 内 —— 见
+  //    src/webui/webui-layout.guard.test.ts（结构回退即红，不靠这个运行时补丁兜底）。
   (function normalizeViewSections() {
     const shell = document.getElementById('app-shell');
     const main = document.getElementById('hyacinth-main');

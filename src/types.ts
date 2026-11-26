@@ -4,7 +4,7 @@ export type MessageRole = 'system' | 'user' | 'assistant';
 export interface TextContent {
   type: 'text';
   text: string;
-  cache_control?: { type: 'ephemeral' };
+  cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' };
 }
 
 export interface ThinkingContent {
@@ -22,7 +22,17 @@ export interface ToolUseContent {
 export interface ToolResultContent {
   type: 'tool_result';
   tool_use_id: string;
-  content: string;
+  /**
+   * 工具结果内容（2026-11-26 放宽）。
+   *
+   * - `string`：纯文本结果（绝大多数工具）；
+   * - 块数组：可携带图片。Anthropic / Gemini 3+ 原生支持；OpenAI Chat Completions
+   *   只接受文本，发送时由适配器降级为文本占位。
+   *
+   * ⚠️ 消费方**不要**直接对它做字符串操作（md5 / match / 模板拼接），
+   * 先走 `utils/tool-result.ts` 的 `toolResultToText()` / `toolResultBlocks()`。
+   */
+  content: string | Array<TextContent | ImageContent>;
   is_error?: boolean;
 }
 
@@ -42,7 +52,7 @@ export type MediaSource =
 export interface ImageContent {
   type: 'image';
   source: ImageSource;
-  cache_control?: { type: 'ephemeral' };
+  cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' };
 }
 
 /** 视频内容块（模型支持 video 输入时发送；sampling 为请求提示，非硬约束） */
@@ -51,7 +61,7 @@ export interface VideoContent {
   source: MediaSource;
   media_type: string;
   sampling?: { fps?: number; max_frames?: number; max_long_side_pixel?: number };
-  cache_control?: { type: 'ephemeral' };
+  cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' };
 }
 
 /** 音频内容块 */
@@ -59,7 +69,7 @@ export interface AudioContent {
   type: 'audio';
   source: MediaSource;
   media_type: string;
-  cache_control?: { type: 'ephemeral' };
+  cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' };
 }
 
 export type MessageContent = TextContent | ThinkingContent | ToolUseContent | ToolResultContent | ImageContent | VideoContent | AudioContent;

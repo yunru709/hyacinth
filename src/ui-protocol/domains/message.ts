@@ -94,9 +94,16 @@ export class ProtocolOutputHandler implements OutputHandler {
     this.emit(UI_EVENT.MESSAGE_TEXT, { content });
   }
 
-  /** say 交付（模型的"嘴"）：独立事件，UI 据此用不同样式渲染 */
-  onSay(content: string): void {
-    this.emit(UI_EVENT.MESSAGE_SAY, { content });
+  /** 输出（模型的"嘴"）：独立事件，UI 据此用不同样式渲染。
+   *  kind 区分「过程插话」与「收尾交付」—— 两者的视觉权重完全不同，
+   *  混成一个事件会让 UI 把插话标成交付（2026-11-24 修）。
+   *  缺省 'say'：老调用方没有这个信息，按过程插话处理比误标交付安全。 */
+  onSay(content: string, meta?: { kind?: 'say' | 'deliver'; title?: string }): void {
+    this.emit(UI_EVENT.MESSAGE_SAY, {
+      content,
+      kind: meta?.kind ?? 'say',
+      ...(meta?.title ? { title: meta.title } : {}),
+    });
   }
 
   onThinking(content: string): void {

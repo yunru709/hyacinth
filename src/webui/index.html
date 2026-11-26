@@ -91,8 +91,8 @@
       <div class="ctx-track"><div id="header-context-bar" style="width: 0%"></div></div>
       <span id="header-context-text">— / —</span>
     </div>
-    <span id="header-cache-text" style="font-size:11px;color:#9ca3af;margin-left:8px;white-space:nowrap" title="上下文缓存命中率"></span>
-    <span id="header-tokens-text" style="font-size:11px;color:#9ca3af;margin-left:8px;white-space:nowrap" title="本会话累计 token（入/出）"></span>
+    <span id="header-cache-text" style="font-size: var(--text-xs);color:#9ca3af;margin-left:8px;white-space:nowrap" title="上下文缓存命中率"></span>
+    <span id="header-tokens-text" style="font-size: var(--text-xs);color:#9ca3af;margin-left:8px;white-space:nowrap" title="本会话累计 token（入/出）"></span>
 
     <div id="header-online" class="online-pill" title="正在连接后端…">
       <span id="header-online-dot" style="background-color:#6b7280"></span>
@@ -351,6 +351,13 @@
             </div>
 
             <div id="composer-hint" class="composer-hint">
+              <!-- 计划进度：后端 StateSnapshot 早就有 planStepsDone/Total（TUI 也一直在显示），
+                   WebUI 此前一次都没读 ⇒ 有 plan 的回合里"还剩几步"完全不可见。
+                   没有 plan 时整块隐藏（不占位、不显示 0/0）。 -->
+              <span id="plan-chip" class="plan-chip" hidden>
+                <i data-lucide="list-checks"></i>
+                <span id="plan-chip-text"></span>
+              </span>
               <span>Enter 发送 / Shift+Enter 换行</span>
               <span id="composer-attach-hint" class="hidden">图片将随本条消息一起发送</span>
             </div>
@@ -649,6 +656,16 @@
         <div id="automation-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-2"></div>
         </div>
         <div id="auto-tasks-view" class="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-2" hidden>
+          <!-- 2026-11-19 审计补齐：app.js 的 loadTasks() 早就读 #tasks-status 与
+               #tasks-refresh-btn（并各自判空），但这两个节点在 HTML 里一直不存在 ⇒
+               「已启用 x/y」状态条和刷新按钮从来没出现过（半截功能）。
+               这里按 plugins 视图的头部样式补齐，JS 一行不改。 -->
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <p id="tasks-status" class="text-xs text-muted-foreground">加载中…</p>
+            <button id="tasks-refresh-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-muted text-xs font-medium text-foreground hover:bg-muted-foreground/10 transition-colors">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span>
+            </button>
+          </div>
           <div id="tasks-list" class="space-y-2"></div>
         </div>
       </div>
@@ -672,25 +689,25 @@
         .skill-row { border: 1px solid var(--hyacinth-border); border-radius: 10px; background-color: var(--hyacinth-card); overflow: hidden; }
         .skill-row-head { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; }
         .skill-info { flex: 1 1 auto; min-width: 0; }
-        .skill-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .skill-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--text-base); font-weight: 600; color: var(--hyacinth-foreground); }
         .skill-name { font-family: var(--font-mono, ui-monospace, monospace); }
-        .skill-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hyacinth-border); color: var(--hyacinth-muted-foreground); font-weight: 500; }
-        .skill-desc { margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
+        .skill-badge { font-size: var(--text-2xs); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--hyacinth-border); color: var(--hyacinth-muted-foreground); font-weight: 500; }
+        .skill-desc { margin-top: 4px; font-size: var(--text-sm); line-height: 1.6; color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
         .skill-tools { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
-        .skill-tool { font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; padding: 1px 5px; border-radius: 4px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); }
+        .skill-tool { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-2xs); padding: 1px 5px; border-radius: 4px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); }
         .skill-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
         .skill-toggle { width: 38px; height: 22px; border-radius: 999px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-muted); position: relative; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease; }
         .skill-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background-color: var(--hyacinth-foreground); opacity: 0.45; transition: transform 140ms ease, opacity 140ms ease; }
         .skill-toggle.is-on { background-color: var(--hyacinth-primary); border-color: var(--hyacinth-primary); }
         .skill-toggle.is-on::after { transform: translateX(16px); background-color: #fff; opacity: 1; }
         .skill-toggle:disabled { opacity: 0.5; cursor: wait; }
-        .skill-expand { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; }
+        .skill-expand { font-size: var(--text-xs); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; }
         .skill-expand:hover { color: var(--hyacinth-foreground); }
         .skill-body { display: none; border-top: 1px dashed var(--hyacinth-border); padding: 0 14px 12px; }
         .skill-row.is-open .skill-body { display: block; }
-        .skill-prompt { margin-top: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.65; background-color: var(--hyacinth-background); border: 1px solid var(--hyacinth-border); border-radius: 6px; padding: 10px; color: var(--hyacinth-muted-foreground); }
-        .skill-meta { margin-top: 8px; font-size: 11px; color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
-        .skill-empty { padding: 40px 16px; text-align: center; font-size: 12.5px; color: var(--hyacinth-muted-foreground); }
+        .skill-prompt { margin-top: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-sm); line-height: 1.65; background-color: var(--hyacinth-background); border: 1px solid var(--hyacinth-border); border-radius: 6px; padding: 10px; color: var(--hyacinth-muted-foreground); }
+        .skill-meta { margin-top: 8px; font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); overflow-wrap: anywhere; }
+        .skill-empty { padding: 40px 16px; text-align: center; font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); }
       </style>
       <div class="h-full flex flex-col" data-dom-id="skills-panel">
         <div class="shrink-0 px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3 flex-wrap">
@@ -711,8 +728,8 @@
         .settings-tab-radio { position: absolute; opacity: 0; pointer-events: none; }
         .settings-frame { display: flex; height: 100%; width: 100%; min-width: 0; }
         .settings-tabs { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px; border-right: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); }
-        .settings-tabs-header { padding: 0 10px 12px; font-size: 14px; font-weight: 600; color: var(--hyacinth-foreground); }
-        .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: 13px; color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+        .settings-tabs-header { padding: 0 10px 12px; font-size: var(--text-md); font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-tab { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; font-size: var(--text-base); color: var(--hyacinth-foreground); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
         .settings-tab:hover { background-color: var(--hyacinth-muted); }
         /* tab 高亮与 panel 显隐由 bindSettingsPanelSwitch() 统一驱动（JS 单点）：
            label 选中态加 .is-active；panel 按 panel-<name> 命名约定显隐。
@@ -728,23 +745,23 @@
         .theme-preview { display: flex; gap: 4px; height: 44px; padding: 6px; border-radius: 6px; border: 1px solid var(--hyacinth-border); }
         .theme-preview-swatch { flex: 1; border-radius: 3px; }
         .theme-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-        .theme-name { font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); }
-        .theme-check { font-size: 11px; color: var(--hyacinth-primary); display: none; }
+        .theme-name { font-size: var(--text-sm); font-weight: 600; color: var(--hyacinth-foreground); }
+        .theme-check { font-size: var(--text-xs); color: var(--hyacinth-primary); display: none; }
         .theme-card[aria-pressed="true"] .theme-check { display: inline; }
 
         
         .settings-card { background-color: var(--hyacinth-card); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 16px; }
-        .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--hyacinth-foreground); }
+        .settings-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: var(--text-md); font-weight: 600; color: var(--hyacinth-foreground); }
         .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid transparent; }
         .settings-row + .settings-row { border-top: 1px solid var(--hyacinth-border); }
         .settings-row-stack { display: flex; flex-direction: column; gap: 8px; }
-        .settings-label { font-size: 13px; color: var(--hyacinth-foreground); }
-        .settings-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
-        .settings-input { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; font-family: var(--font-mono); }
+        .settings-label { font-size: var(--text-base); color: var(--hyacinth-foreground); }
+        .settings-desc { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); }
+        .settings-input { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); font-family: var(--font-mono); }
         .settings-input:focus { outline: none; border-color: var(--hyacinth-primary); }
-        .settings-textarea { min-height: 88px; padding: 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; line-height: 1.5; resize: vertical; }
+        .settings-textarea { min-height: 88px; padding: 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); line-height: 1.5; resize: vertical; }
         .settings-textarea:focus { outline: none; border-color: var(--hyacinth-primary); }
-        .settings-select { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: 13px; }
+        .settings-select { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-foreground); font-size: var(--text-base); }
         .settings-select:focus { outline: none; border-color: var(--hyacinth-primary); }
         .settings-toggle { position: relative; width: 40px; height: 22px; appearance: none; border-radius: 999px; background-color: var(--hyacinth-muted); cursor: pointer; transition: background-color 120ms ease; }
         .settings-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 999px; background-color: var(--hyacinth-foreground); transition: transform 120ms ease; }
@@ -755,54 +772,54 @@
         .voice-mgr { margin-top: 10px; display: flex; flex-direction: column; gap: 12px; }
         .vm-section { border: 1px solid var(--hyacinth-border); border-radius: 10px; padding: 10px 12px; }
         .vm-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-        .vm-title { font-size: 12px; font-weight: 500; color: var(--hyacinth-foreground); }
-        .vm-summary { font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .vm-title { font-size: var(--text-sm); font-weight: 500; color: var(--hyacinth-foreground); }
+        .vm-summary { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); }
         .vm-list { display: flex; flex-direction: column; gap: 6px; max-height: 170px; overflow-y: auto; }
-        .vm-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 10px; border-radius: 8px; background-color: var(--hyacinth-input); border: 1px solid transparent; }
+        .vm-item { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); padding: 6px 10px; border-radius: 8px; background-color: var(--hyacinth-input); border: 1px solid transparent; }
         .vm-item:hover { border-color: var(--hyacinth-border); }
         .vm-item.vm-bound { border-color: var(--hyacinth-primary); }
         .vm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hyacinth-foreground); }
-        .vm-meta { font-size: 11px; color: var(--hyacinth-muted-foreground); white-space: nowrap; }
-        .vm-del { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; font-size: 14px; line-height: 1; }
+        .vm-meta { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); white-space: nowrap; }
+        .vm-del { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--hyacinth-muted-foreground); cursor: pointer; font-size: var(--text-md); line-height: 1; }
         .vm-del:hover { color: var(--hyacinth-primary-foreground); background-color: #e24b4a; }
         .vm-add { display: flex; gap: 6px; margin-top: 8px; }
-        .vm-btn { padding: 0 14px; height: 32px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--primary-100); color: var(--hyacinth-primary); font-size: 12px; cursor: pointer; white-space: nowrap; }
+        .vm-btn { padding: 0 14px; height: 32px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--primary-100); color: var(--hyacinth-primary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
         .vm-btn:hover { border-color: var(--hyacinth-primary); }
         .vm-btn:disabled { opacity: 0.5; cursor: default; }
-        .vm-empty { font-size: 12px; color: var(--hyacinth-muted-foreground); padding: 6px 0; }
-        .settings-unit { font-size: 12px; color: var(--hyacinth-muted-foreground); margin-left: 6px; }
+        .vm-empty { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); padding: 6px 0; }
+        .settings-unit { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); margin-left: 6px; }
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
         .command-shortcuts { display: flex; flex-direction: column; gap: 8px; }
         .command-shortcut-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .command-shortcut-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-        .command-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); background-color: var(--primary-100); padding: 2px 6px; border-radius: 4px; width: fit-content; }
-        .command-desc { font-size: 12px; color: var(--hyacinth-muted-foreground); }
-        .command-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); color: var(--hyacinth-foreground); font-size: 12px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap; }
+        .command-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); background-color: var(--primary-100); padding: 2px 6px; border-radius: 4px; width: fit-content; }
+        .command-desc { font-size: var(--text-sm); color: var(--hyacinth-muted-foreground); }
+        .command-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-card); color: var(--hyacinth-foreground); font-size: var(--text-sm); cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; text-decoration: none; white-space: nowrap; }
         .command-link:hover { background-color: var(--hyacinth-muted); border-color: var(--hyacinth-primary); }
         .prompt-source-list { display: flex; flex-direction: column; gap: 8px; }
         .prompt-source-item { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .prompt-source-main { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-        .prompt-source-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
-        .prompt-source-type { font-size: 10px; padding: 1px 6px; border-radius: 999px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); text-transform: uppercase; }
+        .prompt-source-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); }
+        .prompt-source-type { font-size: var(--text-2xs); padding: 1px 6px; border-radius: 999px; background-color: var(--hyacinth-muted); color: var(--hyacinth-muted-foreground); text-transform: uppercase; }
         .prompt-source-type.conditional { background-color: var(--primary-100); color: var(--hyacinth-primary); }
         .prompt-source-type.runtime { background-color: rgba(140, 200, 255, 0.12); color: var(--state-info); }
-        .prompt-source-path { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
-        .prompt-source-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); margin-top: 4px; }
+        .prompt-source-path { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .prompt-source-desc { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); margin-top: 4px; }
         .settings-subcard { background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); border-radius: 8px; padding: 12px; }
-        .assembly-pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .assembly-pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); }
         .assembly-pipeline-step { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .assembly-pipeline-arrow { color: var(--hyacinth-primary); display: inline-flex; }
         .zone-list { display: flex; flex-direction: column; gap: 12px; }
-        .zone-header { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--hyacinth-foreground); padding: 6px 10px; border-radius: 6px; background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); }
+        .zone-header { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); font-weight: 600; color: var(--hyacinth-foreground); padding: 6px 10px; border-radius: 6px; background-color: var(--neutral-150); border: 1px solid var(--hyacinth-border); }
         .zone-sections { display: flex; flex-direction: column; gap: 6px; padding-left: 8px; }
         .zone-section-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); }
         .zone-section-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .zone-section-name { font-family: var(--font-mono); font-size: 12px; color: var(--hyacinth-primary); }
+        .zone-section-name { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--hyacinth-primary); }
         .zone-section-name .prompt-source-type { margin-left: 6px; }
-        .zone-section-source { font-size: 11px; color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
-        .zone-section-desc { font-size: 11px; color: var(--hyacinth-muted-foreground); }
+        .zone-section-source { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); font-family: var(--font-mono); }
+        .zone-section-desc { font-size: var(--text-xs); color: var(--hyacinth-muted-foreground); }
         .mechanism-legend { display: flex; flex-wrap: wrap; gap: 6px; }
-        .mechanism-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-muted-foreground); }
+        .mechanism-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: var(--text-xs); border: 1px solid var(--hyacinth-border); background-color: var(--hyacinth-input); color: var(--hyacinth-muted-foreground); }
       </style>
 
       <h1 class="sr-only">设置</h1>
@@ -1306,7 +1323,7 @@
                     </p>
 
                     <div class="settings-subcard">
-                      <div class="settings-card-header" style="margin-bottom: 8px; font-size: 13px;">
+                      <div class="settings-card-header" style="margin-bottom: 8px; font-size: var(--text-base);">
                         <i data-lucide="layers" class="w-3.5 h-3.5 text-primary"></i>
                         <span>覆盖优先级</span>
                       </div>
@@ -1959,10 +1976,10 @@
         </div>
         <div class="history-scroll" id="history-scroll">
             <div class="history-inner" id="history-list">
-                <button id="history-load-more" class="history-load-more" type="button">
-                    <i data-lucide="chevron-up" class="w-4 h-4"></i>
-                    <span>显示更多</span>
-                </button>
+                <!-- 2026-11-19 审计删除：这里原有一个静态「显示更多」按钮 #history-load-more，
+                     但 app.js 里没有任何绑定（全文件 0 处），且 renderCompanionHistoryPage()
+                     用 list.innerHTML = … 整体重建本容器 ⇒ 该按钮首次渲染即被冲掉、永远不会出现。
+                     真正的分页按钮由 JS 动态生成（id="history-more"，见 app.js renderCompanionHistoryPage）。 -->
             </div>
         </div>
         <!-- 语音重放列表（数据源：协议层 companion.voiceList） -->
@@ -2100,7 +2117,7 @@
 }
 
 .dialogue-name {
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--hyacinth-primary);
   margin-bottom: 10px;
@@ -2110,7 +2127,7 @@
 }
 
 .dialogue-text {
-  font-size: 17px;
+  font-size: var(--text-lg);
   line-height: 1.85;
   color: var(--hyacinth-foreground);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -2133,7 +2150,7 @@
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.10);
   color: var(--hyacinth-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: var(--font-mono);
   cursor: pointer;
   backdrop-filter: blur(12px);
@@ -2221,7 +2238,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--hyacinth-muted-foreground);
   font-family: var(--font-mono);
 }
@@ -2257,7 +2274,7 @@
   border: none;
   outline: none;
   color: var(--hyacinth-foreground);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.6;
   resize: none;
 }
@@ -2289,7 +2306,7 @@
   border: 1px solid rgba(255,255,255,0.1);
   background: rgba(255,255,255,0.04);
   color: var(--hyacinth-muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease;
 }
@@ -2326,7 +2343,7 @@
   flex-shrink: 0;
 }
 .history-title {
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--hyacinth-foreground);
 }
@@ -2358,7 +2375,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--hyacinth-muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
   cursor: pointer;
   transition: background-color 200ms ease, color 200ms ease;
@@ -2407,7 +2424,7 @@
 }
 .voice-main { flex: 1; min-width: 0; }
 .voice-text {
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.5;
   color: var(--hyacinth-foreground);
   overflow: hidden;
@@ -2420,37 +2437,20 @@
   display: flex;
   gap: 8px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--hyacinth-muted-foreground);
 }
 .voice-empty {
   padding: 48px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--hyacinth-muted-foreground);
 }
 
-.history-load-more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px;
-  margin-bottom: 8px;
-  border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--hyacinth-muted-foreground);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
-}
-.history-load-more:hover {
-  background: rgba(255, 255, 255, 0.10);
-  color: var(--hyacinth-foreground);
-  border-color: rgba(255, 255, 255, 0.16);
-}
+/* 2026-11-19 审计删除：.history-load-more 与 .history-load-more:hover 两条规则随
+   静态按钮 #history-load-more 一同移除（该按钮从未绑定过事件、且会被
+   renderCompanionHistoryPage() 的 innerHTML 重建冲掉；分页按钮是动态生成的
+   .history-more）。样式留着只会让下一个人去找那个不存在的按钮。 */
 
 .history-scroll {
   flex: 1;
@@ -2495,7 +2495,7 @@
   max-width: min(70%, 560px);
   padding: 14px 18px;
   border-radius: var(--radius-lg);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.7;
   background: var(--hyacinth-bubble-assistant-bg, var(--hyacinth-card));
   border: 1px solid var(--hyacinth-bubble-assistant-border, var(--hyacinth-border));
@@ -2515,7 +2515,7 @@
 .history-turn.assistant .history-time {
   display: block;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   opacity: 0.6;
 }
 
@@ -2551,7 +2551,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--hyacinth-muted-foreground);
   font-family: var(--font-mono);
 }
@@ -2582,7 +2582,7 @@
   gap: 3px;
 }
 .hm-audio-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--hyacinth-foreground);
   font-family: var(--font-mono);
@@ -2591,7 +2591,7 @@
   text-overflow: ellipsis;
 }
 .hm-audio-sub {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--hyacinth-muted-foreground);
   font-family: var(--font-mono);
 }
@@ -2666,12 +2666,12 @@
   transform: translateY(0);
 }
 .scene-info-title {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--hyacinth-foreground);
 }
 .scene-info-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--hyacinth-muted-foreground);
   font-family: var(--font-mono);
   display: flex;

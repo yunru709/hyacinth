@@ -1,4 +1,5 @@
 import type { Message, StreamEvent, ProviderType, ToolDefinition } from '../types.js';
+import type { ToolPolicy } from './tool-policy.js';
 
 /** Provider 能力描述 */
 export interface ProviderCapabilities {
@@ -84,6 +85,17 @@ export interface Provider {
    * @param maxOutputTokens 新的单次输出上限（> 0）
    */
   setMaxOutputTokens?(maxOutputTokens: number): void;
+
+  /**
+   * 运行时设置工具调用策略（2026-11-26）。
+   *
+   * 与 `setThinking` / `setMaxOutputTokens` 同为「每轮下发」的可选 setter：
+   * 消费方（goal / verification / 自主模式）在需要时调用，未调用 ⇒ 不发送任何字段。
+   * 包装类（ResilientProvider / fallback / 通道 provider）必须**转发**，否则静默失效。
+   *
+   * 映射由 `tool-policy.ts` 的纯函数负责，adapter 不要自己写 if/else。
+   */
+  setToolPolicy?(policy: ToolPolicy): void;
 
   // ⚠️ 2026-11-08：此处原有**第二份** `setUserId?(userId: string): void;` 声明，
   // 与上方 getModel() 之后那份完全重复（TypeScript 对同名可选方法只取其一，

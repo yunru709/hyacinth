@@ -435,7 +435,47 @@ export async function loadImageFileToStore(
 
 // ── view_image 工具 ──────────────────────────────────────────────────
 
-export function createViewImageTool(imageStore: ImageStore, pendingInjections: Array<{ imgId: string; data: string; media_type: string }>) {
+/**
+ * 视觉能力不足时的统一告知（2026-11-21）。
+ *
+ * 背景（摩擦清单第 1 条）：`view_image` 曾经无条件回「will be visible in the next response」，
+ * 而 context 阶段 `if (pending.length > 0 && vision)` 在 **vision=false 时直接跳过**，
+ * 调用方随后又无条件 `pendingImageInjections.length = 0` ⇒ 图被静默丢弃，
+ * 我（agent）以为看到了、其实整轮靠用户文字瞎猜。
+ * 现在三层同一边界：工具层先查能力并**显式拒绝**，context 层兜底落 MediaDropped 标记。
+ * ⚠️ 这里的措辞要与 `orchestrator/stages/context.ts` 的 `droppedMarker` 保持一致。
+ */
+export function imageNotDeliveredNotice(imgId: string, model?: string): string {
+  return (
+    `[Image #${imgId} NOT DELIVERED] 当前模型${model ? `（${model}）` : ''}不支持图像输入（vision=false）` +
+    `⇒ 图**没有**送进上下文，你看不到它。图仍在索引里：换到视觉模型后可再次 view_image("${imgId}")，` +
+    `否则请让用户用文字描述内容。`
+  );
+}
+
+/** view_image 的运行时能力注入（缺省 = 保持旧行为「支持」，仅测试/老装配不传） */
+export interface ViewImageOptions {
+  /** 本轮实际发送的模型是否支持图像输入 */
+  getVisionSupport?: () => boolean;
+  /** 仅用于告知文案 */
+  getModelLabel?: () => string;
+}
+
+/**
+ * 2026-11-21 活体实验发现：`pendingInjections` 的**每一项都必须带 origin**。
+ *
+ * 事故（当场复现，不是推测）：调 `view_image("C:\...\avatar-v5.png")`，工具回
+ * "will be visible in the next response"，下一轮**确实看到了图**；但落盘的
+ * MediaStripped 标记写的是「来源未记录（可能是渠道附图）—— 需要时请重发」。
+ * 原因：路径分支 push 时只塞了 `{imgId, data, media_type}`，丢了来源；
+ * 而 `ImageStore.store()` 明明把 source_path 存下来了。后果：历史里那条标记无法回溯，
+ * 下一轮的我只能读到"来源未记录"，误判成"图没送达"（摩擦清单第 1 条的原始症状）。
+ */
+export function createViewImageTool(
+  imageStore: ImageStore,
+  pendingInjections: Array<{ imgId: string; data: string; media_type: string; origin?: string }>,
+  opts: ViewImageOptions = {},
+) {
   return {
     name: 'view_image',
     description: 'View an image: pass an indexed image ID (e.g. "img_001"), OR a local image file path (generated file / user file) — paths are auto-read, compressed and injected into context on the next turn.',
@@ -458,11 +498,20 @@ export function createViewImageTool(imageStore: ImageStore, pendingInjections: A
         }).join('\n');
       }
       const img = imageStore.get(imgId);
+      // 能力闸门：vision=false 时**不注入**、也不回「will be visible」——否则图被 context 阶段静默丢弃，
+      // 而我以为看到了（见 imageNotDeliveredNotice 注释）。图仍留在 imageStore，换模型后可再取。
+      const visionOk = opts.getVisionSupport?.() ?? true;
       if (!img) {
         // 路径回看：生成产物 / 用户图片文件 → 读取+压缩+索引+注入（P2 多模态）
         const loaded = await loadImageFileToStore(imgId, imageStore);
         if (loaded) {
-          pendingInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type });
+          if (!visionOk) {
+            return `[Image #${loaded.id} indexed from ${imgId}]\n`
+              + imageNotDeliveredNotice(loaded.id, opts.getModelLabel?.());
+          }
+          // ⚠️ origin 必须带上（2026-11-21 实测）：漏了它，落盘的 MediaStripped 就成「来源未记录」，
+          // 下一轮的我读到后误判成"图没送达"。此处来源就是调用方给的路径（imgId 此时是路径）。
+          pendingInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type, origin: imgId });
           const ext = loaded.media_type.split('/')[1]?.toUpperCase() || 'IMG';
           const sizeStr = loaded.data.length < 700 ? `${loaded.data.length}B` : `${(loaded.data.length / 700).toFixed(1)}KB`;
           return `[Image #${loaded.id} loaded from ${imgId}: ${ext}, ${sizeStr}]
@@ -471,7 +520,9 @@ The image will be visible in the next response.`;
         const available = imageStore.list().map(i => i.id).join(', ') || '(none)';
         return `Image #${imgId} not found (也不是可读取的本地图片路径). Available images: ${available}`;
       }
-      pendingInjections.push({ imgId, data: img.data, media_type: img.media_type });
+      if (!visionOk) return imageNotDeliveredNotice(imgId, opts.getModelLabel?.());
+      // 同上：origin 从索引里取回（store() 时记过 source_path）
+      pendingInjections.push({ imgId, data: img.data, media_type: img.media_type, origin: img.source_path || undefined });
       const sizeStr = img.byteSize < 1024 ? `${img.byteSize}B` : `${(img.byteSize / 1024).toFixed(1)}KB`;
       const desc = img.description ? ` — ${img.description.slice(0, 200)}` : '';
       return `[Image #${imgId} retrieved: ${img.media_type.split('/')[1]?.toUpperCase() || 'IMG'}, ${sizeStr}${desc}]\nThe image will be visible in the next response.`;
@@ -484,6 +535,10 @@ The image will be visible in the next response.`;
 /** view_media 执行时解析的能力/阈值（支持运行时 provider 切换） */
 export interface ViewMediaOptions {
   getInputTypes?: () => string[] | undefined;
+  /** 视觉能力（图片分支的闸门，2026-11-21 与 view_image 同一语义；缺省视为支持） */
+  getVisionSupport?: () => boolean;
+  /** 仅用于「未送达」告知文案 */
+  getModelLabel?: () => string;
   getVideoInlineMaxBytes?: () => number | undefined;
   getVideoMaxFrames?: () => number | undefined;
   getAudioInlineMaxBytes?: () => number | undefined;
@@ -515,6 +570,9 @@ export function createViewMediaTool(
       required: [], // media_path 或 capture 二选一（execute 里校验）
     },
     async execute(args: Record<string, unknown>): Promise<string> {
+      // 视觉能力闸门（2026-11-21，与 view_image 同一语义）：vision=false 时图片注入会被
+      // context 阶段静默丢弃 ⇒ 这里必须如实回报「没送进去」，否则我会以为看到了。
+      const visionOk = opts.getVisionSupport?.() ?? true;
       const captureSpec = String(args.capture || '').trim();
       if (captureSpec) {
         // 抓源：base64 直接进内存 imageStore，全程不落盘。
@@ -522,6 +580,10 @@ export function createViewMediaTool(
         if (cap.error) return cap.error;
         const b64 = cap.base64!;
         const imgId = imageStore.store(b64, 'image/png', captureSpec);
+        if (!visionOk) {
+          return `[Image #${imgId} captured from ${captureSpec}]\n`
+            + imageNotDeliveredNotice(imgId, opts.getModelLabel?.());
+        }
         pendingImageInjections.push({ imgId, data: b64, media_type: 'image/png', origin: captureSpec });
         return `[Image #${imgId} captured from ${captureSpec}]\nThe image will be visible in the next response.`;
       }
@@ -533,17 +595,22 @@ export function createViewMediaTool(
       if (imageStore.get(target) || IMAGE_MIME_MAP[ext]) {
         const img = imageStore.get(target);
         if (img) {
+          if (!visionOk) return imageNotDeliveredNotice(target, opts.getModelLabel?.());
           pendingImageInjections.push({ imgId: target, data: img.data, media_type: img.media_type, origin: img.source_path || undefined });
           return `[Image #${target} retrieved]\nThe image will be visible in the next response.`;
         }
         const loaded = await loadImageFileToStore(target, imageStore);
         if (loaded) {
-          pendingImageInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type, origin: target });
           // 抓源临时文件用完即删（摄像头帧/窗口截图不留在盘上，防累积 + 隐私）。只删本工具产出的 hyacinth-cam-/hyacinth-capture-。
           const bn = path.basename(target);
           if (bn.startsWith('hyacinth-cam-') || bn.startsWith('hyacinth-capture-')) {
             try { fs.unlinkSync(target); } catch { /* ignore */ }
           }
+          if (!visionOk) {
+            return `[Image #${loaded.id} indexed from ${target}]\n`
+              + imageNotDeliveredNotice(loaded.id, opts.getModelLabel?.());
+          }
+          pendingImageInjections.push({ imgId: loaded.id, data: loaded.data, media_type: loaded.media_type, origin: target });
           return `[Image #${loaded.id} loaded from ${target}]\nThe image will be visible in the next response.`;
         }
         return `Error: 无法读取图片 ${target}`;

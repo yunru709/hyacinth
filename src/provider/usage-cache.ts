@@ -21,6 +21,14 @@ export interface CacheUsage {
   hit: number;
   /** 未命中（需重新计费）的输入 token 数 */
   miss: number;
+  /**
+   * 写入缓存的 token 数（2026-11-26 新增，可选）。
+   *
+   * 来源：Anthropic 风格 `cache_creation_input_tokens`、部分网关 `cache_write_tokens`、
+   * `prompt_tokens_details.cache_creation_tokens`。多数 OpenAI 兼容厂商不提供 ⇒ 只在
+   * 有值时输出该键（避免破坏既有 `toEqual({hit, miss})` 断言与所有消费方）。
+   */
+  write?: number;
 }
 
 /** 安全取数：仅接受有限数字 */
@@ -41,16 +49,23 @@ export function extractCacheUsage(
 ): CacheUsage | undefined {
   if (!usage || typeof usage !== 'object') return undefined;
   const u = usage as Record<string, unknown>;
+  const details = u.prompt_tokens_details as Record<string, unknown> | undefined;
+
+  // 写入量（可选，2026-11-26）：Anthropic 风格 / 网关命名 / details 内嵌三种来源
+  const write =
+    num(u.cache_creation_input_tokens) ??
+    num(u.cache_write_tokens) ??
+    num(details?.cache_creation_tokens);
+  const withWrite = (r: CacheUsage): CacheUsage => (write !== undefined ? { ...r, write } : r);
 
   // 1) DeepSeek 官方：hit / miss 成对返回，最精确，优先采用
   const hitPair = num(u.prompt_cache_hit_tokens);
   const missPair = num(u.prompt_cache_miss_tokens);
   if (hitPair !== undefined && missPair !== undefined) {
-    return { hit: hitPair, miss: missPair };
+    return withWrite({ hit: hitPair, miss: missPair });
   }
 
   // 2)/3) 只有"命中量"的厂商：用总输入量推导未命中部分
-  const details = u.prompt_tokens_details as Record<string, unknown> | undefined;
   const hit =
     num(details?.cached_tokens) ??
     num(u.cached_tokens) ??
@@ -59,7 +74,7 @@ export function extractCacheUsage(
     hitPair;
   const prompt = num(u.prompt_tokens) ?? promptTokens;
   if (hit !== undefined && prompt !== undefined) {
-    return { hit, miss: Math.max(0, prompt - hit) };
+    return withWrite({ hit, miss: Math.max(0, prompt - hit) });
   }
 
   return undefined;

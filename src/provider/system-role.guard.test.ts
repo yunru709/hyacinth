@@ -43,4 +43,31 @@ describe('system 角色不得降级为 user', () => {
     expect(sys).toBeDefined();
     expect(Object.keys(sys)).toEqual(['role', 'content']);
   });
+
+  // ── 2026-11-21：角色能力清单（role-capabilities.ts）接入后的行为 ──
+  it('openai + gpt-5.5 → developer（能力清单命中，不是硬编码）', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj = Object.create(OpenAIProvider.prototype) as any;
+    obj.model = 'gpt-5.5';
+    const out = obj.convertMessages(messages);
+    expect(out.map((m: { role: string }) => m.role)).toEqual(['developer', 'user']);
+    expect(out[0].content).toBe('SYSTEM_MARKER_PERSONA');
+  });
+
+  it('openai + gpt-4o → 仍是 system（旧模型不认 developer）', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj = Object.create(OpenAIProvider.prototype) as any;
+    obj.model = 'gpt-4o';
+    const out = obj.convertMessages(messages);
+    expect(out[0].role).toBe('system');
+  });
+
+  it('compatible + gpt-5.5 → 仍是 system（中转层是否认 developer 无法保证，保守）', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj = Object.create(OpenAICompatibleProvider.prototype) as any;
+    obj.model = 'gpt-5.5';
+    obj.providerType = 'openrouter';
+    const out = obj.convertMessages(messages);
+    expect(out[0].role).toBe('system');
+  });
 });

@@ -13,6 +13,8 @@ import { getModelInfo } from './catalog.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
 import { toProviderError } from './errors.js';
 import type { ProviderSampling } from './fields.js';
+import { toGeminiToolConfig, type ToolPolicy } from './tool-policy.js';
+import { toolResultBlocks, toolResultToText } from '../utils/tool-result.js';
 
 export interface GeminiProviderOptions {
   apiKey?: string;
@@ -63,6 +65,8 @@ export class GeminiProvider implements Provider {
   private model: string;
   private maxOutputTokens: number;
   private sampling?: ProviderSampling;
+  /** 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变） */
+  private toolPolicy?: ToolPolicy;
 
   constructor(opts: GeminiProviderOptions = {}) {
     const apiKey =
@@ -105,6 +109,11 @@ export class GeminiProvider implements Provider {
   }
 
   /** 运行时改单次输出上限（wire 的 maxOutputTokens）。见 Provider 接口说明。 */
+  /** 工具调用策略（2026-11-26）。未设置 ⇒ 不发送任何字段；映射见 tool-policy.ts。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.toolPolicy = policy;
+  }
+
   setMaxOutputTokens(maxOutputTokens: number): void {
     if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
     this.maxOutputTokens = maxOutputTokens;
@@ -160,6 +169,10 @@ export class GeminiProvider implements Provider {
           : undefined,
         tools: tools && tools.length > 0 ? this.convertTools(tools) : undefined,
         maxOutputTokens: this.maxOutputTokens,
+        // 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变）
+        ...(this.toolPolicy?.toolChoice !== undefined
+          ? { toolConfig: toGeminiToolConfig(this.toolPolicy.toolChoice) as unknown as Record<string, unknown> }
+          : {}),
         ...(this.sampling?.temperature !== undefined ? { temperature: this.sampling.temperature } : {}),
         ...(this.sampling?.topP !== undefined ? { topP: this.sampling.topP } : {}),
         // 2026-11-08：关闭思考时显式下发 `thinkingBudget: 0`（Gemini 官方的关闭方式）。
@@ -300,7 +313,14 @@ export class GeminiProvider implements Provider {
       if (msg.role === 'user') {
         const textParts: string[] = [];
         const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
-        const responseParts: Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = [];
+        const responseParts: Array<{
+          functionResponse: {
+            name: string;
+            response: Record<string, unknown>;
+            /** Gemini 3+ 支持 functionResponse 携带图片（2.x 只接受文本） */
+            parts?: Array<{ inlineData: { mimeType: string; data: string } }>;
+          };
+        }> = [];
         // 多模态视频/音频（Gemini inlineData / fileData）
         const mediaParts: Array<{ inlineData?: { mimeType: string; data: string }; fileData?: { fileUri: string } }> = [];
 
@@ -309,16 +329,31 @@ export class GeminiProvider implements Provider {
           else if (b.type === 'tool_result') {
             const fnName = toolUseNames.get(b.tool_use_id);
             if (fnName) {
-              // 结构化 functionResponse：与上一条 functionCall 配对，保证工具调用闭环
+              // 2026-11-26：Gemini 3+ 支持 functionResponse.parts 携带图片；2.x 只接受文本。
+              // URL 图片此处不内联（需先下载，留给后续），只处理 base64。
+              const trText = toolResultToText(b.content);
+              const imgBlocks = toolResultBlocks(b.content).filter((x) => x.type === 'image');
+              const supportsParts = /^gemini-3/i.test(this.model);
               responseParts.push({
                 functionResponse: {
                   name: fnName,
-                  response: b.is_error ? { error: sanitizeText(b.content) } : { output: sanitizeText(b.content) },
+                  response: b.is_error ? { error: trText } : { output: trText },
+                  ...(supportsParts && imgBlocks.length > 0
+                    ? {
+                        parts: imgBlocks
+                          .filter((x) => x.source.type === 'base64')
+                          .map((x) => ({
+                            inlineData: {
+                              mimeType: (x.source as { type: 'base64'; media_type: string; data: string }).media_type,
+                              data: (x.source as { type: 'base64'; media_type: string; data: string }).data,
+                            },
+                          })),
+                      }
+                    : {}),
                 },
               });
             } else {
-              // 找不到对应 tool_use（异常场景）：降级为文本，避免 API 报 400
-              textParts.push(`[Tool result: ${sanitizeText(b.content.substring(0, 200))}]`);
+              textParts.push(`[Tool result: ${toolResultToText(b.content).substring(0, 200)}]`);
             }
           } else if (b.type === 'image' && b.source.type === 'base64') {
             imageParts.push({ inlineData: { mimeType: b.source.media_type, data: b.source.data } });

@@ -12,6 +12,7 @@ import {
   buildThinkingParams,
   buildAnthropicThinking,
   normalizeThinkingStyle,
+  normalizeDeepSeekEffort,
   resolveThinkingStyle,
   EFFORT_OFF,
 } from './thinking-style.js';
@@ -55,6 +56,24 @@ describe('resolveThinkingStyle（模型级 > 厂商级 > none）', () => {
   it('模型级是非法值时不吞掉厂商级（回落而非中断）', () => {
     expect(resolveThinkingStyle('effort', 'effort-required ')).toBe('effort-required');
     expect(resolveThinkingStyle('effort', 'effortRequired')).toBe('effort');
+  });
+});
+
+describe('normalizeDeepSeekEffort（官方枚举 low/high/max）', () => {
+  it('合法值原样保留', () => {
+    expect(normalizeDeepSeekEffort('low')).toBe('low');
+    expect(normalizeDeepSeekEffort('high')).toBe('high');
+    expect(normalizeDeepSeekEffort('max')).toBe('max');
+  });
+
+  it('commandcode 体系的 medium / xhigh 归一化到官方枚举', () => {
+    expect(normalizeDeepSeekEffort('medium')).toBe('high');
+    expect(normalizeDeepSeekEffort('xhigh')).toBe('max');
+  });
+
+  it('未设置 / 大小写 / 空白 ⇒ high（官方默认）', () => {
+    expect(normalizeDeepSeekEffort(undefined)).toBe('high');
+    expect(normalizeDeepSeekEffort(' MAX ')).toBe('max');
   });
 });
 

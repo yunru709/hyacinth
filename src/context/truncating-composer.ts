@@ -26,6 +26,7 @@
  */
 
 import type { ComposeOptions, ContextComposerLike, LayeredComposeOptions, LayeredContext } from './interface.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import type { Message, MessageContent } from '../types.js';
 
 // ─── 估算（本实现自带的 token 估算，激进策略专用；不与内置 TokenCounter 共享） ───
@@ -54,7 +55,7 @@ function contentTokens(c: MessageContent): number {
     case 'tool_use':
       return estimateTextTokens(c.name) + estimateTextTokens(JSON.stringify(c.input ?? {}));
     case 'tool_result':
-      return estimateTextTokens(c.content) + 4;
+      return estimateTextTokens(toolResultToText(c.content)) + 4;
     case 'image':
       return IMAGE_TOKEN_COST;
     case 'video':

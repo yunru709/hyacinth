@@ -121,6 +121,32 @@ describe('ProtocolOutputHandler 事件广播', () => {
     expect(events.find((e) => e.type === 'message.diff')?.payload).toMatchObject({
       id: 't1', filePath: 'a.ts',
     });
+    // 工具结果必须带回同一个 id：UI 靠它把结果挂回调用卡（否则只能另起一条注记）
+    expect(events.find((e) => e.type === 'message.tool_result')?.payload).toMatchObject({
+      id: 't1', content: 'ok', isError: false,
+    });
+  });
+
+  /**
+   * say / deliver 的语义分叉（2026-11-24）。
+   *
+   * 两者共用 onSay 通道，但一个是"边干边说"的过程插话、一个是收尾交付；
+   * 事件里不带 kind，UI 只能一律当交付渲染 ⇒ 插话被标成交付、真交付被淹没。
+   */
+  it('onSay 带 kind：deliver / say 可区分，缺省按 say', async () => {
+    const { outputHandler, events, flush } = setup();
+
+    outputHandler.onSay('先说一句', { kind: 'say' });
+    outputHandler.onSay('# 交付正文', { kind: 'deliver', title: '结论' });
+    outputHandler.onSay('没写 kind 的老调用方');
+    await flush();
+
+    const says = events.filter((e) => e.type === 'message.say').map((e) => e.payload as Record<string, unknown>);
+    expect(says).toHaveLength(3);
+    expect(says[0]).toMatchObject({ content: '先说一句', kind: 'say' });
+    expect(says[1]).toMatchObject({ content: '# 交付正文', kind: 'deliver', title: '结论' });
+    // 缺省 = say：误标成交付比误标成插话更伤（用户会以为活干完了）
+    expect(says[2]).toMatchObject({ content: '没写 kind 的老调用方', kind: 'say' });
   });
 
   it('message.chat 转发 loop.run + 广播 turn_info + state.update', async () => {

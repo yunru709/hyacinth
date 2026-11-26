@@ -22,8 +22,11 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
+import { resolveRoleCapabilities } from './role-capabilities.js';
+import { toOpenAIToolChoice, type ToolPolicy } from './tool-policy.js';
 import { createLogger, isLogLevelEnabled } from '../logging/logger.js';
 
 const logger = createLogger('provider');
@@ -106,6 +109,8 @@ export class OpenAICompatibleProvider implements Provider {
   private model: string;
   private maxTokens: number;
   private providerType: ProviderType;
+  /** 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变） */
+  private toolPolicy?: ToolPolicy;
   private thinkingEnabled = false;
   private reasoningEffort: DeepSeekReasoningEffort;
   private userId?: string;
@@ -178,6 +183,11 @@ export class OpenAICompatibleProvider implements Provider {
     if (effort) this.reasoningEffort = effort;
   }
 
+  /** 工具调用策略（2026-11-26）。未设置 ⇒ 不发送任何字段；映射见 tool-policy.ts。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.toolPolicy = policy;
+  }
+
   /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
   setMaxOutputTokens(maxOutputTokens: number): void {
     if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
@@ -211,6 +221,14 @@ export class OpenAICompatibleProvider implements Provider {
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
+    }
+
+    // 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变）
+    if (this.toolPolicy?.toolChoice !== undefined) {
+      params.tool_choice = toOpenAIToolChoice(this.toolPolicy.toolChoice);
+    }
+    if (this.toolPolicy?.parallelToolCalls !== undefined) {
+      params.parallel_tool_calls = this.toolPolicy.parallelToolCalls;
     }
 
     // 思考字段 —— 位置必须在**顶层**。曾写成 `extra_body:{thinking:…}`，那是 Python SDK
@@ -408,7 +426,14 @@ export class OpenAICompatibleProvider implements Provider {
           .map((b) => (b.type === 'text' ? sanitizeText(b.text) : ''))
           .filter(Boolean)
           .join('');
-        if (text) result.push({ role: 'system', content: text });
+        // 2026-11-21：角色能力清单（role-capabilities.ts）。本文件服务 11 家中转/兼容厂商，
+        // 表里对它们统一声明 supportsDeveloperRole=false ⇒ 仍发 system（行为不变）。
+        // 之所以也读表而不是写死 'system'：将来某家中转确认支持 developer 时，
+        // 只改表一处，不用回来改这里 —— 这正是 11-08 事故要防的"漏改不报错"。
+        if (text) {
+          const caps = resolveRoleCapabilities(this.providerType, this.model);
+          result.push({ role: caps.supportsDeveloperRole ? 'developer' : 'system', content: text });
+        }
         continue;
       }
 
@@ -431,6 +456,16 @@ export class OpenAICompatibleProvider implements Provider {
             });
           } else if (block.type === 'thinking') {
             reasoningContent = (block as ThinkingContent).thinking;
+          } else if (block.type === 'image') {
+            // 2026-11-26：assistant 消息里的图片。OpenAI 系只允许 user 侧图片
+            // （image_url 必须出现在 user content parts）⇒ 这里不能原样发，但**也不能静默丢**
+            // （11-08 事故的教训：漏了不报错比报错更糟）。降级为文本占位 + 留日志。
+            const src = block.source;
+            textParts.push(src.type === 'base64' ? `[Image: ${src.media_type}]` : `[Image URL: ${src.url}]`);
+            logger.warn('assistant 消息含图片，已降级为文本占位', {
+              mediaType: src.type === 'base64' ? src.media_type : 'url',
+              reason: 'OpenAI 兼容协议不允许 assistant 侧图片',
+            });
           }
         }
 
@@ -466,7 +501,8 @@ export class OpenAICompatibleProvider implements Provider {
             toolResults.push({
               role: 'tool',
               tool_call_id: block.tool_use_id,
-              content: sanitizeText(block.content),
+              // 2026-11-26：OpenAI 兼容协议的 tool 消息只接受文本，图片降级为占位
+              content: sanitizeText(toolResultToText(block.content)),
             });
           } else if (block.type === 'image') {
             // 非视觉模型 → 降级为文本占位符

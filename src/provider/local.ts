@@ -9,8 +9,11 @@ import type { Provider, ProviderCapabilities } from './interface.js';
 import { getLocalProviderConfigLoader } from './local-config.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import { extractCacheUsage } from './usage-cache.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
+import { resolveRoleCapabilities } from './role-capabilities.js';
+import { toOpenAIToolChoice, type ToolPolicy } from './tool-policy.js';
 
 /** LocalProvider 构造选项 */
 export interface LocalProviderOptions {
@@ -39,6 +42,8 @@ export class LocalProvider implements Provider {
   private client: OpenAI;
   private model: string;
   private maxTokens: number;
+  /** 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变） */
+  private toolPolicy?: ToolPolicy;
   private _providerType: ProviderType;
 
   constructor(opts: LocalProviderOptions = {}) {
@@ -84,6 +89,11 @@ export class LocalProvider implements Provider {
    * NOTE（既有耦合，非本次引入）：本类的 getCapabilities().maxContextTokens 也用 this.maxTokens
    * （见上方），因此调小输出上限会连带把上报的上下文窗口一起调小。改这里前先看那处。
    */
+  /** 工具调用策略（2026-11-26）。未设置 ⇒ 不发送任何字段；映射见 tool-policy.ts。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.toolPolicy = policy;
+  }
+
   setMaxOutputTokens(maxOutputTokens: number): void {
     if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
     this.maxTokens = maxOutputTokens;
@@ -111,6 +121,14 @@ export class LocalProvider implements Provider {
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
+    }
+
+    // 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变）
+    if (this.toolPolicy?.toolChoice !== undefined) {
+      params.tool_choice = toOpenAIToolChoice(this.toolPolicy.toolChoice);
+    }
+    if (this.toolPolicy?.parallelToolCalls !== undefined) {
+      params.parallel_tool_calls = this.toolPolicy.parallelToolCalls;
     }
 
     const toolCallAccumulators = new Map<
@@ -267,6 +285,15 @@ export class LocalProvider implements Provider {
                 arguments: JSON.stringify(block.input),
               },
             });
+          } else if (block.type === 'image') {
+            // 2026-11-26：assistant 侧图片。OpenAI 兼容协议只允许 user 侧图片
+            // （image_url 在 user content parts 里）⇒ 不原样发，但**不能静默丢**
+            // （11-08 教训：漏了不报错比报错更糟）。降级为文本占位 + 日志。
+            const src = block.source;
+            textParts.push(src.type === 'base64' ? `[Image: ${src.media_type}]` : `[Image URL: ${src.url}]`);
+            console.warn('[local] assistant 消息含图片，已降级为文本占位', {
+              mediaType: src.type === 'base64' ? src.media_type : 'url',
+            });
           }
         }
 
@@ -290,7 +317,8 @@ export class LocalProvider implements Provider {
             toolResults.push({
               role: 'tool',
               tool_call_id: block.tool_use_id,
-              content: sanitizeText(block.content),
+              // 2026-11-26：本地后端的 OpenAI 兼容 tool 消息只接受文本，图片降级为占位
+              content: sanitizeText(toolResultToText(block.content)),
             });
           } else if (block.type === 'image') {
             // 仅视觉模型发送图片。LocalProvider 默认为非视觉，视图片为文本占位
@@ -310,6 +338,11 @@ export class LocalProvider implements Provider {
           }
         }
 
+        // 角色能力清单（2026-11-21）：本地后端（llama.cpp / Ollama）在表里统一声明
+        // supportsDeveloperRole=false ⇒ 仍发 system。读表而非写死，保证"差异只有一处声明"。
+        const systemRole = resolveRoleCapabilities(this.getProviderType(), this.model).supportsDeveloperRole
+          ? ('developer' as const)
+          : ('system' as const);
         result.push(...toolResults);
         if (imageParts.length > 0) {
           const content: OpenAI.ChatCompletionContentPart[] = [
@@ -317,13 +350,13 @@ export class LocalProvider implements Provider {
             ...(textParts.length > 0 ? [{ type: 'text' as const, text: textParts.join('') }] : []),
           ];
           if (msg.role === 'system') {
-            result.push({ role: 'system', content: textParts.join('') });
+            result.push({ role: systemRole, content: textParts.join('') });
           } else {
             result.push({ role: 'user', content });
           }
         } else if (textParts.length > 0) {
           if (msg.role === 'system') {
-            result.push({ role: 'system', content: textParts.join('') });
+            result.push({ role: systemRole, content: textParts.join('') });
           } else {
             result.push({ role: 'user', content: textParts.join('') });
           }

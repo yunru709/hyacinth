@@ -34,8 +34,9 @@ const DYNAMIC_TOOLS: Record<string, string> = {
   'delegate_to_agent': '运行时注册，name 声明形式与其他 Tool 类不同（src/agents/delegate-tool.ts）',
   'view_image': 'multimodal 内联对象工具（src/multimodal/index.ts）',
   'view_media': '同上',
-  'docx_read': 'Python 桥：名字来自 .py 元数据，不在 TS 源码里',
-  'xlsx_read': '同上',
+  // Python 桥工具（docx_read / xlsx_read / docx_write / xlsx_write …）**不再列在这里**：
+  // declaredToolNames() 直接扫描 src/tools/builtin/*.py 的 `name:` 行，声明即入包。
+  // 白名单只保留真正无法静态枚举的来源（MCP 前缀、运行时注册、multimodal 内联对象）。
   // ── ② 类：子 Agent 专属通道，**不能**归包 ──
   'report': '子 Agent → 父 Agent 的结果回传通道（src/agents/report-tool.ts）。'
     + '只在 delegate 建子 loop 时经白名单注入（delegate-tool.ts:244 的 FilteredToolRegistry）；'
@@ -102,6 +103,18 @@ function declaredToolNames(): Map<string, string> {
     // 普通对象形式的工具（runtime-control / knowledge / rollback / channels 下大量使用）
     for (const m of src.matchAll(/^\s*name:\s*'([a-z0-9_]+)'/gm)) {
       if (!found.has(m[1]!)) found.set(m[1]!, rel);
+    }
+  }
+
+  // Python 桥工具：名字来自 builtin/*.py 顶层 docstring 的 `name:` 行，不在 TS 源码里。
+  // 2026-11-17：此前只能靠手写白名单豁免（每加一个 .py 就要改测试，且顶到白名单 8 条上限）。
+  // 改为**从 .py 文件自身推导**：声明即入包，白名单只保留真正无法静态枚举的来源（MCP 前缀）。
+  const pyDir = path.join(ROOT, 'src', 'tools', 'builtin');
+  if (fs.existsSync(pyDir)) {
+    for (const name of fs.readdirSync(pyDir).filter((n) => n.endsWith('.py'))) {
+      const src = fs.readFileSync(path.join(pyDir, name), 'utf8');
+      const m = /^name:\s*([a-z0-9_]+)\s*$/m.exec(src);
+      if (m) found.set(m[1]!, `src/tools/builtin/${name}`);
     }
   }
   return found;

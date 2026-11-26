@@ -32,16 +32,43 @@
 /**
  * 模态数据的**剥离标记** —— 落盘用，替代原先的 base64 消息。
  *
- * 为什么：模态数据应**一次性**发送。标记很小、且**自带来源路径**，
+ * 为什么：模态数据应**一次性**发送。标记很小、且**自带取回方式**，
  * 于是"看完就从上下文剥离"与"还能再取回来"这两件事同时成立 ✓。
  * 头部 ASCII 键 MediaStripped 是给 grep 用的（中文匹配在某些 shell 里不可靠）。
+ *
+ * 2026-11-21 修正：无 origin 时旧文案写「来源未记录 —— 需要时请重发」，
+ * 这是错的洞见 —— 图其实还在 ImageStore 里，按 id 就能取回，没必要让用户重发。
+ * 而"来源未记录"本身多半是 `view_image` 路径分支漏传 origin 造成的（已在那边修）。
  */
 function strippedMarker(kind: string, id: string, origin: string | undefined): Message {
-  const src = origin ? '来源: ' + origin : '来源未记录（可能是渠道附图）—— 需要时请重发';
-  const how = origin ? '；再看一次就调 view_media("' + origin + '") ✓' : '';
+  const src = origin
+    ? '来源: ' + origin + '；再看一次就调 view_media("' + origin + '") ✓'
+    : '来源未记录（不影响取回：图仍在索引里，view_image("' + id + '") 即可）';
   return {
     role: 'user',
-    content: [{ type: 'text', text: '[MediaStripped ' + kind + ' #' + id + ' | ' + src + how + ']' }],
+    content: [{ type: 'text', text: '[MediaStripped ' + kind + ' #' + id + ' | ' + src + ']' }],
+  };
+}
+
+/**
+ * 「图没送进去」的显式标记（2026-11-21）。
+ *
+ * 与 strippedMarker 的区别：stripped = 图**送达过**、只在历史里留个能再取的线索；
+ * dropped = 图**根本没进入本轮请求**（模型无视觉能力等）。后者绝不能静默 ——
+ * 摩擦清单第 1 条踩的就是这个：工具层说"下一轮可见"，context 层直接跳过，我全程没看到图还以为是。
+ * 工具层（view_image / view_media）已先拦截；这条是兜底（渠道附图、read 工具图、视频抽帧等路径）。
+ * 头部 ASCII 键 MediaDropped 供 grep。
+ */
+function droppedMarker(kind: string, id: string, origin: string | undefined): Message {
+  const src = origin ? '来源: ' + origin : '来源未记录（可能是渠道附图）';
+  return {
+    role: 'user',
+    content: [{
+      type: 'text',
+      text: '[MediaDropped ' + kind + ' #' + id + ' | ' + src
+        + '｜未送达：当前模型无图像输入能力（vision=false），这张图**没有**进入上下文。'
+        + '换到视觉模型后可 view_image("' + id + '") 取回；否则请让用户用文字描述。]',
+    }],
   };
 }
 
@@ -167,7 +194,8 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
         : router.filterHistory(state.historyWithoutLastUser);
 
       // ── 3. 图片注入（仅视觉模型；注入后由调用方清空 pendingImageInjections） ──
-      if (state.pendingImageInjections.length > 0 && (activeProvider.getCapabilities?.()?.vision ?? false)) {
+      const imageVisionOk = activeProvider.getCapabilities?.()?.vision ?? false;
+      if (state.pendingImageInjections.length > 0 && imageVisionOk) {
         for (const pi of state.pendingImageInjections) {
           const imgMsg: Message = {
             role: 'user',
@@ -186,6 +214,13 @@ export function createContextStage(): StageModule<TurnState, StageServiceMap> {
           effectiveHistory = [...effectiveHistory, imgMsg];
           // 落盘只留标记：base64 **不进历史**（否则每轮重发 —— 用户 2026-09-19 裁定）✓
           await store.append(sessionDir, strippedMarker('图片', pi.imgId, pi.origin));
+        }
+      } else if (state.pendingImageInjections.length > 0) {
+        // 兜底（2026-11-21）：模型无视觉能力时**不能静默跳过** —— 调用方随后无条件清空 pending，
+        // 图就无声消失了，而工具层若没拦（渠道附图 / read 工具图 / 视频抽帧等路径）我完全不知情。
+        // 这里落一条显式 MediaDropped 标记，下一轮读历史即可知道「那张图我没看到」。
+        for (const pi of state.pendingImageInjections) {
+          await store.append(sessionDir, droppedMarker('图片', pi.imgId, pi.origin));
         }
       }
 

@@ -12,6 +12,7 @@
  */
 
 import type { Provider, ProviderCapabilities } from './interface.js';
+import type { ToolPolicy } from './tool-policy.js';
 import type { Message, StreamEvent, ToolDefinition, ProviderType } from '../types.js';
 import { createLogger } from '../logging/logger.js';
 import type { Logger } from '../logging/logger.js';
@@ -222,6 +223,11 @@ export class ResilientProvider implements Provider {
 
   setUserId(userId: string): void {
     this.inner.setUserId?.(userId);
+  }
+
+  /** 必须转发：否则熔断包装下工具策略静默失效（见 Provider 接口 setToolPolicy 说明）。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.inner.setToolPolicy?.(policy);
   }
 
   getCircuitState(): CircuitState {

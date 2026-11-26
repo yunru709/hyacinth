@@ -22,6 +22,7 @@ import type {
   ToolResultContent,
   StreamEvent,
 } from '../types.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import type { Provider } from '../provider/interface.js';
 import type { ModelRouter } from '../provider/model-router.js';
 import type { GitManager } from '../evolution/git-manager.js';
@@ -235,7 +236,7 @@ export class ToolOutputTrimmer {
       for (let ci = 0; ci < items.length; ci++) {
         const item = items[ci];
         if (!isToolResult(item)) continue;
-        const hash = md5(item.content);
+        const hash = md5(toolResultToText(item.content));
         resultMap.set(item.tool_use_id, { msgIdx: mi, itemIdx: ci, hash });
       }
     }
@@ -255,7 +256,7 @@ export class ToolOutputTrimmer {
 
       const newItems = items.map((item, ci) => {
         if (!isToolResult(item)) return item;
-        const hash = md5(item.content);
+        const hash = md5(toolResultToText(item.content));
         const latestId = hashToLatestId.get(hash);
         // 如果当前 id 不是最新的（即存在另一个同 hash 的不同 id），则替换
         if (latestId && latestId !== item.tool_use_id) {
@@ -341,7 +342,7 @@ export class ToolOutputTrimmer {
 
   /** 根据工具结果内容推断工具名并生成摘要 + 缓存 */
   private generateSummary(item: ToolResultContent): string {
-    const content = item.content;
+    const content = toolResultToText(item.content);
 
     // Read 工具：输出通常包含行号格式 "  1→content"
     const lineMatch = content.match(/^\s*\d+[→|]/m);
@@ -582,7 +583,7 @@ export class StructuredSummarizer {
           .map((item) => {
             if (isText(item)) return item.text;
             if (isToolUse(item)) return `[ToolUse: ${item.name}] ${JSON.stringify(item.input)}`;
-            if (isToolResult(item)) return `[ToolResult: ${item.tool_use_id}] ${item.content}`;
+            if (isToolResult(item)) return `[ToolResult: ${item.tool_use_id}] ${toolResultToText(item.content)}`;
             if (item.type === 'image') {
               const img = item as import('../types.js').ImageContent;
               return `[Image: ${img.source.type === 'base64' ? img.source.media_type : img.source.url}]`;
@@ -1076,7 +1077,7 @@ export class CompressorOrchestrator {
           if (isToolResult(c) && higherLayerToolUseIds.has(c.tool_use_id)) {
             fixedContents.push({
               type: 'text',
-              text: `[ToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(c.content)}`,
+              text: `[ToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(toolResultToText(c.content))}`,
             });
           } else {
             fixedContents.push(c);
@@ -1133,7 +1134,7 @@ export class CompressorOrchestrator {
         if (isToolResult(c) && !allToolUseIds.has(c.tool_use_id)) {
           fixedContents.push({
             type: 'text',
-            text: `[OrphanedToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(c.content)}`,
+            text: `[OrphanedToolResult: ${c.tool_use_id}] ${truncateDegradedToolResult(toolResultToText(c.content))}`,
           });
         } else {
           fixedContents.push(c);

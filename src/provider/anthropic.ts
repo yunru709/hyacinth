@@ -15,6 +15,7 @@ import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.j
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
 import { toProviderError } from './errors.js';
 import { buildAnthropicThinking, normalizeThinkingStyle, type ThinkingStyle } from './thinking-style.js';
+import { toAnthropicToolChoice, type ToolPolicy } from './tool-policy.js';
 /** AnthropicProvider 构造选项（在 ProviderConfig 基础上扩展） */
 export interface AnthropicProviderOptions {
   /** 必须提供 apiKey，或通过 ANTHROPIC_API_KEY 环境变量自动读取 */
@@ -62,6 +63,8 @@ export class AnthropicProvider implements Provider {
   private maxTokens: number;
   private thinkingEnabled: boolean;
   private thinkingBudget: number;
+  /** 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变） */
+  private toolPolicy?: ToolPolicy;
   /** 思考接线方式（缺省 anthropic = 原生延长思考语法） */
   private readonly thinkingStyle: ThinkingStyle;
 
@@ -136,6 +139,11 @@ export class AnthropicProvider implements Provider {
     this.thinkingBudget = budget;
   }
 
+  /** 工具调用策略（2026-11-26）。未设置 ⇒ 不发送任何字段；映射见 tool-policy.ts。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.toolPolicy = policy;
+  }
+
   /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
   setMaxOutputTokens(maxOutputTokens: number): void {
     if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
@@ -165,6 +173,14 @@ export class AnthropicProvider implements Provider {
     // tools
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
+    }
+
+    // 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变）
+    if (this.toolPolicy?.toolChoice !== undefined) {
+      params.tool_choice = toAnthropicToolChoice(
+        this.toolPolicy.toolChoice,
+        this.toolPolicy.parallelToolCalls,
+      );
     }
 
     // thinking —— 接线方式由 style 决定（缺省 anthropic 原生语法；关或不支持则不发）
@@ -366,9 +382,22 @@ export class AnthropicProvider implements Provider {
         }
       } else if (msg.role === 'user' || msg.role === 'assistant') {
         const content = Array.isArray(msg.content) ? msg.content : [msg.content];
+        // 2026-11-26：Anthropic Messages API 只在 **user** 侧接受 image block；
+        // assistant 侧带图会被 400。这里降级为文本占位而不是原样发（也不是静默丢）——
+        // 11-08 的教训是"漏了不报错"比报错更糟。
+        const normalized = msg.role === 'assistant'
+          ? content.map((b) => (b.type === 'image'
+              ? {
+                  type: 'text' as const,
+                  text: b.source.type === 'base64'
+                    ? `[Image: ${b.source.media_type}]`
+                    : `[Image URL: ${b.source.url}]`,
+                }
+              : b))
+          : content;
         filteredMessages.push({
           role: msg.role,
-          content: this.convertContentBlocks(content),
+          content: this.convertContentBlocks(normalized),
         });
       }
     }
@@ -435,14 +464,22 @@ export class AnthropicProvider implements Provider {
           });
           break;
 
-        case 'tool_result':
+        case 'tool_result': {
+          // 2026-11-26：Anthropic 原生支持 tool_result 携带图片块（TextBlockParam | ImageBlockParam）。
+          // 字符串路径保持原样；数组路径逐块 sanitize（文本清洗、图片原样透传）。
+          const trContent = typeof block.content === 'string'
+            ? sanitizeText(block.content)
+            : block.content.map((b) => (b.type === 'text'
+                ? { type: 'text' as const, text: sanitizeText(b.text) }
+                : b as unknown as Anthropic.ImageBlockParam));
           result.push({
             type: 'tool_result' as const,
             tool_use_id: block.tool_use_id,
-            content: sanitizeText(block.content),
+            content: trContent,
             ...(block.is_error != null ? { is_error: block.is_error } : {}),
           });
           break;
+        }
 
         case 'thinking':
           // Anthropic API 不接受 thinking 块作为输入，跳过

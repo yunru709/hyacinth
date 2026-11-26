@@ -1635,6 +1635,20 @@ button:not(:disabled), [role='button'], a, select { cursor: pointer; }
   --scrollbar-thumb: var(--neutral-250);
   --scrollbar-thumb-hover: var(--neutral-300);
 
+  /* ── 字体刻度（2026-11-21 收敛）──
+   * 病因：shell.css / app.css / index.html 内联样式里散落 13 种 px 值
+   * （9.5 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 13.5 / 14 / 15 / 16 / 17），
+   * 共 154 处 —— 没有阶梯，每个组件各取一个"看着顺眼"的数。
+   * 规则：只有这 6 档；新增字号一律引用变量，不再写裸 px。
+   * 取值原则：以原有众数为中心（11/12/13 三档占 70%），不整体放大界面。
+   */
+  --text-2xs: 10px;   /* 徽章、极小标注、时间戳 */
+  --text-xs: 11px;    /* 元信息、侧栏次级、代码小块 */
+  --text-sm: 12px;    /* 紧凑正文、设置项描述、列表项 */
+  --text-base: 13px;  /* 正文与控件默认（占比最高） */
+  --text-md: 14px;    /* 强调正文、卡片标题 */
+  --text-lg: 16px;    /* 视图标题、空态标题 */
+
   /* Spacing / Layout */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;

@@ -52,4 +52,23 @@ describe('extractCacheUsage（按候选字段名探测）', () => {
     expect(extractCacheUsage(null)).toBeUndefined();
     expect(extractCacheUsage('usage')).toBeUndefined();
   });
+
+  // ── 2026-11-26：缓存写入量（write）────────────────────────────────
+  it('Anthropic 风格 cache_creation_input_tokens → 附带 write', () => {
+    const u = { prompt_tokens: 1000, cache_read_input_tokens: 300, cache_creation_input_tokens: 200 };
+    expect(extractCacheUsage(u)).toEqual({ hit: 300, miss: 700, write: 200 });
+  });
+
+  it('网关 cache_write_tokens / details.cache_creation_tokens → 同样识别', () => {
+    expect(extractCacheUsage({ prompt_tokens: 100, cached_tokens: 40, cache_write_tokens: 60 }))
+      .toEqual({ hit: 40, miss: 60, write: 60 });
+    expect(extractCacheUsage({ prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 10, cache_creation_tokens: 20 } }))
+      .toEqual({ hit: 10, miss: 90, write: 20 });
+  });
+
+  it('没有写入量字段 → 结果不含 write 键（既有断言兼容）', () => {
+    const r = extractCacheUsage({ prompt_tokens: 100, cached_tokens: 30 });
+    expect(r).toEqual({ hit: 30, miss: 70 });
+    expect(r !== undefined && 'write' in r).toBe(false);
+  });
 });

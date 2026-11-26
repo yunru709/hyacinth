@@ -407,11 +407,11 @@ html {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--hyacinth-foreground);
 }
-.code-theme-check { display: none; font-size: 11px; color: var(--hyacinth-primary); }
+.code-theme-check { display: none; font-size: var(--text-xs); color: var(--hyacinth-primary); }
 .code-theme-card[aria-pressed='true'] .code-theme-check { display: inline; }
 
 /* 预览：一小段真实着色的代码，比色块更能反映配色 */
@@ -423,7 +423,7 @@ html {
   background: var(--code-bg);
   color: var(--code-fg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
   white-space: pre;
   overflow: hidden;

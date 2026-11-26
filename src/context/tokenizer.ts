@@ -10,6 +10,7 @@ import type {
   VideoContent,
   AudioContent,
 } from '../types.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import type { ContextConfig } from '../setup/config.js';
 
 // --- Lazy singleton encoding ---
@@ -103,7 +104,7 @@ export class TokenCounter {
       }
       case 'tool_result': {
         const trc = content as ToolResultContent;
-        return this.countTokens(trc.content) + 4;
+        return this.countTokens(toolResultToText(trc.content)) + 4;
       }
       case 'image': {
         // 官方上界（见 IMAGE_TOKEN_UPPER_BOUND 注释）；URL 与 base64 都是同一张图 ⇒ 同价 ✓

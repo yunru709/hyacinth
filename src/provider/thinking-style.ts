@@ -46,6 +46,32 @@ const VALID_STYLES: readonly string[] = [
 export const EFFORT_OFF = 'off';
 
 /**
+ * DeepSeek 官方 `reasoning_effort` 枚举归一化（2026-11-26 代理直取官方文档）。
+ *
+ * 官方 Thinking Mode 文档写明：OpenAI 格式下 `reasoning_effort` 只接受
+ * `low` / `high` / `max`（默认 high），**没有 medium / xhigh / off**。
+ * 而本模块的 effort 配置来自用户手写 providers.json，可能混入 commandcode 体系的
+ * 枚举（off/low/medium/high/xhigh/max）⇒ 直接透传会让严格端点 400。
+ *
+ * 归一化规则：
+ *   low → low；medium → high（官方默认档）；xhigh → max；其余（含未设置）→ high。
+ * 关闭思考不走这里：调用方用 `enabled=false` 走 `thinking:{type:'disabled'}`。
+ */
+export function normalizeDeepSeekEffort(effort?: string): 'low' | 'high' | 'max' {
+  switch ((effort ?? '').trim().toLowerCase()) {
+    case 'low':
+      return 'low';
+    case 'max':
+    case 'xhigh':
+      return 'max';
+    case 'medium':
+    case 'high':
+    default:
+      return 'high';
+  }
+}
+
+/**
  * 归一化外部输入。
  *
  * providers.json 是用户手写的，style 可能是拼错的字符串 —— 必须回落到
@@ -74,8 +100,10 @@ export function buildThinkingParams(
 ): Record<string, unknown> {
   switch (style) {
     case 'deepseek':
+      // 官方文档（2026-11-26）：reasoning_effort 只接受 low/high/max ⇒ 用户配置里的
+      // medium/xhigh（来自 commandcode 体系）必须归一化，否则严格端点 400。
       return enabled
-        ? { thinking: { type: 'enabled' }, reasoning_effort: effort ?? 'high' }
+        ? { thinking: { type: 'enabled' }, reasoning_effort: normalizeDeepSeekEffort(effort) }
         : { thinking: { type: 'disabled' } };
     case 'effort':
       // 关闭时也**必须发**：上游思考默认开着，不显式发 'off' 就关不掉。

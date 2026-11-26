@@ -8,6 +8,7 @@ import type {
 import type { Provider, ProviderCapabilities } from '../provider/interface.js';
 import { withRetry } from '../provider/retry.js';
 import type { LlamaCppOptions } from './types.js';
+import { toolResultToText } from '../utils/tool-result.js';
 
 export type { LlamaCppOptions };
 
@@ -454,7 +455,7 @@ export class LlamaCppProvider implements Provider {
             toolResults.push({
               role: 'tool',
               tool_call_id: block.tool_use_id,
-              content: block.content,
+              content: toolResultToText(block.content),
             });
           }
         }

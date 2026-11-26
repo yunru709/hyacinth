@@ -121,9 +121,15 @@ export interface OutputHandler {
   /** Ask the user structured questions with options. Each question supports multi-select and custom input.
    *  Returns a JSON string mapping question index → selected answers. */
   onAskUser?(questions: AskUserQuestion[]): Promise<string>;
-  /** say 工具交付内容（模型的"嘴"）。可选：实现方可用不同样式渲染，
-   *  未实现时回退 onText（见 takeSayStatus）。 */
-  onSay?(content: string): void;
+  /** 输出内容（模型的"嘴"）。可选：实现方可用不同样式渲染，
+   *  未实现时回退 onText（见 takeSayStatus）。
+   *
+   *  `meta.kind` 区分两种语义 —— UI 若一律当"交付"渲染，就会把过程插话
+   *  （say）也标成交付，而真正的收尾交付（deliver）反而分不出来：
+   *    · 'say'     = 过程插话（会朗读、不结束回合）
+   *    · 'deliver' = 收尾交付（Markdown 长文、不朗读、置回合结束）
+   *  未传 kind 的实现按 'say' 处理（历史实现只有这一种）。 */
+  onSay?(content: string, meta?: { kind?: 'say' | 'deliver'; title?: string }): void;
   /** 通用事件通道（陪伴语音等非 message 正文的后端推送；协议层转发给 UI） */
   onEvent?(type: string, payload?: unknown): void;
 }
@@ -1006,12 +1012,22 @@ export class AgentLoop {
     }
 
     // ── 注册 view_image / view_media 工具（依赖 ImageStore + 注入队列） ──
+    // 2026-11-21：加视觉能力闸门。当前模型 vision=false 时（如 deepseek-v4-flash），
+    // context 阶段根本不会把图放进请求 ⇒ 旧行为下工具仍回「will be visible next response」，
+    // 我于是以为看到了、其实没看到。闸门必须在工具层，让回执如实说「没送达」。
+    // 用 getActiveProvider 近似「本轮实际发送模型」：工具执行发生在同一 turn 内，
+    // 而 provider 是每轮开头一次性确定的，二者在此期间一致。
     this.toolRegistry.register(
-      createViewImageTool(this.imageStore, this.pendingImageInjections),
+      createViewImageTool(this.imageStore, this.pendingImageInjections, {
+        getVisionSupport: () => this.getActiveProvider().getCapabilities?.()?.vision ?? false,
+        getModelLabel: () => this.getActiveProvider().getModel?.(),
+      }),
     );
     this.toolRegistry.register(
       createViewMediaTool(this.imageStore, this.pendingImageInjections, this.pendingMediaInjections, {
         getInputTypes: () => this.getActiveProvider().getCapabilities?.()?.inputTypes,
+        getVisionSupport: () => this.getActiveProvider().getCapabilities?.()?.vision ?? false,
+        getModelLabel: () => this.getActiveProvider().getModel?.(),
         getVideoInlineMaxBytes: () => this.configCenter?.get('multimodal.videoInlineMaxBytes') as number | undefined,
         getVideoMaxFrames: () => this.configCenter?.get('multimodal.videoMaxFrames') as number | undefined,
         getAudioInlineMaxBytes: () => this.configCenter?.get('multimodal.audioInlineMaxBytes') as number | undefined,
@@ -1672,8 +1688,14 @@ export class AgentLoop {
       }
       // 走专用通道（onSay）：UI 可据此把「说/交付」与流式文本分开渲染；
       // 未实现 onSay 的渠道回退 onText，保持兼容。
-      if (this.outputHandler?.onSay) this.outputHandler.onSay(item.content);
-      else this.outputHandler?.onText?.(item.content);
+      // kind/title 必须一起带出去：只说"这是输出"的话，UI 无法把过程插话
+      // 与收尾交付分开（2026-11-24）。
+      if (this.outputHandler?.onSay) {
+        this.outputHandler.onSay(item.content, {
+          kind: item.kind,
+          ...(item.title ? { title: item.title } : {}),
+        });
+      } else this.outputHandler?.onText?.(item.content);
       // 只有 say 说话才播报；deliver 交付不朗读（2026-10-25）。
       // 语音能力由 say-voice 插件注入：串行排队 + 失败静默，绝不阻塞回合收尾。
       if (item.kind === 'say') {
@@ -1874,7 +1896,7 @@ export class AgentLoop {
         role: 'assistant',
         content: [{ type: 'text', text: cc }],
       }).catch(() => {});
-      if (this.outputHandler?.onSay) this.outputHandler.onSay(cc);
+      if (this.outputHandler?.onSay) this.outputHandler.onSay(cc, { kind: 'deliver' });
       else this.outputHandler?.onText?.(cc);
       this.outputHandler?.onStatus?.(`goal 验收通过：${result.reason || 'ok'}`, 'info');
       this.goalStatus = 'achieved';

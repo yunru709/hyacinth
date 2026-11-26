@@ -16,6 +16,7 @@
  */
 
 import type { Provider } from './interface.js';
+import type { ToolPolicy } from './tool-policy.js';
 import type { Message, StreamEvent, ToolDefinition, ProviderType } from '../types.js';
 import { ResilientProvider, isAbortError } from './resilient.js';
 import type { RetryConfig, CircuitBreakerConfig } from './resilient.js';
@@ -144,6 +145,13 @@ export class FallbackProviderChain implements Provider {
   setUserId(userId: string): void {
     for (const p of this.providers) {
       p.setUserId?.(userId);
+    }
+  }
+
+  /** 必须转发给链上每个成员：否则降级后工具策略对成员不生效。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    for (const p of this.providers) {
+      p.setToolPolicy?.(policy);
     }
   }
 

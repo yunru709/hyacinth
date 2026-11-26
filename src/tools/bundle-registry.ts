@@ -209,9 +209,9 @@ const BUILTIN_KNOWLEDGE: ToolBundle = {
 
 const BUILTIN_OFFICE: ToolBundle = {
   name: 'office',
-  description: '办公文档 — 读取 Word/Excel 文件（按需激活）',
+  description: '办公文档 — 读取与生成 Word/Excel 文件（按需激活）',
   builtin: true,
-  tools: ['docx_read', 'xlsx_read'],
+  tools: ['docx_read', 'xlsx_read', 'docx_write', 'xlsx_write'],
 };
 
 const BUILTIN_DATABASE: ToolBundle = {

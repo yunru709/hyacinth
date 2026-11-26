@@ -14,9 +14,12 @@ import { translateFields } from './fields.js';
 import type { ProviderFields, ProviderSampling } from './fields.js';
 import { recoverToolArguments, logToolArgsWarning } from './tool-args-recovery.js';
 import { sanitizeText, sanitizeStrings } from './sanitize.js';
+import { toolResultToText } from '../utils/tool-result.js';
 import { extractCacheUsage } from './usage-cache.js';
 import { toProviderError } from './errors.js';
 import { dropOrphanToolMessages, dropOrphanToolCalls } from './message-sanitize.js';
+import { resolveRoleCapabilities } from './role-capabilities.js';
+import { toOpenAIToolChoice, type ToolPolicy } from './tool-policy.js';
 /** OpenAIProvider 构造选项 */
 export interface OpenAIProviderOptions {
   /** 必须提供 apiKey，或通过 OPENAI_API_KEY 环境变量自动读取 */
@@ -52,6 +55,8 @@ export class OpenAIProvider implements Provider {
   private model: string;
   private maxTokens: number;
   private thinkingEnabled = false;
+  /** 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变） */
+  private toolPolicy?: ToolPolicy;
   private userId?: string;
   private sampling?: ProviderSampling;
   private fieldMap?: Partial<Record<keyof ProviderFields, string>>;
@@ -106,6 +111,11 @@ export class OpenAIProvider implements Provider {
     this.thinkingEnabled = enabled;
   }
 
+  /** 工具调用策略（2026-11-26）。未设置 ⇒ 不发送任何字段；映射见 tool-policy.ts。 */
+  setToolPolicy(policy: ToolPolicy): void {
+    this.toolPolicy = policy;
+  }
+
   /** 运行时改单次输出上限（wire 的 max_tokens）。见 Provider 接口 setMaxOutputTokens 说明。 */
   setMaxOutputTokens(maxOutputTokens: number): void {
     if (!Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) return;
@@ -134,6 +144,14 @@ export class OpenAIProvider implements Provider {
 
     if (tools && tools.length > 0) {
       params.tools = this.convertTools(tools);
+    }
+
+    // 工具调用策略（2026-11-26）：未设置 ⇒ 不发送任何字段（行为不变）
+    if (this.toolPolicy?.toolChoice !== undefined) {
+      params.tool_choice = toOpenAIToolChoice(this.toolPolicy.toolChoice);
+    }
+    if (this.toolPolicy?.parallelToolCalls !== undefined) {
+      params.parallel_tool_calls = this.toolPolicy.parallelToolCalls;
     }
 
     // 注：`thinking: {type}` 是 **DeepSeek 私有**扩展，OpenAI 官方并不接受 ——
@@ -316,7 +334,13 @@ export class OpenAIProvider implements Provider {
           .map((b) => (b.type === 'text' ? sanitizeText(b.text) : ''))
           .filter(Boolean)
           .join('');
-        if (text) result.push({ role: 'system', content: text });
+        // 2026-11-21：角色能力清单（role-capabilities.ts）。gpt-5 / o1 / o3 / codex 等
+        // 新模型用 `developer` 传达更高优先级指令；其余模型保持 system（行为不变）。
+        // 这里只查表，不自己写判断 —— 差异必须集中在表里，否则漏改不报错（11-08 事故教训）。
+        if (text) {
+          const caps = resolveRoleCapabilities('openai', this.model);
+          result.push({ role: caps.supportsDeveloperRole ? 'developer' : 'system', content: text });
+        }
         continue;
       }
 
@@ -374,7 +398,8 @@ export class OpenAIProvider implements Provider {
             toolResults.push({
               role: 'tool',
               tool_call_id: block.tool_use_id,
-              content: sanitizeText(block.content),
+              // 2026-11-26：OpenAI Chat Completions 的 tool 消息只接受文本，图片降级为占位
+              content: sanitizeText(toolResultToText(block.content)),
             });
           } else if (block.type === 'image') {
             const url = block.source.type === 'base64'

@@ -870,11 +870,15 @@ let autoFooterText = '';
     const p = (ev.payload ?? {}) as Record<string, unknown>;
     switch (ev.type) {
       case UI_EVENT.MESSAGE_TEXT: tuiHandler.onText?.(String(p.content ?? '')); break;
-      case UI_EVENT.MESSAGE_SAY:
-        // say 交付块（模型的"嘴"）：不经流式累积，直接以强调色落定，
-        // 与普通 assistant 输出在视觉上区分开。
-        chatLog.addDelivered(String(p.content ?? ''));
+      case UI_EVENT.MESSAGE_SAY: {
+        // 两种语义必须分开（2026-11-24）：deliver = 收尾交付（强调色块），
+        // say = 过程插话（边干边说，与普通正文同形）。
+        // 早先一律走 addDelivered ⇒ 插话也被画成交付块，真正的交付反而淹没在其中。
+        const text = String(p.content ?? '');
+        if (String(p.kind ?? 'say') === 'deliver') chatLog.addDelivered(text);
+        else chatLog.finalizeAssistant(text);
         break;
+      }
       case UI_EVENT.SAY_VOICE: {
         // payload: { state:'ready'|'error', audioWavBase64?, textPreview?, voice?, speed?, message? }
         // error 态只静默（正文已完整到达，语音是增强）

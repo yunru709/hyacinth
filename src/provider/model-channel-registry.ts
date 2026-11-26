@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { ProviderType, ProviderConfig } from '../types.js';
 import type { Provider } from './interface.js';
+import type { ToolPolicy } from './tool-policy.js';
 import type { Message, StreamEvent, ToolDefinition } from '../types.js';
 import { ProviderManager } from './manager.js';
 import { ResilientProvider } from './resilient.js';
@@ -887,6 +888,11 @@ export class ModelChannelRegistry {
       /** 必须转发：通道包装层不透传则 max_tokens 热更到不了真实 provider。 */
       setMaxOutputTokens(maxOutputTokens: number) {
         channelProvider.setMaxOutputTokens?.(maxOutputTokens);
+      },
+
+      /** 必须转发：通道包装层不透传则工具策略到不了真实 provider。 */
+      setToolPolicy(policy: ToolPolicy) {
+        channelProvider.setToolPolicy?.(policy);
       },
     };
   }

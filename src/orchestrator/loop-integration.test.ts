@@ -371,7 +371,9 @@ describe('渠道附图：不落盘 base64（与工具图同构）', () => {
     expect(appended, '渠道图 base64 落进了历史 —— 会被每轮重发').not.toContain(SENTINEL);
     expect(appended, '落盘的 user 消息不该带 image 块').not.toContain('"type":"image"');
     expect(appended, '应落一行剥离标记').toContain('MediaStripped');
-    expect(appended, '渠道图无本地路径 ⇒ 标记提示重发').toContain('渠道附图');
+    // 2026-11-21：无 origin 的文案从「可能是渠道附图——需要时请重发」改为「来源未记录，
+    // 但可按 id 取回」（图还在 ImageStore，没必要让用户重发）。断言随之更新。
+    expect(appended, '无本地路径时应给出按 id 取回的办法').toContain('view_image');
 
     // 模型本轮确实看到了图（context 阶段把它注入了 compose 的历史）
     const composer = (services as unknown as { contextComposer: { compose: ReturnType<typeof vi.fn> } }).contextComposer;

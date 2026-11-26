@@ -183,11 +183,12 @@ describe('context 阶段（builtin:layered-composer）', () => {
     expect(st.pendingImageInjections.length).toBe(1); // 调用方负责清空原数组
   });
 
-  it('非视觉模型：图片一律丢弃，不进历史也不落盘标记（用户 2026-10-29 裁定）', async () => {
-    // 裁定原话：「对于不支持视觉的模型，图片就默认丢弃」
-    // 依据：把一张模型根本看不了的图塞进请求，除了占 token 什么也换不来；
-    // 而 MCP 截图这类工具一次就能吐 600KB base64（见 2026-10-29 上下文爆炸事故）。
-    // 本用例锁死这条路径，防止日后被"顺手补全成也支持图片"改回去。
+  it('非视觉模型：图片不注入请求，但落一条 MediaDropped 显式标记（2026-11-21 修正）', async () => {
+    // 2026-10-29 裁定原话：「对于不支持视觉的模型，图片就默认丢弃」—— 判定的**后果**不变：
+    // 不把 image 块/base64 塞进请求（MCP 截图一次 600KB，塞了白烧 token）。
+    // 2026-11-21 补充：丢弃**不能静默**。摩擦清单第 1 条实测过 —— 工具层回"will be visible next response"，
+    // 本层直接跳过，调用方随后清空 pending ⇒ 我全程没看到图还以为是，整轮靠用户文字瞎猜。
+    // 故本层兜底落一条 MediaDropped 标记（工具层已先拦截，这里是渠道附图/read 工具图等旁路）。
     const append = vi.fn().mockResolvedValue(undefined);
     const ctx = makeCtx({
       conversationStore: { readAll: vi.fn(), append, replace: vi.fn() },
@@ -207,12 +208,18 @@ describe('context 阶段（builtin:layered-composer）', () => {
 
     expect(hist, '非视觉模型不得收到 image 块').not.toContain('"image"');
     expect(hist, '非视觉模型不得收到 base64').not.toContain('MUST_NOT_SURVIVE_B64');
-    expect(append, '丢弃的图不该留下任何落盘痕迹').not.toHaveBeenCalled();
+    // 落盘只留标记：可检索、可据以判断"这张图我没看到"，且**不含** base64 / image 块
+    expect(append, '丢弃必须留痕，否则我会误以为看到了').toHaveBeenCalledTimes(1);
+    const appended = JSON.stringify(append.mock.calls[0][1]);
+    expect(appended).toContain('MediaDropped');
+    expect(appended).toContain('img_nv');
+    expect(appended).toContain('x.png');
+    expect(appended, 'base64 落进历史了 —— 它会被每轮重发').not.toContain('MUST_NOT_SURVIVE_B64');
     // 原数组仍由调用方清空（本层不改写引用语义）
     expect(st.pendingImageInjections.length).toBe(1);
   });
 
-  it('渠道附图：注入语如实标为「刚收到」，落盘只留「请重发」标记（无本地路径）', async () => {
+  it('渠道附图：注入语如实标为「刚收到」，落盘只留可按 id 取回的标记（无本地路径）', async () => {
     const append = vi.fn().mockResolvedValue(undefined);
     const ctx = makeCtx({
       conversationStore: { readAll: vi.fn(), append, replace: vi.fn() },
@@ -230,7 +237,11 @@ describe('context 阶段（builtin:layered-composer）', () => {
     const appended = JSON.stringify(append.mock.calls[0][1]);
     expect(appended, '渠道图 base64 不得落盘').not.toContain('CHANNEL_B64_SENTINEL');
     expect(appended).toContain('MediaStripped');
-    expect(appended, '渠道图无本地路径 ⇒ 标记应提示「需要时请重发」').toContain('请重发');
+    // 2026-11-21：无 origin 时旧文案是「需要时请重发」——错的。图还在 ImageStore，按 id 就能取回。
+    // ⚠️ appended 是 JSON.stringify 后的文本，引号被转义成 \" ⇒ 只能断言不带引号的片段。
+    expect(appended, '必须给出按 id 取回的办法，而不是让用户重发').toContain('view_image');
+    expect(appended, '取回指引必须带上具体 id').toContain('img_chan');
+    expect(appended, '不该再把「重发」当唯一出路').not.toContain('请重发');
 
     const composeArg = (ctx as never as { require(k: string): { compose: ReturnType<typeof vi.fn> } }).require('contextComposer').compose;
     const hist = JSON.stringify(composeArg.mock.calls[0][0].history as Message[]);
