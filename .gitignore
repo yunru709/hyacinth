@@ -92,3 +92,6 @@ __pycache__/
 _delayed_*
 _wmi_test.txt
 /test_*.cjs
+
+# Packaging output: release/ is ignored (scripts/package-portable.ps1)
+release/
